@@ -61,7 +61,10 @@ pub struct RpcError {
 
 impl RpcError {
     pub fn new(code: ErrorCode, message: impl Into<String>) -> RpcError {
-        RpcError { code, message: message.into() }
+        RpcError {
+            code,
+            message: message.into(),
+        }
     }
 
     pub fn bad_params(message: impl Into<String>) -> RpcError {
@@ -69,7 +72,10 @@ impl RpcError {
     }
 
     pub fn unknown_method(method: &str) -> RpcError {
-        RpcError::new(ErrorCode::UnknownMethod, format!("unknown method: {method}"))
+        RpcError::new(
+            ErrorCode::UnknownMethod,
+            format!("unknown method: {method}"),
+        )
     }
 }
 
@@ -105,7 +111,10 @@ pub fn event(topic: &str, data: Value) -> Value {
 /// A line received by a client.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Incoming {
-    Response { id: Value, result: Result<Value, RpcError> },
+    Response {
+        id: Value,
+        result: Result<Value, RpcError>,
+    },
     Event(Event),
 }
 
@@ -119,10 +128,16 @@ impl Incoming {
         let id = obj.remove("id")?;
         if let Some(error) = obj.remove("error") {
             let error = serde_json::from_value(error).ok()?;
-            return Some(Incoming::Response { id, result: Err(error) });
+            return Some(Incoming::Response {
+                id,
+                result: Err(error),
+            });
         }
         let result = obj.remove("result")?;
-        Some(Incoming::Response { id, result: Ok(result) })
+        Some(Incoming::Response {
+            id,
+            result: Ok(result),
+        })
     }
 }
 
@@ -135,7 +150,8 @@ mod tests {
         let r: Request = serde_json::from_str(r#"{"method":"screen.text"}"#).unwrap();
         assert_eq!(r.id, Value::Null);
         assert_eq!(r.params, Value::Null);
-        let r: Request = serde_json::from_str(r#"{"id":"a","method":"m","params":{"x":1}}"#).unwrap();
+        let r: Request =
+            serde_json::from_str(r#"{"id":"a","method":"m","params":{"x":1}}"#).unwrap();
         assert_eq!(r.id, json!("a"));
         assert_eq!(r.params["x"], 1);
     }
@@ -143,7 +159,10 @@ mod tests {
     #[test]
     fn error_codes_are_kebab() {
         let e = RpcError::new(ErrorCode::UnknownMethod, "x");
-        assert_eq!(serde_json::to_value(&e).unwrap(), json!({"code":"unknown-method","message":"x"}));
+        assert_eq!(
+            serde_json::to_value(&e).unwrap(),
+            json!({"code":"unknown-method","message":"x"})
+        );
         for code in [
             ErrorCode::BadRequest,
             ErrorCode::UnknownMethod,
@@ -162,7 +181,13 @@ mod tests {
     #[test]
     fn incoming_is_classified() {
         let ok = Incoming::from_value(response(&json!(3), Ok(json!({"a":1})))).unwrap();
-        assert_eq!(ok, Incoming::Response { id: json!(3), result: Ok(json!({"a":1})) });
+        assert_eq!(
+            ok,
+            Incoming::Response {
+                id: json!(3),
+                result: Ok(json!({"a":1}))
+            }
+        );
         let err = response(&json!(4), Err(RpcError::new(ErrorCode::Gone, "bye")));
         match Incoming::from_value(err).unwrap() {
             Incoming::Response { id, result: Err(e) } => {
@@ -172,7 +197,13 @@ mod tests {
             other => panic!("{other:?}"),
         }
         let ev = Incoming::from_value(event("exit", json!({"status":0}))).unwrap();
-        assert_eq!(ev, Incoming::Event(Event { event: "exit".into(), data: json!({"status":0}) }));
+        assert_eq!(
+            ev,
+            Incoming::Event(Event {
+                event: "exit".into(),
+                data: json!({"status":0})
+            })
+        );
         assert!(Incoming::from_value(json!([1])).is_none());
         assert!(Incoming::from_value(json!({"id":1})).is_none());
     }

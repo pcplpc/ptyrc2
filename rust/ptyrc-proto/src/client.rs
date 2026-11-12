@@ -64,8 +64,13 @@ impl Client {
     /// Connect to a socket and read the `hello`.
     pub fn connect(path: &Path) -> Result<Client, ClientError> {
         let stream = UnixStream::connect(path)?;
-        let mut client =
-            Client { stream, decoder: LineDecoder::new(), events: VecDeque::new(), hello: Value::Null, next_id: 1 };
+        let mut client = Client {
+            stream,
+            decoder: LineDecoder::new(),
+            events: VecDeque::new(),
+            hello: Value::Null,
+            next_id: 1,
+        };
         let deadline = Instant::now() + Duration::from_secs(5);
         match client.read_message(Some(deadline))? {
             Some(Incoming::Event(e)) if e.event == "hello" => client.hello = e.data,
@@ -105,7 +110,8 @@ impl Client {
     }
 
     pub fn subscribe(&mut self, topics: &[&str]) -> Result<(), ClientError> {
-        self.call("subscribe", json!({"topics": topics})).map(|_| ())
+        self.call("subscribe", json!({"topics": topics}))
+            .map(|_| ())
     }
 
     /// Next event; `None` when `timeout` elapsed. No timeout: blocks.
@@ -128,8 +134,8 @@ impl Client {
         let mut buf = [0u8; 65536];
         loop {
             if let Some(line) = self.decoder.next_line()? {
-                let value: Value =
-                    serde_json::from_slice(&line).map_err(|e| ClientError::Protocol(e.to_string()))?;
+                let value: Value = serde_json::from_slice(&line)
+                    .map_err(|e| ClientError::Protocol(e.to_string()))?;
                 return Incoming::from_value(value)
                     .map(Some)
                     .ok_or_else(|| ClientError::Protocol("neither response nor event".into()));
@@ -145,7 +151,12 @@ impl Client {
             match self.stream.read(&mut buf) {
                 Ok(0) => return Err(ClientError::Closed),
                 Ok(n) => self.decoder.push(&buf[..n]),
-                Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => {
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    ) =>
+                {
                     return Ok(None);
                 }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
@@ -177,14 +188,16 @@ mod tests {
         let listener = UnixListener::bind(&path).unwrap();
         let server = std::thread::spawn(move || {
             let (mut s, _) = listener.accept().unwrap();
-            s.write_all(&encode(&envelope::event("hello", json!({"protocol": 1})))).unwrap();
+            s.write_all(&encode(&envelope::event("hello", json!({"protocol": 1}))))
+                .unwrap();
             let mut reader = BufReader::new(s.try_clone().unwrap());
             let mut line = String::new();
             reader.read_line(&mut line).unwrap();
             let req: crate::Request = serde_json::from_str(&line).unwrap();
             assert_eq!(req.method, "ping");
             // An event before the response, the response split in two writes.
-            s.write_all(&encode(&envelope::event("screen", json!(1)))).unwrap();
+            s.write_all(&encode(&envelope::event("screen", json!(1))))
+                .unwrap();
             let resp = encode(&envelope::response(&req.id, Ok(json!({"pong": true}))));
             s.write_all(&resp[..5]).unwrap();
             s.flush().unwrap();
@@ -194,18 +207,25 @@ mod tests {
             reader.read_line(&mut line).unwrap();
             let req: crate::Request = serde_json::from_str(&line).unwrap();
             let err = RpcError::unknown_method(&req.method);
-            s.write_all(&encode(&envelope::response(&req.id, Err(err)))).unwrap();
+            s.write_all(&encode(&envelope::response(&req.id, Err(err))))
+                .unwrap();
         });
         let mut c = Client::connect(&path).unwrap();
         assert_eq!(c.hello()["protocol"], 1);
         assert_eq!(c.call("ping", json!({})).unwrap(), json!({"pong": true}));
-        let e = c.next_event(Some(Duration::from_millis(10))).unwrap().unwrap();
+        let e = c
+            .next_event(Some(Duration::from_millis(10)))
+            .unwrap()
+            .unwrap();
         assert_eq!(e.event, "screen");
         match c.call("nope", Value::Null) {
             Err(ClientError::Rpc(e)) => assert_eq!(e.code, crate::ErrorCode::UnknownMethod),
             other => panic!("{other:?}"),
         }
-        assert!(matches!(c.next_event(Some(Duration::from_millis(500))), Err(ClientError::Closed)));
+        assert!(matches!(
+            c.next_event(Some(Duration::from_millis(500))),
+            Err(ClientError::Closed)
+        ));
         server.join().unwrap();
         let _ = std::fs::remove_file(&path);
     }
@@ -216,11 +236,16 @@ mod tests {
         let listener = UnixListener::bind(&path).unwrap();
         let server = std::thread::spawn(move || {
             let (mut s, _) = listener.accept().unwrap();
-            s.write_all(&encode(&envelope::event("hello", json!({})))).unwrap();
+            s.write_all(&encode(&envelope::event("hello", json!({}))))
+                .unwrap();
             std::thread::sleep(Duration::from_millis(200));
         });
         let mut c = Client::connect(&path).unwrap();
-        assert!(c.next_event(Some(Duration::from_millis(30))).unwrap().is_none());
+        assert!(
+            c.next_event(Some(Duration::from_millis(30)))
+                .unwrap()
+                .is_none()
+        );
         server.join().unwrap();
         let _ = std::fs::remove_file(&path);
     }

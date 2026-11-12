@@ -58,7 +58,9 @@ pub fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && !name.starts_with('.')
         && name.len() <= 64
-        && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
 /// Socket path of a session.
@@ -88,7 +90,10 @@ pub fn list() -> Vec<Session> {
         }
         let path = entry.path();
         match UnixStream::connect(&path) {
-            Ok(_) => sessions.push(Session { name: name.to_string(), path }),
+            Ok(_) => sessions.push(Session {
+                name: name.to_string(),
+                path,
+            }),
             Err(e) if e.kind() == io::ErrorKind::ConnectionRefused => {
                 let _ = fs::remove_file(&path);
             }
@@ -115,7 +120,11 @@ impl fmt::Display for SelectError {
             SelectError::None => f.write_str("no ptyrc session; start one with `ptyrc run`"),
             SelectError::NotFound(name) => write!(f, "no such session: {name}"),
             SelectError::Ambiguous(names) => {
-                write!(f, "several sessions, pick one with --session: {}", names.join(", "))
+                write!(
+                    f,
+                    "several sessions, pick one with --session: {}",
+                    names.join(", ")
+                )
             }
         }
     }
@@ -138,7 +147,9 @@ pub fn select(explicit: Option<&str>) -> Result<Session, SelectError> {
     match live.len() {
         0 => Err(SelectError::None),
         1 => Ok(live.remove(0)),
-        _ => Err(SelectError::Ambiguous(live.into_iter().map(|s| s.name).collect())),
+        _ => Err(SelectError::Ambiguous(
+            live.into_iter().map(|s| s.name).collect(),
+        )),
     }
 }
 
