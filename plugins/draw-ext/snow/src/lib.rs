@@ -221,7 +221,8 @@ impl Snow {
     /// Snow may lie in `(x, y)`: free, a cell away from the text of its
     /// row, held, and with room.
     fn ledge(&self, x: usize, y: usize) -> bool {
-        let clear = !self.wall(x, y) && !(x > 0 && self.wall(x - 1, y)) && !self.wall(x + 1, y);
+        let text = self.wall(x, y) || self.wall(x + 1, y) || (x > 0 && self.wall(x - 1, y));
+        let clear = !text;
         clear && self.held(x, y) && self.depth(x, y) < self.room(y)
     }
 
