@@ -100,6 +100,8 @@ struct Sprite {
     /// Given by the client; otherwise the layer follows the blend.
     layer_set: bool,
     blend: Blend,
+    /// Drawn only on app cells of this backdrop.
+    panel: Option<Color>,
     /// Opacity, `0..=1`; 1: colours as given.
     alpha: f32,
     z: i32,
@@ -227,6 +229,8 @@ pub struct Scene {
     dirty: bool,
     last_tick: Duration,
     host: HostColors,
+    /// Layer names declared by clients.
+    layers: BTreeMap<String, i32>,
 }
 
 impl Default for Scene {
@@ -245,6 +249,7 @@ impl Scene {
             dirty: false,
             last_tick: Duration::ZERO,
             host: HostColors::default(),
+            layers: BTreeMap::new(),
         };
         scene.register_effect("confetti", Box::new(confetti));
         scene.register_effect("sparkle", Box::new(sparkle));
@@ -262,6 +267,53 @@ impl Scene {
 
     pub fn host_colors(&self) -> HostColors {
         self.host
+    }
+
+    /// Declare the layer `name` at `z`, for every client. A name of the
+    /// fixed table, `app`, an integer and 0 are refused. Declared again,
+    /// a name moves: the sprites already there stay where they are.
+    pub fn define_layer(&mut self, name: &str, z: i32) -> Result<(), SceneError> {
+        let bad = |why: String| Err(SceneError::BadParams(why));
+        let plain = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
+        if name.is_empty() || name.len() > 32 || !name.chars().all(plain) {
+            return bad(format!(
+                "layer name: 1 to 32 of a-z, 0-9, - and _, not {name:?}"
+            ));
+        }
+        if name == "app" || name.parse::<i64>().is_ok() {
+            return bad(format!("layer name: {name} is taken"));
+        }
+        if let Some((_, layer)) = Layer::NAMES.iter().find(|(n, _)| *n == name) {
+            return bad(format!("layer name: {name} is fixed at {}", layer.0));
+        }
+        if z == 0 {
+            return bad("layer 0 is the app: use a negative or a positive layer".into());
+        }
+        if self.layers.len() >= 64 && !self.layers.contains_key(name) {
+            return bad("layer names: 64 at most".into());
+        }
+        self.layers.insert(name.to_string(), z);
+        Ok(())
+    }
+
+    /// The layer names, fixed and declared, back to front.
+    pub fn layers(&self) -> Vec<(String, i32)> {
+        let fixed = Layer::NAMES.iter().map(|(n, l)| (n.to_string(), l.0));
+        let mut all: Vec<(String, i32)> = fixed
+            .chain(self.layers.iter().map(|(n, z)| (n.clone(), *z)))
+            .collect();
+        all.sort_by(|a, b| (a.1, &a.0).cmp(&(b.1, &b.0)));
+        all
+    }
+
+    /// Replace a declared name in the `layer` of a sprite on the wire by
+    /// its integer.
+    pub fn name_layer(&self, sprite: &mut serde_json::Value) {
+        if let Some(layer) = sprite.get_mut("layer")
+            && let Some(z) = layer.as_str().and_then(|name| self.layers.get(name))
+        {
+            *layer = (*z).into();
+        }
     }
 
     fn check_alpha(alpha: Option<f32>) -> Result<f32, SceneError> {
@@ -416,6 +468,7 @@ impl Scene {
             layer: spec.layer.map_or(spec.blend.default_layer(), |l| l.0),
             layer_set: spec.layer.is_some(),
             blend: spec.blend.canonical(),
+            panel: spec.panel.map(|c| c.0),
             alpha,
             z: spec.z,
             persist: spec.persist,
@@ -549,6 +602,9 @@ impl Scene {
             order |= sprite.layer != layer.0;
             sprite.layer = layer.0;
             sprite.layer_set = true;
+        }
+        if let Some(panel) = patch.panel {
+            sprite.panel = Some(panel.0);
         }
         if let Some(alpha) = alpha {
             sprite.alpha = alpha;
@@ -697,6 +753,7 @@ impl Scene {
                     },
                     layer: s.layer,
                     blend: s.blend,
+                    panel: s.panel.map(ColorSpec),
                     alpha: s.alpha,
                     z: s.z,
                     persist: s.persist,
@@ -1039,8 +1096,9 @@ impl Scene {
         let mut back = Back::new(base, self.host);
         for sprite in &self.sprites[..front] {
             let tint = sprite.blend == Blend::Tint;
+            let cover = sprite.panel.is_some();
             each_glyph(sprite, base, surfaces, cursor, |x, y, glyph| {
-                back.paint(x, y, glyph, tint, sprite.alpha * glyph.alpha())
+                back.paint(x, y, glyph, tint, sprite.alpha * glyph.alpha(), cover)
             });
         }
         back.resolve(base, &mut out);
@@ -1096,6 +1154,12 @@ fn each_glyph(
             if sx < clip.x as i64 || sx + width > clip.right() as i64 {
                 continue;
             }
+            if let Some(panel) = sprite.panel
+                && !(sx..sx + width.max(1))
+                    .all(|x| base.cell(x as u16, sy as u16).backdrop() == panel)
+            {
+                continue;
+            }
             f(sx as u16, sy as u16, glyph);
         }
     }
@@ -1113,6 +1177,8 @@ struct BackCell {
     fade: Option<f32>,
     /// Opaque colour.
     bg: Option<Color>,
+    /// `bg` is laid on the app's panel: it replaces the backdrop.
+    cover: bool,
     /// Translucent colours laid over `bg`: their sum, premultiplied, and
     /// its opacity.
     glaze: Option<([f32; 3], f32)>,
@@ -1121,9 +1187,10 @@ struct BackCell {
 
 impl BackCell {
     /// Lay the colour `bg` at opacity `alpha` over what is there.
-    fn lay(&mut self, bg: Color, alpha: f32, host: &HostColors) {
+    fn lay(&mut self, bg: Color, alpha: f32, cover: bool, host: &HostColors) {
         if alpha >= 1.0 {
             self.bg = Some(bg);
+            self.cover = cover;
             self.glaze = None;
             return;
         }
@@ -1190,7 +1257,15 @@ impl Back {
         }
     }
 
-    fn paint(&mut self, x: u16, y: u16, glyph: &raster::Glyph, tint: bool, alpha: f32) {
+    fn paint(
+        &mut self,
+        x: u16,
+        y: u16,
+        glyph: &raster::Glyph,
+        tint: bool,
+        alpha: f32,
+        cover: bool,
+    ) {
         let wide = glyph.cell.width == 2;
         let host = self.host;
         if !tint {
@@ -1208,7 +1283,7 @@ impl Back {
         // Behind the app a tint is a colour of background.
         if let Some(bg) = glyph.bg {
             for x in x..=x + wide as u16 {
-                self.at(x, y).lay(bg, alpha, &host);
+                self.at(x, y).lay(bg, alpha, cover, &host);
             }
         }
     }
@@ -1247,7 +1322,7 @@ impl Back {
                     if app.style.attrs.contains(Attrs::INVERSE) {
                         return None;
                     }
-                    if app.style.bg == Color::Default {
+                    if app.style.bg == Color::Default || (own.cover && own.bg.is_some()) {
                         let under = palette::rgb(own.bg.unwrap_or(Color::Default), host.bg);
                         own.glazed(under).or(own.bg)
                     } else {
@@ -1271,10 +1346,16 @@ impl Back {
                         };
                         on_backdrop(below, ink.fg, None, ink.attrs)
                     };
-                    if let (Some(alpha), Some(fg)) = (ink.fade, ink.fg)
-                        && !style.attrs.contains(Attrs::INVERSE)
-                    {
-                        style.fg = faded(style.bg, fg, alpha, &host);
+                    if let (Some(alpha), Some(fg)) = (ink.fade, ink.fg) {
+                        if style.attrs.contains(Attrs::INVERSE) {
+                            // Inverse: the glyph is drawn in `bg`, on the
+                            // app's foreground.
+                            let ground = palette::rgb(style.fg, host.fg);
+                            let [r, g, b] = palette::mix(ground, palette::rgb(fg, host.fg), alpha);
+                            style.bg = Color::Rgb(r, g, b);
+                        } else {
+                            style.fg = faded(style.bg, fg, alpha, &host);
+                        }
                     }
                     style
                 };
