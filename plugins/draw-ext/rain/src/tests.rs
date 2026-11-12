@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use super::*;
+use ptyrc_core::frames::HeatView;
+use ptyrc_vt::Grid;
 use serde_json::json;
 
 fn make(params: serde_json::Value) -> Rain {
@@ -8,11 +10,10 @@ fn make(params: serde_json::Value) -> Rain {
 }
 
 fn look(rain: &mut Rain, rows: &[&str], cursor: Option<(u16, u16)>) {
-    let rows: Vec<String> = rows.iter().map(|r| r.to_string()).collect();
-    rain.look(&Under {
-        rows: &rows,
-        cursor,
-    });
+    let grid = Grid::from_lines(80, if rows.is_empty() { &[""] } else { rows });
+    let mut under = Under::of(&grid);
+    under.cursor = cursor;
+    rain.look(&under);
 }
 
 /// Render every frame of `[from, to]`; `each` sees the rain after each.
@@ -103,10 +104,21 @@ fn text_written_under_a_drop_takes_it() {
 fn it_rains_less_where_the_text_changes() {
     let mut rain = make(json!({"rate": 200, "seed": 9}));
     let (mut busy, mut cold) = (0usize, 0usize);
-    for (n, t) in (0..12_000u64).step_by(FRAME_MS as usize).enumerate() {
-        // Columns 0..20 change at every frame.
-        let row = if n % 2 == 0 { "a" } else { "b" }.repeat(20);
-        look(&mut rain, &["", "", "", "", "", "", "", "", "", &row], None);
+    // Columns 0..20 of the last row just changed; the rest is still.
+    let grid = Grid::new(80, 10);
+    let n = 80 * 10;
+    let mut heat = HeatView {
+        cols: 80,
+        rows: 10,
+        safe: vec![1.0; n],
+        activity: vec![0.0; n],
+        occupancy: vec![0.0; n],
+        still: vec![60.0; n],
+        class: vec![Default::default(); n],
+    };
+    heat.still[9 * 80..9 * 80 + 20].fill(0.0);
+    for t in (0..12_000u64).step_by(FRAME_MS as usize) {
+        rain.look(&Under::of(&grid).with_heat(Some(&heat)));
         let mut canvas = Canvas::new(80, 10);
         assert!(rain.render(Duration::from_millis(t), &mut canvas));
         // Every drop ends in a splash: count those of this frame.
@@ -120,6 +132,36 @@ fn it_rains_less_where_the_text_changes() {
     }
     assert!(cold > 50, "{cold}");
     assert!(busy * 4 < cold, "{busy} {cold}");
+    // No heat: it rains alike everywhere.
+    rain.look(&Under::of(&grid));
+    assert_eq!(rain.weight(3), 1.0);
+}
+
+#[test]
+fn a_wide_glyph_is_two_walls_and_shifts_nothing() {
+    let mut vt = ptyrc_vt::Vt::new(20, 4);
+    vt.feed("\r\n\r\na\t世b".as_bytes());
+    let mut rain = make(json!({"rate": 0}));
+    rain.resize(20, 4);
+    rain.look(&Under::of(vt.grid()));
+    rain.build();
+    let walls: Vec<usize> = (0..20).filter(|x| rain.wall(*x, 2)).collect();
+    assert_eq!(walls, [0, 8, 9, 10]);
+}
+
+#[test]
+fn a_running_rain_takes_a_new_rate() {
+    let mut rain = make(json!({"rate": 80, "seed": 2}));
+    run(&mut rain, 40, 10, 0, 1000, |_| {});
+    let drops = rain.drops.len();
+    assert!(drops > 0);
+    assert!(rain.tune(&json!({"rate": -4})).is_err());
+    assert!(rain.tune(&json!({"speed": 4})).is_err());
+    assert_eq!(rain.params.rate, 80.0);
+    rain.tune(&json!({"rate": 0})).unwrap();
+    assert_eq!(rain.drops.len(), drops);
+    run(&mut rain, 40, 10, 1040, 4000, |_| {});
+    assert!(rain.drops.is_empty());
 }
 
 #[test]
