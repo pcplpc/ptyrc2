@@ -68,6 +68,9 @@ pub(crate) struct Wait {
     pub gone: bool,
     pub stable: Option<Duration>,
     pub deadline: Duration,
+    /// The same deadline on the real clock, for when the session's clock
+    /// stands still.
+    pub real_deadline: std::time::Instant,
 }
 
 /// What `debug.overlay` shows.
@@ -710,7 +713,31 @@ impl Engine for ScreenEngine {
             on: modes.mouse,
             press_only: modes.mouse_press_only,
             sgr: modes.mouse_sgr,
+            bits: modes.mouse_bits,
         }
+    }
+
+    /// The topmost sprite whose box holds the cell; effects are not
+    /// clicked, nor the debug overlay.
+    fn sprite_at(&self, x: u16, y: u16) -> Option<Value> {
+        let (cx, cy) = (x as i64, y as i64);
+        let sprites = self.scene.list();
+        let (hit, [sx, sy]) = sprites.iter().rev().find_map(|s| {
+            let [sx, sy] = s.screen?;
+            let [w, h] = s.size;
+            let inside = cx >= sx && cx < sx + w as i64 && cy >= sy && cy < sy + h as i64;
+            let clicked = inside && s.owner != DEBUG_OWNER && !s.kind.starts_with("effect");
+            clicked.then_some((s, [sx, sy]))
+        })?;
+        let at = self.frames.at(x, y);
+        Some(json!({
+            "sprite": hit.id,
+            "at": [cx - sx, cy - sy],
+            "x": x,
+            "y": y,
+            "frame": at.map(|(id, _)| id),
+            "pos": at.map(|(_, pos)| [pos.x, pos.y]),
+        }))
     }
 
     fn bracketed_paste(&self) -> bool {
@@ -739,10 +766,34 @@ impl Engine for ScreenEngine {
         }
     }
 
+    fn stall_wake(&self) -> Option<std::time::Instant> {
+        self.waits.iter().map(|w| w.real_deadline).min()
+    }
+
+    fn on_stall(&mut self, ctx: &mut Ctx) {
+        let now = std::time::Instant::now();
+        self.waits.retain(|wait| {
+            let late = now >= wait.real_deadline;
+            if late {
+                ctx.complete(wait.token, Ok(json!({"matched": false})));
+            }
+            !late
+        });
+    }
+
     fn session_extras(&self) -> Value {
+        let modes = self.app.modes();
+        let mouse = [(1, 9), (2, 1000), (4, 1002), (8, 1003)];
+        let mouse = mouse.iter().filter(|(bit, _)| modes.mouse_bits & bit != 0);
         json!({
-            "alt_screen": self.app.modes().alt_screen,
+            "alt_screen": modes.alt_screen,
             "title": self.app.title(),
+            "modes": {
+                "app_cursor": modes.app_cursor,
+                "bracketed_paste": modes.bracketed_paste,
+                "mouse": mouse.map(|(_, mode)| mode).collect::<Vec<_>>(),
+                "mouse_sgr": modes.mouse_sgr,
+            },
         })
     }
 }

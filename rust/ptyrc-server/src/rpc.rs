@@ -190,7 +190,8 @@ fn screen_cells(engine: &ScreenEngine, params: Value) -> Res {
             row_runs(&cells)
         })
         .collect();
-    Ok(json!({"rows": rows, "size": [rect.w, rect.h]}))
+    Ok(json!({"rows": rows, "size": [rect.w, rect.h],
+              "rect": [rect.x, rect.y, rect.w, rect.h]}))
 }
 
 #[derive(Deserialize)]
@@ -298,6 +299,7 @@ fn screen_wait(
         ));
     }
     let now = ctx.now();
+    let timeout = Duration::from_millis(p.timeout_ms.unwrap_or(5000));
     let wait = Wait {
         token,
         conn,
@@ -313,7 +315,8 @@ fn screen_wait(
         }),
         gone: p.gone,
         stable: p.stable_ms.map(Duration::from_millis),
-        deadline: now + Duration::from_millis(p.timeout_ms.unwrap_or(5000)),
+        deadline: now + timeout,
+        real_deadline: std::time::Instant::now() + timeout,
     };
     if let Some(query) = &wait.query
         && let Err(e) = engine.frames.try_find(frame, query, false)

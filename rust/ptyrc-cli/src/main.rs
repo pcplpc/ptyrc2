@@ -108,8 +108,8 @@ enum Verb {
     Debug(verbs::Debug),
     /// Print events, one JSON object per line
     Events {
-        /// screen, cursor, frames, text, idle, draw, input, size, exit
-        /// [default: all]
+        /// screen, cursor, frames, text, idle, draw, input, mouse, size,
+        /// exit [default: all but mouse]
         topics: Vec<String>,
         /// The state now as the first events (cursor, frames, idle, size)
         #[arg(long)]
@@ -369,6 +369,7 @@ fn verb_run(args: Run) -> Result<ExitCode, Fail> {
         ask_host_colors: !args.transparent,
         record: args.record,
         record_input: args.record_input,
+        presets: !args.no_presets && !args.transparent,
     };
     let status = ptyrc_server::run(config, plugins::engine(args.transparent, !args.no_presets))?;
     Ok(ExitCode::from(status.clamp(0, 255) as u8))
@@ -420,7 +421,8 @@ fn verb_ls(common: &Common) -> Result<ExitCode, Fail> {
 fn verb_events(common: &Common, topics: Vec<String>, snapshot: bool) -> Result<ExitCode, Fail> {
     let mut client = connect(common)?;
     let topics: Vec<&str> = if topics.is_empty() {
-        TOPICS.to_vec()
+        // The mouse is asked of the host only when named.
+        TOPICS.iter().copied().filter(|t| *t != "mouse").collect()
     } else {
         topics.iter().map(String::as_str).collect()
     };
