@@ -106,6 +106,7 @@ def sprite_spec(
     loop: bool | int = True,
     layer: int | str | None = None,
     blend: str | None = None,
+    alpha: float | None = None,
     z: int | None = None,
     ttl: float | None = None,
     persist: bool = False,
@@ -134,9 +135,13 @@ def sprite_spec(
 
     Style keywords (`fg`, `bg`, `bold`...) extend `style`. `layer`: `"back"`
     (the default: behind the app's text, seen where the app shows none),
-    `"front"`, or an integer; the app is 0, negative layers are behind
+    `"front"`, `"wallpaper"` (behind `back`), `"hud"` (in front of
+    `front`), or an integer; the app is 0, negative layers are behind
     it, `z` orders inside a layer. `blend="tint"` keeps the glyph below
     and applies the style; it is in front unless `layer` says otherwise.
+    `alpha`: opacity, 0 to 1; the colours are mixed with those below
+    (the app's, or the host's defaults: `Pilot.host_colors`) and written
+    as RGB.
     `ttl` is in seconds. A sprite dies with its connection unless
     `persist`.
     """
@@ -207,6 +212,8 @@ def sprite_spec(
         spec["layer"] = layer
     if blend is not None:
         spec["blend"] = blend
+    if alpha is not None:
+        spec["alpha"] = alpha
     if z is not None:
         spec["z"] = z
     if ttl is not None:
@@ -393,11 +400,14 @@ class Pilot:
         name: str | None = None,
         env: dict[str, str] | None = None,
         host_log: str | Path | None = None,
+        host_fg: str | None = None,
+        host_bg: str | None = None,
         binary: str | None = None,
         timeout: float = 10.0,
     ) -> Pilot:
         """Start `ptyrc run --headless` on `argv` and connect to it. The
-        driver is killed by `close()`."""
+        driver is killed by `close()`. `host_fg`, `host_bg`: the default
+        colours of the host that is not there, `"#rrggbb"`."""
         name = name or f"py-{os.getpid()}-{time.monotonic_ns() % 10**9}"
         if name in live_sessions():
             raise PtyrcError(
@@ -409,6 +419,10 @@ class Pilot:
         cmd += ["--size", f"{size[0]}x{size[1]}"]
         if host_log is not None:
             cmd += ["--host-log", str(host_log)]
+        if host_fg is not None:
+            cmd += ["--host-fg", host_fg]
+        if host_bg is not None:
+            cmd += ["--host-bg", host_bg]
         cmd += ["--", *argv]
         proc = subprocess.Popen(
             cmd,
@@ -506,6 +520,13 @@ class Pilot:
     @property
     def session(self) -> str:
         return self.hello["session"]
+
+    @property
+    def host_colors(self) -> dict[str, Any]:
+        """Default colours of the host: `fg`, `bg` as `"#rrggbb"`, and
+        `from`: for each, `"host"` (it answered), `"option"` or
+        `"default"`. Asks the driver."""
+        return self.info()["host_colors"]
 
     @property
     def argv(self) -> list[str]:

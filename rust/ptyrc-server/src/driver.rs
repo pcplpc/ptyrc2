@@ -4,6 +4,7 @@
 use crate::conn::Conn;
 use crate::engine::{ConnId, Ctx, Effects, Engine, Reply, SessionInfo, Token};
 use crate::host::Host;
+use crate::hostcolors::{Known, QUERY_BG, QUERY_FG, Replies};
 use crate::keys;
 use crate::pty::{self, Pty};
 use crate::start::{self, RunError, RunErrorKind};
@@ -36,6 +37,8 @@ const BURST_MAX_TIME: Duration = Duration::from_millis(8);
 /// Keyboard input is not read while this much waits for the app.
 const PTY_QUEUE_HIGH: usize = 1 << 20;
 const DEFAULT_SIZE: (u16, u16) = (80, 24);
+/// How long the host has to tell its colours.
+const HOST_COLORS_WAIT: Duration = Duration::from_millis(1000);
 
 /// How to run a session.
 #[derive(Clone, Debug)]
@@ -53,6 +56,12 @@ pub struct Config {
     pub host_log: Option<PathBuf>,
     /// Quiet time that ends a burst, in milliseconds. 0: no coalescing.
     pub coalesce_ms: u64,
+    /// Default foreground and background of the host. One that is
+    /// absent is asked of the host terminal (OSC 10, OSC 11) when
+    /// `ask_host_colors`; without an answer: light grey, black.
+    pub host_fg: Option<ptyrc_vt::Rgb>,
+    pub host_bg: Option<ptyrc_vt::Rgb>,
+    pub ask_host_colors: bool,
 }
 
 impl Default for Config {
@@ -64,6 +73,9 @@ impl Default for Config {
             size: None,
             host_log: None,
             coalesce_ms: 1,
+            host_fg: None,
+            host_bg: None,
+            ask_host_colors: true,
         }
     }
 }
@@ -132,6 +144,10 @@ struct Driver {
     next_token: u64,
     repaint: bool,
     exit_status: Option<i32>,
+    colors: Known,
+    replies: Replies,
+    /// When to stop waiting for the host's colours.
+    replies_until: Option<Duration>,
 }
 
 /// Run a session to its end: spawn the app, serve, return its exit status
@@ -261,6 +277,7 @@ impl Driver {
             rows,
             headless: cfg.headless,
         };
+        let colors = Known::new(cfg.host_fg, cfg.host_bg);
         Ok(Driver {
             stdin_open: host.interactive || !cfg.headless,
             cfg,
@@ -279,6 +296,9 @@ impl Driver {
             next_token: 1,
             repaint: false,
             exit_status: None,
+            colors,
+            replies: Replies::default(),
+            replies_until: None,
         })
     }
 
@@ -296,12 +316,16 @@ impl Driver {
             "argv": self.info.argv,
             "size": [self.info.cols, self.info.rows],
             "headless": self.info.headless,
+            "host_colors": self.colors.json(),
         })
     }
 
     /// The loop. Returns the exit status of the app.
     fn serve(&mut self, engine: &mut dyn Engine) -> io::Result<i32> {
         hook!(self, self.now(), |ctx| engine.on_start(ctx));
+        let colors = self.colors.colors;
+        hook!(self, self.now(), |ctx| engine.on_host_colors(colors, ctx));
+        self.ask_host_colors()?;
         loop {
             // Tick: deadline passed, or repaint asked.
             let now = self.now();
@@ -320,10 +344,21 @@ impl Driver {
             }
 
             let now = self.now();
+            if self.replies_until.is_some_and(|t| t <= now) {
+                // The host does not tell: the defaults stand.
+                self.replies_until = None;
+                let held = self.replies.give_up();
+                self.forward_input(&held, engine);
+            }
             let timeout = if self.repaint {
                 Some(Duration::ZERO)
             } else {
-                engine.next_wake(now).map(|w| w.saturating_sub(now))
+                let wake = engine.next_wake(now);
+                let wake = match (wake, self.replies_until) {
+                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (a, b) => a.or(b),
+                };
+                wake.map(|w| w.saturating_sub(now))
             };
             let ready = self.wait(timeout)?;
 
@@ -513,19 +548,67 @@ impl Driver {
         match rustix::io::read(rustix::stdio::stdin(), &mut buf) {
             Ok(0) => self.stdin_open = false,
             Ok(n) => {
-                let bytes = &buf[..n];
-                let forward = hook!(self, self.now(), |ctx| {
-                    if ctx.has_subscribers("input") {
-                        ctx.emit("input", json!({"bytes": keys::base64_encode(bytes)}));
+                let fed = self.replies.feed(&buf[..n]);
+                let mut changed = false;
+                for (which, rgb) in fed.colors.into_iter().enumerate() {
+                    if let Some(rgb) = rgb {
+                        changed |= self.colors.learn(which, rgb);
                     }
-                    engine.on_input(bytes, ctx)
-                });
-                if forward {
-                    self.pty_queue.extend_from_slice(bytes);
                 }
+                if !self.replies.waiting() {
+                    self.replies_until = None;
+                }
+                if changed {
+                    let colors = self.colors.colors;
+                    hook!(self, self.now(), |ctx| {
+                        engine.on_host_colors(colors, ctx);
+                        ctx.request_repaint();
+                    });
+                }
+                self.forward_input(&fed.forward, engine);
             }
             Err(Errno::INTR | Errno::AGAIN) => {}
             Err(_) => self.stdin_open = false,
+        }
+        Ok(())
+    }
+
+    /// Keyboard bytes on their way to the app.
+    fn forward_input(&mut self, bytes: &[u8], engine: &mut dyn Engine) {
+        if bytes.is_empty() {
+            return;
+        }
+        let forward = hook!(self, self.now(), |ctx| {
+            if ctx.has_subscribers("input") {
+                ctx.emit("input", json!({"bytes": keys::base64_encode(bytes)}));
+            }
+            engine.on_input(bytes, ctx)
+        });
+        if forward {
+            self.pty_queue.extend_from_slice(bytes);
+        }
+    }
+
+    /// Ask the host terminal for the default colours nobody gave. The
+    /// replies come with the keys.
+    fn ask_host_colors(&mut self) -> io::Result<()> {
+        use crate::hostcolors::Source;
+        let ask = |source: Source| source == Source::Default;
+        let (fg, bg) = (ask(self.colors.from[0]), ask(self.colors.from[1]));
+        if !self.cfg.ask_host_colors
+            || !self.host.interactive
+            || !rustix::termios::isatty(rustix::stdio::stdout())
+            || !(fg || bg)
+        {
+            return Ok(());
+        }
+        self.replies.expect(fg, bg);
+        self.replies_until = Some(self.now() + HOST_COLORS_WAIT);
+        if fg {
+            self.host.write(QUERY_FG)?;
+        }
+        if bg {
+            self.host.write(QUERY_BG)?;
         }
         Ok(())
     }

@@ -525,11 +525,32 @@ fn draw_layers_from_the_cli() {
     let sprites: Value = serde_json::from_str(&out).unwrap();
     let sprites = sprites["sprites"].as_array().unwrap();
     assert_eq!(sprites.len(), 4);
+    assert_eq!(sprites[0]["alpha"], json!(1.0));
     let big = sprites
         .iter()
         .find(|s| s["id"].as_u64() == id.parse().ok())
         .unwrap();
     assert_eq!((&big["layer"], &big["size"][0]), (&json!(1), &json!(7)));
+
+    // Named layers and an opacity.
+    let (ok, id, err) = run(&[
+        "draw", "text", "--layer", "hud", "--alpha", "0.5", "--bg", "#ff0000", "--at", "0,5", "x",
+    ]);
+    assert!(ok, "{err}");
+    let (_, out, _) = run(&["--json", "draw", "ls"]);
+    let sprites: Value = serde_json::from_str(&out).unwrap();
+    let glass = sprites["sprites"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"].as_u64() == id.parse().ok())
+        .unwrap();
+    assert_eq!(
+        (&glass["layer"], &glass["alpha"]),
+        (&json!(100), &json!(0.5))
+    );
+    let (ok, _, err) = run(&["draw", "text", "--alpha", "2", "x"]);
+    assert!(!ok && err.contains("alpha: 0 to 1"), "{err}");
 
     // Layer 0 is the app's.
     let (ok, _, err) = run(&["draw", "text", "--layer", "0", "x"]);
@@ -692,6 +713,67 @@ mod hosted {
         assert_eq!(status, Some(3));
         assert!(host.canonical(), "termios restored at exit");
         assert!(!sb.socket("h").exists());
+    }
+
+    #[test]
+    fn host_colours_are_asked_and_the_reply_kept_from_the_app() {
+        let sb = Sandbox::new("hcol");
+        let argv: Vec<String> = [BIN, "run", "--name", "c", "--", "sh"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let env = [
+            (
+                "XDG_RUNTIME_DIR".to_string(),
+                sb.dir.to_string_lossy().into_owned(),
+            ),
+            ("PS1".to_string(), "$ ".to_string()),
+            ("ENV".to_string(), String::new()),
+        ];
+        let pty = ptyrc_server::pty::spawn(&argv, &env, 80, 24).unwrap();
+        let mut driver = Proc(pty.child);
+        let mut host = HostPty {
+            master: pty.master,
+            seen: Vec::new(),
+        };
+        // Both are asked; this host tells its background only, in two
+        // pieces, between keys.
+        host.wait_seen("\x1b]10;?\x1b\\\x1b]11;?\x1b\\");
+        host.type_in("echo a$((1+1))b\r\x1b]11;rgb:1010/20");
+        std::thread::sleep(Duration::from_millis(50));
+        host.type_in("20/3030\x1b\\echo c$((1+1))d\r");
+        host.wait_seen("c2d\r\n");
+        let mut client = sb.client("c");
+        let colors = || {
+            let info = sb.client("c").call("session.info", json!({})).unwrap();
+            info["host_colors"].clone()
+        };
+        wait_for(
+            || colors()["from"] == json!({"fg": "default", "bg": "host"}),
+            "the background of the host",
+        );
+        assert_eq!(colors()["bg"], json!("#102030"));
+        assert_eq!(colors()["fg"], json!("#e5e5e5"));
+        // The app never saw the reply: its tty would have echoed it.
+        host.pump();
+        assert!(!String::from_utf8_lossy(&host.seen).contains("rgb:"));
+
+        // After the wait a reply is the app's to read; the driver reads
+        // it too.
+        std::thread::sleep(Duration::from_millis(1100));
+        host.type_in("\x1b]10;rgb:c0c0/c0c0/c0c0\x07");
+        wait_for(|| colors()["fg"] == json!("#c0c0c0"), "a late foreground");
+        host.wait_seen("rgb:c0c0");
+
+        client
+            .call("input.send", json!({"text": "\x15exit 0\r"}))
+            .unwrap();
+        let deadline = Instant::now() + TIMEOUT;
+        while driver.try_wait().unwrap().is_none() {
+            host.pump();
+            assert!(Instant::now() < deadline, "driver did not exit");
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
 
     #[test]
