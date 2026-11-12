@@ -9,9 +9,10 @@ import sys
 import time
 from collections.abc import Callable, Iterator, Sequence
 
-from ptyrc import Frame, Pilot, PtyrcError, Sprite
+from ptyrc import Cursor, Frame, Pilot, PtyrcError, Sprite
 
 __all__ = [
+    "Sight",
     "follow",
     "frame_arg",
     "heir",
@@ -217,3 +218,87 @@ def in_sight() -> Iterator[None]:
     except PtyrcError as exc:
         if exc.code != "not-usable":
             raise
+
+
+class Sight:
+    """What an app that plays on a frame knows of it, told by the
+    driver: nothing is asked on a period.
+
+    Topics, subscribed with a snapshot: `frames` (the layout: whether
+    the frame is on screen, and where), `text` (rows of its view
+    changed, or the view moved), `cursor` when wanted. A tick starts
+    with `look()`, which takes the events that came since the last one;
+    the text is read again only when told.
+
+        sight = Sight(pilot, frame)
+        for _ in ticks(period):
+            if not sight.look():
+                continue            # out of sight, or settling
+            if sight.changed:
+                walls = walls_of(sight.rows, *frame.origin)
+            with sight.drawing():
+                ...
+
+    `frame` is kept up to date in place: `origin`, `rect`, `usable`.
+    """
+
+    def __init__(self, pilot: Pilot, frame: Frame, cursor: bool = False) -> None:
+        self.pilot = pilot
+        self.frame = frame
+        self.rows: list[str] = []  # the text of the view
+        self.changed = False  # `rows` was read by the last `look()`
+        self.cursor: tuple[int, int] | None = None  # in frame cells; None: hidden
+        self._at: Cursor | None = None
+        self._stale = True
+        topics = ("frames", "text", "cursor") if cursor else ("frames", "text")
+        pilot.subscribe(*topics, snapshot=True)
+
+    def look(self) -> bool:
+        """Take the events waiting. False while the frame cannot be
+        drawn on: out of sight (another tmux window), or a new layout
+        still settling; its sprites are kept by the driver."""
+        frame = self.frame
+        while (event := self.pilot.event(timeout=0)) is not None:
+            topic, data = event
+            if topic == "frames":
+                infos = (f for f in data["frames"] if f["id"] == frame.id)
+                info = next(infos, None) or {**frame.info, "usable": False}
+                self._stale |= (info["rect"], info["origin"]) != (
+                    frame.info["rect"],
+                    frame.info["origin"],
+                )
+                frame.info = info
+            elif topic == "text" and data["frame"] == frame.id:
+                frame.info.update(origin=data["origin"], rect=data["rect"])
+                self._stale = True
+            elif topic == "cursor":
+                self._at = Cursor.from_wire(data)
+        self.changed = False
+        if not frame.usable:
+            # Asked meanwhile: a raw frame alone settles with no event.
+            if not on_screen(frame):
+                return False
+            self._stale = True
+        if self._stale:
+            with self.drawing():
+                self.rows = frame.text()
+                self.changed, self._stale = True, False
+        at = self._at
+        if at is None or not at.visible:
+            self.cursor = None
+        elif at.frame == frame.id and at.pos is not None:
+            self.cursor = at.pos
+        else:
+            self.cursor = frame.to_frame(at.x, at.y)
+        return not self._stale
+
+    @contextlib.contextmanager
+    def drawing(self) -> Iterator[None]:
+        """A step on the frame. What is left of it is dropped when the
+        frame goes out of sight in the middle; `look` then waits."""
+        try:
+            yield
+        except PtyrcError as exc:
+            if exc.code != "not-usable":
+                raise
+            self.frame.info["usable"] = False

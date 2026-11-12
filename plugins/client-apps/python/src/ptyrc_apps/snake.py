@@ -11,6 +11,9 @@ What it shows:
 - Reading the screen as a map: every glyph of the pane is a wall. The
   snake finds its way between the words to the apple (a breadth-first
   search over the free cells of the view).
+- The topic `text` (`_cli.Sight`): the driver tells when the text of
+  the pane changed or scrolled; the map is read again then, and only
+  then. Between two changes a move costs one batch of drawing.
 - Frame coordinates: the snake and the apple belong to the text, not to
   the window. Scroll and they move with it; when the snake is scrolled
   out of sight it starts again where you look.
@@ -385,13 +388,18 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     snake: Sprite | None = None
     apple: Sprite | None = None
     shown_apple = None
+    # The map is read when the driver says the text changed or the view
+    # moved (topic `text`), not at each move.
+    sight = _cli.Sight(pilot, frame)
+    walls: set[Cell] = set()
     for _ in _cli.ticks(1.0 / args.speed, seconds):
-        if not _cli.on_screen(frame):
+        if not sight.look():
             continue
         box = view(frame)
-        with _cli.in_sight():
-            game.step(box, walls_of(frame.text(), box[0], box[1]))
-        with _cli.in_sight(), pilot.batch():
+        if sight.changed:
+            walls = walls_of(sight.rows, box[0], box[1])
+        game.step(box, walls)
+        with sight.drawing(), pilot.batch():
             stage.show(game)
             if not game.body:
                 # A full screen: wait for room. Or burnt: back next step.

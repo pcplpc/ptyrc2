@@ -1145,6 +1145,41 @@ def test_sand_follows_two_panes_resized() -> None:
             subprocess.run([*tmux, "kill-server"], check=False)
 
 
+def test_sight(session: Pilot) -> None:
+    """`_cli.Sight`: the text is read when the driver tells, the cursor
+    is told, and nothing is asked on a quiet screen."""
+    page(session, "one")
+    asked: list[str] = []
+    with Pilot(session.session) as pilot:
+        frame = pilot.frame("raw")
+        sight = _cli.Sight(pilot, frame, cursor=True)
+        request = pilot._request
+        pilot._request = lambda method, *a, **kw: (
+            asked.append(method) or request(method, *a, **kw)
+        )
+        assert sight.look() and sight.changed
+        assert sight.rows[0] == "one" and asked[-1] == "screen.text"
+        asked.clear()
+        # Quiet: the looks cost nothing.
+        time.sleep(0.3)
+        assert sight.look() and not sight.changed and asked == []
+        assert until(lambda: sight.look() and sight.cursor == (2, 1), 2)
+        # Text written: read again, once the driver has told.
+        session.send("echo t''wo\n")
+        session.wait_for("two")
+        assert until(lambda: sight.look() and sight.changed, 2)
+        assert "two" in sight.rows[2] and sight.cursor == (2, 3)
+        assert set(asked) == {"screen.text"} and len(asked) <= 3
+        # A resize: the frame settles; the sight asks while it waits,
+        # then reads.
+        session.resize(60, 20)
+        assert until(lambda: sight.look() and frame.size == (60, 20), 4)
+        assert len(sight.rows) == 20
+        with sight.drawing():
+            pilot.draw(["x"], frame=frame.id)
+        assert sight.look()
+
+
 def test_options_between_the_words() -> None:
     out = _cli.parser("marks", "")
     out.add_argument("patterns", nargs="+")

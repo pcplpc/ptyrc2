@@ -651,6 +651,10 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
         score=args.score,
         sideways=args.sideways,
     )
+    # The walls are read when the driver says the text changed or the
+    # view moved (topic `text`); the cursor is told too (topic `cursor`).
+    sight = _cli.Sight(pilot, frame, cursor=args.cursor)
+    walls: set[Cell] = set()
     rate = args.speed * game.period  # steps per second
     top = FAST if args.score else 1.0
     due = 0.0
@@ -659,16 +663,13 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
         if due < 1.0:
             continue
         due = min(due - 1.0, 1.0)
-        if not _cli.on_screen(frame):
+        if not sight.look():
             continue
         box = view(frame)
-        with _cli.in_sight():
-            cursor = None
-            if args.cursor:
-                at = pilot.cursor()
-                cursor = frame.to_frame(at.x, at.y) if at.visible else None
-            game.step(box, walls_of(frame.text(), box[0], box[1]), cursor)
-        with _cli.in_sight(), pilot.batch():
+        if sight.changed:
+            walls = walls_of(sight.rows, box[0], box[1])
+        game.step(box, walls, sight.cursor)
+        with sight.drawing(), pilot.batch():
             stage.show(game)
 
 
