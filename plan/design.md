@@ -671,7 +671,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `screen.text` | `frame`, `rect`, `ansi` | `{"lines":[...],"size":[c,r],"rect":[x,y,w,h]}` |
 | `screen.cells` | `frame`, `rect` | `{"rows":[[run,...],...]}` |
 | `screen.find` | `pattern`, `regex`, `ignore_case`, `frame`, `known` | `{"matches":[{"frame","x","y","len","text","screen":[c,r]\|null}]}` |
-| `screen.cursor` | `trail` | `{"x","y","visible","frame","trail":[[ms,x,y],...]}` |
+| `screen.cursor` | `trail` | `{"x","y","visible","frame","pos":[x,y],"trail":[[ms,x,y],...]}`; `frame`: the innermost frame showing it, `pos`: its cell there |
 | `screen.wait` | `pattern` or `stable_ms` or `idle` (or `gone`), `timeout_ms`, `frame` | `{"matched":bool,"match":...}`; with `idle`: `{"matched":true,"match":null,"frame":id,"idle":{"score","idle","free"}}`, the frame name resolved at each look |
 | `input.send` | `text` or `keys` or `bytes` (base64), `paste` | `{}` |
 | `frame.list` | | `{"frames":[info,...],"layout":id}` |
@@ -684,11 +684,11 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `draw.update` | `id`, patch | `{}` |
 | `draw.remove` | `id` | `{}` |
 | `draw.clear` | `all` | `{"removed":n}` |
-| `draw.list` | | `{"sprites":[{..., "screen":[x,y]\|null, "visible":bool, "covered":0..1}]}` |
+| `draw.list` | | `{"sprites":[{..., "style":{...}, "screen":[x,y]\|null, "visible":bool, "covered":0..1}]}`; `style`: that of the content, of the first frame, of the first run; absent when none or an effect |
 | `draw.ext` | `name`, `function`, `params`, sprite fields; with `id`: redraw that sprite in place (content replaced, the rest kept unless given) | `{"id":n}` |
 | `draw.exts` | | `{"exts":[{"name","functions":[...]}],"effects":[...]}` |
 | `batch` | `calls`: `[{"method","params"}]` | `{"results":[{"result"} or {"error"},...]}`, applied in one repaint |
-| `subscribe` | `topics`: `screen`, `cursor`, `frames`, `idle`, `draw`, `input`, `size`, `exit` | `{}` |
+| `subscribe` | `topics`: `screen`, `cursor`, `frames`, `text`, `idle`, `draw`, `input`, `size`, `exit`; `snapshot` | `{}`; with `snapshot`, then the state now as events, to this client: `idle` per frame on screen, `cursor`, `frames`, `size` |
 | `debug.overlay` | `what`: `frames`, `heat`, `off` | `{}` |
 | `debug.dump` | | app grid, host grid, sprites, frames |
 
@@ -708,9 +708,21 @@ A string plainly meant as a key and that is not one is refused
 `subscribe` refuses an unknown topic.
 
 Event `idle`: `{"frame","idle","score","free"}`, per frame on screen,
-when `idle` changes; looked at every 250 ms while subscribed or while a
-`screen.wait {idle}` is pending; a frame is not idle until seen so, and
-a late subscriber gets no snapshot. Event `draw`:
+when `idle` changes. The watch runs while subscribed or while a
+`screen.wait {idle}` is pending. It looks when the heat says the first
+busy frame can be idle (`HeatView::idle_in`: the time for the share of
+still cells to reach 0.8 if nothing changes), and 250 ms at the
+earliest after a look when the screen or the layout changed; an idle,
+quiet screen costs no wake-up. A frame is not idle until seen so; a
+late subscriber asks for a snapshot. Event `cursor`: the result of
+`screen.cursor` without the trail, when the cursor moved on the screen
+or in its frame (a scroll under it). Event `text`:
+`{"frame","rows":[y,...],"origin":[x,y],"rect":[x,y,w,h]}`, per frame
+on screen and per burst: the frame rows in view whose text is not what
+the frame last showed there, and the view; sent when a row changed or
+the view moved. A row that comes into view is not a change; styles are
+not text. The base is the screen when the first client subscribes.
+Event `draw`:
 `{"removed":[ids],"frame","rows":[from,to]|null}`, sprites removed with
 a collected island (`rows`) or a dropped frame (`null`).
 
@@ -782,7 +794,12 @@ tests. `Frame.check_idle()` is the idle score, `Frame.is_idle` the
 boolean; both ask the driver when read. `Pilot.wait_idle(frame, timeout)`
 and `Frame.wait_idle(timeout)`: one `screen.wait {idle}`, no polling.
 `Sprite.visible`. `Pilot.host_colors`; `spawn(host_fg=, host_bg=)`;
-`alpha=` in `sprite_spec` and `draw`. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
+`alpha=` in `sprite_spec` and `draw`. `subscribe(*topics, snapshot=)`;
+`events(*topics, timeout=)` ends on silence, `event(timeout)` returns
+None on silence; both raise `PtyrcError` (`gone`) on a closed
+connection. Inside `batch()`, `text`, `find`, `sprites` and
+`Sprite.info` return a container filled when the batch is sent.
+`Cursor.pos`. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
 `python -m ptyrc_apps.<name>` and `ptyrc-app <name>`. Every app takes
 `-s SESSION` and `-f FRAME` and runs until interrupted or the session
 ends (no time limit option; tests pass `main(argv, seconds=...)`); its
@@ -797,8 +814,8 @@ sprites die with its connection, but for the bursts of a confetti round.
 | `snake` | `largest` | client: breadth-first search over the free cells of the view, one batch per move (12 a second); frame coordinates. Options, `-a` for all; rules count in steps, the plain game of a seed is unchanged; all behind the text, `z` from the back: beams, snake and apple, foes, particles. `-e`: an apple eaten is a burst of 10 particles (`_arcade.spark`: one sprite, a finite animation with a `motion` and a `ttl`) and a lump that goes down the body two segments a step; one apple in 6 is golden: 5 segments in place of 2, 26 particles; a lost tail crumbles, 40 particles at most; the body is shaded from head to tail; the apple pulses. `-x`: 2 foes at most, one 60 to 140 steps after the last, born 8 cells or more from the head. A foe moves every other step towards the middle segment of a body of 4 or more (breadth-first), at random else; reaching the body, it cuts it there and is gone. Foes are walls to the snake. `-l`: 2 beams at most, one 80 to 200 steps after the last: through a segment of the snake (half of them) or a free cell, along its row or column from wall to wall, 5 cells or more. Announced 14 steps, then firing 5: the snake is cut at the first segment in it (the head: it starts again), foes in it are gone. The snake takes an announced beam for a wall unless there is no other way; a firing one always. Foes and beams scrolled out of the view or written on are dropped |
 | `brick` | `largest` | client: one step and one batch 16 times a second (`--speed`); frame coordinates; the plain game is a ball, a racket and bricks. Map: a glyph of the view is a wall (`snake.walls_of`); the sides of the view are walls, the top and the bottom are open. Ball `o`: a position in fractions of a cell, 0.5 row a step, at most 0.9 column; a move goes along x, then along y, and an axis that would enter a solid cell is reversed instead (`fly`). Brick: 4 cells, one row, braille with round ends. Racket `[===]`, 5 cells, never on text or bricks, 3 cells in 2 steps in any direction along a shortest path (breadth-first over the places where it fits); hit from above or below, it sets the ball's `vx` by where it is hit, from an end only reversing it. Each step the racket foresees the ball 90 steps with no racket; when it leaves, it goes to a row the ball enters, over or under it: the latest it reaches in time, on the ball's last leg and with 6 moves to spare if any, else the row where it is the least late; of the places on that row, the one whose shot, weighed over 50 steps, meets a brick soonest, else leaves towards the column of the nearest brick. With nothing to stop it stays. Score: 10 a brick, shown top right in view cells; a ball out sets it to 0; a ball is served 12 steps after the last is gone, from a side of the racket. A ball 240 steps without a brick gets another angle, at 720 it is served again. Terrain: bricks are kept in frame cells for the life of the app, sprites within a view's height of the view; fewer than 14 in the view: a new area, one every 40 steps, three at the start: a block of 2 to 8 by 1 to 4 bricks (full, checker, frame or slope; a colour a row) on free cells, two rows free of text on its open side; 65 % under a line of text, 20 % standing on one, 15 % floating, when such places exist. A brick written on is gone; scrolled out of the view, balls, capsules and falling bricks are dropped and the racket starts again in the view. Options, `-a` for all; all behind the text, `z` from the back: bricks, capsules and falling bricks, rackets, balls, particles, the score. `-r`: kinds of bricks, drawn by share: plain 66 %; hard 14 %, 3 hits; loose 8 %: touched, it falls a row every other step, breaks on text or bricks, and kills the racket under it for 60 steps (a racket with nothing to stop leaves the 6 rows under one); bumper 5 %, 2 hits: the ball leaves at a random angle, half faster for 24 steps; bomb 7 %: breaks the bricks within 4 columns and a row, bombs among them. `-b`: a broken brick in 7 drops a capsule, a letter that sinks a row every third step and rests 2 s on text; the racket that touches it: `W` 7 cells for 320 steps, `N` 3 cells `[=]` for 240, `T` a twin racket for 400, `M` three balls for one (5 at most), `S` balls half faster for 160, `F` 5 s of fire: the ball goes through bricks. A racket with nothing to stop goes for a capsule, not for `N` or `S`. `-m`: two rackets, two scores; one keeps the top, the other the bottom: a ball out by a side sets its keeper's score to 0, and its keeper serves; a brick scores for the last racket hit; a shot with no brick is aimed at the other's side. `-e`: particles (`_arcade.spark`) for a brick, a serve, a catch, a ball out; a trail; the best score. A blast, a kill and the flames of a ball on fire show without it |
 | `blocks` | `largest` | client: falling pieces of four blocks, played by the app; frame coordinates; all behind the text, `z` from the back: heap, pieces, particles, score. A step is a dot of fall: 4 a row, `--speed` rows a second (4); one batch a step. A glyph of the view is a wall (`snake.walls_of`). Inside, cells are `(u, v)`, `v` along the fall: `(x, y)`, or `(y, -x)` with `--sideways` (from the right, 2 dots a column). A block is a cell, `⣿`; a piece between two cells is drawn in braille dots and holds both. `--count` pieces at once (3), one `GAP` (3) cells after the last, at the first depth where one fits between the walls, at random across; 7 kinds drawn from a bag, a colour a kind. No room there because of the heap: the heap goes, the score is 0. A line: a run of free cells across, from wall or side to wall or side; full of blocks, it goes, each block worth the number of lines gone at once; a step later, the blocks standing on a broken one, without a gap, come down a cell, and lines are looked for again. Blocks out of the view or written on are gone; a piece there is lost. Play: a breadth-first search over `(u, v, turn)` with moves across, turns and falls; among the positions of rest the best by lines made and advanced, sides in contact, free cells covered, depth; the rests of the other pieces are taken; made again when the heap or the walls change. A move across or a turn a step; they are made while falling when the lower row allows. `--cursor`: the piece nearest to the cursor (bold) rests as near across to it as it can; the turn stays the app's. `--chains`: a block broken in the last step breaks the blocks of its colour next to it, a point each; the heap comes down when no more break; the app likes its colour. `--effects`: a broken block is a particle (`_blocks.crumb`), 48 a step at most. `--score`: shown top-right; speed times `1 + score / 150`, 3 at most. `-a`: `--chains --effects --score` |
-| `sand` | `idle` | native effect `sand` (draw extension `sand`), one request; one `screen.wait {idle}` on the frame name, answered by the driver when a pane is idle (`--now`: at once), then looks every 0.5 s: when its frame is inactive and a usable pane of the same key covers half of it (a resize of a pane with little text), the sprite is moved there (`heir`). `--rate`; `--cursor`: the stream falls on the cursor's column |
-| `cat` | `largest` | one sprite in frame cells, back layer (`--front`); driven by the topics `idle`, `cursor`, `screen`, `frames`, no tick: it waits on the socket until its next step. It stands on a ledge (3x11 free cells over 5 cells of text at least, or the floor of the view), walks, sits, grooms; sleeps on `idle` (a looped animation, nothing sent); jumps when the cursor is within 7 columns and 2 rows, when `covered` > 0.2 or the line under it goes; `visible` false after a scroll: back into the view after 2 to 4 s |
+| `sand` | `idle` | native effect `sand` (draw extension `sand`), one request; one `screen.wait {idle}` on the frame name, answered by the driver when a pane is idle (`--now`: at once), then waits on the topic `frames` (`follow`): when its frame is inactive and a usable pane of the same key covers half of it (panes with little text resized together), the sprite is moved there (`heir`, on the event's data; nothing asked). `--rate`; `--cursor`: the stream falls on the cursor's column |
+| `cat` | `largest` | one sprite in frame cells, back layer (`--front`); driven by the topics `idle`, `cursor` (frame cells), `screen`, `frames`, subscribed with a snapshot, no tick: it waits on the socket until its next step. It stands on a ledge (3x11 free cells over 5 cells of text at least, or the floor of the view), walks, sits, grooms; sleeps on `idle` (a looped animation, nothing sent); jumps when the cursor is within 7 columns and 2 rows, when `covered` > 0.2 or the line under it goes; `visible` false after a scroll: back into the view after 2 to 4 s |
 | `marks` | every pane, else `raw` | `PATTERN...`, `-e` regex, `-i`; one front `tint` per match in frame cells, a colour per pattern, on remembered rows too (`screen.find {known}`), 400 at most, nearest to the view first; looks again on `screen` and `frames` after 30 ms of silence (200 ms at most), finds in one batch, changes in another; topic `draw` drops what the driver removed; a display of the counts (in view, `/known`), `auto` top-right, front (`--no-hud`) |
 | `rain` | `raw` | native effect `rain` (draw extension `rain`), one request, back layer; `--rate` drops per second over 80 columns; a drop lands on a free cell over text with probability 0.45, on the cursor and the floor always; a column within 3 of a change gets 10 % of its rain, all of it after 10 s; a replaced frame is followed as `sand` does |
 

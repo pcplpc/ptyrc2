@@ -301,3 +301,28 @@ Built: `cat`, `marks`, `rain` (see `design.md`). Gaps met:
   front sprites.
 - `_cli.parse` uses `parse_args`; `marks ERROR -i WARN` needs
   `parse_intermixed_args`.
+
+## Clients, fifth session
+
+Built: `subscribe {snapshot}`; `cursor` in frame cells; topic `text`;
+the idle watch on a deadline; `style` in `draw.list`; in Python, reads
+inside `batch()`, `Pilot.event`, `gone` raised by `events` on a closed
+connection; `_cli.parse` intermixed (see `design.md`). Left:
+
+- `sand.heir` stays, driven by the topic `frames`. Two tmux panes with
+  little text resized together kept their frames when tried (100x30 to
+  70x30); the case where they do not was not found again, not proven
+  gone.
+- Topic `text` compares the text of view rows by hash, in the server:
+  a change of style is not told; a frame back from inactive is compared
+  with what it showed when it left. `snake`, `brick`, `blocks`,
+  `fishes`, `flower` still read the text on a period; `rain` and
+  `sand` read it in the driver.
+- `ptyrc events` has no `--snapshot`.
+- No snapshot for `screen`, `text`, `draw`, `input`, `exit`.
+- A hot cell whose `still` passed 10 s makes the idle watch look again
+  20 ms later, until the class follows.
+- Not started: host colours set at run time and their event; layer
+  names declared by a client.
+- `Pilot.cursor`, `wait_for`, `wait_idle`, `frame`, `frames` refuse or
+  queue blindly inside `batch()`.
