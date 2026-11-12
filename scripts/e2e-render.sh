@@ -239,6 +239,10 @@ sprites() {
     p "$n" draw text --at 10,8 --blend tint --bg 52 'xxxxxxxxxxxxxxxx' >/dev/null
     p "$n" draw text --layer front --auto bottom-right --bg magenta ' auto ' >/dev/null
     p "$n" draw text --layer front --at 41,5 '界面' --fg yellow >/dev/null
+    # Opacity: a glaze behind the text, glass and a faded word in front.
+    p "$n" draw text --layer wallpaper --at 0,2 --bg '#804000' --opaque --alpha 0.4 '                    ' '                    ' >/dev/null
+    p "$n" draw text --layer hud --at 6,5 --bg '#ffffff' --opaque --alpha 0.3 '            ' >/dev/null
+    p "$n" draw text --layer hud --at 22,2 --fg '#ff8800' --alpha 0.5 'faded' >/dev/null
     p "$n" call draw.put '{"anchor":{"at":[50,2],"space":"view"},"persist":true,
         "layer":"front",
         "frames":[{"rows":["(o )"],"ms":60},{"rows":["( o)"],"ms":60}],"loop":true}' >/dev/null
