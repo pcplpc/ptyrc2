@@ -243,6 +243,9 @@ fn record_then_replay() {
     client
         .call("session.resize", json!({"size": [30, 4]}))
         .unwrap();
+    client
+        .call("session.colors", json!({"bg": "#203040"}))
+        .unwrap();
     client.call("input.send", json!({"text": "key\r"})).unwrap();
     assert_eq!(driver.wait_exit(), 3);
 
@@ -258,6 +261,11 @@ fn record_then_replay() {
     assert_eq!(
         header["host_colors"],
         json!({"fg": "#e5e5e5", "bg": "#102030"})
+    );
+    // Colours set later are a record.
+    assert!(
+        text.contains("\"host_colors\":{\"bg\":\"#203040\",\"fg\":\"#e5e5e5\"},\"t\":"),
+        "{text}"
     );
     assert!(
         text.contains("\"size\":[30,4]") && text.contains("\"i\":\"key\\r\""),
@@ -285,6 +293,9 @@ fn record_then_replay() {
     let _replay = sb.spawn("q", &["replay", file, "--name", "q", "--step"]);
     let info = sb.client("q").call("session.info", json!({})).unwrap();
     assert_eq!(info["host_colors"]["bg"], "#102030");
+    sb.run(&["-s", "q", "tape", "seek", "end"]);
+    let info = sb.client("q").call("session.info", json!({})).unwrap();
+    assert_eq!(info["host_colors"]["bg"], "#203040");
     sb.run(&["-s", "q", "tape", "quit"]);
 }
 

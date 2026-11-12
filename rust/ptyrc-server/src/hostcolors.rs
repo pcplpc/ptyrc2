@@ -23,6 +23,8 @@ pub enum Source {
     Option,
     /// The host answered.
     Host,
+    /// A client said (`session.colors`).
+    Client,
 }
 
 impl Source {
@@ -31,6 +33,7 @@ impl Source {
             Source::Default => "default",
             Source::Option => "option",
             Source::Host => "host",
+            Source::Client => "client",
         }
     }
 }
@@ -57,6 +60,11 @@ impl Known {
 
     /// The host said `which` is `rgb`. Returns whether it changed.
     pub fn learn(&mut self, which: usize, rgb: Rgb) -> bool {
+        self.set(which, rgb, Source::Host)
+    }
+
+    /// `which` is `rgb`, from `source`. Returns whether it changed.
+    pub fn set(&mut self, which: usize, rgb: Rgb, source: Source) -> bool {
         let slot = if which == 0 {
             &mut self.colors.fg
         } else {
@@ -64,7 +72,7 @@ impl Known {
         };
         let changed = *slot != rgb;
         *slot = rgb;
-        self.from[which] = Source::Host;
+        self.from[which] = source;
         changed
     }
 
@@ -76,6 +84,43 @@ impl Known {
             "bg": hex(self.colors.bg),
             "from": {"fg": self.from[0].name(), "bg": self.from[1].name()},
         })
+    }
+}
+
+/// The params of `session.colors`: colours to set (foreground,
+/// background), and whether to ask the host for the others.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Change {
+    pub colors: [Option<Rgb>; 2],
+    pub ask: bool,
+}
+
+impl Change {
+    /// `{"fg": colour, "bg": colour, "ask": bool}`, all optional. A
+    /// colour is `#rrggbb`, a name or `0..255`; not `default`.
+    pub fn parse(params: &Value) -> Result<Change, String> {
+        let mut change = Change::default();
+        let Some(fields) = params.as_object() else {
+            return Ok(change);
+        };
+        for (key, value) in fields {
+            match key.as_str() {
+                "fg" | "bg" => {
+                    let spec: ptyrc_core::scene::ColorSpec =
+                        serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
+                    if spec.0 == ptyrc_vt::Color::Default {
+                        return Err(format!("{key}: default is what is being set"));
+                    }
+                    change.colors[(key == "bg") as usize] =
+                        Some(ptyrc_vt::palette::rgb(spec.0, [0; 3]));
+                }
+                "ask" => {
+                    change.ask = value.as_bool().ok_or("ask: true or false")?;
+                }
+                other => return Err(format!("unknown field: {other} (fg, bg, ask)")),
+            }
+        }
+        Ok(change)
     }
 }
 
@@ -222,6 +267,35 @@ mod tests {
 
     const BG: &[u8] = b"\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\";
     const FG: &[u8] = b"\x1b]10;rgb:cdcd/d6d6/f4f4\x07";
+
+    #[test]
+    fn a_client_sets_the_colours() {
+        let change = Change::parse(&json!({"fg": "#102030", "bg": 4, "ask": true})).unwrap();
+        assert_eq!(
+            change.colors,
+            [Some([0x10, 0x20, 0x30]), Some([0, 0, 0xee])]
+        );
+        assert!(change.ask);
+        assert_eq!(Change::parse(&json!({})).unwrap(), Change::default());
+        assert_eq!(Change::parse(&Value::Null).unwrap(), Change::default());
+        for bad in [
+            json!({"fg": "default"}),
+            json!({"bg": "nope"}),
+            json!({"ask": 1}),
+            json!({"colour": "#000000"}),
+        ] {
+            assert!(Change::parse(&bad).is_err(), "{bad}");
+        }
+
+        let mut known = Known::new(None, Some([1, 2, 3]));
+        assert!(known.set(0, [9, 9, 9], Source::Client));
+        assert!(!known.set(0, [9, 9, 9], Source::Client));
+        assert_eq!(
+            known.json()["from"],
+            json!({"fg": "client", "bg": "option"})
+        );
+        assert_eq!(known.json()["fg"], "#090909");
+    }
 
     #[test]
     fn replies_asked_for_are_taken_out() {

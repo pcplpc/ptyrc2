@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""The wall: what `brick` draws.
+"""The wall: what `bricks` draws.
 
 - A brick, a racket, a ball, a capsule, a falling brick: one sprite
   each, in frame coordinates. Those that blink are animations played by
@@ -145,7 +145,7 @@ def board(
 
 
 class Stage:
-    """The sprites of a `brick.Game`; particles and more when
+    """The sprites of a `bricks.Game`; particles and more when
     `effects`."""
 
     def __init__(

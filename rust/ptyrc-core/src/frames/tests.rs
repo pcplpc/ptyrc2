@@ -2809,3 +2809,24 @@ fn a_preset_splits_a_pane_of_another_app() {
     s.settle(&g);
     assert_eq!(s.rects(), vec![[0, 0, 30, 20], [31, 0, 29, 20]]);
 }
+
+#[test]
+fn ink_of_a_row_out_of_the_view_is_remembered() {
+    let d = doc(200);
+    let mut s = Sim::new();
+    s.settle(&view(&d, 0, 20, &[]));
+    let id = s.pane().id;
+    for top in 1..=30 {
+        s.feed(&view(&d, top, 20, &[]), 30);
+    }
+    s.idle(500);
+    // Row 3 left by the top; row 60 was never seen.
+    let text: Vec<char> = s.f.text(id, 3, 4)[0].chars().collect();
+    let ink = s.f.ink_row(id, 3, 2, 12).unwrap();
+    for (k, got) in ink.iter().enumerate() {
+        assert_eq!(*got, text.get(k + 2).is_some_and(|c| *c != ' '), "{k}");
+    }
+    assert!(ink.contains(&true));
+    assert_eq!(s.f.ink_row(id, 60, 0, 12), None);
+    assert_eq!(s.f.ink_row(RAW, 3, 0, 12), None);
+}

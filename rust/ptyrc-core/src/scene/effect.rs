@@ -4,6 +4,7 @@
 use super::raster::Canvas;
 use super::spec::{ColorSpec, StyleSpec};
 use crate::frames::{HeatClass, HeatView};
+use crate::types::{FrameId, Surfaces};
 use ptyrc_vt::{Cell, Color, Grid, Rect};
 use serde::Deserialize;
 use std::time::Duration;
@@ -22,6 +23,10 @@ pub trait Effect: Send {
     /// What the app shows under the canvas; called before each `render`
     /// while the frame is usable.
     fn look(&mut self, _under: &Under) {}
+
+    /// Rows `from..=to` of the frame moved by `dy` in frame space (a
+    /// splice, an island merge): what is kept on them moves too.
+    fn shift(&mut self, _from: i64, _to: i64, _dy: i64) {}
 
     /// New `params` for a running effect: its state is kept. Nothing is
     /// changed on error.
@@ -64,6 +69,8 @@ pub struct Under<'a> {
     /// The view of the frame, screen cells.
     clip: Rect,
     heat: Option<&'a HeatView>,
+    /// The frame, for its rows out of the view.
+    frame: Option<(&'a dyn Surfaces, FrameId)>,
     /// The canvas, in cells.
     pub size: (u16, u16),
     /// The cursor as a canvas cell; `None`: outside.
@@ -81,6 +88,7 @@ impl<'a> Under<'a> {
             at,
             clip: clip.intersect(&grid.rect()),
             heat: None,
+            frame: None,
             size: (clip.w, clip.h),
             cursor: None,
             origin: at,
@@ -96,6 +104,24 @@ impl<'a> Under<'a> {
     pub fn with_heat(mut self, heat: Option<&'a HeatView>) -> Under<'a> {
         self.heat = heat;
         self
+    }
+
+    /// With the frame the canvas is on: `row` reads what it remembers.
+    pub fn with_frame(mut self, surfaces: &'a dyn Surfaces, id: FrameId) -> Under<'a> {
+        self.frame = Some((surfaces, id));
+        self
+    }
+
+    /// Ink of the canvas columns on the row `y` of the canvas, above
+    /// (negative) or below it and out of the view: what the frame
+    /// remembers there. `None`: in the view, or not remembered.
+    pub fn row(&self, y: i64) -> Option<Vec<bool>> {
+        let sy = self.at.1 + y;
+        if sy >= self.clip.y as i64 && sy < self.clip.bottom() as i64 {
+            return None;
+        }
+        let (surfaces, id) = self.frame?;
+        surfaces.ink_row(id, self.origin.1 + y, self.origin.0, self.size.0)
     }
 
     /// Foreground of the canvas, row-major: `ink` of every cell.

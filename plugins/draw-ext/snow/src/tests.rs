@@ -269,3 +269,21 @@ fn tuned_checked_and_ended() {
     assert!(late.render(Duration::from_secs(3600), &mut canvas));
     assert!(late.flakes.len() <= 10);
 }
+
+#[test]
+fn a_shift_moves_the_snow_of_its_rows() {
+    let mut snow = make(json!({"rate": 0}));
+    look(&mut snow, &TEXT, 0, &[], None);
+    run(&mut snow, 8, 0, 0);
+    for x in 8..16 {
+        snow.put(x, 2, 5.0);
+    }
+    // Two rows are spliced in above the line: it is two rows lower.
+    snow.shift(1, 100, 2);
+    let mut rows = [""; 8];
+    rows[5] = TEXT[3];
+    look(&mut snow, &rows, 0, &[], None);
+    run(&mut snow, 8, 80, 80);
+    assert_eq!(row(&snow, 4, 8, 16), 8.0 * 5.0);
+    assert_eq!(row(&snow, 2, 8, 16), 0.0);
+}

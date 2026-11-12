@@ -196,18 +196,12 @@ Gaps met while writing the apps; none fixed in the core.
   shaded body, foes that bite the tail off, beams that burn
   (`_arcade.py`, see `design.md`). Left: a particle is drawn over the
   head for a moment; the snake does not fight back; no score shown.
-- Built: brick, a brick breaker that plays alone; `-r`, `-b`, `-m`,
-  `-e`, `-a` (`brick.py`, `_bricks.py`, see `design.md`). Left: the
+- Built: bricks, a brick breaker that plays alone; `-r`, `-b`, `-m`,
+  `-e`, `-a` (`bricks.py`, `_bricks.py`, see `design.md`). Left: the
   terrain dies with the app; a racket crossing the first row shows
   through the gaps of the score; on a blank view a ball is juggled
   from edge to edge; capsules sink only down; the two rackets do not
   fight for a ball.
-- Built: blocks, falling pieces in braille that play alone; `--sideways`,
-  `--count`, `--cursor`, `--chains`, `--effects`, `--score`, `-a`
-  (`blocks.py`, `_blocks.py`, see `design.md`). Left: the heap dies
-  with the app, its blocks scrolled out of sight are forgotten; pieces cross each other; a piece
-  whose way is cut by another is lost; the cursor gives a place, not
-  a turn; a gap of one cell between two words is a line.
 - Built: sand in braille, one stream, avalanches, strata, kept across
   resizes and text changes, `--cursor` (see `design.md`). No cursor, or
   on column 0: the spout of a sand without `--cursor`. Built in the
@@ -318,13 +312,8 @@ Left:
 Built: host colours (OSC 10, 11), `alpha`, `wallpaper` and `hud` (see
 `design.md`). Left:
 
-- The named layers are a fixed table; a client cannot declare names.
-- An opaque back colour is still hidden under an app panel; only a
-  glaze shows there. A back glyph on an inverse app cell does not fade.
 - A lone ESC as the last byte of a read is forwarded, not held: a reply
   split exactly there reaches the app.
-- No event when the host colours change; no method to set them at run
-  time.
 - Draw extensions and effects take `alpha` only through the sprite
   fields. Mixes are linear in sRGB.
 
@@ -365,7 +354,7 @@ connection; `_cli.parse` intermixed (see `design.md`). Left:
   gone.
 - Topic `text` compares the text of view rows by hash, in the server:
   a change of style is not told; a frame back from inactive is compared
-  with what it showed when it left. `snake`, `brick`, `blocks`,
+  with what it showed when it left. `snake`, `bricks`,
   `fishes`, `flower` still read the text on a period; `rain` and
   `sand` read it in the driver.
 - No snapshot for `screen`, `text`, `draw`, `input`, `exit`.
@@ -434,8 +423,7 @@ of its terminal; `shot` draws the cursor. Left:
   back.
 - `replay` takes the colours of the tape as an option would
   (`host_colors.from`: `option`); no `--host-fg` / `--host-bg` on
-  `replay`. A colour set at run time by a client is not recorded: only
-  what the host answers is.
+  `replay`.
 - Paused, `stable_ms` and `idle` waits can only time out: they count
   tape time.
 - Tapes: vim's `ctrl+f` (two rows of overlap) is read as a jump, each
@@ -493,3 +481,46 @@ on the heat; `snow` (see `design.md`, "Effects"). Left:
   `snow.py` repeats the loop of `sand.follow` to send its gusts between
   two events. `Sprite.tune(params)` in the Python pilot
   would spare `update(effect={"name": ..., "params": ...})`.
+
+## Effects and layers, fifth session, second round
+
+Built (see `design.md`, "Rendering", "Effects", "Layers"):
+
+- `Effect::shift`; `Under::row` over `Surfaces::ink_row`: the rows a
+  frame remembers out of the view. Sand: a world of the canvas and up
+  to 16 remembered rows on each side, simulated; grains kept by frame
+  cell when they leave by any side (1024 rows of 1024 cells). Snow:
+  `shift`, a bound in columns.
+- `panel`: a sprite clipped to a backdrop, its opaque `bg` laid on it.
+  A back glyph fades on an inverse cell. `layer.define`, `layer.list`.
+- `session.colors`, topic `colors`.
+- A scroll unpaints only the rows that leave for the scrollback.
+  `scripts/e2e-render.sh flicker`: per effect the host log replayed,
+  cells written against cells changed (`E2E_VERBOSE=1` prints them).
+  Measured, 3 s at 60x16: static, 0 wasted of 274 to 7849 written for
+  sand, rain, snow, confetti; scrolling at 20 lines a second, sand
+  1297 wasted of 5371 before, 0 of 4338 after; confetti 17 of 7925
+  (cells of the row that leaves). Nothing out of an update.
+
+Left:
+
+- No anchor relative to a panel (its rectangle): a sprite on a panel
+  is a view-sized canvas clipped to it. `panel` cannot be unset by
+  `draw.update`. No `--panel` in the CLI, no `Sprite` field in the
+  Python pilot; nor `layer.define` and `session.colors` there
+  (`Pilot.call`).
+- `ink_row` is text only: a remembered underline or line drawn by
+  attribute is not ink. The raw frame remembers nothing. Rows of the
+  view are not in the buffer until committed: `Under::row` gives them
+  from the screen only inside the canvas.
+- Sand: the margin costs steps (a world up to 32 rows taller). Beyond
+  it grains are frozen. Forgotten rows (`FrameEvent::Forgotten`) keep
+  their grains in the attic until it overflows. Rain does nothing
+  with `shift` (it keeps nothing on rows).
+- A declared layer name is not in `draw.list` (the integer is); names
+  are not saved in a tape.
+- `session.colors {ask}` in a host that never answers waits 1 s, as at
+  start; a tape does not record the change.
+- A view-fixed sprite over a scroll is still erased where the scroll
+  took it and painted again: inherent to pass-through.
+- Mixes in linear light: not tried.

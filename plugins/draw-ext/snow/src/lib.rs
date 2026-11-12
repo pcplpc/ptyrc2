@@ -28,7 +28,9 @@
 //! text holds `CAP` eighths: a white cap on a line, a drift on the floor.
 //!
 //! The snow lies on the rows of the frame: it scrolls with the text,
-//! and is kept out of sight (`ATTIC` rows around the view).
+//! and is kept out of sight (`ATTIC` rows and columns around the view).
+//! Rows told moved (`shift`: a splice, an island merge) take their snow
+//! along.
 //!
 //! Thaw. Lying snow loses an eighth every `THAW_MS` on average: under a
 //! light fall the snow thins from the top lines down and never covers
@@ -70,7 +72,7 @@ const MELT_MS: f32 = 1500.0;
 const THAW_MS: f64 = 30_000.0;
 /// Columns on each side of the cursor that are warm.
 const WARM: i64 = 3;
-/// Rows of snow kept above and below the view.
+/// Rows, and columns, of snow kept above and below the view.
 const ATTIC: i64 = 2000;
 /// Speed, rows per second: near, far.
 const NEAR: (f64, f64) = (2.6, 4.2);
@@ -415,8 +417,23 @@ impl Effect for Snow {
         if under.origin != self.origin {
             self.origin = under.origin;
             let rows = (self.origin.1 - ATTIC, self.origin.1 + h as i64 + ATTIC);
-            self.lying.retain(|(y, _), _| *y >= rows.0 && *y < rows.1);
+            let cols = (self.origin.0 - ATTIC, self.origin.0 + w as i64 + ATTIC);
+            self.lying
+                .retain(|(y, x), _| *y >= rows.0 && *y < rows.1 && *x >= cols.0 && *x < cols.1);
         }
+    }
+
+    fn shift(&mut self, from: i64, to: i64, dy: i64) {
+        let moved: Vec<(i64, i64)> = self
+            .lying
+            .range((from, i64::MIN)..=(to, i64::MAX))
+            .map(|(key, _)| *key)
+            .collect();
+        let snow: Vec<((i64, i64), f32)> = moved
+            .into_iter()
+            .filter_map(|(y, x)| Some(((y + dy, x), self.lying.remove(&(y, x))?)))
+            .collect();
+        self.lying.extend(snow);
     }
 
     fn tune(&mut self, params: &serde_json::Value) -> Result<(), String> {

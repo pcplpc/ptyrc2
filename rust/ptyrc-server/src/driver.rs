@@ -494,10 +494,7 @@ impl Driver {
                 Step::Feed(Record::HostColors(colors)) => {
                     self.colors.learn(0, colors.fg);
                     self.colors.learn(1, colors.bg);
-                    hook!(self, self.now(), |ctx| {
-                        engine.on_host_colors(colors, ctx);
-                        ctx.request_repaint();
-                    });
+                    self.colors_changed(engine);
                 }
                 Step::Feed(_) => {}
                 Step::Paused => {
@@ -807,15 +804,7 @@ impl Driver {
                     self.replies_until = None;
                 }
                 if changed {
-                    let colors = self.colors.colors;
-                    let now = self.now();
-                    if let Some(recorder) = &mut self.recorder {
-                        recorder.host_colors(now, colors);
-                    }
-                    hook!(self, now, |ctx| {
-                        engine.on_host_colors(colors, ctx);
-                        ctx.request_repaint();
-                    });
+                    self.colors_changed(engine);
                 }
                 self.forward_input(&fed.forward, engine);
             }
@@ -938,18 +927,65 @@ impl Driver {
         }
     }
 
+    /// The host colours changed: the engine mixes with them in the next
+    /// repaint; topic `colors`.
+    fn colors_changed(&mut self, engine: &mut dyn Engine) {
+        let (colors, data) = (self.colors.colors, self.colors.json());
+        let now = self.now();
+        if let Some(recorder) = &mut self.recorder {
+            recorder.host_colors(now, colors);
+        }
+        hook!(self, now, |ctx| {
+            engine.on_host_colors(colors, ctx);
+            ctx.emit("colors", data);
+            ctx.request_repaint();
+        });
+    }
+
+    /// `session.colors {fg, bg, ask}`: set the host colours; `ask`: ask
+    /// the host again for those not given. The colours as they are now.
+    fn session_colors(
+        &mut self,
+        params: &Value,
+        engine: &mut dyn Engine,
+    ) -> Result<Value, RpcError> {
+        use crate::hostcolors::{Change, Source};
+        let change = Change::parse(params).map_err(RpcError::bad_params)?;
+        let mut changed = false;
+        for (which, rgb) in change.colors.into_iter().enumerate() {
+            if let Some(rgb) = rgb {
+                changed |= self.colors.set(which, rgb, Source::Client);
+            }
+        }
+        let asked = change.ask
+            && self
+                .ask_host(change.colors[0].is_none(), change.colors[1].is_none())
+                .map_err(|e| RpcError::new(ErrorCode::Internal, e.to_string()))?;
+        if changed {
+            self.colors_changed(engine);
+        }
+        let mut out = self.colors.json();
+        out["asked"] = json!(asked);
+        Ok(out)
+    }
+
     /// Ask the host terminal for the default colours nobody gave. The
     /// replies come with the keys.
     fn ask_host_colors(&mut self) -> io::Result<()> {
         use crate::hostcolors::Source;
         let ask = |source: Source| source == Source::Default;
         let (fg, bg) = (ask(self.colors.from[0]), ask(self.colors.from[1]));
+        self.ask_host(fg, bg).map(|_| ())
+    }
+
+    /// Ask the host for its foreground, its background. Whether asked.
+    fn ask_host(&mut self, fg: bool, bg: bool) -> io::Result<bool> {
         if !self.cfg.ask_host_colors
             || !self.host.interactive
             || !rustix::termios::isatty(rustix::stdio::stdout())
             || !(fg || bg)
         {
-            return Ok(());
+            return Ok(false);
         }
         self.replies.expect(fg, bg);
         self.replies_until = Some(self.now() + HOST_COLORS_WAIT);
@@ -959,7 +995,7 @@ impl Driver {
         if bg {
             self.host.write(QUERY_BG)?;
         }
-        Ok(())
+        Ok(true)
     }
 
     /// Type queued bytes into the app, as much as the pty takes.
@@ -1118,6 +1154,7 @@ impl Driver {
         Some(match method {
             "session.info" => Ok(self.session_info(engine)),
             "session.resize" => self.session_resize(&params, engine),
+            "session.colors" => self.session_colors(&params, engine),
             "subscribe" => self.subscribe(conn, &params, engine),
             "input.send" => self.input_send(&params, engine),
             "input.click" => self.input_click(&params, engine),
