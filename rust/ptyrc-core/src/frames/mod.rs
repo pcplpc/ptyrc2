@@ -270,6 +270,14 @@ pub struct Frames {
 /// How long a preset outlives its last detection.
 const SUPPORT_HOLD: Duration = Duration::from_secs(4);
 
+/// A glyph that takes two cells, by its block: enough to size a match.
+fn is_wide(ch: char) -> bool {
+    matches!(ch as u32,
+        0x1100..=0x115F | 0x2E80..=0xA4CF | 0xAC00..=0xD7A3 | 0xF900..=0xFAFF
+        | 0xFE30..=0xFE4F | 0xFF00..=0xFF60 | 0xFFE0..=0xFFE6
+        | 0x1F300..=0x1FAFF | 0x20000..=0x3FFFD)
+}
+
 fn ms(v: u32) -> Duration {
     Duration::from_millis(v as u64)
 }
@@ -651,7 +659,15 @@ impl Frames {
                 }
                 let k0 = line.text[..m.start()].chars().count();
                 let k1 = k0 + m.as_str().chars().count();
-                let (c0, c1) = (line.col_of(k0), line.col_of(k1));
+                let c0 = line.col_of(k0);
+                // The column after the match; at the end of the text, from
+                // the width of its last glyph.
+                let c1 = if k1 < line.text.chars().count() {
+                    line.col_of(k1)
+                } else {
+                    let last = m.as_str().chars().next_back().unwrap_or(' ');
+                    line.col_of(k1 - 1) + if is_wide(last) { 2 } else { 1 }
+                };
                 let pos = FramePos {
                     x: x0 + c0 as i64,
                     y,

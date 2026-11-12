@@ -225,6 +225,14 @@ fn wide_glyph_columns() {
     assert_eq!((m[0].x, m[0].len), (5, 6));
     let m = s.f.find(RAW, &lit("界"), false);
     assert_eq!((m[0].x, m[0].len), (2, 2));
+    // A match ending the text on a wide glyph.
+    let mut g = Grid::new(COLS, 3);
+    put(&mut g, 0, 0, "ab");
+    g.put(2, 0, Cell::wide("世", Style::default()));
+    g.put(4, 0, Cell::wide("界", Style::default()));
+    s.feed(&g, 10);
+    let m = s.f.find(RAW, &lit("b世界"), false);
+    assert_eq!((m[0].x, m[0].len), (1, 5));
 }
 
 // -- extended frame ----------------------------------------------------
