@@ -461,7 +461,7 @@ Built (see `design.md`, "Python"):
   topics `text`, `frames`, `cursor`. The text of the view is read when
   the driver says it changed or scrolled; the game ticks stay. On a
   quiet screen an app asks nothing: before, per second, the snake made
-  24 requests besides its drawing, the fishes 30.
+  24 requests besides its drawing, the fishes 21.
 - `sand.heir` is needed, and was wrong. Two stacked tmux panes with
   little text, the host resized from 100x30 to 100x20: both frames are
   replaced, every time; a sprite left on an old frame stays out of
