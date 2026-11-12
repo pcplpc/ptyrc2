@@ -108,6 +108,89 @@ def once():
     if cur != f"{x},{hc['y']}":
         problems.append(f"cursor: model {x},{hc['y']} host {cur}")
     return problems
+def cells(line):
+    """(glyph, fg, bg, attrs) per glyph of a line holding SGR sequences."""
+    out, fg, bg, attrs, i, col = [], None, None, frozenset(), 0, 0
+    names = {1: "bold", 2: "dim", 3: "italic", 4: "underline", 5: "blink",
+             7: "inverse", 8: "hidden", 9: "strike"}
+    off = {22: ("bold", "dim"), 23: ("italic",), 24: ("underline",), 25: ("blink",),
+           27: ("inverse",), 28: ("hidden",), 29: ("strike",)}
+    while i < len(line):
+        ch = line[i]
+        if ch == "\x1b" and line[i + 1:i + 2] == "[":
+            j = i + 2
+            while j < len(line) and not line[j].isalpha():
+                j += 1
+            if line[j:j + 1] == "m":
+                ps = [int(x.split(":")[0] or 0) for x in line[i + 2:j].split(";")] or [0]
+                k = 0
+                while k < len(ps):
+                    n = ps[k]
+                    if n == 0: fg, bg, attrs = None, None, frozenset()
+                    elif n in names: attrs = attrs | {names[n]}
+                    elif n in off: attrs = attrs - set(off[n])
+                    elif 30 <= n <= 37: fg = n - 30
+                    elif 90 <= n <= 97: fg = n - 90 + 8
+                    elif 40 <= n <= 47: bg = n - 40
+                    elif 100 <= n <= 107: bg = n - 100 + 8
+                    elif n == 39: fg = None
+                    elif n == 49: bg = None
+                    elif n in (38, 48, 58) and k + 1 < len(ps):
+                        if ps[k + 1] == 5:
+                            val, k = ps[k + 2], k + 2
+                        else:
+                            val, k = tuple(ps[k + 2:k + 5]), k + 4
+                        if n == 38: fg = val
+                        elif n == 48: bg = val
+                    k += 1
+            i = j + 1
+            continue
+        if ch == "\x1b":       # charset designation and the like
+            i += 3 if line[i + 1:i + 2] in "()" else 2
+            continue
+        if ch in "\x0e\x0f":
+            i += 1
+            continue
+        if ch == "\t":
+            pad = 8 - col % 8
+            out += [(" ", fg, bg, attrs)] * pad
+            col += pad
+        else:
+            out.append((ch, fg, bg, attrs))
+            if not (unicodedata.combining(ch) or unicodedata.category(ch) in ("Mn", "Me", "Cf")):
+                col += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+        i += 1
+    # Trailing default blanks carry nothing.
+    while out and out[-1][0] == " " and out[-1][2] is None and "inverse" not in out[-1][3]:
+        out.pop()
+    # The colour of a blank that shows no ink is not observable.
+    return [(c, None if c == " " and not (a & {"underline", "strike", "inverse"}) else f, b,
+             a - {"bold", "dim", "italic", "blink"} if c == " " else a) for c, f, b, a in out]
+def styles(dump):
+    cap = subprocess.run(
+        ["tmux", "capture-pane", "-p", "-e", "-N", "-t", f"ptyrc-rd-{name}"],
+        capture_output=True, text=True, check=True).stdout.split("\n")
+    out = []
+    for y, model in enumerate(dump["host_ansi"]):
+        real = cap[y] if y < len(cap) else ""
+        if "\x0e" in real or "\x1b(0" in real:
+            continue
+        a, b = cells(model), cells(real)
+        if a != b:
+            x = next((i for i, (p, q) in enumerate(zip(a, b)) if p != q), min(len(a), len(b)))
+            out.append(f"style row {y} col~{x}: model {a[x:x+1]} host {b[x:x+1]}")
+            if len(out) > 4:
+                break
+    return out
+_once = once
+def once():
+    problems = _once()
+    if not problems and mode == "rows":
+        dump = json.loads(subprocess.run(
+            [binary, "-s", f"rd-{name}", "--json", "call", "debug.dump"],
+            capture_output=True, text=True, check=True).stdout)
+        problems = styles(dump)
+    return problems
 problems = []
 for attempt in range(8):
     try:
