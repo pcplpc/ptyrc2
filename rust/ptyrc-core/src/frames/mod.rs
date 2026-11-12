@@ -336,10 +336,6 @@ const DETECT_EVERY: Duration = Duration::from_secs(1);
 /// A repaint that follows a clear may come in several bursts, this long.
 const REPAINT: Duration = Duration::from_millis(100);
 
-/// One write of the app may reach the driver in several bursts, this far
-/// apart; keys repeat more slowly.
-const FEED_GAP: Duration = Duration::from_millis(10);
-
 /// A pane replaced whole is the same one repainted when, on average over
 /// its rows, this share of the cells kept their glyph and this share kept
 /// their class. Two views of a listing pass too: see `repainted`'s caller.
@@ -1780,7 +1776,7 @@ impl Frames {
         let mut overfed = false;
         if seed != 0 && travel == seed.abs() {
             let sum = match p.fed {
-                Some((t, sum)) if now <= t + FEED_GAP && sum.signum() == seed.signum() => {
+                Some((t, sum)) if now <= t + ext::FEED_GAP && sum.signum() == seed.signum() => {
                     sum + seed
                 }
                 _ => seed,

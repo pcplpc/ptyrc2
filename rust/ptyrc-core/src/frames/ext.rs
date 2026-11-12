@@ -8,6 +8,10 @@ use std::time::Duration;
 
 /// Distance between islands, in rows.
 pub(crate) const ISLAND_GAP: i64 = 100_000;
+/// One write of the app may reach the driver in several bursts, this far
+/// apart; keys repeat more slowly. A row that leaves the view sooner
+/// than this after it came was on its way through: not remembered.
+pub(crate) const FEED_GAP: Duration = Duration::from_millis(10);
 /// Islands kept per frame; the least recently shown goes first.
 const MAX_ISLANDS: usize = 8;
 
@@ -632,7 +636,7 @@ impl Ext {
                 self.learn_tape_chrome(o, &ph);
             }
             let (a, b) = self.band(h);
-            self.flush(o.now);
+            self.flush(o.now.saturating_sub(FEED_GAP) + Duration::from_nanos(1));
             self.oy += o.seed;
             self.rows = (0..h).map(|i| self.fresh(o, i)).collect();
             self.mark_known(a, b);
@@ -784,7 +788,7 @@ impl Ext {
         let inb = |i: i64| i >= a as i64 && i < b as i64;
         // Rows that leave the view are remembered on the way out.
         for j in a..b {
-            if !inb(j as i64 - dy) && self.rows[j].since < o.now {
+            if !inb(j as i64 - dy) && self.rows[j].since + FEED_GAP <= o.now {
                 self.commit_row(j);
             }
         }

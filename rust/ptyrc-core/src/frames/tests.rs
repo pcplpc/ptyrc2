@@ -1888,6 +1888,27 @@ fn a_pager_jump_fed_in_two_bursts_is_placed_by_the_status_row() {
 }
 
 #[test]
+fn a_pager_jump_fed_in_pieces_leaves_no_marker() {
+    // With a status row the jump is placed; the marker line that went
+    // through between two bursts is not remembered.
+    for cut in [1, 7, 19] {
+        let mut p = Pager::open(doc(300), 20, true);
+        let id = p.s.pane().id;
+        p.down(19);
+        p.top = 250;
+        let mut lines: Vec<String> = vec!["...skipping...\r\n".into()];
+        lines.extend((250..269).map(|i| format!("{}\r\n", p.doc[i])));
+        p.step(&format!("\r\x1b[K{}", lines[..cut].concat()));
+        p.step_after(&format!("{}{}", lines[cut..].concat(), p.prompt()), 2);
+        assert_eq!(p.origin(), 250, "cut {cut}");
+        p.jump_top();
+        p.s.idle(300);
+        let known = p.s.f.find(id, &lit("skipping"), true);
+        assert!(known.is_empty(), "cut {cut}: {known:?}");
+    }
+}
+
+#[test]
 fn a_status_row_that_counts_wrapped_lines_is_dropped() {
     // The number moves less than the rows do: it counts file lines. It is
     // not read any more; the frame keeps screen rows.
