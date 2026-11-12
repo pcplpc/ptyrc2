@@ -26,11 +26,11 @@ One cargo workspace and one uv workspace at the root. Dependency direction:
 
 ```
 ptyrc-cli    -> ptyrc-server, ptyrc-proto, every plugin crate (clap)
-ptyrc-server -> ptyrc-core, ptyrc-vt, ptyrc-proto (mio, nix, signal-hook)
+ptyrc-server -> ptyrc-core, ptyrc-vt, ptyrc-proto (rustix, signal-hook, libc)
 plugins      -> ptyrc-core
 ptyrc-core   -> ptyrc-vt (serde, serde_json, regex)
 ptyrc-proto  -> serde, serde_json
-ptyrc-vt     -> vte, unicode-width, smol_str
+ptyrc-vt     -> unicode-width, smol_str
 ptyrc-apps   -> ptyrc (Python, stdlib only)
 ```
 
@@ -97,6 +97,12 @@ painted (`host.grid := app.grid`), every frame returns to the pool.
 Exit: sprites are unpainted, the host termios restored, the exit status is
 the app's.
 
+The driver is plumbing: a level-triggered `poll(2)` loop over the pty, the
+host, the signals, the socket and one deadline. What is drawn and what the
+methods answer belongs to an `Engine` (`ptyrc-server/src/engine.rs`):
+`ScreenEngine` implements this section; `PassThrough` (`ptyrc run
+--transparent`) does nothing.
+
 Headless: `ptyrc run --headless --size 80x24` has no host terminal. The
 host stream is discarded, or appended to `--host-log FILE`. Tests and
 automation use it.
@@ -144,6 +150,10 @@ pub enum VtEvent {
 }
 pub fn repair(host: &mut Vt, desired: &Grid, out: &mut Vec<u8>);
 ```
+
+The parser is the crate's own (a `Vt` is `Clone`, and `in_ground` is
+exact). `repair` also reprints the glyph the cursor follows, so a REP or a
+late combining mark from the app still refers to the app's glyph.
 
 Scope: what full-screen programs and shells emit. C0, CSI cursor moves,
 ED/EL/ECH, IL/DL/ICH/DCH, SU/SD, DECSTBM, RI/IND/NEL, SGR (16, 256, RGB,
@@ -245,6 +255,17 @@ whole-pane change with no alignment, no buffer hit and no matching inactive
 frame is a jump when the chrome around it is unchanged, a new frame when
 it changed too.
 
+A segmentation that differs from the current one first only suspends the
+panes it touches (not usable, same burst). It replaces the layout after
+`flap_ms` (100); if the old one returns sooner the panes resume without
+penalty. A resize commits at once.
+
+Frame events: `layout`, `added`, `attached`, `stable`, `inactive`,
+`dropped`, `scroll {frame, dx, dy}`, `shift {frame, from, to, dy}`, `jump`,
+`rect`. After a `shift` (splice, island merge, renumbering) the scene
+translates what is fixed on those frame rows. A `scroll` needs nothing:
+the origin has moved.
+
 ### Heatmap
 
 Per frame, in view coordinates, per cell: `activity` (EWMA of change
@@ -302,6 +323,10 @@ Sprite, as JSON (the wire form; serde on the core types):
 }
 ```
 
+- Defaults: `frame` raw; `anchor` `{"at": [0, 0], "space": "view"}` (`at`
+  given without `space` means `frame`); `loop` false: an animation plays
+  once and the sprite is removed; frame `ms` 100.
+- `size: [w, h]`: canvas of an effect; default the frame's view.
 - `frame`: an id, or `"raw"`, `"active"` (pane holding the cursor),
   `"largest"`, `"quietest"`. A name is resolved when the sprite is added.
 - `anchor`, one of:
@@ -387,8 +412,9 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 
 | method | params | result |
 |---|---|---|
-| `session.info` | | hello data, `alt_screen`, `title`, `exited` |
-| `screen.text` | `frame`, `rect` | `{"lines":[...],"size":[c,r]}` |
+| `session.info` | | hello data, `alt_screen`, `title`, `driver_pid`, `headless` |
+| `session.resize` | `size`: `[c, r]` | `{}`; headless only |
+| `screen.text` | `frame`, `rect`, `ansi` | `{"lines":[...],"size":[c,r],"rect":[x,y,w,h]}` |
 | `screen.cells` | `frame`, `rect` | `{"rows":[[run,...],...]}` |
 | `screen.find` | `pattern`, `regex`, `ignore_case`, `frame`, `known` | `{"matches":[{"frame","x","y","len","text","screen":[c,r]\|null}]}` |
 | `screen.cursor` | `trail` | `{"x","y","visible","frame","trail":[[ms,x,y],...]}` |
@@ -397,7 +423,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `frame.list` | | `{"frames":[info,...],"layout":id}` |
 | `frame.text` | `frame`, `y0`, `y1` | `{"lines":[...],"y0":n}` remembered buffer |
 | `frame.heat` | `frame` | `{"rows":["0123...",...]}` |
-| `frame.at` | `x`, `y` | `{"frame":id,"pos":[x,y]}` |
+| `frame.at` | `x`, `y`, or `name` | `{"frame":id,"pos":[x,y]}` |
 | `draw.put` | sprite | `{"id":n}` |
 | `draw.update` | `id`, patch | `{}` |
 | `draw.remove` | `id` | `{}` |
@@ -405,7 +431,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `draw.list` | | `{"sprites":[...]}` |
 | `draw.ext` | `name`, `function`, `params`, sprite fields | `{"id":n}` |
 | `draw.exts` | | `{"exts":[{"name","functions":[...]}],"effects":[...]}` |
-| `batch` | `calls`: `[{"method","params"}]` | `{"results":[...]}`, applied in one repaint |
+| `batch` | `calls`: `[{"method","params"}]` | `{"results":[{"result"} or {"error"},...]}`, applied in one repaint |
 | `subscribe` | `topics`: `screen`, `cursor`, `frames`, `input`, `size`, `exit` | `{}` |
 | `debug.overlay` | `what`: `frames`, `heat`, `off` | `{}` |
 | `debug.dump` | | app grid, host grid, sprites, frames |
@@ -425,7 +451,8 @@ string is sent as text. Arrow keys follow the app's cursor-key mode.
 form exists.
 
 ```
-ptyrc run [--name N] [--headless --size CxR] [--host-log F] [--] CMD...
+ptyrc run [--name N] [--headless --size CxR] [--host-log F]
+          [--transparent] [--coalesce-ms N] [--] CMD...
 ptyrc ls                          sessions
 ptyrc text [-f FRAME] [--ansi]    screen as plain text
 ptyrc find [-E] [-i] PATTERN      matches with coordinates
@@ -435,7 +462,7 @@ ptyrc keys KEY...                 press keys
 ptyrc wait [PATTERN] [--stable MS] [--gone] [--timeout MS]
 ptyrc frames [--watch]
 ptyrc heat [-f FRAME]
-ptyrc draw text|rm|ls|clear|ext ...
+ptyrc draw text|ext|effect|exts|rm|ls|clear ...   (sprites persist)
 ptyrc show                        live mirror of the remote screen
 ptyrc events [TOPIC...]           JSON events, one per line
 ptyrc debug overlay frames|heat|off ; ptyrc debug dump
