@@ -176,6 +176,8 @@ fn idle_after_ten_seconds() {
     s.wait(9_000);
     let i = s.heat().idle();
     assert!(!i.idle && i.score == 0.0, "{i:?}");
+    let left = s.heat().idle_in().expect("not idle");
+    assert!((left - 1.0).abs() < 0.05, "{left}");
     // Time passes without a tick.
     let later = s.now + Duration::from_millis(1_500);
     let i = s.f.idle(RAW, later).unwrap();

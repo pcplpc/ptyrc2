@@ -561,3 +561,124 @@ fn a_forgotten_island_takes_its_sprites() {
     assert_eq!(draw[0].1["removed"], json!([id]));
     assert_eq!(draw[0].1["frame"], first["id"]);
 }
+
+fn topic<'a>(rig: &'a Rig, name: &str) -> Vec<&'a Value> {
+    let named = rig.events.iter().filter(|(t, _)| t == name);
+    named.map(|(_, d)| d).collect()
+}
+
+fn lines(k: usize, n: usize) -> String {
+    let rows: Vec<String> = (k..k + n).map(|i| format!("line {i:03} of text")).collect();
+    rows.join("\r\n")
+}
+
+#[test]
+fn the_idle_watch_sleeps_until_a_frame_can_be_idle() {
+    let mut rig = Rig::new(40, 10);
+    rig.topics.insert("idle".into());
+    rig.burst(b"hello");
+    rig.advance(3000);
+    let before = rig.engine.ticks;
+    rig.advance(8000);
+    // One look when the ten seconds are over, not one every 250 ms.
+    assert!(
+        rig.engine.ticks - before <= 3,
+        "{}",
+        rig.engine.ticks - before
+    );
+    let mut idle = topic(&rig, "idle");
+    idle.retain(|d| d["frame"] == 0);
+    assert_eq!(idle.len(), 1, "{idle:?}");
+    assert_eq!(idle[0]["idle"], true);
+    // Idle: nothing to wait for.
+    rig.advance(2000);
+    let before = rig.engine.ticks;
+    rig.advance(60000);
+    assert_eq!(rig.engine.ticks, before);
+}
+
+#[test]
+fn a_snapshot_tells_the_state_of_a_topic() {
+    let mut rig = Rig::new(40, 10);
+    rig.burst(b"hello");
+    rig.advance(11000);
+    let now = rig.now;
+    let idle = rig.engine.snapshot("idle", now);
+    assert_eq!(idle.len(), 2, "the screen and its pane: {idle:?}");
+    assert_eq!(idle[0]["frame"], 0);
+    assert_eq!(idle[0]["idle"], true);
+    let cursor = rig.engine.snapshot("cursor", now);
+    assert_eq!(cursor.len(), 1);
+    assert_eq!(cursor[0]["x"], 5);
+    assert_eq!(cursor[0]["pos"], json!([5, 0]));
+    let frames = rig.engine.snapshot("frames", now);
+    assert_eq!(frames[0]["frames"][0]["id"], 0);
+    assert!(rig.engine.snapshot("screen", now).is_empty());
+}
+
+#[test]
+fn the_cursor_event_is_in_frame_cells() {
+    let mut rig = Rig::new(40, 12);
+    rig.topics.insert("cursor".into());
+    rig.burst(format!("\x1b[H{}", lines(0, 12)).as_bytes());
+    rig.advance(2000);
+    rig.events.clear();
+    rig.burst(b"\x1b[5;3H");
+    let cursor = topic(&rig, "cursor");
+    assert_eq!(cursor.len(), 1, "{cursor:?}");
+    let first = cursor[0].clone();
+    assert_eq!((&first["x"], &first["y"]), (&json!(2), &json!(4)));
+    let frame = first["frame"].as_u64().expect("a frame");
+    assert_ne!(frame, 0, "the pane, not the raw frame");
+    let y = first["pos"][1].as_i64().unwrap();
+    // The text scrolls under a cursor that stays: told again.
+    rig.events.clear();
+    rig.burst(format!("\x1b[H\x1b[M\x1b[12;1H{}\x1b[5;3H", lines(12, 1)).as_bytes());
+    let cursor = topic(&rig, "cursor");
+    assert_eq!(cursor.len(), 1, "{cursor:?}");
+    assert_eq!((&cursor[0]["x"], &cursor[0]["y"]), (&json!(2), &json!(4)));
+    assert_eq!(cursor[0]["frame"], frame);
+    assert_eq!(cursor[0]["pos"][1], y + 1);
+}
+
+#[test]
+fn text_events_name_the_frame_rows_that_changed() {
+    let mut rig = Rig::new(40, 12);
+    rig.topics.insert("text".into());
+    rig.burst(format!("\x1b[H{}", lines(0, 12)).as_bytes());
+    rig.advance(2000);
+    let pane = rig.call("frame.list", json!({}))["frames"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["kind"] == "pane")
+        .expect("a pane")
+        .clone();
+    let top = pane["origin"][1].as_i64().unwrap();
+    rig.events.clear();
+    // The same text again: no change.
+    rig.burst(b"\x1b[4;1Hline 003 of text");
+    assert!(topic(&rig, "text").is_empty());
+    // One row rewritten.
+    rig.burst(b"\x1b[4;1Hline 003 of TEXT");
+    let of_pane = |rig: &Rig| -> Vec<Value> {
+        let all = topic(rig, "text").into_iter().cloned();
+        all.filter(|d| d["frame"] == pane["id"]).collect()
+    };
+    let text = of_pane(&rig);
+    assert_eq!(text.len(), 1, "{text:?}");
+    assert_eq!(text[0]["rows"], json!([top + 3]));
+    assert_eq!(text[0]["origin"], pane["origin"]);
+    // A scroll: the origin moves, no row changed; the row that comes
+    // into view is new, not changed.
+    rig.events.clear();
+    rig.burst(format!("\x1b[H\x1b[M\x1b[12;1H{}", lines(12, 1)).as_bytes());
+    let text = of_pane(&rig);
+    assert_eq!(text.len(), 1, "{text:?}");
+    assert_eq!(text[0]["rows"], json!([]));
+    assert_eq!(text[0]["origin"][1], top + 1);
+    // No subscriber: nothing kept.
+    rig.topics.clear();
+    rig.burst(b"x");
+    assert!(rig.engine.shown_is_empty());
+}
