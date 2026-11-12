@@ -160,6 +160,12 @@ pub trait Surfaces {
         None
     }
 
+    /// Ink of the cells `x..x + w` of the frame row `y`, as remembered
+    /// out of the view; `None`: not remembered.
+    fn ink_row(&self, _id: FrameId, _y: i64, _x: i64, _w: u16) -> Option<Vec<bool>> {
+        None
+    }
+
     /// Current cursor, screen coordinates.
     fn cursor(&self) -> (u16, u16);
 

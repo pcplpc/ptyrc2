@@ -2290,3 +2290,91 @@ fn a_running_effect_is_tuned_in_place() {
         .unwrap();
     assert_eq!(show(&mut scene, &mock, &base(), 100)[2], "ab1");
 }
+
+/// Notes the shifts it is told and the rows it is shown out of the view.
+struct Rows(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+impl Effect for Rows {
+    fn render(&mut self, _t: Duration, _canvas: &mut Canvas) -> bool {
+        true
+    }
+
+    fn looks(&self) -> Looks {
+        Looks::Cells
+    }
+
+    fn look(&mut self, under: &Under) {
+        let show = |y: i64| match under.row(y) {
+            Some(ink) => ink.iter().map(|i| if *i { '#' } else { '.' }).collect(),
+            None => "none".to_string(),
+        };
+        let mut notes = self.0.lock().unwrap();
+        notes.push(format!("{} {} {}", show(-1), show(0), show(4)));
+    }
+
+    fn shift(&mut self, from: i64, to: i64, dy: i64) {
+        self.0
+            .lock()
+            .unwrap()
+            .push(format!("shift {from} {to} {dy}"));
+    }
+}
+
+/// `Mock`, remembering one row of ink under the pane.
+struct Remembers(Mock);
+
+impl Surfaces for Remembers {
+    fn info(&self, id: FrameId) -> Option<SurfaceInfo> {
+        self.0.info(id)
+    }
+    fn resolve(&self, sel: &FrameSel) -> Option<FrameId> {
+        self.0.resolve(sel)
+    }
+    fn find(&self, id: FrameId, query: &TextQuery, known: bool) -> Vec<TextMatch> {
+        self.0.find(id, query, known)
+    }
+    fn place(&self, id: FrameId, w: u16, h: u16, p: Prefer, t: &[Rect]) -> Option<(u16, u16)> {
+        self.0.place(id, w, h, p, t)
+    }
+    fn ink_row(&self, id: FrameId, y: i64, x: i64, w: u16) -> Option<Vec<bool>> {
+        (id == PANE && y == 4).then(|| (x..x + w as i64).map(|x| x % 2 == 0).collect())
+    }
+    fn cursor(&self) -> (u16, u16) {
+        self.0.cursor()
+    }
+    fn cursor_trail(&self) -> Vec<CursorSample> {
+        self.0.cursor_trail()
+    }
+}
+
+#[test]
+fn an_effect_is_shown_rows_out_of_the_view_and_told_a_shift() {
+    let mock = Remembers(Mock::new());
+    let grid = base();
+    let notes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut scene = Scene::new();
+    let shared = notes.clone();
+    scene.register_effect(
+        "rows",
+        Box::new(move |_| Ok(Box::new(Rows(shared.clone())))),
+    );
+    let fx = json!({"frame": PANE, "effect": {"name": "rows"}});
+    scene.add(1, spec(fx), ms(0)).unwrap();
+    scene.tick_on(ms(0), &grid, &mock);
+    // Above: not remembered. A row of the view: not given. Under the
+    // view: what the frame remembers.
+    assert_eq!(notes.lock().unwrap()[..], ["none none #.#.#.#.#."]);
+
+    // A shift is told to the effects of the frame, which then look and
+    // render off their period.
+    scene.take_dirty();
+    scene.shift(RAW, 0, 9, 1);
+    assert!(!scene.dirty());
+    scene.shift(PANE, 2, 9, 3);
+    assert!(scene.dirty());
+    scene.tick_on(ms(1), &grid, &mock);
+    assert_eq!(
+        notes.lock().unwrap()[1..],
+        ["shift 2 9 3", "none none #.#.#.#.#."]
+    );
+}

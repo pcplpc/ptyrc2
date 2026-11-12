@@ -600,10 +600,16 @@ impl Scene {
     }
 
     /// Rows `from..=to` of `frame` moved by `dy` in frame space (a splice,
-    /// an island merge): sprites fixed on those rows move with them.
+    /// an island merge): sprites fixed on those rows move with them, and
+    /// the effects on the frame are told.
     pub fn shift(&mut self, frame: FrameId, from: i64, to: i64, dy: i64) {
         let rows = from..=to;
         for sprite in self.sprites.iter_mut().filter(|s| s.frame == Some(frame)) {
+            if let Body::Fx(fx) = &mut sprite.body {
+                fx.effect.shift(from, to, dy);
+                fx.next = Duration::ZERO;
+                self.dirty = true;
+            }
             if let Anchor::At {
                 at,
                 space: Space::Frame,
@@ -838,7 +844,8 @@ impl Scene {
                             let (cx, cy) = (cursor.0 as i64 - x, cursor.1 as i64 - y);
                             let inside = cx >= 0 && cy >= 0 && cx < w as i64 && cy < h as i64;
                             let mut under = Under::new(base, (x, y), info.rect)
-                                .with_heat(fx.heat.as_ref().map(|(_, heat)| heat));
+                                .with_heat(fx.heat.as_ref().map(|(_, heat)| heat))
+                                .with_frame(surfaces, info.id);
                             under.size = (w, h);
                             under.cursor = inside.then_some((cx as u16, cy as u16));
                             under.origin = origin;
