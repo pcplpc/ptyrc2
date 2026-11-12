@@ -1,0 +1,11 @@
+[package]
+name = "ptyrc-tui-vim"
+description = "ptyrc: tui-support preset: vim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ptyrc-core.workspace = true
+ptyrc-vt.workspace = true
+regex.workspace = true
