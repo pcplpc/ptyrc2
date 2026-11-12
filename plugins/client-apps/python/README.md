@@ -16,7 +16,10 @@ python -m ptyrc_apps.clock -s NAME
 | `flower` | flowers of random size and colours planted on cold cells next to the matches of a word (`--count N`, 0: all), the word bolded with a tint; `-a`: anywhere, next to `--count` words drawn from the screen (default 5; 0: 10 to 30, redrawn each minute), one renewed every 10 s, no bold; grown by the client, swayed by the driver; frame coordinates |
 | `fishes` | sprites in frame coordinates: they scroll with the text; one scrolled out of the view goes after a few seconds and comes back behind the text; half of them shy, hiding behind the text; the cursor read each tick, the text once a second; one batch per tick. `-d`: decorations standing on the text, behind or in front of the fishes; `-b`: bubbles, each one request with a `motion`; `-r`: random species, events (a creature crossing, an object sinking, a hook); `-a`: all. Populated areas are remembered in frame cells (`_reef.Reef`) |
 | `snake` | the screen read as a map: glyphs are walls; one sprite redrawn in place each step. `-e`: particles, each one request with a `motion`, golden apples, a shaded body; `-x`: foes that bite the tail off; `-l`: beams from wall to wall that burn what they cross; `-a`: all (`_arcade`) |
-| `sand` | `Frame.is_idle` to choose a pane; a native simulation from a draw extension that reads the pane's text, its walls, by itself; `--cursor` pours on the cursor's column |
+| `sand` | `Pilot.wait_idle` to choose a pane; a native simulation from a draw extension that reads the pane's text, its walls, by itself; `--cursor` pours on the cursor's column |
+| `cat` | an app driven by events (`idle`, `cursor`, `screen`, `frames`), asleep on the socket between two things to do; it stands on lines of text in frame coordinates (`cat.ledges`), sleeps when the pane is idle, and jumps away from the cursor, from text written over it (`covered`) and back into the view after a scroll (`visible`) |
+| `marks` | a highlighter: one tint per match of each pattern (`-e` regex, `-i`), in frame coordinates and on remembered lines too (`find(known=True)`), so the driver scrolls them with the text; searches of a look in one batch; topic `draw`; a display of the counts placed by the driver |
+| `rain` | a native effect from a draw extension that sees the text: drops fall behind it and splash on the top of its lines, on the cursor and on the floor; less rain on columns that changed in the last 10 s |
 
 `scripts/demo-apps.sh` runs them on a scrolling vim buffer;
 `scripts/demo-frames.sh` gives each pane of a tmux session its own
@@ -62,7 +65,15 @@ What to know:
   each step with `_cli.on_screen(frame)` and wraps it in
   `_cli.in_sight()`.
 - **Idle**: `frame.is_idle` is true once 80 % of a pane has been still
-  for 10 s. A big animation waits for it (`sand.py`).
+  for 10 s. A big animation waits for it (`pilot.wait_idle`, `sand.py`);
+  topic `idle` says when it comes and goes (`cat.py`).
+- **What became of a sprite**: `Sprite.info()` has `visible` (some of
+  it is in the view) and `covered` (share of a back sprite under the
+  app's text); topic `draw` lists the sprites removed with rows the
+  driver forgot.
+- **Events, not ticks**: an app with nothing to animate waits on
+  `pilot.events(..., timeout=...)`: it wakes on a change, or when its
+  next step is due (`cat.py`, `marks.py`).
 - **A frame replaced**: a pane keeps its frame through a resize when the
   driver knows its text again; a nearly empty one gets a new frame, and
   the sprites stay with the old, inactive one. `sand.heir` finds the
@@ -86,8 +97,8 @@ What to know:
 `_cli.ticks(period)` paces a loop and yields the measured step;
 `_cli.hold(pilot)` keeps an app with nothing to send connected.
 
-Read `confetti.py` and `clock.py` first, then `flower.py`, `fishes.py`,
-`snake.py`, `sand.py`.
+Read `confetti.py`, `clock.py` and `rain.py` first, then `marks.py`,
+`cat.py`, `flower.py`, `fishes.py`, `snake.py`, `sand.py`.
 
 ## Tests
 

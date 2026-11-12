@@ -14,8 +14,20 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from ptyrc import Pilot
-from ptyrc_apps import APPS, _arcade, clock, confetti, fishes, flower, sand, snake
+from ptyrc import Match, Pilot
+from ptyrc_apps import (
+    APPS,
+    _arcade,
+    cat,
+    clock,
+    confetti,
+    fishes,
+    flower,
+    marks,
+    rain,
+    sand,
+    snake,
+)
 from ptyrc_apps.__main__ import main
 
 
@@ -776,6 +788,193 @@ def test_snake_arcade_art() -> None:
     row = cells[0][::-1]  # head first
     assert "".join(run["t"] for run in row) == "@oooOOoooo"
     assert row[1]["fg"] == _arcade.BODY[0] and row[-1]["fg"] == _arcade.BODY[-1]
+
+
+TOWN = [
+    "",
+    "",
+    "",
+    "a long line of text, long enough for a cat to walk on it",
+    "",
+    "",
+    "",
+    "",
+    "another line, as long as the first, for the cat to jump to",
+]
+
+
+def test_cat_art() -> None:
+    for pose, frames in cat.POSES.items():
+        for rows, _ in frames:
+            assert [len(row) for row in rows] == [cat.W] * cat.H, pose
+    # Seen from the other side, it looks the other way.
+    left = cat.look("walk", right=False, step=0)["cells"]
+    assert "".join(run["t"] for run in left[1]) == "(o.o)___.~ "
+    assert len(cat.look("sleep")["frames"]) == len(cat.POSES["sleep"])
+
+
+def test_cat_ledges() -> None:
+    box = (0, 100, 60, 112)
+    spots = cat.ledges(TOWN, box)
+    # On each line, and on the floor of the view; frame cells.
+    assert [s.g for s in spots] == [103, 108, 112]
+    first = spots[0]
+    assert (first.x0, first.x1) == (0, 60 - cat.W)
+    # It may hang over the end of a line, not stand on nothing.
+    assert cat.ledges(["", "", "", "0123456789"], (0, 0, 40, 6))[0].x1 == 5
+    assert cat.perch(spots, 5, 103) == first and cat.perch(spots, 5, 104) is None
+    # Text in the box of the cat: no ledge there.
+    rows = [*TOWN]
+    rows[2] = " " * 20 + "words"
+    cut = [s for s in cat.ledges(rows, box) if s.g == 103]
+    assert [(s.x0, s.x1) for s in cut] == [(0, 20 - cat.W - 1), (26, 60 - cat.W)]
+
+
+def test_cat_arc_and_near() -> None:
+    path = cat.arc((0, 10), (30, 14))
+    assert path[-1] == (30, 14)
+    assert min(y for _, y in path) < 10, "a jump goes up first"
+    assert [x for x, _ in path] == sorted(x for x, _ in path)
+    assert cat.near(10, 20, (12, 18)) and cat.near(10, 20, (4, 21))
+    assert not cat.near(10, 20, (40, 18)) and not cat.near(10, 20, None)
+
+
+def test_cat(session: Pilot) -> None:
+    settle(session)
+    watch(
+        session,
+        lambda: cat.main(["-s", session.session, "--seed", "1"], seconds=2.0),
+        lambda host: "/\\_/\\" in host,
+    )
+
+
+def test_cat_life(session: Pilot) -> None:
+    session.send("clear; printf '\\n\\n\\n%060d\\n\\n\\n\\n\\n%060d\\n' 0 0\n")
+    session.wait_for("0" * 60, frame="raw")
+    time.sleep(0.3)
+    frame = session.frame("raw")
+    it = cat.Cat(session, frame, random.Random(4))
+    now = 0.0
+
+    def run(until: Callable[[], bool], limit: float = 20.0) -> None:
+        # The app's loop, with a clock of our own.
+        nonlocal now
+        end = now + limit
+        while not until():
+            assert now < end, it.act
+            now = max(now + 0.01, min(it.due, end))
+            it.step(now)
+
+    run(lambda: it.act == "alert")  # it dropped in
+    assert it.sprite is not None and it.sprite.visible
+    assert cat.perch(it.spots, it.x, it.g) is not None
+    # The pane goes idle: a yawn, then sleep, until something happens.
+    it.on("idle", {"frame": frame.id, "idle": True}, now)
+    run(lambda: it.act == "sleep")
+    assert it.due == float("inf")
+    assert "-.-" in shown(session)
+    it.on("idle", {"frame": frame.id, "idle": False}, now)
+    assert it.act == "alert"
+    # The cursor comes near: it jumps, and lands away from it.
+    col, row = frame.to_screen(it.x + 2, it.g - 1)
+    it.on("cursor", {"x": col, "y": row, "visible": True}, now)
+    assert it.act == "leap"
+    run(lambda: it.act == "alert")
+    assert not cat.near(it.x, it.g, it.cursor)
+    # Text written over it: `covered` says so, and it moves.
+    was = (it.x, it.g)
+    it.cursor = None
+    col, row = frame.to_screen(it.x, it.g - 2)
+    session.send(f"printf '\\033[{row + 1};{col + 1}H%s\\033[20;1H' ::::::::::\n")
+    session.wait_for("::::::::::", frame="raw")
+    time.sleep(0.2)
+    assert it.sprite.info()["covered"] > cat.COVERED
+    it.check(now)
+    assert it.act == "leap"
+    run(lambda: it.act == "alert")
+    assert (it.x, it.g) != was and it.sprite.info()["covered"] == 0
+    it.sprite.remove()
+
+
+def test_marks_wanted() -> None:
+    def match(y: int, shown: bool = True, text: str = "ab") -> Match:
+        return Match(1, 3, y, len(text), text, (3, y - 100) if shown else None)
+
+    found = [
+        (1, 0, [match(90, False), match(100), match(109), match(140, False)]),
+        (1, 1, [match(105, text="xyz"), match(106, text="")]),
+    ]
+    keys, counts = marks.wanted(found, {1: (100, 10)})
+    # In view first, then the nearest rows; an empty match is no mark.
+    assert [k[2] for k in keys] == [100, 109, 105, 90, 140]
+    assert keys[2] == (1, 3, 105, 1, "xyz")
+    assert counts == [[2, 4], [1, 1]]
+    assert [k[2] for k in marks.wanted(found, {1: (100, 10)}, most=3)[0]] == [
+        100,
+        109,
+        105,
+    ]
+
+
+def test_marks_hud() -> None:
+    rows = marks.hud(["TODO", "a very long pattern indeed"], [[2, 2], [1, 12]])
+    text = ["".join(run["t"] for run in row) for row in rows]
+    assert text == ["  TODO                 2 ", "  a very long pat…  1/12 "]
+    assert rows[0][1]["bg"] == marks.INKS[0][0] != rows[1][1]["bg"]
+
+
+def test_marks(session: Pilot) -> None:
+    session.send("clear; echo 'an apple, a pear, an Apple'\n")
+    session.wait_for("Apple", frame="raw")
+    time.sleep(0.3)
+    args = ["-s", session.session, "apple", "-i", "-e", "p[ea]+r"]
+    status: list[int] = []
+    thread = threading.Thread(target=lambda: status.append(marks.main(args, seconds=4)))
+    thread.start()
+
+    def tints() -> list[tuple[int, int]]:
+        return sorted(
+            (s["size"][0], s["anchor"]["at"][1])
+            for s in session.sprites()
+            if s["blend"] == "tint" and s["visible"]
+        )
+
+    def displayed(note: str) -> bool:
+        return any(note in row for row in session.dump()["host"])
+
+    # Three matches on the row of the output, and the display.
+    assert until(lambda: [w for w, _ in tints()] == [4, 5, 5], 3), session.sprites()
+    assert len({y for _, y in tints()}) == 1
+    assert until(lambda: displayed(" apple    2") and displayed(" p[ea]+r  1"), 2)
+    # New text: marked when it shows, without asking.
+    session.send("echo APPLE\n")
+    assert until(lambda: len(tints()) >= 5, 3), tints()  # typed, then printed
+    assert until(lambda: displayed(" apple    4"), 2), shown(session)
+    thread.join()
+    assert status == [0]
+    assert until(lambda: session.sprites() == [], 3)
+    assert marks.main(["-s", session.session, "-e", "("]) == 1
+
+
+def test_rain(session: Pilot) -> None:
+    session.send("clear; printf '\\n\\n\\n\\n%070d\\n' 0\n")
+    session.wait_for("0" * 70, frame="raw")
+    time.sleep(0.3)
+    splashes: set[int] = set()
+    drops: set[str] = set()
+
+    def seen(host: str) -> bool:
+        rows = host.split("\n")
+        splashes.update(y for y, row in enumerate(rows) if "'" in row or "." in row)
+        drops.update(c for c in "│╎" if c in host)
+        return len(drops) == 2 and {3, 23} <= splashes
+
+    args = ["-s", session.session, "--rate", "300"]
+    watch(session, lambda: rain.main(args, seconds=2.5), seen)
+    # On the line of text (the row above it) and on the floor; behind
+    # the text, nothing shows.
+    assert 4 not in splashes, splashes
+    assert rain.main(["-s", session.session, "--rate", "-1"]) == 1
 
 
 def test_clock(session: Pilot) -> None:
