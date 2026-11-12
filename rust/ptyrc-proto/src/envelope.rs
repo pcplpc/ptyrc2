@@ -13,7 +13,7 @@ pub const SERVER: &str = concat!("ptyrc/", env!("CARGO_PKG_VERSION"));
 
 /// Topics of `subscribe`.
 pub const TOPICS: [&str; 9] = [
-    "screen", "text", "cursor", "frames", "idle", "draw", "input", "size", "exit",
+    "screen", "cursor", "frames", "text", "idle", "draw", "input", "size", "exit",
 ];
 
 /// Client to server. `id` is echoed as given.

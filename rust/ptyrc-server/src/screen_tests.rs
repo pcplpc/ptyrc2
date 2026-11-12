@@ -682,3 +682,20 @@ fn text_events_name_the_frame_rows_that_changed() {
     rig.burst(b"x");
     assert!(rig.engine.shown_is_empty());
 }
+
+#[test]
+fn draw_list_tells_the_style() {
+    let mut rig = Rig::new(40, 10);
+    let tint = |fg: &str| json!({"content": {"rows": ["  "], "style": {"fg": fg}, "opaque": true}, "blend": "tint"});
+    let red = rig.put(tint("red"));
+    let blue = rig.put(tint("blue"));
+    let plain = rig.put(text_at(0, 0, "x"));
+    let list = rig.call("draw.list", json!({}))["sprites"].clone();
+    let of = |id: u64| {
+        let all = list.as_array().unwrap().iter();
+        all.clone().find(|s| s["id"] == id).unwrap().clone()
+    };
+    assert_eq!(of(red)["style"], json!({"fg": "red"}));
+    assert_eq!(of(blue)["style"], json!({"fg": "blue"}));
+    assert!(of(plain).get("style").is_none());
+}

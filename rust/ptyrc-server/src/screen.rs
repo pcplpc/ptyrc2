@@ -31,6 +31,9 @@ const IDLE_PERIOD: Duration = Duration::from_millis(250);
 /// Least delay to a look the heat asked for.
 const IDLE_STEP: Duration = Duration::from_millis(20);
 
+/// The cursor as told: screen cell, frame, frame position.
+type Told = (u16, u16, Option<FrameId>, Option<(i64, i64)>);
+
 /// What a frame showed at the last look of the `text` topic.
 struct Shown {
     rect: Rect,
@@ -94,7 +97,7 @@ pub struct ScreenEngine {
     /// Last time the app grid changed.
     pub(crate) last_change: Duration,
     /// Cursor as last told: screen cell, frame, frame position.
-    last_cursor: Option<(u16, u16, Option<FrameId>, Option<(i64, i64)>)>,
+    last_cursor: Option<Told>,
     pub(crate) overlay: Overlay,
     overlay_due: Duration,
     /// A client subscribed to `idle`, as of the last hook.
