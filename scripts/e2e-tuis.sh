@@ -274,7 +274,7 @@ a_glances() {
     same_text glances
     check "glances: the title is chrome, the rules cut panes" \
         'len(P) >= 2 and C and C[0]["rect"] == [0, 0, W, 1] and all(f["rect"][2] == W for f in P)'
-    known "glances: panes usable 3 s after the start (frames re-allocated at each refresh)" \
+    check "glances: panes usable 3 s after the start" \
         'all(f["usable"] for f in P)'
     steady glances 5
     sprite glances
