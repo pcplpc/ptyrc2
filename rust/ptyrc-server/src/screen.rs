@@ -58,6 +58,10 @@ pub struct ScreenEngine {
     overlay_due: Duration,
     /// Bytes of our own written to the host, for `debug.dump`.
     pub(crate) injected: u64,
+    /// Bursts seen.
+    pub(crate) bursts: u64,
+    /// Time of the last tick.
+    ticked: Duration,
 }
 
 impl ScreenEngine {
@@ -82,6 +86,8 @@ impl ScreenEngine {
             overlay: Overlay::Off,
             overlay_due: Duration::ZERO,
             injected: 0,
+            bursts: 0,
+            ticked: Duration::ZERO,
         }
     }
 
@@ -107,8 +113,24 @@ impl ScreenEngine {
             events,
         };
         let changes = self.frames.update(&input, now);
+        self.shift_sprites(&changes);
         if !changes.is_empty() && ctx.has_subscribers("frames") {
             ctx.emit("frames", json!({"frames": self.frames.list()}));
+        }
+    }
+
+    /// Frame rows that moved in frame space take their sprites along.
+    fn shift_sprites(&mut self, changes: &[ptyrc_core::frames::FrameEvent]) {
+        for change in changes {
+            if let ptyrc_core::frames::FrameEvent::Shift {
+                frame,
+                from,
+                to,
+                dy,
+            } = *change
+            {
+                self.scene.shift(frame, from, to, dy);
+            }
         }
     }
 
@@ -184,6 +206,7 @@ impl Engine for ScreenEngine {
     }
 
     fn on_burst(&mut self, burst: &[u8], now: Duration, out: &mut Vec<u8>, ctx: &mut Ctx) {
+        self.bursts += 1;
         self.app.feed(burst);
         let events = self.app.take_events();
         let to_scrollback = events.iter().any(|e| {
@@ -228,7 +251,9 @@ impl Engine for ScreenEngine {
     }
 
     fn on_tick(&mut self, now: Duration, out: &mut Vec<u8>, ctx: &mut Ctx) {
+        self.ticked = now;
         let changes = self.frames.tick(now);
+        self.shift_sprites(&changes);
         if !changes.is_empty() && ctx.has_subscribers("frames") {
             ctx.emit("frames", json!({"frames": self.frames.list()}));
         }
@@ -253,8 +278,14 @@ impl Engine for ScreenEngine {
                 merge(Some(self.last_change + stable));
             }
         }
-        // Never in the past by more than a tick: the loop must not spin.
-        wake.map(|w| w.max(now + Duration::from_millis(1)))
+        // A deadline the last tick did not clear must not spin the loop.
+        wake.map(|w| {
+            if w <= self.ticked {
+                self.ticked + Duration::from_millis(10)
+            } else {
+                w
+            }
+        })
     }
 
     fn on_resize(&mut self, cols: u16, rows: u16, now: Duration, out: &mut Vec<u8>, ctx: &mut Ctx) {

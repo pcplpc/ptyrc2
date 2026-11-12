@@ -547,8 +547,16 @@ fn label_width(spec: &SpriteSpec) -> usize {
 
 fn debug_dump(engine: &ScreenEngine) -> Res {
     let cursor = engine.app.cursor();
+    let host_cursor = engine.host.cursor();
+    let desired = engine.scene.compose(engine.app.grid(), &engine.frames);
     Ok(json!({
         "size": [engine.app.cols(), engine.app.rows()],
+        "desired": desired.text(),
+        "host_is_desired": *engine.host.grid() == desired,
+        "host_cursor": {"x": host_cursor.col, "y": host_cursor.row,
+                        "visible": host_cursor.visible,
+                        "pending_wrap": host_cursor.pending_wrap},
+        "bursts": engine.bursts,
         "app": engine.app.grid().text(),
         "host": engine.host.grid().text(),
         "same_state": engine.host.same_state(&engine.app),
