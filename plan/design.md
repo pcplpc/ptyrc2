@@ -252,8 +252,17 @@ Segments the screen into panes, each with an extended frame.
   junctions), horizontal runs (`─ ━ ═ -` and junctions), and bars (a row
   whose background or inverse attribute is uniform across the rect: status
   lines, tab bars).
+  A bar is a row that one backdrop, not the default, covers (nine cells
+  in ten) while the rows above and below show another. A bar that moves
+  without taking its text along is the highlight of a list: bars are not
+  believed in that list for `distrust_ms`.
 - **Boxes**: closed rectangles of border glyphs with corners; the interior
   is a pane.
+- **Panels**: rectangles of one backdrop that is not their surroundings',
+  without border, at least a pane in size and narrower than the rect they
+  float in (a modal, a prompt box, a sidebar). A row belongs to a panel
+  when it shows the panel's colour at both edges and nothing of the
+  surrounding backdrop between them. A panel is a pane, as a box.
 - **Guillotine**: a rect is split by a separator that spans it; recursion.
   tmux and vim layouts are of this form.
 - Leaves below `min_pane` (3 rows, 8 columns) are merged into chrome.
@@ -416,7 +425,8 @@ pub trait DrawExt: Send {
 
 A `TuiSupport` is consulted for a pane (and for the whole screen) when its
 `detect` is at least 0.5. First: `vim`, `tmux`, `agent-tui` (the family of
-coding-agent TUIs: prompt box, streaming transcript). First draw
+coding-agent TUIs: a prompt box, rounded, between rules or a panel edged
+by `┃`, under a streaming transcript). First draw
 extensions: `shapes` (line, rect, circle, ellipse), `bigtext` (block
 letters).
 
@@ -558,6 +568,10 @@ tests. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
 
 - `scripts/e2e-frames.sh`: frames on real vim, tmux, less, htop, a shell
   and a stand-in agent TUI, in a detached tmux.
+- `scripts/e2e-tuis.sh`: htop, less, man, tmux, ranger, glances and
+  opencode in a detached tmux: the screen read against the host, the
+  layout found and its steadiness, a sprite drawn and removed, the exit.
+  `KNOWN` marks a defect recorded in `plan/ideas.md`.
 - `scripts/e2e-render.sh`: the driver in a detached tmux; what tmux shows
   is compared, text and styles, with the driver's model of the host.
 - `scripts/bench.sh`: throughput and key-echo latency, bare, transparent,
