@@ -146,6 +146,10 @@ fn erase() {
     let mut v = vt(5, 3, "abcde\r\nfghij\r\nklmno\x1b[2;3H\x1b[2J");
     assert_eq!(v.grid().text(), ["", "", ""]);
     assert!(v.take_events().contains(&VtEvent::Clear));
+    v.feed(b"abc\x1b[J");
+    assert!(!v.take_events().contains(&VtEvent::Clear));
+    v.feed(b"\x1b[H\x1b[J");
+    assert!(v.take_events().contains(&VtEvent::Clear));
     let v = vt(5, 1, "abcde\x1b[1;2H\x1b[2X");
     assert_eq!(v.grid().text(), ["a  de"]);
 }

@@ -1085,6 +1085,10 @@ impl Vt {
                 for r in row + 1..rows {
                     grid.clear_row(r, &fill);
                 }
+                // From home it is the whole screen (`clear` of tmux, screen).
+                if (col, row) == (0, 0) {
+                    self.event(VtEvent::Clear);
+                }
             }
             1 => {
                 for r in 0..row {
