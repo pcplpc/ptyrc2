@@ -52,3 +52,16 @@
   merged into `main` by the pilot. The post-commit timestamp hook stashes
   unstaged files while it runs: a shared tree would lose a sibling's
   edits.
+
+## Confetti flags, late in the second session
+
+Supersedes `--spawn --rate` above.
+
+- A burst picks a cold spot by default; no flag for it. `--anywhere`,
+  `--seconds`, `--seed` and `--rate` go.
+- `--bursts N`: N bursts at different places, each starting after
+  `random() * 3` seconds so they are not aligned; at most 10 at once.
+- `--spawn` becomes `--party` ("party mode"): it keeps going, with the
+  `--bursts` bursts in parallel, same random offsets.
+- `--count` becomes `--size`.
+- `--help` stays simple.
