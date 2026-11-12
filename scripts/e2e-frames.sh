@@ -307,7 +307,14 @@ EOF
     check "agent: the preset is seen, the prompt box is chrome" \
         'pane()["support"] == "agent-tui" and pane()["rect"] == [0, 0, 100, 25] and pane()["usable"]'
     check "agent: the transcript is one frame, scrolled line by line" \
-        'pane()["origin"] == [0, 47] and pane()["extent"] == [0, 71]'
+        'pane()["extent"][1] - pane()["extent"][0] == 71 and pane()["origin"][1] - pane()["extent"][0] == 47'
+    e2e_p call frame.text "{\"frame\":$(pane_id)}" --json | python3 -c '
+import json, sys
+lines = json.load(sys.stdin)["lines"]
+steps = [l for l in lines if l.startswith("● step")]
+sys.exit(0 if steps == [f"● step {i:03d}: reading file_{i}.rs and thinking about it" for i in range(1, 61)] else 1)' \
+        && echo "PASS  agent: the remembered transcript is complete and in order" \
+        || { echo "FAIL  agent: the remembered transcript is complete and in order"; FAILED=1; }
     e2e_p find --known -f "$(pane_id)" 'step 003' >/dev/null \
         && echo "PASS  agent: early steps are found in the buffer" \
         || { echo "FAIL  agent: early steps are found in the buffer"; FAILED=1; }
