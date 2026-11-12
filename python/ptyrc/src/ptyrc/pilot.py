@@ -95,6 +95,7 @@ def sprite_spec(
     ignore_case: bool = False,
     side: str = "right",
     gap: int | None = None,
+    slide: bool = True,
     auto: str | bool | None = None,
     cursor: tuple[int, int] | None = None,
     style: dict[str, Any] | None = None,
@@ -120,7 +121,8 @@ def sprite_spec(
     - `at=(x, y)` with `space`: `"view"` is fixed on the pane (negative
       counts from the right and bottom), `"frame"` moves with scrolling;
     - `near="word"`: next to a text match (`side`, `gap`, `nth`, `regex`,
-      `ignore_case`), following it;
+      `ignore_case`), following it; it slides along the match to stay
+      whole in the view unless `slide=False`;
     - `auto="top-right"` (or True): a quiet spot chosen by the driver;
     - `cursor=(dx, dy)`: follows the cursor.
 
@@ -165,6 +167,8 @@ def sprite_spec(
         anchor: dict[str, Any] = {"text": near, "side": side}
         if gap is not None:
             anchor["gap"] = gap
+        if not slide:
+            anchor["slide"] = False
         if ignore_case:
             anchor["ignore_case"] = True
         if nth:
@@ -244,8 +248,15 @@ class Sprite:
         self.update(anchor={"at": [x, y], "space": space})
 
     def info(self) -> dict[str, Any] | None:
-        """Its entry in `draw.list`; `screen` is where it shows, or None."""
+        """Its entry in `draw.list`. `screen`: its top-left cell, None
+        while hidden; `visible`: some of it is in the view; `covered`:
+        share of a back sprite under the app's text."""
         return next((s for s in self._pilot.sprites() if s["id"] == self.id), None)
+
+    @property
+    def visible(self) -> bool:
+        """Some of it is in the view of a usable frame. Asks the driver."""
+        return bool((self.info() or {}).get("visible"))
 
     def remove(self) -> None:
         """Remove it; fine if it is already gone."""
@@ -296,11 +307,8 @@ class Frame:
         return (self.info["origin"][0] + dx, self.info["origin"][1] + dy)
 
     def refresh(self) -> Frame:
-        for info in self._pilot.call("frame.list")["frames"]:
-            if info["id"] == self.id:
-                self.info = info
-                return self
-        raise PtyrcError("no-frame", str(self.id))
+        self.info = self._pilot.call("frame.get", frame=self.id)["frame"]
+        return self
 
     def text(self) -> list[str]:
         """What the view shows."""
@@ -342,6 +350,12 @@ class Frame:
     def is_idle(self) -> bool:
         """At least 80 % of the view is static. Asked now."""
         return bool(self.idle()["idle"])
+
+    def wait_idle(self, timeout: float = 30.0) -> Frame:
+        """Wait until the frame is idle, without polling; refreshed.
+        Raises `TimeoutError`."""
+        self._pilot.wait_idle(self.id, timeout=timeout)
+        return self.refresh()
 
     def draw(self, rows: Any = None, **kw: Any) -> Sprite:
         return self._pilot.draw(rows, frame=self.id, **kw)
@@ -582,6 +596,19 @@ class Pilot:
         match = res.get("match")
         return Match.from_wire(match) if match else None
 
+    def wait_idle(self, frame: int | str = "raw", *, timeout: float = 30.0) -> Frame:
+        """Wait until `frame` is idle (`Frame.is_idle`), without polling.
+        A name (`idle`, `quietest`, ...) is resolved by the driver at
+        each look: `wait_idle("idle")` returns the first pane that
+        qualifies. Raises `TimeoutError`."""
+        if self._batch is not None:
+            raise RuntimeError("wait_idle inside a batch")
+        params = {"idle": True, "frame": frame, "timeout_ms": int(timeout * 1000)}
+        res = self._conn.call("screen.wait", params, timeout=timeout + 5.0)
+        if not res.get("matched", False):
+            raise TimeoutError(f"wait_idle({frame!r})")
+        return self.frame(res["frame"])
+
     # -- typing -----------------------------------------------------------
 
     def send(self, text: str) -> None:
@@ -620,18 +647,9 @@ class Pilot:
     def frame(self, sel: int | str = "raw") -> Frame:
         """A frame by id or name: `raw`, `active` (the pane holding the
         cursor), `largest`, `quietest`, `idle` (the most static pane)."""
-        frames = self.frames(inactive=True)
-        if isinstance(sel, int) or sel.isdigit():
-            fid = int(sel)
-        elif sel == "raw":
-            fid = 0
-        else:
-            # The driver resolves names; `frame.at` answers for one too.
-            fid = self.call("frame.at", name=sel)["frame"]
-        for f in frames:
-            if f.id == fid:
-                return f
-        raise PtyrcError("no-frame", str(sel))
+        if isinstance(sel, str) and sel.isdigit():
+            sel = int(sel)
+        return Frame(self, self.call("frame.get", frame=sel)["frame"])
 
     def frame_at(self, x: int, y: int) -> tuple[int, tuple[int, int]]:
         """Frame holding screen cell `(x, y)` and the frame position there."""
@@ -681,8 +699,9 @@ class Pilot:
     # -- events and debug -------------------------------------------------
 
     def subscribe(self, *topics: str) -> None:
-        """Ask for events: `screen`, `cursor`, `frames`, `input`, `size`,
-        `exit`."""
+        """Ask for events: `screen`, `cursor`, `frames`, `idle` (a frame
+        became idle, or busy), `draw` (sprites removed with the rows or
+        the frame they were on), `input`, `size`, `exit`."""
         self.call("subscribe", topics=list(topics))
 
     def events(

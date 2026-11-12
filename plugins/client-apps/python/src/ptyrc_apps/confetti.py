@@ -89,18 +89,29 @@ def spot(
     if not h or not w:
         return 0, 0
     cold = [[c != "h" for c in row.ljust(w, ".")] for row in classes]
-    cells, weights = [], []
+    # Cold cells of each window, from sums along the rows, then down the
+    # columns: `below[y][x]` counts those of rows `< y` in the columns
+    # within `reach` of `x`.
+    lo = [max(0, x - reach) for x in range(w)]
+    hi = [min(w, x + reach + 1) for x in range(w)]
+    below = [[0] * w]
+    for row in cold:
+        run = [0, *itertools.accumulate(row)]
+        along = [run[b] - run[a] for a, b in zip(lo, hi)]
+        below.append([n + m for n, m in zip(below[-1], along)])
+    span = [b - a for a, b in zip(lo, hi)]
+    cells: list[tuple[int, int]] = []
+    weights: list[float] = []
     for y in range(h):
-        for x in range(w):
-            if any(abs(x - i) <= reach and abs(y - j) <= reach for i, j in avoid):
-                continue
-            near = [
-                cold[j][i]
-                for j in range(max(0, y - reach), min(h, y + reach + 1))
-                for i in range(max(0, x - reach), min(w, x + reach + 1))
-            ]
-            cells.append((x, y))
-            weights.append(sum(near) / len(near) if cold[y][x] else 0.0)
+        y0, y1 = max(0, y - reach), min(h, y + reach + 1)
+        near = [n - m for n, m in zip(below[y1], below[y0])]
+        gaps = [i for i, j in avoid if abs(y - j) <= reach]
+        free: Sequence[int] = range(w)
+        if gaps:
+            free = [x for x in free if all(abs(x - i) > reach for i in gaps)]
+        row, rows = cold[y], y1 - y0
+        cells += [(x, y) for x in free]
+        weights += [near[x] / (rows * span[x]) if row[x] else 0.0 for x in free]
     if not cells:  # a view too small for the gaps
         return spot(classes, rng, avoid[1:], reach)
     if not any(weights):  # all hot: anywhere

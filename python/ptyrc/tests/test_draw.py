@@ -21,6 +21,7 @@ def test_sprite_spec() -> None:
     }
     spec = sprite_spec("a\nb", near="x", side="below", gap=2, fg="red", bold=True)
     assert spec["anchor"] == {"text": "x", "side": "below", "gap": 2}
+    assert sprite_spec("a", near="x", slide=False)["anchor"]["slide"] is False
     assert spec["content"] == {"rows": ["a", "b"], "style": {"fg": "red", "bold": True}}
     spec = sprite_spec(frames=[["a"], {"rows": ["b"], "ms": 5}], frame_ms=50, loop=2)
     assert [f["ms"] for f in spec["frames"]] == [50, 5] and spec["loop"] == 2
@@ -42,6 +43,16 @@ def test_anchors(shell: Pilot) -> None:
     follow = shell.draw(["C"], cursor=(2, 0))
 
     assert until(lambda: at.info()["screen"]) == [40, 5]
+    assert at.visible and at.info()["covered"] == 0
+    # Behind the text: half of `HI` is under the `a` of the echo.
+    behind = shell.draw(["HI"], at=(word.x, word.y))
+    assert until(lambda: behind.info()["covered"] == 0.5)
+    # Below the screen: a position, nothing to see.
+    below = shell.draw(["LOW"], at=(0, 40), space="frame")
+    assert until(lambda: below.info()["screen"]) == [0, 40]
+    assert not below.visible
+    behind.remove()
+    below.remove()
     assert edge.info()["screen"] == [76, 23]
     assert near.info()["screen"] == [word.x + 2 + 6 + 1, word.y]
     assert over.info()["screen"] == [word.x + 2 + 2, word.y + 1]
@@ -60,6 +71,7 @@ def test_anchors(shell: Pilot) -> None:
     shell.send("\x15clear\n")
     shell.wait_for("flower", gone=True)
     assert until(lambda: near.info()["screen"] is None)
+    assert not near.visible
     assert "<-" not in "".join(shown(shell))
     assert len(shell.sprites()) == 6
     assert shell.clear() == 6

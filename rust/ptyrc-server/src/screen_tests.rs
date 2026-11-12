@@ -22,6 +22,9 @@ struct Rig {
     /// What a real host would show.
     host: Vt,
     next: u64,
+    /// Events and completions of the hooks, in order.
+    events: Vec<(String, Value)>,
+    done: Vec<(Token, Value)>,
 }
 
 impl Rig {
@@ -42,6 +45,8 @@ impl Rig {
             now: Duration::ZERO,
             host: Vt::new(cols, rows),
             next: 0,
+            events: Vec::new(),
+            done: Vec::new(),
         };
         let mut fx = Effects::default();
         let mut ctx = Ctx {
@@ -64,7 +69,11 @@ impl Rig {
             now: self.now,
             fx: &mut fx,
         };
-        f(&mut self.engine, &mut ctx)
+        let r = f(&mut self.engine, &mut ctx);
+        self.events.extend(fx.events);
+        self.done
+            .extend(fx.completions.into_iter().map(|(t, r)| (t, r.unwrap())));
+        r
     }
 
     /// App output; returns what went to the host.
@@ -439,4 +448,116 @@ fn bench_burst_path() {
             if sprites { " with a sprite" } else { "" },
         );
     }
+}
+
+/// A `screen.wait` left pending; its token.
+fn pending(rig: &mut Rig, params: Value) -> Token {
+    rig.next += 1;
+    let token = Token(rig.next);
+    let reply = rig.ctx(|e, ctx| e.handle(ConnId(7), token, "screen.wait", params, ctx));
+    assert!(matches!(reply, Reply::Pending), "{reply:?}");
+    token
+}
+
+#[test]
+fn wait_idle_answers_when_the_frame_is_idle() {
+    let mut rig = Rig::new(40, 10);
+    rig.burst(b"hello");
+    let token = pending(&mut rig, json!({"idle": true, "timeout_ms": 30000}));
+    rig.advance(9000);
+    assert!(rig.done.is_empty(), "idle before 10 s");
+    rig.advance(1500);
+    let (t, result) = rig.done.pop().expect("answered");
+    assert_eq!(t, token);
+    assert_eq!(result["matched"], true);
+    assert_eq!(result["frame"], 0);
+    assert_eq!(result["idle"]["idle"], true);
+    // Idle now: answered at once.
+    let now = rig.call("screen.wait", json!({"idle": true, "frame": "idle"}));
+    assert_eq!(now["matched"], true);
+}
+
+#[test]
+fn wait_idle_times_out_on_a_busy_screen() {
+    let mut rig = Rig::new(40, 10);
+    let token = pending(&mut rig, json!({"idle": true, "timeout_ms": 3000}));
+    for i in 0..40 {
+        // Most of the screen changes, again and again.
+        let fill = format!("\x1b[H{}", format!("{i:040}").repeat(10));
+        rig.burst(fill.as_bytes());
+        rig.advance(100);
+    }
+    assert_eq!(rig.done, vec![(token, json!({"matched": false}))]);
+}
+
+#[test]
+fn idle_events_on_change_only() {
+    let mut rig = Rig::new(40, 10);
+    rig.topics.insert("idle".into());
+    rig.burst(b"hello");
+    rig.advance(12000);
+    let idle: Vec<_> = rig
+        .events
+        .iter()
+        .filter(|(t, d)| t == "idle" && d["frame"] == 0)
+        .collect();
+    assert_eq!(idle.len(), 1, "{idle:?}");
+    assert_eq!(idle[0].1["idle"], true);
+    rig.events.clear();
+    for i in 0..5 {
+        let fill = format!("\x1b[H{}", format!("{i:040}").repeat(10));
+        rig.burst(fill.as_bytes());
+        rig.advance(300);
+    }
+    let idle: Vec<_> = rig
+        .events
+        .iter()
+        .filter(|(t, d)| t == "idle" && d["frame"] == 0)
+        .collect();
+    assert_eq!(idle.len(), 1, "{idle:?}");
+    assert_eq!(idle[0].1["idle"], false);
+    // No subscriber: no wake for the watch.
+    rig.topics.clear();
+    rig.advance(1000);
+    let before = rig.engine.ticks;
+    rig.advance(5000);
+    assert_eq!(rig.engine.ticks, before);
+}
+
+#[test]
+fn a_forgotten_island_takes_its_sprites() {
+    let mut rig = Rig::new(40, 20);
+    rig.topics.insert("draw".into());
+    let page = |k: usize| -> String {
+        let rows: Vec<String> = (0..12).map(|i| format!("run {k:02} out {i:02}")).collect();
+        format!("\x1b[2J\x1b[H{}", rows.join("\r\n"))
+    };
+    let pane = |rig: &mut Rig| {
+        let frames = rig.call("frame.list", json!({}))["frames"].clone();
+        let pane = frames
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["kind"] == "pane");
+        pane.expect("a pane").clone()
+    };
+    rig.burst(page(0).as_bytes());
+    rig.advance(2000);
+    let first = pane(&mut rig);
+    let at = json!([20, first["origin"][1].as_i64().unwrap() + 3]);
+    let anchor = json!({"at": at, "space": "frame"});
+    let spec = json!({"frame": first["id"], "anchor": anchor, "content": {"rows": ["<MK"]}});
+    let id = rig.put(spec);
+    assert!(rig.row(3).ends_with("<MK"), "{:?}", rig.row(3));
+    // A shell cleared again and again: an island per clear, eight kept.
+    for k in 1..=12 {
+        rig.burst(page(k).as_bytes());
+        rig.advance(600);
+    }
+    assert_eq!(pane(&mut rig)["id"], first["id"]);
+    assert_eq!(rig.call("draw.list", json!({}))["sprites"], json!([]));
+    let draw: Vec<_> = rig.events.iter().filter(|(t, _)| t == "draw").collect();
+    assert_eq!(draw.len(), 1, "{draw:?}");
+    assert_eq!(draw[0].1["removed"], json!([id]));
+    assert_eq!(draw[0].1["frame"], first["id"]);
 }

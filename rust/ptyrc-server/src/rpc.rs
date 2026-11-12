@@ -235,6 +235,8 @@ struct WaitParams {
     #[serde(default)]
     gone: bool,
     stable_ms: Option<u64>,
+    #[serde(default)]
+    idle: bool,
     timeout_ms: Option<u64>,
     frame: Option<FrameSel>,
 }
@@ -246,17 +248,25 @@ pub(crate) fn check_wait(engine: &ScreenEngine, wait: &Wait, now: Duration) -> O
     {
         return None;
     }
-    match &wait.query {
-        None => Some(json!({"matched": true, "match": null})),
-        Some(query) => {
-            let found = engine.frames.find(wait.frame, query, false);
-            match (found.first(), wait.gone) {
-                (Some(m), false) => Some(json!({"matched": true, "match": match_json(m)})),
-                (None, true) => Some(json!({"matched": true, "match": null})),
-                _ => None,
-            }
+    let mut frame = wait.frame;
+    let mut result = json!({"matched": true, "match": null});
+    if wait.idle {
+        if let Some(name) = &wait.name {
+            frame = engine.frames.resolve(name)?;
+        }
+        let idle = engine.frames.idle(frame, now).filter(|i| i.idle)?;
+        result["frame"] = json!(frame);
+        result["idle"] = json!(idle);
+    }
+    if let Some(query) = &wait.query {
+        let found = engine.frames.find(frame, query, false);
+        match (found.first(), wait.gone) {
+            (Some(m), false) => result["match"] = match_json(m),
+            (None, true) => {}
+            _ => return None,
         }
     }
+    Some(result)
 }
 
 fn screen_wait(
@@ -274,14 +284,20 @@ fn screen_wait(
         Ok(id) => id,
         Err(e) => return Reply::Err(e),
     };
-    if p.pattern.is_none() && p.stable_ms.is_none() {
-        return Reply::Err(RpcError::bad_params("pattern or stable_ms is required"));
+    if p.pattern.is_none() && p.stable_ms.is_none() && !p.idle {
+        return Reply::Err(RpcError::bad_params(
+            "pattern, stable_ms or idle is required",
+        ));
     }
     let now = ctx.now();
     let wait = Wait {
         token,
         conn,
         frame,
+        name: p
+            .frame
+            .filter(|sel| p.idle && matches!(sel, FrameSel::Name(_))),
+        idle: p.idle,
         query: p.pattern.map(|pattern| TextQuery {
             pattern,
             regex: p.regex,
@@ -688,7 +704,9 @@ pub(crate) fn handle(
             };
             Ok(json!({"removed": removed}))
         }
-        "draw.list" => Ok(json!({"sprites": engine.scene.list()})),
+        "draw.list" => Ok(json!({
+            "sprites": engine.scene.list_on(engine.app.grid(), &engine.frames)
+        })),
         "draw.ext" => draw_ext(engine, conn, params, now),
         "draw.exts" => draw_exts(engine),
         "debug.overlay" => set_overlay(engine, params, now),

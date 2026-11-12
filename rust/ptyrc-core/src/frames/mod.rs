@@ -1054,9 +1054,10 @@ impl Frames {
                 }
             }
             // The layout will be committed on a tick, without the screen:
-            // ask the presets now, for the rectangles to come.
-            self.advice.clear();
+            // ask the presets now, for the rectangles to come. A tick
+            // while it is pending keeps what was asked.
             if let Some(inp) = input {
+                self.advice.clear();
                 for leaf in seg.iter().filter(|l| l.kind == 0) {
                     let pv = self.pane_view(inp, leaf.rect());
                     let advice = self.advise(&pv, self.detect(&pv));

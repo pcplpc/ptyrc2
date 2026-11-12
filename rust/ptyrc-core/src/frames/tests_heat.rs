@@ -263,3 +263,102 @@ fn the_idle_name_is_the_calm_pane() {
     assert!(left.idle < 1.0);
     assert_eq!(s.f.resolve(&FrameSel::Name("idle".into())), Some(right.id));
 }
+
+/// Cost of an update at 200x60, printed: the best of five rounds. Run by `scripts/bench.sh`:
+/// `cargo test --release -p ptyrc-core cost_200x60 -- --ignored --nocapture`.
+#[test]
+#[ignore = "timing"]
+fn cost_200x60() {
+    use super::heat::Heat;
+    use super::screen::Screen;
+    use std::time::Instant;
+
+    const N: u32 = 300;
+    let (cols, rows) = (200u16, 60u16);
+    let page = |k: u32| {
+        let mut g = Grid::new(cols, rows);
+        for y in 0..rows {
+            for x in 0..cols {
+                let v = x as u32 * 7 + y as u32 * 13 + k * 31;
+                if !v.is_multiple_of(5) {
+                    let ch = (b'a' + (v % 26) as u8) as char;
+                    g.put(x, y, Cell::narrow(&ch.to_string(), Style::default()));
+                }
+            }
+        }
+        g
+    };
+    let pages = [page(0), page(1)];
+    let all = Rect::new(0, 0, cols, rows);
+    fn input(g: &Grid) -> ScreenInput<'_> {
+        ScreenInput {
+            grid: g,
+            cursor: Cursor {
+                col: 0,
+                row: 0,
+                visible: true,
+                pending_wrap: false,
+            },
+            alt_screen: false,
+            title: "",
+            events: &[],
+        }
+    }
+    // The app writes on one grid, as a terminal does. 0: every row
+    // changes; 1: nothing does; 2: one row does.
+    let write = |g: &mut Grid, case: u32, i: u32| match case {
+        0 => {
+            for y in 0..rows {
+                g.row_mut(y).clone_from_slice(pages[i as usize % 2].row(y));
+            }
+        }
+        1 => {}
+        _ => put(g, 3, 30, if i.is_multiple_of(2) { "x" } else { "y" }),
+    };
+    let mut out = [[f64::MAX; 4]; 3];
+    for case in (0..5).flat_map(|_| 0..3u32) {
+        let mut spent = [Duration::ZERO; 4];
+        let mut timed = |k: usize, f: &mut dyn FnMut()| {
+            let t = Instant::now();
+            f();
+            spent[k] += t.elapsed();
+        };
+
+        let mut g = pages[0].clone();
+        let mut s = Screen::default();
+        let mut h = Heat::default();
+        for i in 0..N {
+            write(&mut g, case, i);
+            timed(0, &mut || {
+                s.scan(&g);
+            });
+            timed(1, &mut || {
+                h.update(&s, all, Duration::from_millis(20 * i as u64))
+            });
+            s.settle();
+        }
+
+        let mut g = pages[0].clone();
+        let mut sim = Sim::new();
+        sim.feed(&g, 0);
+        sim.wait(2000);
+        for i in 0..N {
+            sim.now += Duration::from_millis(20);
+            timed(3, &mut || {
+                sim.f.tick(sim.now);
+            });
+            write(&mut g, case, i);
+            timed(2, &mut || {
+                sim.f.update(&input(&g), sim.now);
+            });
+        }
+        for (best, d) in out[case as usize].iter_mut().zip(spent) {
+            *best = best.min(d.as_secs_f64() * 1e6 / N as f64);
+        }
+    }
+    for (name, [scan, heat, update, tick]) in ["all rows", "no change", "one row"].iter().zip(out) {
+        println!(
+            "  {name:<10} scan {scan:6.1} us   heat {heat:6.1} us   update {update:6.1} us   tick {tick:6.1} us"
+        );
+    }
+}

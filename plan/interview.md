@@ -110,3 +110,11 @@ Supersedes `--spawn --rate` above.
 - Decorations, bubbles and animations remember the areas already
   populated.
 - Only beautiful ASCII art and good animations; nothing bad.
+
+## Snake arcade
+
+- The snake gets fancy with `--effects` (`-e`): particles when it eats,
+  and so on.
+- Two or three creative flags as for the fishes, enemies and lasers
+  among them: `-x`, `--enemies`; `-l`, `--lasers`.
+- `-a`, `--all`: everything.

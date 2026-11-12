@@ -216,6 +216,10 @@ find (literal or regex), cell styles, cursor and cursor trail (last 256
 `(time, col, row)` samples). Usable 250 ms after a resize or an alt-screen
 switch, immediately otherwise.
 
+`Grid::row_stamp(row)` changes at every write to the row; a clone is
+another grid. `Screen::scan` reads only rows whose stamp changed, then
+compares cell hashes: a write that changes nothing is still no change.
+
 ### Extended frame
 
 A sparse buffer of lines addressed by `i64` frame rows, each line a run of
@@ -335,6 +339,8 @@ Further rules, from real apps:
   changed, when the title or the layout changed, else once a second; a
   preset found is held 4 s and asked (chrome, hint, key) on every change.
   A preset that knows the whole screen may segment on any change.
+- Advice asked of the presets for a pending layout is kept until the
+  layout is committed or replaced; ticks do not clear it.
 - When nothing aligns, the emulator's scroll counts are trusted only if
   rows entered the host scrollback (a shell printing a lot at once).
 - A pane replaced whole twice within 3 s is a monitor (htop): rewritten
@@ -381,6 +387,12 @@ computed at the time of the request: time passes without a tick.
 `debug overlay heat`: red for hot (brighter when busier), light blue for
 static text, green for free, violet for a panel; the last three brighten
 until the cell has been still for 10 s.
+
+The heat is lazy. A row is brought up to date when the screen changed on
+it; otherwise it is read as it would stand at the asked time (decay
+composes). An update or a tick without a visible change costs nothing
+per cell. The backdrop counts are kept per row. A pane that missed a
+scan, or whose rect moved, is read whole again.
 
 ### Placement
 
@@ -448,6 +460,10 @@ Sprite, as JSON (the wire form; serde on the core types):
   - `{"text": "flower", "regex": false, "nth": 0, "side": "right" | "left"
     | "above" | "below" | "over", "gap": 1}`: next to a match, re-resolved
     when the frame content changes; hidden while there is no match.
+    `"slide": true` (default): while the row of the match is in the view,
+    the sprite moves along its centred axis (`left`, `right`: rows;
+    `above`, `below`: columns) to stay whole inside the view, never onto
+    the match; `false`: strict centring.
   - `{"auto": {"prefer": "top-right"}}`: placement by heatmap.
   - `{"cursor": {"dx": 1, "dy": 0}}`: follows the cursor.
 - `content`: `rows` (strings; a space is transparent unless `"opaque":
@@ -475,6 +491,13 @@ Sprite, as JSON (the wire form; serde on the core types):
 
 Sprites are clipped to the view rect of their frame. `compose` goes through
 `Grid::put`.
+
+`Scene::list_on(base, surfaces)`: `list` plus `visible` (a glyph inside
+the view of a usable frame) and `covered` (back layers: share of the
+glyphs in view under app cells with ink; 0 in front).
+`Scene::shift(.., dy = ROWS_GONE)` and `Scene::drop_frame` remove the
+sprites fixed on forgotten rows or on a forgotten frame and return their
+ids; a text anchor on those rows only loses its held match.
 
 A finite animation and an effect start their clock when the sprite is
 first drawn: added on a frame that is not usable yet, or on a text that
@@ -553,11 +576,18 @@ pub trait DrawExt: Send {
 ```
 
 A `TuiSupport` is consulted for a pane (and for the whole screen) when its
-`detect` is at least 0.5. First: `vim`, `tmux`, `agent-tui` (the family of
-coding-agent TUIs: a prompt box, rounded, between rules or a panel edged
-by `┃`, under a streaming transcript). First draw
+`detect` is at least 0.5. Presets: `tmux`, `vim`, `ranger`, `htop`, `agent-tui` (the
+family of coding-agent TUIs: a prompt box, rounded, between rules or a
+panel edged by `┃`, under a streaming transcript). `ranger`: columns
+from the selected entries (inverse runs), a column without one takes
+what is left; title and status rows chrome; main column keyed
+`ranger:<dir>`, hinted by the selected index. `htop`: main screen only
+(`F1Help F2Setup`); meters `htop:meters` and table `htop:processes`
+around the header row, function bar chrome; no learned chrome in the
+table. A preset segments only the whole screen; inside another app's
+pane it is detected and keyed, not split. First draw
 extensions: `shapes` (line, rect, circle, ellipse), `bigtext` (block
-letters).
+letters). A draw extension refuses a parameter of the wrong type.
 
 ## Protocol
 
@@ -596,7 +626,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `screen.cells` | `frame`, `rect` | `{"rows":[[run,...],...]}` |
 | `screen.find` | `pattern`, `regex`, `ignore_case`, `frame`, `known` | `{"matches":[{"frame","x","y","len","text","screen":[c,r]\|null}]}` |
 | `screen.cursor` | `trail` | `{"x","y","visible","frame","trail":[[ms,x,y],...]}` |
-| `screen.wait` | `pattern` or `stable_ms` or `gone`, `timeout_ms`, `frame` | `{"matched":bool,"match":...}` |
+| `screen.wait` | `pattern` or `stable_ms` or `idle` (or `gone`), `timeout_ms`, `frame` | `{"matched":bool,"match":...}`; with `idle`: `{"matched":true,"match":null,"frame":id,"idle":{"score","idle","free"}}`, the frame name resolved at each look |
 | `input.send` | `text` or `keys` or `bytes` (base64), `paste` | `{}` |
 | `frame.list` | | `{"frames":[info,...],"layout":id}` |
 | `frame.text` | `frame`, `y0`, `y1` | `{"lines":[...],"y0":n}` remembered buffer; default: the island on screen |
@@ -608,11 +638,11 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `draw.update` | `id`, patch | `{}` |
 | `draw.remove` | `id` | `{}` |
 | `draw.clear` | `all` | `{"removed":n}` |
-| `draw.list` | | `{"sprites":[...]}` |
+| `draw.list` | | `{"sprites":[{..., "screen":[x,y]\|null, "visible":bool, "covered":0..1}]}` |
 | `draw.ext` | `name`, `function`, `params`, sprite fields; with `id`: redraw that sprite in place (content replaced, the rest kept unless given) | `{"id":n}` |
 | `draw.exts` | | `{"exts":[{"name","functions":[...]}],"effects":[...]}` |
 | `batch` | `calls`: `[{"method","params"}]` | `{"results":[{"result"} or {"error"},...]}`, applied in one repaint |
-| `subscribe` | `topics`: `screen`, `cursor`, `frames`, `input`, `size`, `exit` | `{}` |
+| `subscribe` | `topics`: `screen`, `cursor`, `frames`, `idle`, `draw`, `input`, `size`, `exit` | `{}` |
 | `debug.overlay` | `what`: `frames`, `heat`, `off` | `{}` |
 | `debug.dump` | | app grid, host grid, sprites, frames |
 
@@ -631,6 +661,13 @@ A string plainly meant as a key and that is not one is refused
 (`return`, `escape`, `pgdn`, `ctrl-c`). The hint names the key meant.
 `subscribe` refuses an unknown topic.
 
+Event `idle`: `{"frame","idle","score","free"}`, per frame on screen,
+when `idle` changes; looked at every 250 ms while subscribed or while a
+`screen.wait {idle}` is pending; a frame is not idle until seen so, and
+a late subscriber gets no snapshot. Event `draw`:
+`{"removed":[ids],"frame","rows":[from,to]|null}`, sprites removed with
+a collected island (`rows`) or a dropped frame (`null`).
+
 ## CLI
 
 `ptyrc <verb>`; `-s/--session` on every client verb; `--json` where a human
@@ -645,7 +682,7 @@ ptyrc find [-E] [-i] PATTERN      matches with coordinates
 ptyrc cursor
 ptyrc send TEXT                   type text
 ptyrc keys KEY...                 press keys
-ptyrc wait [PATTERN] [--stable MS] [--gone] [--timeout MS]
+ptyrc wait [PATTERN] [--stable MS] [--idle] [--gone] [--timeout MS]
 ptyrc frames [--watch]
 ptyrc heat [-f FRAME] [--classes]
 ptyrc idle [-f FRAME]             score; status 0 when idle, 1 when not
@@ -695,7 +732,9 @@ killed). The Python pilot raises `PtyrcError` with the same `code`,
 events), `Frame`, `Sprite` handles; mirrors the protocol one to one, plus
 `wait_for`, context managers and `Pilot.spawn(argv, headless=True)` for
 tests. `Frame.check_idle()` is the idle score, `Frame.is_idle` the
-boolean; both ask the driver when read. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
+boolean; both ask the driver when read. `Pilot.wait_idle(frame, timeout)`
+and `Frame.wait_idle(timeout)`: one `screen.wait {idle}`, no polling.
+`Sprite.visible`. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
 `python -m ptyrc_apps.<name>` and `ptyrc-app <name>`. Every app takes
 `-s SESSION` and `-f FRAME` and runs until interrupted or the session
 ends (no time limit option; tests pass `main(argv, seconds=...)`); its
@@ -707,8 +746,8 @@ sprites die with its connection, but for the bursts of a confetti round.
 | `clock` | `raw` | one `draw.update` a second; front layer |
 | `flower` | `largest` | client: every 0.5 s, `find` the word (case ignored) in the view and wilt the flowers whose match left it or whose cells show text; while fewer than `--count` (1; 0: one per match), plant one on a random match without a flower, at most one a scan. Random size (3 shapes, 3 to 7 rows; a smaller one where it does not fit) and colours (256-colour petals, two-tone at times, heart, stem). Root 3 to 10 columns from an end of the word, 1 to 3 rows above or below; every cell of the shape cold (`heat_classes` `.`), in the view, off the other flowers and a cell away from every match; nearest first, rows counting double, ties at random. The match is redrawn bold with a `tint` sprite. Growth: two or so steps 0.35 s apart, sent by the client; then a sway animation played by the driver, random phase and pace; wilting: a finite animation, removed by the driver. With matches to spare, a flower wilts after 20 to 40 s. No cell of a flower between two cells that are not cold: never in the gap between two words. `-a` (`--anywhere`): in place of `--word`, a pool of 3 to 5 words of 4 letters or more drawn from the view, matched whole (`\b`, one regex `find`); a word leaves the pool when it leaves the view, or when none of its matches has a flower or room for one, and another is drawn; matches of the words with the fewest flowers first; `--count` defaults to the pool size; no bold. Frame coordinates; back layer unless `--front` |
 | `fishes` | `largest` | 8 fishes, back layer; positions in frame coordinates, computed by the client, one batch every 100 ms; flee the cursor. Half of them, rounded down and drawn at random at birth, are shy (`--shy N`: N); a shy fish heads for the nearest spot of the view where the text hides at least 5 of its 6 cells, out of reach of the cursor (`hideouts`), slows down there, stays 4 to 10 s, then heads for a random spot at least 12 cells away (`lure`); fear first. The view's text is read once a second or when the view moved. A fish out of the view stays still; after a random 2 to 5 s it goes, at most one a tick (`tide`), and comes back in the view at the spot where the text hides most of it, ties at random, a side of the view when there is no text (`entry`). Back in view before its time, it carries on. Options, `-a` for all; everything behind the text, layers from the back: bubbles (-4), crossers (-3), decorations (-2), fishes and the other decorations (-1). `-d`: decorations (`_reef.DECOR`: kelp, shells, corals, a castle; some animated by the driver) standing on text: a box free with a free column each side, ink under two cells of its base out of three (`stand`). Each row of text of the view is surveyed once, the last row never, a row within 5 of the top once the view has been still for a read; 30 % of the lines get one, drawn by weight times height squared among those that fit. `Reef` remembers, in frame cells, the rows surveyed and what stands there; sprites exist within a view's height of the view. One whose text is gone is forgotten and its row surveyed again. `-b`: an area of 12 rows has a vent every 20 columns, drawn once; the vents of the area of the view's last row blow from that row, bursts of 2 to 5, 2 to 7 s apart; a bubble is one sprite: a finite animation (a `.` wobbling in 3 cells, dim) with a `motion` of 1.2 to 2.2 rows a second, gone at the top. `-r`: a fish that comes back is of a random species (`SPECIES`, 3 to 9 cells, one row); one event at a time, 8 to 20 s after the last: a crosser (`CROSSERS`, one sprite with a `motion` and a `ttl`; the jellyfish rises), an object (`SUNK`) falling from the top of the view down a free column, 3 rows or more, onto text, then kept by the reef, a hook down a free column, 5 to 9 s there, then up, or a bold fish leaving by the nearest side. Fishes flee the hook's tip and the grouper's mouth as a still cursor |
-| `snake` | `largest` | client: breadth-first search over the free cells of the view, one batch per move (12 a second); frame coordinates |
-| `sand` | `idle` | native effect `sand` (draw extension `sand`), one request; the client polls `is_idle` every 0.5 s until the pane is idle (`--now`: at once), then looks every 0.5 s: when its frame is inactive and a usable pane of the same key covers half of it (a resize of a pane with little text), the sprite is moved there (`heir`). `--rate`; `--cursor`: the stream falls on the cursor's column |
+| `snake` | `largest` | client: breadth-first search over the free cells of the view, one batch per move (12 a second); frame coordinates. Options, `-a` for all; rules count in steps, the plain game of a seed is unchanged; all behind the text, `z` from the back: beams, snake and apple, foes, particles. `-e`: an apple eaten is a burst of 10 particles (`_arcade.spark`: one sprite, a finite animation with a `motion` and a `ttl`) and a lump that goes down the body two segments a step; one apple in 6 is golden: 5 segments in place of 2, 26 particles; a lost tail crumbles, 40 particles at most; the body is shaded from head to tail; the apple pulses. `-x`: 2 foes at most, one 60 to 140 steps after the last, born 8 cells or more from the head. A foe moves every other step towards the middle segment of a body of 4 or more (breadth-first), at random else; reaching the body, it cuts it there and is gone. Foes are walls to the snake. `-l`: 2 beams at most, one 80 to 200 steps after the last: through a segment of the snake (half of them) or a free cell, along its row or column from wall to wall, 5 cells or more. Announced 14 steps, then firing 5: the snake is cut at the first segment in it (the head: it starts again), foes in it are gone. The snake takes an announced beam for a wall unless there is no other way; a firing one always. Foes and beams scrolled out of the view or written on are dropped |
+| `sand` | `idle` | native effect `sand` (draw extension `sand`), one request; one `screen.wait {idle}` on the frame name, answered by the driver when a pane is idle (`--now`: at once), then looks every 0.5 s: when its frame is inactive and a usable pane of the same key covers half of it (a resize of a pane with little text), the sprite is moved there (`heir`). `--rate`; `--cursor`: the stream falls on the cursor's column |
 
 Draw extension `sand`: effect `sand`. Grains are braille dots, 2 x 4 a
 cell, one step every 12 ms, a render every 48 ms.
@@ -750,7 +789,9 @@ windows under the driver, one drawing per pane, sand in the idle one.
   is compared, text and styles, with the driver's model of the host.
 - `scripts/e2e-heat.sh`: heat classes and idle on a shell, vim and htop.
 - `scripts/bench.sh`: throughput and key-echo latency, bare, transparent,
-  engine, engine without presets, engine with sprites.
+  engine, engine without presets, engine with sprites. Then one
+  `Frames::update` at 200x60 (scan, heat, update, tick);
+  `BENCH_ONLY=frames` for it alone.
 
 - Rust unit tests per crate, `cargo test --workspace`.
 - `ptyrc-vt`: the repair property above; recorded streams of real programs.

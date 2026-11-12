@@ -427,7 +427,7 @@ fn text_anchor_sides_follow_and_hide() {
     // nth picks the second match; a tall sprite is centred on the row.
     mock.lines = vec!["".into(), "a flower".into(), "".into(), "flower".into()];
     scene
-        .add(1, spec(json!({"frame": PANE, "anchor": {"text": "flower", "nth": 1, "gap": 0}, "content": {"rows": ["1", "2", "3"]}})), ms(0))
+        .add(1, spec(json!({"frame": PANE, "anchor": {"text": "flower", "nth": 1, "gap": 0, "slide": false}, "content": {"rows": ["1", "2", "3"]}})), ms(0))
         .unwrap();
     let rows = show(&mut scene, &mock, &base(), 8);
     // Rows 3 and 4; the third is below the view.
@@ -1608,4 +1608,110 @@ fn a_show_waits_to_be_seen() {
     assert!(scene.is_empty());
     // Hidden again after it started, the clock runs: `ttl_ms` aside,
     // only the first showing is waited for.
+}
+
+#[test]
+fn text_anchor_slides_to_stay_whole() {
+    let mut mock = Mock::new();
+    mock.lines = vec!["top".into(), "".into(), "".into(), "end".into()];
+    let mut scene = Scene::new();
+    let mut put = |text: &str, side: &str, rows: serde_json::Value| {
+        let anchor = json!({"text": text, "side": side});
+        scene
+            .add(
+                1,
+                spec(json!({"frame": PANE, "anchor": anchor, "content": {"rows": rows}})),
+                ms(0),
+            )
+            .unwrap()
+    };
+    // Centred on the first and on the last row of the view: three rows
+    // would lose one; they slide inside.
+    put("top", "right", json!(["1", "2", "3"]));
+    put("end", "right", json!(["a", "b", "c"]));
+    // Centred on a word at the left edge: slides right.
+    put("top", "below", json!(["vvvvv"]));
+    let rows = show(&mut scene, &mock, &base(), 0);
+    // Rows 1..=3 and 2..=4 in column 14; the last one drawn wins.
+    assert_eq!(
+        rows,
+        [
+            "",
+            "              1",
+            "          vvvvv",
+            "              b",
+            "              c",
+            ""
+        ]
+    );
+    // The word leaves the view: nothing is dragged along. What is left
+    // of its sprites is where a strict anchor puts it, clipped.
+    mock.pane().origin = FramePos { x: 0, y: 1 };
+    let rows = show(&mut scene, &mock, &base(), 1);
+    assert_eq!(rows[1..3], ["          vvvv3", "              a"]);
+}
+
+#[test]
+fn list_on_tells_what_shows() {
+    let mock = Mock::new();
+    let mut scene = Scene::new();
+    let mut put = |v: serde_json::Value| scene.add(1, spec(v), ms(0)).unwrap();
+    let back = put(json!({"anchor": {"at": [0, 0]}, "content": {"rows": ["abcd"]}}));
+    let front =
+        put(json!({"anchor": {"at": [0, 0]}, "layer": "front", "content": {"rows": ["abcd"]}}));
+    let out = put(
+        json!({"frame": PANE, "anchor": {"at": [0, 9], "space": "frame"}, "content": {"rows": ["x"]}}),
+    );
+    let mut base = base();
+    base.put_ascii(0, 0, b"T", Style::default());
+    scene.tick(ms(0), &mock);
+    let of = |id| {
+        let list = scene.list_on(&base, &mock);
+        list.into_iter().find(|s| s.id == id).unwrap()
+    };
+    // One glyph of four under ink.
+    assert!(of(back).visible);
+    assert_eq!(of(back).covered, 0.25);
+    assert!(of(front).visible);
+    assert_eq!(of(front).covered, 0.0);
+    // Below the view: a screen position, nothing shown.
+    assert_eq!(of(out).screen, Some([10, 10]));
+    assert!(!of(out).visible);
+    scene.remove(front);
+    assert_eq!(scene.compose(&base, &mock).text()[0], "Tbcd");
+}
+
+#[test]
+fn forgotten_rows_and_frames_take_their_sprites() {
+    let mock = Mock::new();
+    let mut scene = Scene::new();
+    let mut put = |frame: FrameId, y: i64| {
+        let anchor = json!({"at": [0, y], "space": "frame"});
+        scene
+            .add(
+                1,
+                spec(json!({"frame": frame, "anchor": anchor, "content": {"rows": ["x"]}})),
+                ms(0),
+            )
+            .unwrap()
+    };
+    let (here, far, other) = (put(PANE, 2), put(PANE, 100_005), put(RAW, 100_005));
+    let hud = scene
+        .add(
+            1,
+            spec(json!({"frame": PANE, "content": {"rows": ["h"]}})),
+            ms(0),
+        )
+        .unwrap();
+    scene.tick(ms(0), &mock);
+    scene.take_dirty();
+    // An island of the pane is forgotten: only what is fixed on its rows.
+    assert_eq!(scene.shift(PANE, 99_800, 100_220, ROWS_GONE), vec![far]);
+    assert!(scene.take_dirty());
+    assert!(scene.shift(PANE, 99_800, 100_220, ROWS_GONE).is_empty());
+    let ids = |scene: &Scene| scene.list().iter().map(|s| s.id).collect::<Vec<_>>();
+    assert_eq!(ids(&scene), vec![here, other, hud]);
+    // The frame itself: everything on it.
+    assert_eq!(scene.drop_frame(PANE), vec![here, hud]);
+    assert_eq!(ids(&scene), vec![other]);
 }

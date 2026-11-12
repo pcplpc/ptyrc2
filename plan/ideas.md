@@ -85,8 +85,7 @@ Built: see `design.md`, "Layers". Left:
 - A panel as a surface: a back sprite clipped to a panel of the app, or
   placed on it by name of colour.
 - A drawing next to a word (`--near`) is hidden where the app has text,
-  as any back sprite. A hint in `draw.list` (`covered`: share of its
-  cells hidden by ink) would help a client choose `front`.
+  as any back sprite; `covered` in `draw.list` tells a client.
 - `Grid::put` gives the spacer of a wide glyph the style of its head;
   the scene relies on it. The front layers do not check that a wide
   sprite glyph lands on one backdrop.
@@ -97,8 +96,6 @@ Built: see `design.md`, "Layers". Left:
 
 Built: see "Heatmap" in `design.md`. Left:
 
-- `screen.wait {idle: true}` and an `idle` event topic, so a client does
-  not poll `frame.idle`.
 - The 150 ms grace is a constant; an app that clears and redraws more
   slowly still heats what it redraws.
 - A scroll is a visible change of every cell that differs: a pager stays
@@ -130,12 +127,9 @@ Built: see "Heatmap" in `design.md`. Left:
 - A jump fed in two bursts and caught by a hint: the first burst's rows
   may have been remembered a few rows off; they are rewritten when shown
   again. Forget what was committed since the last agreeing hint.
-- A forgotten island takes its lines; sprites fixed on its rows stay in
-  the scene, never shown. Emit an event and let the scene drop them.
-- `frames.update` at 200x60: 200 µs when every row changed, 80 µs when
-  nothing did. `Screen::scan` is 140 µs and 45 µs of these, the two
-  heatmaps (raw and pane) 35 µs in both; the trackers 25 µs. Hash rows
-  before cells in the scan; update heat lazily, on read or on a tick.
+- `frames.update` at 200x60, after row stamps and lazy heat: 0.5 µs
+  when nothing changed, 17 µs for one row (trackers and segmentation),
+  500 µs for a full repaint (trackers 270, scan 120, heat 111 per map).
 - An empty main-screen frame stays inactive behind a full-screen app
   started at once (`ptyrc run less file`).
 - Preset detection on a one-row change waits up to 1 s. A preset whose
@@ -178,17 +172,11 @@ Open, in the frames (`frames/mod.rs`, `frames/ext.rs`):
   needs a prompt submitted to a model. The preset is checked on the home
   screen only. Messages of a transcript are panels too: expect candidate
   panes that come and go while it scrolls.
-- ranger: one pane. The three columns have no border and no backdrop;
-  only a preset can tell them (`plugins/tui-support/ranger`): column
-  widths from the `column_ratios` look of the status rows.
 - less, man: open and segment as one pane; the prompt row is not chrome.
   Paging is in `scripts/e2e-frames.sh`.
 
 Other:
 
-- `draw ext shapes circle '{"r":"x"}'` is accepted: a draw extension
-  ignores a parameter of the wrong type.
-- `Pilot.frame()` raises its own `no-frame` without the driver's hint.
 - The method list for "did you mean" and the frame names live in
   `ptyrc-server/src/hints.rs`: add new ones there.
 
@@ -199,21 +187,10 @@ Gaps met while writing the apps; none fixed in the core.
 - Built: an effect sees the screen (`Effect::look`: rows of the view,
   cursor). The sand reads its walls there. Left: text only, no styles;
   rows of the view, not of the canvas, when the two differ.
-- vim splits inside a tmux window are one pane. Reproduce:
-  `scripts/demo-frames.sh`, window 1 (`vim -u NONE -N -O a b` in a full
-  tmux window, 120x36). Expected: two panes, key `tmux:1:...`. Observed:
-  one pane `120x35+0+0`, no key, no `vim` support.
 - `less`, page down (space): the view lands on an island (origin
   `0,100000`), `b` brings it back; line scrolls (`j`, `k`) are tracked.
   Frame-anchored sprites stay behind on a page down. `fishes` clamps to
   the new view, so the fishes jump.
-- A text-anchored sprite is centred on the word's row and clipped by the
-  view: a 7-row flower next to a word on the first rows loses its top.
-  An anchor that slides to stay whole would help.
-- `Frame.refresh` lists every frame to update one: use `frame.get`.
-- No event for idle: `sand` polls twice a second until it starts.
-- `quietest` and `idle` name a pane at the time the sprite is added; an
-  app that waits for idle has to ask again (`sand` does).
 - Party mode behind busy text (120x40, two cells of three inked, one
   burst of 64 over 3 s): 1493 host cells changed between 20 ms samples
   on the back layer against 3681 in front, and none of them a text cell.
@@ -239,6 +216,10 @@ Gaps met while writing the apps; none fixed in the core.
   placed on the text of the first visit, a later edit above one leaves
   it behind the new text; nothing stands where there is no text; the
   memory dies with the app.
+- Built: snake `-e`, `-x`, `-l`, `-a`: particles, golden apples and a
+  shaded body, foes that bite the tail off, beams that burn
+  (`_arcade.py`, see `design.md`). Left: a particle is drawn over the
+  head for a moment; the snake does not fight back; no score shown.
 - Built: sand in braille, one stream, avalanches, strata, kept across
   resizes and text changes, `--cursor` (see `design.md`). No cursor, or
   on column 0: the spout of a sand without `--cursor`. Left: the pile
@@ -250,3 +231,34 @@ Gaps met while writing the apps; none fixed in the core.
   Expected: same frame id. Observed: frame 1 inactive, frame 2 new, the
   sprite hidden. `sand` moves its sprite itself (`heir`); the core
   could fall back to the overlap alone when nothing else claims it.
+
+## Events, third session
+
+Built: `screen.wait {idle}`, topics `idle` and `draw`, `visible` and
+`covered` in `draw.list`, sliding text anchors (see `design.md`). Left:
+
+- A collected island travels as a `Shift` with `dy == ROWS_GONE`: a
+  `FrameEvent::Forgotten {frame, from, to}` should replace the sentinel.
+- The idle watch is a 250 ms poll in the driver, not a deadline.
+- No text-change event; `sand` still looks every 0.5 s for a replaced
+  frame (`heir`).
+- No CLI flag for `slide: false`. The `sand` extension's parameters are
+  unchecked.
+- `scripts/demo-frames.sh` `drawn()` reads `screen`; `visible` is the
+  field. Most `demo_until` checks in `demo-apps.sh` evaluate once.
+
+## Presets, third session
+
+Built: `ranger`, `htop`; vim splits in tmux (advice was cleared by a
+tick while a layout was pending). Left:
+
+- A preset cannot split inside another app's pane (ranger, htop in a
+  tmux pane): `segment` per pane.
+- `Tuning.monitor`: a preset declares a pane rewritten in place (htop
+  table, ranger preview hop islands, `0,200000` then `0,400000`, on each
+  whole rewrite; ids and rects hold).
+- ranger: an inverse run inside a text preview is read as a column;
+  `draw_borders` not tried; the preview pane gets a new frame id on the
+  first selection change.
+- glances has no preset. htop menus (sort, setup) are left to the
+  generic segmentation.

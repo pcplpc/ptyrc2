@@ -151,7 +151,9 @@ impl Sprite {
                 };
                 of_view(x, y)
             }
-            Anchor::Text { side, gap, .. } => {
+            Anchor::Text {
+                side, gap, slide, ..
+            } => {
                 let (pos, len) = self.text_at?;
                 let len = len as i64;
                 let side_gap = gap.unwrap_or(1) as i64;
@@ -165,7 +167,22 @@ impl Sprite {
                     Side::Below => (mid_x, pos.y + 1 + stack_gap),
                     Side::Over => (pos.x, pos.y),
                 };
-                of_frame(x, y)
+                let (mut x, mut y) = of_frame(x, y);
+                let row = of_frame(pos.x, pos.y).1;
+                let seen = row >= rect.y as i64 && row < rect.bottom() as i64;
+                if *slide && seen {
+                    // Along the centred axis only: never onto the match.
+                    match side {
+                        Side::Right | Side::Left if h <= rect.h as i64 => {
+                            y = y.clamp(rect.y as i64, rect.bottom() as i64 - h);
+                        }
+                        Side::Above | Side::Below if w <= rect.w as i64 => {
+                            x = x.clamp(rect.x as i64, rect.right() as i64 - w);
+                        }
+                        _ => {}
+                    }
+                }
+                (x, y)
             }
             Anchor::Auto { .. } => {
                 let (x, y) = self.auto.spot?;
@@ -182,6 +199,10 @@ impl Sprite {
         Some((x + ox, y + oy))
     }
 }
+
+/// `dy` of `Scene::shift` and of `FrameEvent::Shift` for rows that are
+/// forgotten (an island collected), not moved.
+pub const ROWS_GONE: i64 = i64::MIN;
 
 /// Every sprite, and what they add to the screen.
 pub struct Scene {
@@ -487,8 +508,11 @@ impl Scene {
 
     /// Rows `from..=to` of `frame` moved by `dy` in frame space (a splice,
     /// an island merge): sprites fixed on those rows move with them.
-    pub fn shift(&mut self, frame: FrameId, from: i64, to: i64, dy: i64) {
+    /// `dy` is `ROWS_GONE`: the rows are forgotten; the sprites fixed on
+    /// them are removed, their ids returned.
+    pub fn shift(&mut self, frame: FrameId, from: i64, to: i64, dy: i64) -> Vec<SpriteId> {
         let rows = from..=to;
+        let mut gone = Vec::new();
         for sprite in self.sprites.iter_mut().filter(|s| s.frame == Some(frame)) {
             if let Anchor::At {
                 at,
@@ -496,16 +520,39 @@ impl Scene {
             } = &mut sprite.anchor
                 && rows.contains(&at[1])
             {
-                at[1] += dy;
+                if dy == ROWS_GONE {
+                    gone.push(sprite.id);
+                } else {
+                    at[1] += dy;
+                }
                 self.dirty = true;
             }
             if let Some((pos, _)) = &mut sprite.text_at
                 && rows.contains(&pos.y)
             {
-                pos.y += dy;
+                if dy == ROWS_GONE {
+                    sprite.text_at = None;
+                } else {
+                    pos.y += dy;
+                }
                 self.dirty = true;
             }
         }
+        self.sprites.retain(|s| !gone.contains(&s.id));
+        gone
+    }
+
+    /// `frame` is forgotten: remove the sprites on it; their ids.
+    pub fn drop_frame(&mut self, frame: FrameId) -> Vec<SpriteId> {
+        let gone: Vec<SpriteId> = self
+            .sprites
+            .iter()
+            .filter(|s| s.frame == Some(frame))
+            .map(|s| s.id)
+            .collect();
+        self.sprites.retain(|s| s.frame != Some(frame));
+        self.dirty |= !gone.is_empty();
+        gone
     }
 
     fn note_removed(&mut self, before: usize) -> usize {
@@ -536,9 +583,32 @@ impl Scene {
                     z: s.z,
                     persist: s.persist,
                     screen: s.screen.map(|(x, y)| [x, y]),
+                    visible: false,
+                    covered: 0.0,
                 }
             })
             .collect()
+    }
+
+    /// `list`, with what shows on the app grid `base`: `visible` and
+    /// `covered`, as `compose` would draw now.
+    pub fn list_on(&self, base: &Grid, surfaces: &dyn Surfaces) -> Vec<SpriteInfo> {
+        let cursor = surfaces.cursor();
+        let mut out = self.list();
+        for (sprite, info) in self.sprites.iter().zip(&mut out) {
+            let (mut glyphs, mut under) = (0u32, 0u32);
+            each_glyph(sprite, base, surfaces, cursor, |x, y, glyph| {
+                glyphs += 1;
+                let width = glyph.cell.width.max(1) as u16;
+                let ink = (x..x + width).any(|x| base.cell(x, y).has_ink());
+                under += ink as u32;
+            });
+            info.visible = glyphs > 0;
+            if sprite.layer < 0 && glyphs > 0 {
+                info.covered = under as f32 / glyphs as f32;
+            }
+        }
+        out
     }
 
     /// Advance to `now`: lifetimes, animations, effects, motion, anchors.
