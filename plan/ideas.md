@@ -210,9 +210,8 @@ Gaps met while writing the apps; none fixed in the core.
   a turn; a gap of one cell between two words is a line.
 - Built: sand in braille, one stream, avalanches, strata, kept across
   resizes and text changes, `--cursor` (see `design.md`). No cursor, or
-  on column 0: the spout of a sand without `--cursor`. Left: the pile
-  does not scroll with the text; at `--rate` 400 the pile under the
-  spout is a column, the stream outruns the slides.
+  on column 0: the spout of a sand without `--cursor`. Built in the
+  fifth session: the pile scrolls with the text; a heavy stream spreads.
 
 ## Events, third session
 
@@ -386,3 +385,36 @@ attach, input interception, mouse clicks, screenshots, selectors. Left:
 - The snapshots of `tests/tapes/` hold the frames to today's answers:
   a deliberate change of the heuristics needs `scripts/record-tapes.sh
   --snap` and a read of the diff.
+
+## Effects, fifth session
+
+Built: `Under` in cells, over the canvas rect, with the heat on
+request and the frame position; `Effect::tune`, `draw.update {effect}`,
+`draw effect --id`; a glyph opacity for effects (`Canvas::put_faded`);
+the sand scrolls with the text and spreads under a heavy stream; rain
+on the heat; `snow` (see `design.md`, "Effects"). Left:
+
+- `Scene::tick` (no grid) shows an effect nothing: only the engine
+  calls `tick_on`. `Surfaces::text` is gone.
+- `Under` is the screen: rows of the frame out of the view are not
+  shown to an effect. The sand keeps grains out of sight frozen; it
+  does not know the text they rest on changed until it is back.
+- A shift (`FrameEvent::Shift`: splice, island merge) is not told to
+  an effect: grains and snow on those rows stay a few rows off until
+  the text under them eats or drops them.
+- Sand: a horizontal scroll loses the grains that leave by a side. The
+  attic is per effect, 1024 rows; it dies with the sprite.
+- Sand under a heavy stream: grains pass through the heap sideways
+  (`reach`), a liquid more than a sand above 1000 a second.
+- The heat shown to an effect is the whole view's (`HeatView`, five
+  vectors), copied every 200 ms per effect that asks.
+- `tune` on `confetti` and `sparkle`: refused, not implemented.
+- `draw.list` does not show the parameters of an effect.
+- Snow: a flake born on row 0 does not settle there; no snow next to a
+  word of its own row, so a ragged right margin holds little; `▁`..`█`
+  need a font with block elements.
+- `sand.py`, `rain.py`: their docstrings and README rows still describe
+  the stillness kept by the rain and a pile that does not scroll.
+  `snow.py` repeats the loop of `sand.follow` to send its gusts between
+  two events. `Sprite.tune(params)` in the Python pilot
+  would spare `update(effect={"name": ..., "params": ...})`.

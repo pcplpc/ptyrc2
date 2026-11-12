@@ -21,4 +21,5 @@ APPS = {
     "rain": "quiet rain behind the text",
     "sand": "sand falling in an idle pane",
     "snake": "a snake that plays alone between the words",
+    "snow": "snow on the lines of text; it melts where they change",
 }

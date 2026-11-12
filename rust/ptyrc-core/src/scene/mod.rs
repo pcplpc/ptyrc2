@@ -10,10 +10,11 @@ mod spec;
 #[cfg(test)]
 mod tests;
 
-pub use effect::{Effect, EffectFactory, Rng, Under, confetti, sparkle};
+pub use effect::{Effect, EffectFactory, Looks, Rng, Under, Warmth, confetti, sparkle};
 pub use raster::Canvas;
 pub use spec::*;
 
+use crate::frames::HeatView;
 use crate::types::{
     FrameId, FramePos, FrameSel, OwnerId, RAW, SpriteId, SurfaceInfo, Surfaces, TextQuery,
 };
@@ -27,6 +28,8 @@ use std::time::Duration;
 const PLACE_EVERY: Duration = Duration::from_millis(500);
 /// A better spot must hold this long before the sprite moves.
 const REPLACE_AFTER: Duration = Duration::from_millis(2000);
+/// The heat shown to an effect is read again after this long.
+const HEAT_EVERY: Duration = Duration::from_millis(200);
 /// Step of a moving sprite.
 const MOTION_STEP: Duration = Duration::from_millis(33);
 /// A text anchor keeps its match when one is found this close (rows).
@@ -59,6 +62,10 @@ struct Fx {
     canvas: Canvas,
     size: Option<[u16; 2]>,
     next: Duration,
+    /// Frame position of the canvas at the last look.
+    origin: Option<(i64, i64)>,
+    /// The heat given at the last look, and when it was read.
+    heat: Option<(Duration, HeatView)>,
 }
 
 enum Body {
@@ -387,6 +394,8 @@ impl Scene {
                     canvas: Canvas::new(w, h),
                     size: spec.size,
                     next: now,
+                    origin: None,
+                    heat: None,
                 })
             }
             None => {
@@ -454,6 +463,31 @@ impl Scene {
             .alpha
             .map(|a| Scene::check_alpha(Some(a)))
             .transpose()?;
+        if patch.effect.is_some() && (patch.content.is_some() || patch.frames.is_some()) {
+            return Err(SceneError::BadParams(
+                "effect excludes content and frames".into(),
+            ));
+        }
+        // An effect of the same name is tuned: it keeps its state.
+        // Another one, or an effect in place of a content, starts.
+        let mut started = None;
+        if let Some(fx) = &patch.effect {
+            match &mut self.sprites[index].body {
+                Body::Fx(old) if old.name == fx.name => {
+                    old.effect.tune(&fx.params).map_err(SceneError::BadParams)?;
+                    old.next = now;
+                }
+                _ => {
+                    let make = self.effects.get(&fx.name).ok_or_else(|| {
+                        SceneError::BadParams(format!("unknown effect: {}", fx.name))
+                    })?;
+                    started = Some((
+                        fx.name.clone(),
+                        make(&fx.params).map_err(SceneError::BadParams)?,
+                    ));
+                }
+            }
+        }
         let body = if patch.content.is_some() || patch.frames.is_some() {
             let looping = patch.looping.unwrap_or_default();
             let mut anim = self.body(&patch.content, &patch.frames, looping)?;
@@ -463,6 +497,24 @@ impl Scene {
             None
         };
         let sprite = &mut self.sprites[index];
+        if let Some((name, effect)) = started {
+            let size = match &sprite.body {
+                Body::Fx(old) => old.size,
+                Body::Anim(_) => None,
+            };
+            let [w, h] = size.unwrap_or([0, 0]);
+            sprite.body = Body::Fx(Fx {
+                name,
+                effect,
+                canvas: Canvas::new(w, h),
+                size,
+                next: now,
+                origin: None,
+                heat: None,
+            });
+            sprite.shown = false;
+            sprite.born = now;
+        }
         if let (Some(frame), Some(sel)) = (frame, patch.frame) {
             sprite.frame = frame;
             sprite.sel = sel;
@@ -672,7 +724,17 @@ impl Scene {
     }
 
     /// Advance to `now`: lifetimes, animations, effects, motion, anchors.
+    /// Effects see nothing of the app.
     pub fn tick(&mut self, now: Duration, surfaces: &dyn Surfaces) {
+        self.advance(now, None, surfaces);
+    }
+
+    /// `tick`, over the app's grid `base`: effects that look are shown it.
+    pub fn tick_on(&mut self, now: Duration, base: &Grid, surfaces: &dyn Surfaces) {
+        self.advance(now, Some(base), surfaces);
+    }
+
+    fn advance(&mut self, now: Duration, base: Option<&Grid>, surfaces: &dyn Surfaces) {
         self.last_tick = now;
         let cursor = surfaces.cursor();
         let mut dirty = false;
@@ -707,6 +769,20 @@ impl Scene {
                 }
             }
 
+            // Where an effect that looks stands: screen cell, frame position.
+            let stand = match (&sprite.body, info.as_ref().filter(|i| i.usable)) {
+                (Body::Fx(fx), Some(i)) if base.is_some() && fx.effect.looks() != Looks::No => {
+                    sprite.locate(i, cursor).map(|(x, y)| {
+                        let origin = (
+                            i.origin.x + x - i.rect.x as i64,
+                            i.origin.y + y - i.rect.y as i64,
+                        );
+                        ((x, y), origin, *i)
+                    })
+                }
+                _ => None,
+            };
+
             match &mut sprite.body {
                 Body::Anim(anim) if anim.timed => {
                     let mut ended = false;
@@ -738,7 +814,10 @@ impl Scene {
                 }
                 Body::Anim(_) => {}
                 Body::Fx(fx) => {
-                    if now >= fx.next {
+                    // The app scrolled under it: grains fixed on the text
+                    // move in the same repaint.
+                    let moved = stand.is_some_and(|(_, origin, _)| fx.origin != Some(origin));
+                    if now >= fx.next || moved {
                         let (w, h) = match (fx.size, &info) {
                             (Some([w, h]), _) => (w, h),
                             (None, Some(info)) => (info.rect.w, info.rect.h),
@@ -746,17 +825,25 @@ impl Scene {
                         };
                         fx.canvas.resize(w, h);
                         fx.canvas.clear();
-                        if let Some(info) = info.as_ref().filter(|i| i.usable)
-                            && fx.effect.looks()
-                        {
-                            let rows = surfaces.text(info.id);
-                            let (cx, cy) = (cursor.0 as i64, cursor.1 as i64);
-                            let (x, y) = (cx - info.rect.x as i64, cy - info.rect.y as i64);
-                            let inside = x >= 0 && y >= 0 && x < w as i64 && y < h as i64;
-                            fx.effect.look(&Under {
-                                rows: &rows,
-                                cursor: inside.then_some((x as u16, y as u16)),
-                            });
+                        if let (Some(base), Some(((x, y), origin, info))) = (base, stand) {
+                            if fx.effect.looks() == Looks::Heat {
+                                let fresh = fx.heat.as_ref().is_some_and(|(at, heat)| {
+                                    now.saturating_sub(*at) < HEAT_EVERY
+                                        && (heat.cols, heat.rows) == (info.rect.w, info.rect.h)
+                                });
+                                if !fresh {
+                                    fx.heat = surfaces.heat(info.id, now).map(|h| (now, h));
+                                }
+                            }
+                            let (cx, cy) = (cursor.0 as i64 - x, cursor.1 as i64 - y);
+                            let inside = cx >= 0 && cy >= 0 && cx < w as i64 && cy < h as i64;
+                            let mut under = Under::new(base, (x, y), info.rect)
+                                .with_heat(fx.heat.as_ref().map(|(_, heat)| heat));
+                            under.size = (w, h);
+                            under.cursor = inside.then_some((cx as u16, cy as u16));
+                            under.origin = origin;
+                            fx.effect.look(&under);
+                            fx.origin = Some(origin);
                         }
                         if !fx
                             .effect
@@ -765,7 +852,9 @@ impl Scene {
                             dead.push(sprite.id);
                             continue;
                         }
-                        fx.next = now + fx.effect.period().max(Duration::from_millis(1));
+                        if now >= fx.next {
+                            fx.next = now + fx.effect.period().max(Duration::from_millis(1));
+                        }
                         dirty = true;
                     }
                 }
@@ -944,15 +1033,16 @@ impl Scene {
         for sprite in &self.sprites[..front] {
             let tint = sprite.blend == Blend::Tint;
             each_glyph(sprite, base, surfaces, cursor, |x, y, glyph| {
-                back.paint(x, y, glyph, tint, sprite.alpha)
+                back.paint(x, y, glyph, tint, sprite.alpha * glyph.alpha())
             });
         }
         back.resolve(base, &mut out);
         for sprite in &self.sprites[front..] {
             let tint = sprite.blend == Blend::Tint;
             each_glyph(sprite, base, surfaces, cursor, |x, y, glyph| {
-                if sprite.alpha < 1.0 {
-                    paint_alpha(&mut out, x, y, glyph, tint, sprite.alpha, &self.host)
+                let alpha = sprite.alpha * glyph.alpha();
+                if alpha < 1.0 {
+                    paint_alpha(&mut out, x, y, glyph, tint, alpha, &self.host)
                 } else {
                     paint(&mut out, x, y, glyph, tint)
                 }

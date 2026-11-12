@@ -466,8 +466,57 @@ s_cursor() {
     pass cursor
 }
 
+s_effects() {
+    # A native effect over a scrolling editor: the pile of the sand
+    # rests on the text, behind it, and scrolls with it; a running
+    # effect takes new parameters in place.
+    need /usr/bin/vim || { skip effects "no vim"; return; }
+    python3 - > "$WORK/shelves.txt" <<'PY'
+for i in range(60):
+    print(f"{i:02d} " + ("" if i % 6 else "        ================================="))
+PY
+    host effects 60 24 /usr/bin/vim -u NONE -N "$WORK/shelves.txt" || { fail effects start; return; }
+    settle effects 1700
+    local id
+    id=$(p effects draw effect -f largest sand '{"rate": 300, "seed": 4}') || { fail effects "sand refused"; return; }
+    sleep 1.5
+    truth effects state || { fail effects "pouring"; return; }
+    p effects draw effect --id "$id" sand '{"rate": 0}' >/dev/null || { fail effects "not tuned"; return; }
+    p effects draw effect --id "$id" sand '{"rate": "much"}' >/dev/null 2>&1 && { fail effects "bad parameter taken"; return; }
+    sleep 1.5
+    truth effects || { fail effects "at rest"; return; }
+    # Braille cells of the host, as "row:col".
+    grains() {
+        tmux capture-pane -p -t "ptyrc-rd-effects-$TAG" | python3 -c '
+import sys
+shift = int(sys.argv[1])
+for y, line in enumerate(sys.stdin.read().split("\n")[:22]):
+    for x, ch in enumerate(line):
+        if "⠀" < ch <= "⣿" and 0 <= y - shift < 4:
+            print(f"{y - shift}:{x}")' "$1" | sort
+    }
+    # Rows 0 to 3 after the scroll are rows 3 to 6 before it: the pile
+    # that rests on the text of row 6.
+    local before after
+    before=$(grains 3)
+    [ "$(wc -l <<<"$before")" -ge 8 ] || { fail effects "no pile on the text: $before"; return; }
+    keys effects ctrl+e ctrl+e ctrl+e
+    sleep 0.3
+    after=$(grains 0)
+    [ "$before" = "$after" ] || { fail effects "the pile did not follow the text"; return; }
+    truth effects || { fail effects "scrolled"; return; }
+    keys effects ctrl+y ctrl+y ctrl+y
+    sleep 0.3
+    [ "$(grains 3)" = "$before" ] || { fail effects "the pile did not come back"; return; }
+    # The text is in front, whole.
+    grep -q '06         =================================' \
+        <<<"$(tmux capture-pane -p -t "ptyrc-rd-effects-$TAG")" || { fail effects "text hidden"; return; }
+    truth effects || { fail effects "back"; return; }
+    pass effects
+}
+
 mkfiles
-ALL="vim shell tmux resize exit client cursor"
+ALL="vim shell tmux resize exit client cursor effects"
 for scenario in ${*:-$ALL}; do
     "s_$scenario"
 done

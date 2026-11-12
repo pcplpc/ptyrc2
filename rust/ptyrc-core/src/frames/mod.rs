@@ -1992,14 +1992,8 @@ impl Surfaces for Frames {
         }
     }
 
-    fn text(&self, id: FrameId) -> Vec<String> {
-        match self.info(id) {
-            Some(info) => {
-                let y0 = info.origin.y;
-                Frames::text(self, id, y0, y0 + info.rect.h as i64)
-            }
-            None => Vec::new(),
-        }
+    fn heat(&self, id: FrameId, now: Duration) -> Option<HeatView> {
+        self.heat_at(id, now)
     }
 
     fn find(&self, id: FrameId, query: &TextQuery, known: bool) -> Vec<TextMatch> {

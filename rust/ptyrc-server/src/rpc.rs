@@ -489,13 +489,9 @@ fn draw_ext(engine: &mut ScreenEngine, conn: ConnId, params: Value, now: Duratio
         target.retain(|_, v| !v.is_null());
         if update {
             // In place: what the extension drew replaces what the sprite
-            // shows; the sprite keeps the rest unless given here.
-            if target.contains_key("effect") {
-                return Err(RpcError::bad_params(
-                    "id: an effect cannot replace the content of a sprite",
-                ));
-            }
-            target.retain(|k, _| matches!(k.as_str(), "content" | "frames" | "loop"));
+            // shows; the sprite keeps the rest unless given here. An
+            // effect of the same name is tuned, not started again.
+            target.retain(|k, _| matches!(k.as_str(), "content" | "frames" | "loop" | "effect"));
         }
         target.extend(fields);
     }

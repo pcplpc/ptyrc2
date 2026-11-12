@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use super::*;
+use crate::frames::HeatClass;
 use crate::types::{CursorSample, FrameKind, FrameState, Prefer, TextMatch};
 use ptyrc_vt::Color;
 use serde_json::json;
@@ -13,6 +14,7 @@ const PANE: FrameId = 7;
 struct Mock {
     infos: Vec<SurfaceInfo>,
     lines: Vec<String>,
+    heat: Option<HeatView>,
     cursor: (u16, u16),
     spot: Option<(u16, u16)>,
     taken_seen: RefCell<Vec<Vec<Rect>>>,
@@ -45,6 +47,7 @@ impl Mock {
                 surface(PANE, Rect::new(10, 1, 10, 4), (0, 0)),
             ],
             lines: Vec::new(),
+            heat: None,
             cursor: (0, 0),
             spot: Some((0, 0)),
             taken_seen: RefCell::new(Vec::new()),
@@ -102,12 +105,8 @@ impl Surfaces for Mock {
         self.spot
     }
 
-    fn text(&self, id: FrameId) -> Vec<String> {
-        if id == PANE {
-            self.lines.clone()
-        } else {
-            Vec::new()
-        }
+    fn heat(&self, id: FrameId, _now: Duration) -> Option<HeatView> {
+        self.heat.clone().filter(|_| id == PANE)
     }
 
     fn cursor(&self) -> (u16, u16) {
@@ -133,7 +132,7 @@ fn base() -> Grid {
 
 /// Tick at `now`, compose over `base`, return the text rows.
 fn show(scene: &mut Scene, mock: &Mock, base: &Grid, now: u64) -> Vec<String> {
-    scene.tick(ms(now), mock);
+    scene.tick_on(ms(now), base, mock);
     scene.compose(base, mock).text()
 }
 
@@ -1080,51 +1079,238 @@ fn sprite_text_is_storable() {
     }
 }
 
-/// Draws the first letter under it at the cursor's cell.
-struct Echo(String, Option<(u16, u16)>);
+/// Draws the first letter under it at the cursor's cell; notes what it
+/// was shown.
+#[derive(Default)]
+struct Echo {
+    letter: String,
+    cursor: Option<(u16, u16)>,
+    looks: Option<Looks>,
+    seen: std::sync::Arc<std::sync::Mutex<Seen>>,
+}
+
+#[derive(Default, Debug, PartialEq)]
+struct Seen {
+    looks: u32,
+    inked: Vec<(u16, u16)>,
+    origin: (i64, i64),
+    size: (u16, u16),
+    hot: Vec<(u16, u16)>,
+    params: serde_json::Value,
+}
 
 impl Effect for Echo {
     fn render(&mut self, _t: Duration, canvas: &mut Canvas) -> bool {
-        if let Some((x, y)) = self.1 {
-            canvas.put(x as i32, y as i32, &self.0, &StyleSpec::default());
+        if let Some((x, y)) = self.cursor {
+            canvas.put(x as i32, y as i32, &self.letter, &StyleSpec::default());
         }
         true
     }
 
-    fn looks(&self) -> bool {
-        true
+    fn looks(&self) -> Looks {
+        self.looks.unwrap_or(Looks::Cells)
     }
 
     fn look(&mut self, under: &Under) {
-        self.0 = under.rows.concat().trim().chars().take(1).collect();
-        self.1 = under.cursor;
+        let (w, h) = under.size;
+        let cells = || (0..h).flat_map(|y| (0..w).map(move |x| (x, y)));
+        let mut seen = self.seen.lock().unwrap();
+        seen.looks += 1;
+        seen.inked = cells().filter(|(x, y)| under.ink(*x, *y)).collect();
+        seen.hot = cells()
+            .filter(|(x, y)| {
+                under
+                    .heat(*x, *y)
+                    .is_some_and(|w| w.class == HeatClass::Hot)
+            })
+            .collect();
+        seen.origin = under.origin;
+        seen.size = under.size;
+        self.letter = seen
+            .inked
+            .first()
+            .and_then(|(x, y)| under.cell(*x, *y))
+            .map(|c| c.text.to_string())
+            .unwrap_or_default();
+        self.cursor = under.cursor;
+    }
+
+    fn tune(&mut self, params: &serde_json::Value) -> Result<(), String> {
+        if params.get("bad").is_some() {
+            return Err("echo: bad".into());
+        }
+        self.seen.lock().unwrap().params = params.clone();
+        Ok(())
+    }
+}
+
+/// A scene with the `echo` effect; what its last instance was shown.
+fn echo_scene(looks: Looks) -> (Scene, std::sync::Arc<std::sync::Mutex<Seen>>) {
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Seen::default()));
+    let mut scene = Scene::new();
+    let shared = seen.clone();
+    scene.register_effect(
+        "echo",
+        Box::new(move |_| {
+            *shared.lock().unwrap() = Seen::default();
+            Ok(Box::new(Echo {
+                looks: Some(looks),
+                seen: shared.clone(),
+                ..Echo::default()
+            }))
+        }),
+    );
+    (scene, seen)
+}
+
+fn write(grid: &mut Grid, x: u16, y: u16, text: &str) {
+    for (i, ch) in text.chars().enumerate() {
+        let cell = Cell::narrow(&ch.to_string(), Style::default());
+        grid.put(x + i as u16, y, cell);
     }
 }
 
 #[test]
 fn an_effect_sees_the_text_and_the_cursor_under_it() {
     let mut mock = Mock::new();
-    mock.lines = vec![String::new(), "  word".into()];
-    let mut scene = Scene::new();
-    scene.register_effect(
-        "echo",
-        Box::new(|_| Ok(Box::new(Echo(String::new(), None)))),
-    );
+    let mut grid = base();
+    write(&mut grid, 12, 2, "word");
+    let (mut scene, _) = echo_scene(Looks::Cells);
     let fx = json!({"frame": PANE, "layer": "front", "effect": {"name": "echo"}});
     scene.add(1, spec(fx), ms(0)).unwrap();
     // The cursor is outside the pane: nothing to draw at.
-    assert_eq!(show(&mut scene, &mock, &base(), 0)[3], "");
+    assert_eq!(show(&mut scene, &mock, &grid, 0)[3], "");
     // Screen (13, 3) is the canvas cell (3, 2).
     mock.cursor = (13, 3);
-    assert_eq!(show(&mut scene, &mock, &base(), 100)[3], "             w");
-    mock.lines[1] = "  other".into();
-    assert_eq!(show(&mut scene, &mock, &base(), 200)[3], "             o");
+    assert_eq!(show(&mut scene, &mock, &grid, 100)[3], "             w");
+    write(&mut grid, 12, 2, "other");
+    assert_eq!(show(&mut scene, &mock, &grid, 200)[3], "             o");
     // Not usable: the effect keeps what it saw.
     mock.pane().usable = false;
-    mock.lines.clear();
     show(&mut scene, &mock, &base(), 300);
     mock.pane().usable = true;
-    assert_eq!(show(&mut scene, &mock, &base(), 301)[3], "             o");
+    assert_eq!(show(&mut scene, &mock, &grid, 301)[3], "             o");
+}
+
+#[test]
+fn an_effect_sees_cells_not_strings() {
+    // A tab and a wide glyph: columns are those of the screen.
+    let mut vt = ptyrc_vt::Vt::new(20, 6);
+    vt.feed("\x1b[3;11Ha\t世b\x1b[4;12H\x1b[4mu \x1b[0;8mh".as_bytes());
+    let mock = Mock::new();
+    let (mut scene, seen) = echo_scene(Looks::Cells);
+    let fx = json!({"frame": PANE, "effect": {"name": "echo"}});
+    scene.add(1, spec(fx), ms(0)).unwrap();
+    scene.tick_on(ms(0), vt.grid(), &mock);
+    // Canvas cells of the pane (screen 10.., 1..): `a` at (0, 1); the
+    // tab stop 16 is canvas 6: both halves of the wide glyph, then `b`;
+    // an underlined blank is ink, hidden text is not.
+    assert_eq!(
+        seen.lock().unwrap().inked,
+        [(0, 1), (6, 1), (7, 1), (8, 1), (1, 2), (2, 2)]
+    );
+    assert_eq!(seen.lock().unwrap().size, (10, 4));
+}
+
+#[test]
+fn an_effect_with_a_size_sees_what_is_under_its_canvas() {
+    let mut mock = Mock::new();
+    mock.pane().origin = FramePos { x: 0, y: 40 };
+    let mut grid = base();
+    write(&mut grid, 0, 2, "0123456789abcdefghij");
+    write(&mut grid, 14, 4, "z");
+    let (mut scene, seen) = echo_scene(Looks::Cells);
+    // A 4x3 canvas at the frame cell (3, 41): screen (13, 2).
+    let fx = json!({"frame": PANE, "size": [4, 3], "anchor": {"at": [3, 41]},
+        "effect": {"name": "echo"}});
+    scene.add(1, spec(fx), ms(0)).unwrap();
+    scene.tick_on(ms(0), &grid, &mock);
+    {
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.inked, [(0, 0), (1, 0), (2, 0), (3, 0), (1, 2)]);
+        assert_eq!((seen.origin, seen.size), ((3, 41), (4, 3)));
+    }
+    // Scrolled by one row: its first row is out of the view, on the
+    // chrome above the pane, and shows nothing.
+    mock.pane().origin = FramePos { x: 0, y: 42 };
+    write(&mut grid, 10, 0, "chrome");
+    scene.tick_on(ms(60), &grid, &mock);
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.inked, [(0, 2), (1, 2), (2, 2), (3, 2)]);
+    assert_eq!(seen.origin, (3, 41));
+}
+
+#[test]
+fn a_scroll_is_shown_to_an_effect_at_once() {
+    let mut mock = Mock::new();
+    let (mut scene, seen) = echo_scene(Looks::Cells);
+    let fx = json!({"frame": PANE, "effect": {"name": "echo"}});
+    scene.add(1, spec(fx), ms(0)).unwrap();
+    scene.tick_on(ms(0), &base(), &mock);
+    // Not due: no look, no render.
+    scene.take_dirty();
+    scene.tick_on(ms(10), &base(), &mock);
+    assert_eq!(seen.lock().unwrap().looks, 1);
+    assert!(!scene.take_dirty());
+    // The app scrolls: looked at and drawn in the same tick; the pace
+    // of the effect is kept.
+    mock.pane().origin = FramePos { x: 0, y: 3 };
+    scene.tick_on(ms(20), &base(), &mock);
+    assert_eq!(seen.lock().unwrap().looks, 2);
+    assert_eq!(seen.lock().unwrap().origin, (0, 3));
+    assert!(scene.take_dirty());
+    assert_eq!(scene.next_wake(), Some(ms(50)));
+    // Without the screen an effect is shown nothing.
+    scene.tick(ms(50), &mock);
+    assert_eq!(seen.lock().unwrap().looks, 2);
+}
+
+fn heat_of(cols: u16, rows: u16, hot: &[(u16, u16)]) -> HeatView {
+    let n = cols as usize * rows as usize;
+    let mut heat = HeatView {
+        cols,
+        rows,
+        safe: vec![1.0; n],
+        activity: vec![0.0; n],
+        occupancy: vec![0.0; n],
+        still: vec![30.0; n],
+        class: vec![HeatClass::Free; n],
+    };
+    for (x, y) in hot {
+        heat.class[*y as usize * cols as usize + *x as usize] = HeatClass::Hot;
+    }
+    heat
+}
+
+#[test]
+fn an_effect_is_shown_the_heat_when_it_asks() {
+    let mut mock = Mock::new();
+    mock.heat = Some(heat_of(10, 4, &[(2, 1), (9, 3)]));
+    // Not asked: not given.
+    let (mut scene, seen) = echo_scene(Looks::Cells);
+    let fx = json!({"frame": PANE, "effect": {"name": "echo"}});
+    scene.add(1, spec(fx.clone()), ms(0)).unwrap();
+    scene.tick_on(ms(0), &base(), &mock);
+    assert_eq!(seen.lock().unwrap().hot, []);
+    // Asked: the cells of the view, in canvas cells.
+    let (mut scene, seen) = echo_scene(Looks::Heat);
+    scene.add(1, spec(fx), ms(0)).unwrap();
+    scene.tick_on(ms(0), &base(), &mock);
+    assert_eq!(seen.lock().unwrap().hot, [(2, 1), (9, 3)]);
+    // Read again after 200 ms, not before.
+    mock.heat = Some(heat_of(10, 4, &[]));
+    scene.tick_on(ms(100), &base(), &mock);
+    assert_eq!(seen.lock().unwrap().hot, [(2, 1), (9, 3)]);
+    scene.tick_on(ms(200), &base(), &mock);
+    assert_eq!(seen.lock().unwrap().hot, []);
+    // A canvas smaller than the view: its own cells.
+    mock.heat = Some(heat_of(10, 4, &[(2, 1), (9, 3)]));
+    let (mut scene, seen) = echo_scene(Looks::Heat);
+    let fx = json!({"frame": PANE, "size": [3, 2], "anchor": {"at": [1, 1]},
+        "effect": {"name": "echo"}});
+    scene.add(1, spec(fx), ms(0)).unwrap();
+    scene.tick_on(ms(0), &base(), &mock);
+    assert_eq!(seen.lock().unwrap().hot, [(1, 0)]);
 }
 
 #[test]
@@ -1998,4 +2184,109 @@ fn a_wide_front_glyph_needs_one_backdrop() {
         .unwrap();
     let out = render(&mut scene, &mock, &grid, 0);
     assert_eq!(out.text()[0], "ab界ef");
+}
+
+/// Two glyphs, one whole and one at half opacity; counts its renders.
+struct Fade(u32);
+
+impl Effect for Fade {
+    fn render(&mut self, _t: Duration, canvas: &mut Canvas) -> bool {
+        self.0 += 1;
+        let style = StyleSpec::fg(rgb(255, 255, 255));
+        canvas.put(0, 0, "a", &style);
+        canvas.put_faded(1, 0, "b", &style, 0.5);
+        canvas.put(2, 0, &self.0.to_string(), &style);
+        true
+    }
+}
+
+#[test]
+fn an_effect_fades_its_own_glyphs() {
+    let mock = Mock::new();
+    let mut scene = Scene::new();
+    scene.set_host_colors(host());
+    scene.register_effect("fade", Box::new(|_| Ok(Box::new(Fade(0)))));
+    for (layer, alpha) in [("back", 1.0), ("front", 1.0), ("front", 0.5)] {
+        scene.clear(None);
+        let fx = json!({"layer": layer, "alpha": alpha, "effect": {"name": "fade"}});
+        scene.add(1, spec(fx), ms(0)).unwrap();
+        scene.tick(ms(0), &mock);
+        let out = scene.compose(&base(), &mock);
+        assert_eq!(out.text()[0], "ab1");
+        // White at `alpha` on the host's background (20, 20, 40); the
+        // faded glyph at half of it.
+        let on = |a: f32| {
+            let mix = |bg: u8| (bg as f32 + (255.0 - bg as f32) * a).round() as u8;
+            rgb(mix(20), mix(20), mix(40))
+        };
+        let whole = if alpha < 1.0 {
+            on(alpha)
+        } else {
+            rgb(255, 255, 255)
+        };
+        assert_eq!(out.cell(0, 0).style.fg, whole, "{layer} {alpha}");
+        assert_eq!(
+            out.cell(1, 0).style.fg,
+            on(alpha * 128.0 / 255.0),
+            "{layer} {alpha}"
+        );
+    }
+}
+
+#[test]
+fn a_running_effect_is_tuned_in_place() {
+    let mock = Mock::new();
+    let (mut scene, seen) = echo_scene(Looks::Cells);
+    scene.register_effect("fade", Box::new(|_| Ok(Box::new(Fade(0)))));
+    let id = scene
+        .add(1, spec(json!({"effect": {"name": "echo"}})), ms(0))
+        .unwrap();
+    scene.tick_on(ms(0), &base(), &mock);
+    scene.tick_on(ms(60), &base(), &mock);
+    assert_eq!(seen.lock().unwrap().looks, 2);
+    let patch = |v| serde_json::from_value::<SpritePatch>(v).unwrap();
+    // Same name: the effect is told, and keeps what it has.
+    let tune = json!({"effect": {"name": "echo", "params": {"rate": 3}}});
+    scene.update(id, patch(tune), ms(70)).unwrap();
+    assert_eq!(seen.lock().unwrap().params, json!({"rate": 3}));
+    assert_eq!(seen.lock().unwrap().looks, 2);
+    // Drawn again at once.
+    scene.tick_on(ms(71), &base(), &mock);
+    assert_eq!(seen.lock().unwrap().looks, 3);
+    // Refused by the effect: nothing changes, not the layer either.
+    let bad = json!({"layer": "front", "effect": {"name": "echo", "params": {"bad": 1}}});
+    assert_eq!(
+        scene.update(id, patch(bad), ms(80)).unwrap_err().code(),
+        "bad-params"
+    );
+    assert_eq!(scene.list()[0].layer, -1);
+    assert_eq!(seen.lock().unwrap().params, json!({"rate": 3}));
+    // An effect that takes no change says so.
+    for wrong in [
+        json!({"effect": {"name": "nope"}}),
+        json!({"effect": {"name": "echo"}, "content": {"rows": ["x"]}}),
+    ] {
+        assert!(scene.update(id, patch(wrong), ms(80)).is_err());
+    }
+    // Another effect starts in its place, with the sprite's fields.
+    scene
+        .update(id, patch(json!({"effect": {"name": "fade"}})), ms(90))
+        .unwrap();
+    assert_eq!(scene.list()[0].kind, "effect:fade");
+    assert_eq!(show(&mut scene, &mock, &base(), 90)[0], "ab1");
+    let again = json!({"effect": {"name": "fade", "params": {}}});
+    let err = scene.update(id, patch(again), ms(95)).unwrap_err();
+    assert!(err.to_string().contains("cannot be changed"), "{err}");
+    // A content becomes an effect.
+    let text = scene
+        .add(
+            1,
+            spec(json!({"content": {"rows": ["zz"]}, "anchor": {"at": [0, 2]}})),
+            ms(0),
+        )
+        .unwrap();
+    scene
+        .update(text, patch(json!({"effect": {"name": "fade"}})), ms(100))
+        .unwrap();
+    assert_eq!(show(&mut scene, &mock, &base(), 100)[2], "ab1");
 }

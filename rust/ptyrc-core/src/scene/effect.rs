@@ -3,24 +3,31 @@
 
 use super::raster::Canvas;
 use super::spec::{ColorSpec, StyleSpec};
-use ptyrc_vt::Color;
+use crate::frames::{HeatClass, HeatView};
+use ptyrc_vt::{Cell, Color, Grid, Rect};
 use serde::Deserialize;
 use std::time::Duration;
 
 /// A generator. `render` draws the state at `t` (time since the sprite was
-/// added) on a cleared canvas and returns `false` once finished: the
+/// first drawn) on a cleared canvas and returns `false` once finished: the
 /// sprite is then removed.
 pub trait Effect: Send {
     fn render(&mut self, t: Duration, canvas: &mut Canvas) -> bool;
 
-    /// Whether `look` is wanted.
-    fn looks(&self) -> bool {
-        false
+    /// What `look` is given. `No`: `look` is not called, nothing is read.
+    fn looks(&self) -> Looks {
+        Looks::No
     }
 
     /// What the app shows under the canvas; called before each `render`
     /// while the frame is usable.
     fn look(&mut self, _under: &Under) {}
+
+    /// New `params` for a running effect: its state is kept. Nothing is
+    /// changed on error.
+    fn tune(&mut self, _params: &serde_json::Value) -> Result<(), String> {
+        Err("this effect cannot be changed while it runs".into())
+    }
 
     /// Time between two renders.
     fn period(&self) -> Duration {
@@ -28,13 +35,120 @@ pub trait Effect: Send {
     }
 }
 
-/// The app under an effect's canvas. Exact when the canvas is the view
-/// of its frame (no `size`, default anchor).
+/// What an effect asks to see.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Looks {
+    No,
+    /// The cells under the canvas, the cursor, the frame position.
+    Cells,
+    /// `Cells`, and the heat of those cells.
+    Heat,
+}
+
+/// The heat of a cell under an effect.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Warmth {
+    pub class: HeatClass,
+    /// Seconds without a visible change.
+    pub still: f32,
+    /// Visible change, decaying, `0..=1`.
+    pub activity: f32,
+}
+
+/// The app under an effect's canvas, cell for cell. A canvas cell
+/// outside the view of the frame shows nothing.
 pub struct Under<'a> {
-    /// Rows of the view, top first, trailing spaces trimmed.
-    pub rows: &'a [String],
+    grid: &'a Grid,
+    /// Screen cell of the canvas cell `(0, 0)`.
+    at: (i64, i64),
+    /// The view of the frame, screen cells.
+    clip: Rect,
+    heat: Option<&'a HeatView>,
+    /// The canvas, in cells.
+    pub size: (u16, u16),
     /// The cursor as a canvas cell; `None`: outside.
     pub cursor: Option<(u16, u16)>,
+    /// Frame position of the canvas cell `(0, 0)`: it changes when the
+    /// app scrolls under a canvas fixed in the view.
+    pub origin: (i64, i64),
+}
+
+impl<'a> Under<'a> {
+    /// A canvas at the screen cell `at` of `grid`, in a view `clip`.
+    pub fn new(grid: &'a Grid, at: (i64, i64), clip: Rect) -> Under<'a> {
+        Under {
+            grid,
+            at,
+            clip: clip.intersect(&grid.rect()),
+            heat: None,
+            size: (clip.w, clip.h),
+            cursor: None,
+            origin: at,
+        }
+    }
+
+    /// A canvas that covers `grid`.
+    pub fn of(grid: &'a Grid) -> Under<'a> {
+        Under::new(grid, (0, 0), grid.rect())
+    }
+
+    /// With the heat of the view `clip`.
+    pub fn with_heat(mut self, heat: Option<&'a HeatView>) -> Under<'a> {
+        self.heat = heat;
+        self
+    }
+
+    /// Foreground of the canvas, row-major: `ink` of every cell.
+    pub fn inked(&self) -> Vec<bool> {
+        let (w, h) = self.size;
+        let mut out = Vec::with_capacity(w as usize * h as usize);
+        for y in 0..h {
+            out.extend((0..w).map(|x| self.ink(x, y)));
+        }
+        out
+    }
+
+    fn screen(&self, x: u16, y: u16) -> Option<(u16, u16)> {
+        let (sx, sy) = (self.at.0 + x as i64, self.at.1 + y as i64);
+        let c = self.clip;
+        let inside =
+            sx >= c.x as i64 && sy >= c.y as i64 && sx < c.right() as i64 && sy < c.bottom() as i64;
+        inside.then_some((sx as u16, sy as u16))
+    }
+
+    /// The app's cell under the canvas cell `(x, y)`.
+    pub fn cell(&self, x: u16, y: u16) -> Option<&'a Cell> {
+        let (sx, sy) = self.screen(x, y)?;
+        Some(self.grid.cell(sx, sy))
+    }
+
+    /// Whether the cell shows foreground: a glyph, either half of a wide
+    /// one, a line.
+    pub fn ink(&self, x: u16, y: u16) -> bool {
+        match self.cell(x, y) {
+            Some(cell) if cell.width == 0 && x > 0 => {
+                self.cell(x - 1, y).is_some_and(|head| head.has_ink())
+            }
+            Some(cell) => cell.has_ink(),
+            None => false,
+        }
+    }
+
+    /// The heat of the cell; `None`: not asked (`Looks::Heat`), or outside.
+    pub fn heat(&self, x: u16, y: u16) -> Option<Warmth> {
+        let heat = self.heat?;
+        let (sx, sy) = self.screen(x, y)?;
+        let (hx, hy) = (sx - self.clip.x, sy - self.clip.y);
+        if hx >= heat.cols || hy >= heat.rows {
+            return None;
+        }
+        let i = hy as usize * heat.cols as usize + hx as usize;
+        Some(Warmth {
+            class: heat.class[i],
+            still: heat.still[i],
+            activity: heat.activity[i],
+        })
+    }
 }
 
 /// Builds an effect from its `params`.
