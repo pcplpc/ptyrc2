@@ -239,6 +239,10 @@ Gaps met while writing the apps; none fixed in the core.
   placed on the text of the first visit, a later edit above one leaves
   it behind the new text; nothing stands where there is no text; the
   memory dies with the app.
+- Built: snake `-e`, `-x`, `-l`, `-a`: particles, golden apples and a
+  shaded body, foes that bite the tail off, beams that burn
+  (`_arcade.py`, see `design.md`). Left: a particle is drawn over the
+  head for a moment; the snake does not fight back; no score shown.
 - Built: sand in braille, one stream, avalanches, strata, kept across
   resizes and text changes, `--cursor` (see `design.md`). No cursor, or
   on column 0: the spout of a sand without `--cursor`. Left: the pile
