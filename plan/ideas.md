@@ -109,3 +109,8 @@ Built: see "Heatmap" in `design.md`. Left:
 - The backdrop of a frame counts every cell, text cells included; at
   most 32 colours are counted (gradients).
 - The heat overlay shows panes only, not the raw frame nor chrome.
+
+## From the owner, during the second session
+
+- Confetti party mode (`--spawn`) likely flickers less with the confetti
+  and sparkles behind the text: use the back layer.

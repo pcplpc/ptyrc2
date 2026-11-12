@@ -505,8 +505,10 @@ mod tests {
         let mut inv = Style::default();
         inv.attrs.insert(Attrs::INVERSE);
         inv.fg = Color::Indexed(4);
-        let mut grey = Style::default();
-        grey.bg = Color::Indexed(8);
+        let grey = Style {
+            bg: Color::Indexed(8),
+            ..Style::default()
+        };
         let mut bold = grey;
         bold.attrs.insert(Attrs::BOLD);
         let mut ul = Style::default();
