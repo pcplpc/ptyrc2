@@ -39,8 +39,8 @@ def pour(pilot: Pilot, frame: Frame, walls: Sequence[str], rate: float) -> Sprit
     return pilot.effect("sand", params, frame=frame.id, layer="back")
 
 
-def app(pilot: Pilot, args: argparse.Namespace) -> None:
-    end = None if args.seconds is None else time.monotonic() + args.seconds
+def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
+    end = None if seconds is None else time.monotonic() + seconds
     sand: Sprite | None = None
     walls: list[str] = []
     shape: tuple[int, ...] = ()
@@ -65,7 +65,8 @@ def app(pilot: Pilot, args: argparse.Namespace) -> None:
                 sand = pour(pilot, frame, walls, args.rate)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> int:
+    """`seconds`: stop after this long (tests); else until interrupted."""
     out = _cli.parser("sand", "Sand falling in an idle pane.", frame="idle")
     out.add_argument(
         "--rate", type=float, default=40.0, help="grains per second [default: 40]"
@@ -73,8 +74,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     out.add_argument(
         "--now", action="store_true", help="do not wait for the pane to be idle"
     )
-    out.add_argument("--seconds", type=float, help="stop after this long")
-    return _cli.run(app, _cli.parse(out, argv))
+    return _cli.run(
+        lambda pilot, args: app(pilot, args, seconds), _cli.parse(out, argv)
+    )
 
 
 if __name__ == "__main__":

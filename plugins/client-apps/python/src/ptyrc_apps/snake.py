@@ -146,13 +146,13 @@ def view(frame: Frame) -> tuple[int, int, int, int]:
     return (ox, oy, ox + w, oy + h)
 
 
-def app(pilot: Pilot, args: argparse.Namespace) -> None:
+def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
     game = Game(random.Random(args.seed))
     frame = _cli.pick(pilot, args.frame)
     snake: Sprite | None = None
     apple: Sprite | None = None
     shown_apple = None
-    for _ in _cli.ticks(1.0 / args.speed, args.seconds):
+    for _ in _cli.ticks(1.0 / args.speed, seconds):
         if not _cli.on_screen(frame):
             continue
         box = view(frame)
@@ -181,7 +181,8 @@ def app(pilot: Pilot, args: argparse.Namespace) -> None:
                 shown_apple = game.apple
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> int:
+    """`seconds`: stop after this long (tests); else until interrupted."""
     out = _cli.parser(
         "snake", "A snake that plays alone between the words.", frame="largest"
     )
@@ -189,11 +190,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--speed", type=float, default=12.0, help="moves per second [default: 12]"
     )
     out.add_argument("--seed", type=int, help="same seed, same game")
-    out.add_argument("--seconds", type=float, help="stop after this long")
     args = _cli.parse(out, argv)
     if args.speed <= 0:
         out.error("--speed must be positive")
-    return _cli.run(app, args)
+    return _cli.run(lambda pilot, args: app(pilot, args, seconds), args)
 
 
 if __name__ == "__main__":

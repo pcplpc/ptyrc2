@@ -693,8 +693,9 @@ events), `Frame`, `Sprite` handles; mirrors the protocol one to one, plus
 tests. `Frame.check_idle()` is the idle score, `Frame.is_idle` the
 boolean; both ask the driver when read. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
 `python -m ptyrc_apps.<name>` and `ptyrc-app <name>`. Every app takes
-`-s SESSION` and `-f FRAME`; its sprites die with its connection, but for
-the bursts of a confetti round.
+`-s SESSION` and `-f FRAME` and runs until interrupted or the session
+ends (no time limit option; tests pass `main(argv, seconds=...)`); its
+sprites die with its connection, but for the bursts of a confetti round.
 
 | app | default frame | what runs where |
 |---|---|---|

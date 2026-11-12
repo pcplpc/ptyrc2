@@ -58,7 +58,7 @@ def paint(rows: Sequence[str], petals: str) -> list[list[dict[str, object]]]:
     return out
 
 
-def app(pilot: Pilot, args: argparse.Namespace) -> None:
+def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
     # The layer is a choice. Behind the text (the default of every
     # sprite) the flower grows in the free cells around the word and
     # never hides a letter: right for a decoration in a document.
@@ -84,10 +84,11 @@ def app(pilot: Pilot, args: argparse.Namespace) -> None:
     flower.set(frames=sway, loop=True)
     # Nothing more to send. Stay connected: the sprite lives as long as
     # this connection does.
-    _cli.hold(pilot, args.seconds)
+    _cli.hold(pilot, seconds)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> int:
+    """`seconds`: stop after this long (tests); else until the session ends."""
     out = _cli.parser("flower", "A flower next to a word.")
     out.add_argument("--word", default="flower", help="the word [default: flower]")
     out.add_argument("--nth", type=int, default=0, help="which match [default: 0]")
@@ -99,8 +100,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     out.add_argument("--color", default="bright-magenta", help="colour of the petals")
     out.add_argument("--front", action="store_true", help="over the text")
-    out.add_argument("--seconds", type=float, help="stop after this long")
-    return _cli.run(app, _cli.parse(out, argv))
+    return _cli.run(
+        lambda pilot, args: app(pilot, args, seconds), _cli.parse(out, argv)
+    )
 
 
 if __name__ == "__main__":

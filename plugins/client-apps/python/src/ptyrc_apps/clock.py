@@ -77,18 +77,19 @@ def big(pilot: Pilot, args: argparse.Namespace, sprite: Sprite | None) -> Sprite
     return sprite
 
 
-def app(pilot: Pilot, args: argparse.Namespace) -> None:
+def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
     draw = big if args.big else small
     args.shown = None
     sprite = None
-    end = None if args.seconds is None else time.monotonic() + args.seconds
+    end = None if seconds is None else time.monotonic() + seconds
     while end is None or time.monotonic() < end:
         sprite = draw(pilot, args, sprite)
         # Sleep to the next second, so the digits change on time.
         time.sleep(1.0 - time.time() % 1.0)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> int:
+    """`seconds`: stop after this long (tests); else until interrupted."""
     out = _cli.parser("clock", "A floating clock in a quiet corner.")
     out.add_argument(
         "--prefer",
@@ -97,8 +98,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "bottom, bottom-right, any [default: top-right]",
     )
     out.add_argument("--big", action="store_true", help="block digits")
-    out.add_argument("--seconds", type=float, help="stop after this long")
-    return _cli.run(app, _cli.parse(out, argv))
+    return _cli.run(
+        lambda pilot, args: app(pilot, args, seconds), _cli.parse(out, argv)
+    )
 
 
 if __name__ == "__main__":

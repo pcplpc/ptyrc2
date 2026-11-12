@@ -89,4 +89,6 @@ Read `confetti.py` and `clock.py` first, then `flower.py`, `fishes.py`,
 ## Tests
 
 `uv run pytest plugins/client-apps/python`: each app against a headless
-driver.
+driver. An app runs until ^C or the end of its session; a test stops it
+with `main(argv, seconds=...)`, or with a stand-in that raises
+`KeyboardInterrupt` (`confetti`).

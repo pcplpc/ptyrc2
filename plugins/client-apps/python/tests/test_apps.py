@@ -191,7 +191,7 @@ def page(pilot: Pilot, *lines: str) -> None:
 
 def test_flower(session: Pilot) -> None:
     page(session, "", "", "", "", "", "a flower", "", "", "")
-    args = ["-s", session.session, "--seconds", "1.6"]
+    args = ["-s", session.session]
     stages: set[str] = set()
 
     def seen(host: str) -> bool:
@@ -203,7 +203,7 @@ def test_flower(session: Pilot) -> None:
             stages.add("open")
         return stages == {"bud", "open"}
 
-    watch(session, lambda: flower.main(args), seen)
+    watch(session, lambda: flower.main(args, seconds=1.6), seen)
 
 
 def test_flower_paint() -> None:
@@ -225,10 +225,10 @@ def settle(pilot: Pilot) -> None:
 
 def test_fishes(session: Pilot) -> None:
     settle(session)
-    args = ["-s", session.session, "--seconds", "1.0", "--seed", "2", "--count", "4"]
+    args = ["-s", session.session, "--seed", "2", "--count", "4"]
     watch(
         session,
-        lambda: fishes.main(args),
+        lambda: fishes.main(args, seconds=1.0),
         lambda host: host.count(fishes.LEFT) + host.count(fishes.RIGHT) >= 2,
     )
 
@@ -257,9 +257,9 @@ def test_fish_flees_the_cursor() -> None:
 
 def test_sand(session: Pilot) -> None:
     page(session, "", "", "", "", "", "", "", "", "      a shelf of words")
-    args = ["-s", session.session, "--now", "--rate", "400", "--seconds", "4"]
+    args = ["-s", session.session, "--now", "--rate", "400"]
     status: list[int] = []
-    thread = threading.Thread(target=lambda: status.append(sand.main(args)))
+    thread = threading.Thread(target=lambda: status.append(sand.main(args, seconds=4)))
     thread.start()
     piled = swept = False
     typed = 0.0
@@ -283,8 +283,12 @@ def test_sand(session: Pilot) -> None:
 def test_snake(session: Pilot) -> None:
     page(session, "", "", "words in the way", "", "   more words here")
     settle(session)
-    args = ["-s", session.session, "--seconds", "1.5", "--seed", "4", "--speed", "30"]
-    watch(session, lambda: snake.main(args), lambda host: "@" in host and "●" in host)
+    args = ["-s", session.session, "--seed", "4", "--speed", "30"]
+    watch(
+        session,
+        lambda: snake.main(args, seconds=1.5),
+        lambda host: "@" in host and "●" in host,
+    )
 
 
 def test_snake_game() -> None:
@@ -320,9 +324,7 @@ def test_clock(session: Pilot) -> None:
         top = host.split("\n")[0]
         return bool(re.search(r" \d\d:\d\d:\d\d$", top)) and len(top) == 79
 
-    watch(
-        session, lambda: clock.main(["-s", session.session, "--seconds", "1.2"]), seen
-    )
+    watch(session, lambda: clock.main(["-s", session.session], seconds=1.2), seen)
 
 
 def test_clock_big_bottom_left(session: Pilot) -> None:
@@ -330,16 +332,8 @@ def test_clock_big_bottom_left(session: Pilot) -> None:
         bottom = host.split("\n")[-3:]
         return any(c in "".join(bottom) for c in "█▀▄") and bottom[-1][:1] in "█▀▄"
 
-    args = [
-        "-s",
-        session.session,
-        "--seconds",
-        "1.2",
-        "--big",
-        "--prefer",
-        "bottom-left",
-    ]
-    watch(session, lambda: clock.main(args), seen)
+    args = ["-s", session.session, "--big", "--prefer", "bottom-left"]
+    watch(session, lambda: clock.main(args, seconds=1.2), seen)
 
 
 def test_clock_face() -> None:
@@ -360,3 +354,14 @@ def test_dispatch(
     assert main(["confetti", "-s", session.session, "--duration", "0.1"]) == 0
     assert main(["confetti", "-s", "no-such-session"]) == 1
     assert "ptyrc-app: gone" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("name", sorted(APPS))
+def test_no_time_limit(name: str, capsys: pytest.CaptureFixture[str]) -> None:
+    # An app runs until ^C or the end of the session: no option for it.
+    with pytest.raises(SystemExit):
+        main([name, "--help"])
+    assert "--sec" not in capsys.readouterr().out
+    with pytest.raises(SystemExit) as exc:
+        main([name, "--sec", "1"])
+    assert exc.value.code == 2

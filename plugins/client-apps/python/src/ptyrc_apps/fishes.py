@@ -99,7 +99,7 @@ def tank(frame: Frame) -> tuple[int, int, int, int]:
     return (ox, oy - h, ox + w, oy + 2 * h - 1)
 
 
-def app(pilot: Pilot, args: argparse.Namespace) -> None:
+def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
     rng = random.Random(args.seed)
     frame = _cli.pick(pilot, args.frame)
     x0, _, x1, _ = tank(frame)
@@ -114,7 +114,7 @@ def app(pilot: Pilot, args: argparse.Namespace) -> None:
         for i in range(args.count)
     ]
     before = None
-    for dt in _cli.ticks(TICK, args.seconds):
+    for dt in _cli.ticks(TICK, seconds):
         # Refreshed each tick: the origin moves when the content scrolls.
         if not _cli.on_screen(frame):
             continue
@@ -147,14 +147,16 @@ def app(pilot: Pilot, args: argparse.Namespace) -> None:
                 fish.shown = fish.cell
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> int:
+    """`seconds`: stop after this long (tests); else until interrupted."""
     out = _cli.parser(
         "fishes", "Fishes behind the text, afraid of the cursor.", frame="largest"
     )
     out.add_argument("--count", type=int, default=6, help="fishes [default: 6]")
     out.add_argument("--seed", type=int, help="same seed, same school")
-    out.add_argument("--seconds", type=float, help="stop after this long")
-    return _cli.run(app, _cli.parse(out, argv))
+    return _cli.run(
+        lambda pilot, args: app(pilot, args, seconds), _cli.parse(out, argv)
+    )
 
 
 if __name__ == "__main__":

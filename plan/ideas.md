@@ -228,3 +228,5 @@ Gaps met while writing the apps; none fixed in the core.
 - Built: confetti flags. `--bursts N` (at most 10) at random offsets in
   3 s on distinct cold spots; `--party` repeats the round every 3 s;
   `--count` is `--size`; `--seconds`, `--seed`, `--rate` gone.
+- Built: no `--seconds` in any app. Tests stop an app with
+  `main(argv, seconds=...)`; the demos kill the app processes.
