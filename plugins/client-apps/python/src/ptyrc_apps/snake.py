@@ -24,7 +24,8 @@ More, each on its own flag; `-a` for all (see `_arcade`):
 
 - `-e`: an apple bursts into particles when eaten and goes down the
   body as a lump; one apple in six is golden and worth more; a lost
-  tail crumbles. The body is shaded from head to tail.
+  tail crumbles. The body is shaded from head to tail. The score, top
+  right: the length of the snake, and the longest it was.
 - `-x`: foes. One goes for the middle of the body at half the snake's
   speed, bites it off there and is gone. The snake goes around them.
 - `-l`: lasers. A beam is announced along a free row or column, from
@@ -57,6 +58,7 @@ __all__ = [
     "FOE_EVERY",
     "FUSE",
     "GOLDEN",
+    "SNAKE_Z",
     "Beam",
     "Foe",
     "Game",
@@ -74,6 +76,7 @@ FOE_EVERY = (60, 140)  # steps between two foes
 BEAMS = 2  # at once
 BEAM_EVERY = (80, 200)  # steps between two beams
 FUSE, FIRE = 14, 5  # steps a beam is announced, then fires
+SNAKE_Z = 4  # over the foes (2) and the particles (3), under the score (5)
 
 
 def walls_of(rows: Sequence[str], x0: int = 0, y0: int = 0) -> set[Cell]:
@@ -410,7 +413,10 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
             at, cells = game.picture(args.effects)
             anchor = {"at": list(at), "space": "frame"}
             if snake is None:
-                snake = pilot.draw(cells=cells, frame=frame.id, at=at, space="frame")
+                # Over the particles: the head is never hidden.
+                snake = pilot.draw(
+                    cells=cells, frame=frame.id, at=at, space="frame", z=SNAKE_Z
+                )
             else:
                 snake.update(anchor=anchor, content={"cells": cells})
             now = (game.apple, game.golden)
@@ -441,7 +447,10 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
     )
     out.add_argument("--seed", type=int, help="same seed, same game")
     out.add_argument(
-        "-e", "--effects", action="store_true", help="particles, golden apples, shades"
+        "-e",
+        "--effects",
+        action="store_true",
+        help="particles, golden apples, shades, the score",
     )
     out.add_argument(
         "-x", "--enemies", action="store_true", help="foes that bite the tail off"

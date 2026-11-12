@@ -31,6 +31,7 @@ __all__ = [
     "debris",
     "foe",
     "spark",
+    "tally",
 ]
 
 BODY = (118, 82, 46, 40, 34, 28, 22)  # head to tail
@@ -144,9 +145,19 @@ def beam(length: int, across: bool, firing: bool) -> dict[str, Any]:
     return {"frames": [{"cells": cells(c), "ms": ms} for c in inks], "loop": True}
 
 
+def tally(length: int, best: int) -> list[list[dict[str, Any]]]:
+    """The score: the length of the snake, and the longest it was."""
+    return [
+        [
+            {"t": f"◆ {length}", "fg": "bright-green", "bold": True},
+            {"t": f"  best {best}", "dim": True},
+        ]
+    ]
+
+
 class Stage:
-    """The sprites of a game's foes and beams, and its particles when
-    `effects`. `game`: a `snake.Game`."""
+    """The sprites of a game's foes and beams; when `effects`, its
+    particles and its score. `game`: a `snake.Game`."""
 
     def __init__(
         self, pilot: Pilot, frame: Frame, rng: random.Random, effects: bool
@@ -157,6 +168,8 @@ class Stage:
         self.effects = effects
         self.foes: dict[int, tuple[Sprite, Cell]] = {}
         self.beams: dict[int, tuple[Sprite, bool]] = {}
+        self.board: tuple[Sprite, tuple[int, int]] | None = None
+        self.best = 0
 
     def draw(self, at: Cell, **kw: Any) -> Sprite:
         return self.pilot.draw(frame=self.frame.id, at=at, space="frame", **kw)
@@ -186,6 +199,24 @@ class Stage:
         if self.effects:
             for event in game.events:
                 self.play(*event)
+            self.score(len(game.body))
+
+    def score(self, length: int) -> None:
+        """The score, top right in view cells: redrawn when it changes."""
+        self.best = max(self.best, length)
+        now = (length, self.best)
+        if self.board is not None and self.board[1] == now:
+            return
+        cells = tally(*now)
+        at = [-sum(len(run["t"]) for run in cells[0]) - 1, 0]
+        if self.board is None:
+            sprite = self.pilot.draw(
+                cells=cells, frame=self.frame.id, at=at, space="view", z=5
+            )
+        else:
+            sprite = self.board[0]
+            sprite.update(anchor={"at": at, "space": "view"}, content={"cells": cells})
+        self.board = (sprite, now)
 
     def play(self, what: str, *data: Any) -> None:
         """An event of the game, as particles."""

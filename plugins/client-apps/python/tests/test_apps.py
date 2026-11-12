@@ -684,15 +684,43 @@ def test_snake_arcade(session: Pilot) -> None:
 
     def look(host: str) -> bool:
         seen.update(host)
-        # The snake, an apple, a foe, a beam announced, a beam firing.
+        # The snake, an apple, a foe, a beam announced, a beam firing,
+        # the score.
         return (
             "@" in seen
+            and "◆" in seen
             and "●" in seen
             and bool(seen & {"x", "+"})
             and (bool(seen & {"╌", "╎"}) and bool(seen & {"━", "┃"}))
         )
 
     watch(session, lambda: snake.main(args, seconds=4), look)
+
+
+def test_snake_over_its_particles(session: Pilot) -> None:
+    page(session, "", "", "words in the way")
+    settle(session)
+    args = ["-s", session.session, "--seed", "4", "--speed", "60", "-e"]
+    status: list[int] = []
+    thread = threading.Thread(target=lambda: status.append(snake.main(args, seconds=3)))
+    thread.start()
+    sparks = best = 0
+    while thread.is_alive():
+        sprites = session.sprites()
+        long = [s for s in sprites if s["z"] == snake.SNAKE_Z]
+        sparks += sum(s["kind"] == "animation" and s["z"] == 3 for s in sprites)
+        for row in session.dump()["host"][:1]:
+            if found := re.search(r"◆ (\d+)  best (\d+)", row):
+                assert int(found[1]) <= int(found[2])
+                best = max(best, int(found[2]))
+        assert len(long) <= 1
+        time.sleep(0.05)
+    thread.join()
+    assert status == [0] and best >= 5
+    # Particles were seen: they are under the snake.
+    assert sparks and snake.SNAKE_Z > 3
+    assert until(lambda: session.sprites() == [], 3)
+    assert session.dump()["host"] == session.text()
 
 
 def test_snake_rules() -> None:
