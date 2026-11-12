@@ -887,7 +887,10 @@ that moves a snapshot is read in the diff of the `.snap`.
   itself, null for what has no name (a mouse report). Keys not taken go
   to the app. The escape key (`ctrl+t`, or `escape`: a named key that
   is not text) always releases: it reaches neither, the client gets
-  `{"released":"escape"}`. A grab ends with `input.release` or with its
+  `{"released":"escape"}`. A key the host terminal sends as CSI u
+  (kitty keyboard protocol) or `CSI 27;m;c~` (modifyOtherKeys) is
+  named, taken and matched as its legacy bytes; a release event is not
+  the key. A grab ends with `input.release` or with its
   connection. Keys typed by clients (`input.send`) are never grabbed.
   One grab at a time (`not-usable` for another client).
   `scripts/grab-sprite.py`: the arrows move a sprite in vim's pane; vim

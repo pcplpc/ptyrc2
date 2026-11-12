@@ -47,7 +47,7 @@ impl Grab {
         while !rest.is_empty() {
             let (key, tail) = rest.split_at(key_len(rest));
             rest = tail;
-            if key == self.escape {
+            if legacy(key).as_deref().unwrap_or(key) == self.escape {
                 sorted.released = true;
                 sorted.forward.extend_from_slice(rest);
                 break;
@@ -98,9 +98,61 @@ fn key_len(bytes: &[u8]) -> usize {
     len.min(bytes.len())
 }
 
+/// Legacy bytes of a key sent as `CSI code;mods u` (kitty keyboard
+/// protocol) or `CSI 27;mods;code ~` (xterm modifyOtherKeys), when it has
+/// some. A release event has none.
+fn legacy(key: &[u8]) -> Option<Vec<u8>> {
+    let params = std::str::from_utf8(key.strip_prefix(b"\x1b[")?).ok()?;
+    let (code, mods): (u32, u32) = if let Some(params) = params.strip_suffix('u') {
+        let mut fields = params.split(';');
+        let code = fields.next()?.split(':').next()?.parse().ok()?;
+        let mut mods = fields.next().unwrap_or("").split(':');
+        let level = match mods.next()? {
+            "" => 1,
+            level => level.parse().ok()?,
+        };
+        if mods.next() == Some("3") {
+            return None;
+        }
+        (code, level)
+    } else {
+        let params = params.strip_prefix("27;")?.strip_suffix('~')?;
+        let (level, code) = params.split_once(';')?;
+        (code.parse().ok()?, level.parse().ok()?)
+    };
+    // Shift 1, alt 2, ctrl 4; caps lock and num lock are ignored.
+    let bits = mods.checked_sub(1)? & !(64 | 128);
+    if bits & !7 != 0 {
+        return None;
+    }
+    let (shift, alt, ctrl) = (bits & 1 != 0, bits & 2 != 0, bits & 4 != 0);
+    let c = char::from_u32(code).filter(|c| !('\u{e000}'..='\u{f8ff}').contains(c))?;
+    let mut bytes = Vec::new();
+    if alt {
+        bytes.push(0x1b);
+    }
+    match (shift, ctrl) {
+        (true, true) => return None,
+        (true, false) if c == '\t' => bytes.extend(b"\x1b[Z"),
+        (true, false) if c.is_ascii_lowercase() => bytes.push(c.to_ascii_uppercase() as u8),
+        (true, false) => return None,
+        (false, true) if c == ' ' => bytes.push(0),
+        (false, true) => bytes.push(keys::ctrl(c.encode_utf8(&mut [0; 4]))?),
+        (false, false) if matches!(c, '\r' | '\t' | '\x1b' | '\x7f') || !c.is_control() => {
+            bytes.extend(c.encode_utf8(&mut [0; 4]).as_bytes())
+        }
+        (false, false) => return None,
+    }
+    Some(bytes)
+}
+
 /// Name of a key, as `input.send` takes it; a printable character is its
-/// own name.
+/// own name. CSI u and modifyOtherKeys forms are named as their legacy
+/// bytes.
 pub(crate) fn name(key: &[u8]) -> Option<String> {
+    if let Some(bytes) = legacy(key) {
+        return name(&bytes);
+    }
     const NAMES: [&str; 27] = [
         "enter",
         "tab",
@@ -207,5 +259,43 @@ mod tests {
         assert!(Grab::new(ConnId(1), None, "q").is_err());
         assert!(Grab::new(ConnId(1), None, "ctrl+xx").is_err());
         assert!(Grab::new(ConnId(1), None, "f2").is_ok());
+    }
+
+    #[test]
+    fn csi_u_and_modify_other_keys_are_named() {
+        for (bytes, expected) in [
+            (&b"\x1b[116;5u"[..], Some("ctrl+t")),
+            (b"\x1b[116;5:1u", Some("ctrl+t")),
+            (b"\x1b[116;69u", Some("ctrl+t")),
+            (b"\x1b[27;5;116~", Some("ctrl+t")),
+            (b"\x1b[93;5u", Some("ctrl+]")),
+            (b"\x1b[32;5u", Some("ctrl+space")),
+            (b"\x1b[120;3u", Some("alt+x")),
+            (b"\x1b[97;2u", Some("A")),
+            (b"\x1b[13u", Some("enter")),
+            (b"\x1b[9;2u", Some("shift+tab")),
+            (b"\x1b[27u", Some("esc")),
+            (b"\x1b[116;5:3u", None),
+            (b"\x1b[116;6u", None),
+            (b"\x1b[116;9u", None),
+            (b"\x1b[57399u", None),
+        ] {
+            assert_eq!(name(bytes).as_deref(), expected, "{bytes:?}");
+        }
+    }
+
+    #[test]
+    fn the_escape_releases_in_any_encoding() {
+        let grab = Grab::new(ConnId(1), None, ESCAPE).unwrap();
+        for escape in [&b"\x1b[116;5u"[..], b"\x1b[116;5:2u", b"\x1b[27;5;116~"] {
+            let sorted = grab.sort(&[b"a", escape, b"b"].concat());
+            assert!(sorted.released, "{escape:?}");
+            assert_eq!(sorted.taken, [(Some("a".into()), b"a".to_vec())]);
+            assert_eq!(sorted.forward, b"b");
+        }
+        // Its release event is not the escape.
+        let sorted = grab.sort(b"\x1b[116;5:3u");
+        assert!(!sorted.released);
+        assert_eq!(sorted.taken, [(None, b"\x1b[116;5:3u".to_vec())]);
     }
 }

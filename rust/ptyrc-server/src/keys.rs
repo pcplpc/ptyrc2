@@ -164,7 +164,8 @@ fn named(key: &str, app_cursor: bool) -> Option<Vec<u8>> {
     })
 }
 
-fn ctrl(rest: &str) -> Option<u8> {
+/// The control byte of `ctrl+<rest>`.
+pub(crate) fn ctrl(rest: &str) -> Option<u8> {
     if rest == "space" {
         return Some(0);
     }
