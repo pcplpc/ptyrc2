@@ -2148,6 +2148,23 @@ fn resized_pane_keeps_its_frame() {
 }
 
 #[test]
+fn resized_pane_with_little_text_keeps_its_frame() {
+    // An empty shell: one prompt row cannot tell the pane by content.
+    let shell = |cols: u16, rows: u16| {
+        let mut g = Grid::new(cols, rows);
+        put(&mut g, 0, 0, "$ ");
+        g
+    };
+    let mut s = Sim::new();
+    s.settle(&shell(COLS, 14));
+    let id = s.pane().id;
+    let ev = s.feed(&shell(COLS - 20, 10), 100);
+    assert!(ev.contains(&FrameEvent::Attached { frame: id }), "{ev:?}");
+    assert_eq!(s.pane().id, id);
+    assert_eq!(s.panes().len(), 1);
+}
+
+#[test]
 fn transcript_with_prompt_box() {
     // A coding-agent TUI: a transcript that scrolls, a prompt between two
     // rules, a status line.

@@ -1154,6 +1154,7 @@ impl Frames {
         input: Option<&ScreenInput>,
         skip: &[FrameId],
         by_content: bool,
+        left_at: Option<Duration>,
     ) -> Option<FrameId> {
         let rect = leaf.rect();
         // `by_content`: the key cannot tell the candidates apart. Without
@@ -1214,7 +1215,39 @@ impl Frames {
                 return best.map(|b| b.0);
             }
         }
-        None
+        // Too little text to tell (an empty shell resized): the one pane
+        // that left the screen at this very layout, of the same key and
+        // overlapping, is this one.
+        let now = left_at?;
+        if leaf.kind() != FrameKind::Pane {
+            return None;
+        }
+        let inked = self
+            .hashes_for(rect, 0, 0)
+            .iter()
+            .filter(|h| **h != screen::BLANK)
+            .count();
+        if inked >= 2 {
+            return None;
+        }
+        let mut heirs = self.panes.values().filter(|p| {
+            p.state == FrameState::Inactive
+                && p.kind == FrameKind::Pane
+                && p.alt == self.alt
+                && p.last_active == now
+                && p.key == key
+                && !skip.contains(&p.id)
+                && {
+                    let x = p.rect.intersect(&rect);
+                    let small =
+                        (p.rect.w as u32 * p.rect.h as u32).min(rect.w as u32 * rect.h as u32);
+                    (x.w as u32 * x.h as u32) * 2 >= small
+                }
+        });
+        match (heirs.next(), heirs.next()) {
+            (Some(p), None) => Some(p.id),
+            _ => None,
+        }
     }
 
     fn attach(&mut self, id: FrameId, rect: Rect, now: Duration, ev: &mut Vec<FrameEvent>) {
@@ -1289,7 +1322,7 @@ impl Frames {
             if let Some(id) = keep {
                 self.resume(id);
                 active.push(id);
-            } else if let Some(id) = self.recognise(leaf, input, &active, false) {
+            } else if let Some(id) = self.recognise(leaf, input, &active, false, Some(now)) {
                 self.attach(id, leaf.rect(), now, ev);
                 active.push(id);
             } else {
@@ -1764,7 +1797,7 @@ impl Frames {
         let other = if same_key && !other_doc {
             None
         } else {
-            self.recognise(&leaf, input, &self.active, same_key)
+            self.recognise(&leaf, input, &self.active, same_key, None)
         };
         let next = if let Some(other) = other {
             self.deactivate(id, now, ev);
