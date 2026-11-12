@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+default_install_hook_types: [post-commit, pre-push]
+repos:
+  - repo: https://dev.archive.rip/ggs/only-vibes/rfc3161-git-hook
+    rev: c135516a105f2a76c81af7cdb8d0096d5c41a8ea
+    hooks:
+      - id: tsa-git-stamp
+      - id: tsa-git-stamp-missing
+      - id: tsa-git-push
