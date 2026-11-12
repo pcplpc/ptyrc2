@@ -1,55 +1,95 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Falling sand: a native effect. Grains fall from the top of the canvas,
-//! slide off slopes and pile on the walls the client gives.
+//! Falling sand: a native effect. A thin stream falls from one spout,
+//! piles on the app's text and on the floor, and avalanches.
+//!
+//! Grains are braille dots: a cell holds 2 x 4 of them.
 //!
 //! Effect `sand`, params:
 //!
-//! - `walls`: rows of text, top-left of the canvas; a cell that is not a
-//!   space holds the sand. Absent: only the floor does.
-//! - `rate`: grains per second (default 30).
-//! - `colors`: grain colours (default: sand tones).
+//! - `rate`: grains per second (default 120).
+//! - `cursor`: the spout is over the cursor's column (default false).
+//! - `colors`: strata; the stream goes from one to the next and around
+//!   (default: sand tones).
+//! - `color_ms`: time from one colour to the next (default 20000).
+//! - `walls`: rows of text standing for the app's, until the app is seen.
 //! - `duration_ms`: life of the effect. Absent: until removed.
 //! - `seed`.
 //!
-//! An effect does not see the screen: the client reads the frame's text,
-//! passes it as `walls`, and starts the effect again when the text
-//! changes.
+//! Walls: every cell of the frame's view that is not a space, read at
+//! each render. A cell that gets text loses its grains; one that loses
+//! its text lets them fall. A resize keeps the grains, top-left fixed;
+//! those outside are lost.
+//!
+//! Spout: the topmost free cell of a column. Chosen near the middle,
+//! over text, away from the ends of the run it lands on; kept while it
+//! stays so; moved when the pile reaches it. With `cursor`: the cursor's
+//! column, unless the cursor is outside the canvas or on column 0.
+//!
+//! Step (12 ms), a grain, bottom row first:
+//!
+//! 1. falls one dot when the dot below is free;
+//! 2. else, awake, slides down a diagonal, or half the time rolls two
+//!    dots aside and one down; on a one-dot drop it may stop and sleep;
+//! 3. else, asleep, topples only off a drop of three dots.
+//!
+//! A grain that moves wakes the three above it: a toppling grain starts
+//! an avalanche.
 
 use ptyrc_core::plugin::{DrawExt, FnDoc};
-use ptyrc_core::scene::{Canvas, ColorSpec, Effect, EffectFactory, Rng, SpriteSpec, StyleSpec};
+use ptyrc_core::scene::{
+    Canvas, ColorSpec, Effect, EffectFactory, Rng, SpriteSpec, StyleSpec, Under,
+};
 use ptyrc_vt::Color;
 use serde::Deserialize;
 use std::time::Duration;
 
-/// One simulation step.
-const STEP_MS: u64 = 50;
+/// One simulation step: a falling grain moves one dot.
+const STEP_MS: u64 = 12;
+/// Time between two renders.
+const FRAME_MS: u64 = 48;
 /// Steps run by one render at most: a late render does not freeze.
-const CATCH_UP: u64 = 8;
+const CATCH_UP: u64 = 16;
 /// Canvas cells at most.
-const MAX_CELLS: usize = 1 << 20;
-
-const FALLING: &str = "░";
-const RESTING: &str = "▒";
+const MAX_CELLS: usize = 1 << 18;
+/// Dots of a cell.
+const DW: usize = 2;
+const DH: usize = 4;
+/// Shades between two colours, at most.
+const SHADES: usize = 16;
+/// A sleeping grain topples off a drop of this many dots.
+const CLIFF: usize = 3;
+/// Chance, of 256, that a grain sliding off a one-dot drop stops.
+const FRICTION: u64 = 96;
+/// Steps a spout stays choked before it moves.
+const CHOKE: u32 = 60;
 
 #[derive(Deserialize)]
 #[serde(default)]
 struct Params {
     walls: Vec<String>,
     rate: f64,
+    cursor: bool,
     colors: Vec<ColorSpec>,
+    color_ms: u64,
     duration_ms: Option<u64>,
     seed: u64,
 }
 
 impl Default for Params {
     fn default() -> Params {
+        let rgb = |v: u32| ColorSpec(Color::Rgb((v >> 16) as u8, (v >> 8) as u8, v as u8));
         Params {
             walls: Vec::new(),
-            rate: 30.0,
-            colors: [178, 179, 180, 214, 220, 221, 222]
-                .iter()
-                .map(|n| ColorSpec(Color::Indexed(*n)))
-                .collect(),
+            rate: 120.0,
+            cursor: false,
+            colors: [
+                0xe8c98a, 0xd9a65a, 0xc47f3c, 0xa65a32, 0xc9825e, 0xe6b89a, 0xf0dcb4, 0xcdb27a,
+                0x9c8a5c, 0xd6b25e,
+            ]
+            .into_iter()
+            .map(rgb)
+            .collect(),
+            color_ms: 20_000,
             duration_ms: None,
             seed: 1,
         }
@@ -57,112 +97,398 @@ impl Default for Params {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Spot {
+enum Dot {
     Free,
     Wall,
-    /// A grain: colour index, and whether it moved in the last step.
+    /// Shade, and whether it is awake.
     Grain(u8, bool),
+}
+
+/// RGB of a colour of the 256 palette above the 16 of the terminal.
+fn rgb(color: Color) -> Option<[u8; 3]> {
+    match color {
+        Color::Rgb(r, g, b) => Some([r, g, b]),
+        Color::Indexed(n @ 16..=231) => {
+            let n = n - 16;
+            let level = |v: u8| if v == 0 { 0 } else { 55 + 40 * v };
+            Some([level(n / 36), level(n / 6 % 6), level(n % 6)])
+        }
+        Color::Indexed(n @ 232..) => Some([8 + 10 * (n - 232); 3]),
+        _ => None,
+    }
+}
+
+/// `colors` as a ring of shades: `per` steps from each to the next.
+fn shades(colors: &[ColorSpec]) -> (Vec<Color>, usize) {
+    let per = (250 / colors.len()).clamp(1, SHADES);
+    let mut out = Vec::with_capacity(colors.len() * per);
+    for (i, from) in colors.iter().enumerate() {
+        let to = colors[(i + 1) % colors.len()].0;
+        for k in 0..per {
+            out.push(match (rgb(from.0), rgb(to)) {
+                (Some(a), Some(b)) if k > 0 => {
+                    let mix =
+                        |j: usize| ((a[j] as usize * (per - k) + b[j] as usize * k) / per) as u8;
+                    Color::Rgb(mix(0), mix(1), mix(2))
+                }
+                _ => from.0,
+            });
+        }
+    }
+    (out, per)
+}
+
+/// Where the stream starts: a cell, and whether text lies under it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Spout {
+    x: usize,
+    y: usize,
+    on_text: bool,
 }
 
 /// The pile. Public for tests and for other extensions.
 pub struct Sand {
     params: Params,
     rng: Rng,
+    shades: Vec<Color>,
+    per: usize,
+    /// Canvas, in cells.
     w: usize,
     h: usize,
-    spots: Vec<Spot>,
+    /// `w * DW` by `h * DH`.
+    dots: Vec<Dot>,
+    /// The app's rows, and whether they changed since the walls were set.
+    rows: Vec<String>,
+    stale: bool,
+    cursor: Option<(u16, u16)>,
+    spout: Option<Spout>,
+    choked: u32,
     steps: u64,
     /// Grains owed by the rate, fractional.
     owed: f64,
 }
 
 impl Sand {
-    fn new(params: Params) -> Sand {
+    fn new(mut params: Params) -> Sand {
+        let (shades, per) = shades(&params.colors);
         Sand {
             rng: Rng::new(params.seed),
+            rows: std::mem::take(&mut params.walls),
             params,
+            shades,
+            per,
             w: 0,
             h: 0,
-            spots: Vec::new(),
+            dots: Vec::new(),
+            stale: true,
+            cursor: None,
+            spout: None,
+            choked: 0,
             steps: 0,
             owed: 0.0,
         }
     }
 
-    /// A new canvas size: an empty pile between the walls.
-    fn reset(&mut self, w: usize, h: usize) {
-        self.w = w;
-        self.h = h;
-        self.spots = vec![Spot::Free; w * h];
-        for (y, row) in self.params.walls.iter().take(h).enumerate() {
-            let mut x = 0usize;
-            for ch in row.chars() {
-                let width = ptyrc_vt::char_width(ch).max(1) as usize;
-                for k in 0..width {
-                    if ch != ' ' && x + k < w {
-                        self.spots[y * w + x + k] = Spot::Wall;
-                    }
-                }
-                x += width;
-            }
-        }
+    fn at(&self, x: usize, y: usize) -> Dot {
+        self.dots[y * self.w * DW + x]
+    }
+
+    fn set(&mut self, x: usize, y: usize, dot: Dot) {
+        let i = y * self.w * DW + x;
+        self.dots[i] = dot;
     }
 
     fn free(&self, x: usize, y: usize) -> bool {
-        self.spots[y * self.w + x] == Spot::Free
+        self.at(x, y) == Dot::Free
+    }
+
+    /// Whether the cell is text.
+    fn wall(&self, x: usize, y: usize) -> bool {
+        self.at(x * DW, y * DH) == Dot::Wall
     }
 
     /// Grains in the pile.
     pub fn grains(&self) -> usize {
-        self.spots
+        self.dots
             .iter()
-            .filter(|s| matches!(s, Spot::Grain(..)))
+            .filter(|d| matches!(d, Dot::Grain(..)))
             .count()
     }
 
-    fn step(&mut self) {
+    /// A new canvas size: the grains stay where they are.
+    fn resize(&mut self, w: usize, h: usize) {
+        let mut dots = vec![Dot::Free; w * DW * h * DH];
+        for y in 0..(h.min(self.h) * DH) {
+            for x in 0..(w.min(self.w) * DW) {
+                if let grain @ Dot::Grain(..) = self.at(x, y) {
+                    dots[y * w * DW + x] = grain;
+                }
+            }
+        }
+        (self.w, self.h, self.dots) = (w, h, dots);
+        self.stale = true;
+    }
+
+    /// Set the walls from `rows`: new text eats the grains under it.
+    fn build(&mut self) {
         let (w, h) = (self.w, self.h);
-        // Bottom up, so a grain moves once per step.
+        let mut walls = vec![false; w * h];
+        for (y, row) in self.rows.iter().take(h).enumerate() {
+            let mut x = 0usize;
+            for ch in row.chars() {
+                let width = ptyrc_vt::char_width(ch).max(1) as usize;
+                for k in x..(x + width).min(w) {
+                    walls[y * w + k] = ch != ' ';
+                }
+                x += width;
+            }
+        }
+        for (i, wall) in walls.into_iter().enumerate() {
+            let (cx, cy) = (i % w, i / w);
+            if wall == self.wall(cx, cy) {
+                continue;
+            }
+            let dot = if wall { Dot::Wall } else { Dot::Free };
+            for y in cy * DH..(cy + 1) * DH {
+                for x in cx * DW..(cx + 1) * DW {
+                    self.set(x, y, dot);
+                }
+            }
+        }
+        self.stale = false;
+    }
+
+    /// The spout of column `x`: its topmost free cell.
+    fn spout_of(&self, x: usize) -> Option<Spout> {
+        let y = (0..self.h).find(|y| !self.wall(x, *y))?;
+        let on_text = (y..self.h).any(|y| self.wall(x, y));
+        Some(Spout { x, y, on_text })
+    }
+
+    /// Whether a grain fits in the first dot row of the spout.
+    fn open(&self, s: &Spout) -> bool {
+        (0..DW).any(|k| self.free(s.x * DW + k, s.y * DH))
+    }
+
+    /// The best spout: open, near the middle, high, over text, with room
+    /// to fall, far from the ends of the run of text it lands on.
+    fn pick(&self) -> Option<Spout> {
+        let w = self.w as i64;
+        (0..self.w)
+            .filter_map(|x| self.spout_of(x))
+            .filter(|s| self.open(s))
+            .min_by_key(|s| {
+                let mut cost = (2 * s.x as i64 + 1 - w).abs() + 8 * s.y as i64;
+                match (s.y..self.h).find(|y| self.wall(s.x, *y)) {
+                    None => cost += 2 * w,
+                    Some(ground) => {
+                        if ground - s.y < 2 {
+                            cost += w;
+                        }
+                        let run = |dx: i64| {
+                            (1..4i64)
+                                .take_while(|k| {
+                                    let x = s.x as i64 + dx * k;
+                                    x >= 0 && x < w && self.wall(x as usize, ground)
+                                })
+                                .count() as i64
+                        };
+                        cost -= 2 * run(-1).min(run(1));
+                    }
+                }
+                cost
+            })
+    }
+
+    /// Keep the spout while it holds; else find one.
+    fn aim(&mut self) {
+        if self.params.cursor
+            && let Some((x, _)) = self.cursor
+            && x > 0
+            && (x as usize) < self.w
+        {
+            self.spout = self.spout_of(x as usize);
+            return;
+        }
+        let keep = self
+            .spout
+            .is_some_and(|s| s.x < self.w && self.spout_of(s.x) == Some(s) && self.open(&s));
+        if !keep {
+            self.spout = self.pick();
+            self.choked = 0;
+        }
+    }
+
+    /// Free dots under `(x, y)`, `CLIFF` at most.
+    fn drop(&self, x: usize, y: usize) -> usize {
+        (1..=CLIFF)
+            .take_while(|k| y + k < self.h * DH && self.free(x, y + k))
+            .count()
+    }
+
+    /// Where the grain at `(x, y)`, held from below, goes.
+    fn slide(&mut self, x: usize, y: usize, awake: bool) -> Option<(usize, usize)> {
+        let w = self.w * DW;
+        let side = |d: i64| {
+            let nx = x as i64 + d;
+            (nx >= 0 && nx < w as i64 && self.free(nx as usize, y)).then_some(nx as usize)
+        };
+        let fall = |nx: Option<usize>| nx.map_or(0, |nx| self.drop(nx, y));
+        let (left, right) = (side(-1), side(1));
+        let (dl, dr) = (fall(left), fall(right));
+        let coin = self.rng.next_u64();
+        let need = if awake { 1 } else { CLIFF };
+        if dl.max(dr) >= need {
+            let go_left = dl > dr || (dl == dr && coin & 1 == 0);
+            let (nx, depth) = if go_left { (left, dl) } else { (right, dr) };
+            if awake && depth == 1 && (coin >> 8) & 0xff < FRICTION {
+                return None;
+            }
+            return nx.map(|nx| (nx, y + 1));
+        }
+        if !awake || coin & 2 == 0 {
+            return None;
+        }
+        // Roll: over one dot of flat ground, then down.
+        let roll = |near: Option<usize>, d: i64| {
+            let nx = near? as i64 + d;
+            (nx >= 0 && nx < w as i64)
+                .then_some(nx as usize)
+                .filter(|nx| self.free(*nx, y) && self.free(*nx, y + 1))
+        };
+        let (l, r) = (roll(left, -1), roll(right, 1));
+        let nx = match (l, r) {
+            (Some(l), Some(r)) => Some(if coin & 4 == 0 { l } else { r }),
+            (l, r) => l.or(r),
+        };
+        nx.map(|nx| (nx, y + 1))
+    }
+
+    fn step(&mut self) {
+        let (w, h) = (self.w * DW, self.h * DH);
+        // Bottom up, so a grain moves once per step; the sweep changes
+        // side each step, so neither is favoured.
+        let reverse = self.steps & 1 == 1;
         for y in (0..h).rev() {
-            for x in 0..w {
-                let Spot::Grain(color, _) = self.spots[y * w + x] else {
+            for i in 0..w {
+                let x = if reverse { w - 1 - i } else { i };
+                let Dot::Grain(shade, awake) = self.at(x, y) else {
                     continue;
                 };
-                let mut to = None;
-                if y + 1 < h {
-                    if self.free(x, y + 1) {
-                        to = Some(x);
-                    } else {
-                        // Slide: the side and the cell below it are free.
-                        let left = x > 0 && self.free(x - 1, y) && self.free(x - 1, y + 1);
-                        let right = x + 1 < w && self.free(x + 1, y) && self.free(x + 1, y + 1);
-                        to = match (left, right) {
-                            (true, true) if self.rng.next_u64() & 1 == 0 => Some(x - 1),
-                            (true, false) => Some(x - 1),
-                            (_, true) => Some(x + 1),
-                            _ => None,
-                        };
+                let to = if y + 1 == h {
+                    None
+                } else if self.free(x, y + 1) {
+                    Some((x, y + 1))
+                } else {
+                    self.slide(x, y, awake)
+                };
+                let Some((nx, ny)) = to else {
+                    if awake {
+                        self.set(x, y, Dot::Grain(shade, false));
                     }
-                }
-                match to {
-                    Some(nx) => {
-                        self.spots[y * w + x] = Spot::Free;
-                        self.spots[(y + 1) * w + nx] = Spot::Grain(color, true);
+                    continue;
+                };
+                self.set(x, y, Dot::Free);
+                self.set(nx, ny, Dot::Grain(shade, true));
+                if y > 0 {
+                    for ax in x.saturating_sub(1)..(x + 2).min(w) {
+                        if let Dot::Grain(s, false) = self.at(ax, y - 1) {
+                            self.set(ax, y - 1, Dot::Grain(s, true));
+                        }
                     }
-                    None => self.spots[y * w + x] = Spot::Grain(color, false),
                 }
             }
         }
-        self.owed += self.params.rate * STEP_MS as f64 / 1000.0;
+        self.pour();
+        self.steps += 1;
+    }
+
+    /// Let the grains owed out of the spout.
+    fn pour(&mut self) {
+        let per_step = self.params.rate * STEP_MS as f64 / 1000.0;
+        self.owed += per_step;
+        let Some(spout) = self.spout else {
+            self.owed = self.owed.fract();
+            return;
+        };
+        let ms = self.steps * STEP_MS;
+        let shade = (ms as u128 * self.per as u128 / self.params.color_ms as u128
+            % self.shades.len() as u128) as u8;
+        // A stream wider than the spout when the rate asks for it.
+        let width = (per_step.ceil() as i64).max(DW as i64);
+        let y = spout.y * DH;
+        let owing = self.owed >= 1.0;
+        let mut poured = false;
         while self.owed >= 1.0 {
             self.owed -= 1.0;
-            let x = (self.rng.next_u64() % w as u64) as usize;
-            if self.free(x, 0) {
-                let color = (self.rng.next_u64() % self.params.colors.len() as u64) as u8;
-                self.spots[x] = Spot::Grain(color, true);
+            let start = (self.rng.next_u64() % width as u64) as i64;
+            let x = (0..width)
+                .map(|k| spout.x as i64 * DW as i64 - (width - DW as i64) / 2 + (start + k) % width)
+                .filter(|x| *x >= 0 && *x < (self.w * DW) as i64)
+                .map(|x| x as usize)
+                .find(|x| self.free(*x, y));
+            match x {
+                Some(x) => {
+                    self.set(x, y, Dot::Grain(shade, true));
+                    poured = true;
+                }
+                None => break,
             }
         }
-        self.steps += 1;
+        self.owed = self.owed.fract();
+        if poured {
+            self.choked = 0;
+        } else if owing {
+            self.choked += 1;
+            if self.choked > CHOKE {
+                // The pile reached the spout: pour elsewhere.
+                self.choked = 0;
+                self.aim();
+            }
+        }
+    }
+
+    /// The braille glyph of a cell and its colour: the mean of its
+    /// grains, so strata blend across a cell; of its top grain when a
+    /// colour has no RGB.
+    fn glyph(&self, cx: usize, cy: usize) -> Option<(char, Color)> {
+        // Dots 1-2-3-7 on the left, 4-5-6-8 on the right.
+        const BITS: [[u32; DW]; DH] = [[0x01, 0x08], [0x02, 0x10], [0x04, 0x20], [0x40, 0x80]];
+        let mut bits = 0;
+        let mut top = None;
+        let (mut sum, mut mixed) = ([0u32; 3], 0u32);
+        for (dy, row) in BITS.iter().enumerate() {
+            for (dx, bit) in row.iter().enumerate() {
+                if let Dot::Grain(s, _) = self.at(cx * DW + dx, cy * DH + dy) {
+                    bits |= bit;
+                    let color = self.shades[s as usize];
+                    top.get_or_insert(color);
+                    if let Some(c) = rgb(color) {
+                        sum.iter_mut().zip(c).for_each(|(a, b)| *a += b as u32);
+                        mixed += 1;
+                    }
+                }
+            }
+        }
+        let color = if mixed == bits.count_ones() && mixed > 0 {
+            let mean = |j: usize| ((sum[j] + mixed / 2) / mixed) as u8;
+            Color::Rgb(mean(0), mean(1), mean(2))
+        } else {
+            top?
+        };
+        Some((char::from_u32(0x2800 + bits)?, color))
+    }
+
+    fn draw(&self, canvas: &mut Canvas) {
+        let mut text = [0u8; 4];
+        for cy in 0..self.h {
+            for cx in 0..self.w {
+                if let Some((glyph, color)) = self.glyph(cx, cy) {
+                    let style = StyleSpec::fg(color);
+                    canvas.put(cx as i32, cy as i32, glyph.encode_utf8(&mut text), &style);
+                }
+            }
+        }
     }
 }
 
@@ -177,7 +503,13 @@ impl Effect for Sand {
             return true;
         }
         if (w, h) != (self.w, self.h) {
-            self.reset(w, h);
+            self.resize(w, h);
+        }
+        if self.stale {
+            self.build();
+            self.aim();
+        } else if self.params.cursor {
+            self.aim();
         }
         let due = ms / STEP_MS;
         if due > self.steps + CATCH_UP {
@@ -186,20 +518,24 @@ impl Effect for Sand {
         while self.steps < due {
             self.step();
         }
-        for y in 0..h {
-            for x in 0..w {
-                if let Spot::Grain(color, moving) = self.spots[y * w + x] {
-                    let style = StyleSpec::fg(self.params.colors[color as usize].0);
-                    let glyph = if moving { FALLING } else { RESTING };
-                    canvas.put(x as i32, y as i32, glyph, &style);
-                }
-            }
-        }
+        self.draw(canvas);
         true
     }
 
     fn period(&self) -> Duration {
-        Duration::from_millis(STEP_MS)
+        Duration::from_millis(FRAME_MS)
+    }
+
+    fn looks(&self) -> bool {
+        true
+    }
+
+    fn look(&mut self, under: &Under) {
+        if self.rows != under.rows {
+            self.rows = under.rows.to_vec();
+            self.stale = true;
+        }
+        self.cursor = under.cursor;
     }
 }
 
@@ -210,11 +546,14 @@ pub fn sand(params: &serde_json::Value) -> Result<Box<dyn Effect>, String> {
     } else {
         serde_json::from_value(params.clone()).map_err(|e| format!("sand: {e}"))?
     };
-    if params.colors.is_empty() || params.colors.len() > 255 {
-        return Err("sand: colors: 1 to 255 are needed".into());
+    if params.colors.is_empty() || params.colors.len() > 250 {
+        return Err("sand: colors: 1 to 250 are needed".into());
     }
     if !(params.rate.is_finite() && (0.0..=10_000.0).contains(&params.rate)) {
         return Err("sand: rate is out of range".into());
+    }
+    if params.color_ms == 0 {
+        return Err("sand: color_ms: at least 1".into());
     }
     Ok(Box::new(Sand::new(params)))
 }
@@ -243,75 +582,4 @@ impl DrawExt for SandExt {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    fn run(params: serde_json::Value, w: u16, h: u16, ms: u64) -> (Sand, Canvas) {
-        let params: Params = serde_json::from_value(params).unwrap();
-        let mut sand = Sand::new(params);
-        let mut canvas = Canvas::new(w, h);
-        for t in (0..=ms).step_by(STEP_MS as usize) {
-            canvas.clear();
-            assert!(sand.render(Duration::from_millis(t), &mut canvas));
-        }
-        (sand, canvas)
-    }
-
-    fn rows(sand: &Sand) -> Vec<String> {
-        (0..sand.h)
-            .map(|y| {
-                (0..sand.w)
-                    .map(|x| match sand.spots[y * sand.w + x] {
-                        Spot::Free => ' ',
-                        Spot::Wall => '#',
-                        Spot::Grain(..) => 'o',
-                    })
-                    .collect()
-            })
-            .collect()
-    }
-
-    #[test]
-    fn piles_on_the_floor_and_fills() {
-        let (sand, _) = run(json!({"rate": 200}), 10, 5, 20_000);
-        assert_eq!(sand.grains(), 50, "{:#?}", rows(&sand));
-    }
-
-    #[test]
-    fn walls_hold_the_sand() {
-        let walls = ["", "", "  ######", "", ""];
-        let (sand, _) = run(json!({"rate": 100, "walls": walls}), 10, 5, 20_000);
-        let rows = rows(&sand);
-        assert_eq!(rows[2], "oo######oo");
-        // Sand lies on the wall, and under it only what slid in.
-        assert_eq!(&rows[1][2..8], "oooooo");
-        assert_eq!(&rows[4][4..6], "  ", "{rows:#?}");
-    }
-
-    #[test]
-    fn same_seed_same_pile() {
-        let a = rows(&run(json!({"seed": 7}), 20, 8, 3000).0);
-        let b = rows(&run(json!({"seed": 7}), 20, 8, 3000).0);
-        let c = rows(&run(json!({"seed": 8}), 20, 8, 3000).0);
-        assert_eq!(a, b);
-        assert_ne!(a, c);
-    }
-
-    #[test]
-    fn a_late_render_catches_up_bounded() {
-        let mut sand = Sand::new(Params::default());
-        let mut canvas = Canvas::new(8, 4);
-        assert!(sand.render(Duration::from_secs(3600), &mut canvas));
-        assert_eq!(sand.steps, 3600 * 1000 / STEP_MS);
-    }
-
-    #[test]
-    fn ends_and_rejects() {
-        let (mut sand, mut canvas) = run(json!({"duration_ms": 500}), 8, 4, 400);
-        assert!(!sand.render(Duration::from_millis(500), &mut canvas));
-        assert!(super::sand(&json!({"colors": []})).is_err());
-        assert!(super::sand(&json!({"rate": -1})).is_err());
-        assert!(super::sand(&json!(null)).is_ok());
-    }
-}
+mod tests;
