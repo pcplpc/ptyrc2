@@ -8,6 +8,7 @@
 mod conn;
 pub mod driver;
 pub mod engine;
+mod hints;
 pub mod host;
 pub mod keys;
 pub mod pty;
@@ -15,7 +16,9 @@ mod rpc;
 pub mod screen;
 #[cfg(test)]
 mod screen_tests;
+pub mod start;
 
 pub use driver::{Config, run};
 pub use engine::{ConnId, Ctx, Engine, PassThrough, Reply, SessionInfo, Token};
 pub use screen::ScreenEngine;
+pub use start::{RunError, RunErrorKind};
