@@ -22,7 +22,7 @@ import random
 import time
 from collections.abc import Sequence
 
-from ptyrc import Frame, Pilot, PtyrcError, Sprite
+from ptyrc import Frame, Pilot, Sprite
 
 from . import _cli
 
@@ -47,23 +47,22 @@ def app(pilot: Pilot, args: argparse.Namespace) -> None:
     frame = _cli.pick(pilot, args.frame)
     patient = not args.now
     while end is None or time.monotonic() < end:
-        try:
-            rect = frame.refresh().rect
-            text = frame.text()
-        except PtyrcError as exc:
-            if exc.code != "no-frame":
-                raise
-            # The pane is gone (a layout change): choose again.
-            frame, sand = _cli.pick(pilot, args.frame), None
-            continue
-        if sand is not None and (text != walls or rect != shape):
-            # Someone uses the pane: give it back at once.
-            sand.remove()
-            sand, patient = None, True
-        if sand is None and frame.usable and (not patient or frame.is_idle):
-            walls, shape = text, rect
-            sand = pour(pilot, frame, walls, args.rate)
         time.sleep(POLL)
+        if sand is None and not isinstance(args.frame, int):
+            # A name is asked again until the sand falls: the most idle
+            # pane now may not be the one of a moment ago.
+            frame = _cli.pick(pilot, args.frame)
+        if not _cli.on_screen(frame):
+            continue  # out of sight: the sand, if any, waits with it
+        with _cli.in_sight():
+            rect, text = frame.rect, frame.text()
+            if sand is not None and (text != walls or rect != shape):
+                # Someone uses the pane: give it back at once.
+                sand.remove()
+                sand, patient = None, True
+            if sand is None and (not patient or frame.is_idle):
+                walls, shape = text, rect
+                sand = pour(pilot, frame, walls, args.rate)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

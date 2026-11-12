@@ -153,14 +153,16 @@ def app(pilot: Pilot, args: argparse.Namespace) -> None:
     apple: Sprite | None = None
     shown_apple = None
     for _ in _cli.ticks(1.0 / args.speed, args.seconds):
-        frame.refresh()
+        if not _cli.on_screen(frame):
+            continue
         box = view(frame)
-        game.step(box, walls_of(frame.text(), box[0], box[1]))
+        with _cli.in_sight():
+            game.step(box, walls_of(frame.text(), box[0], box[1]))
         if not game.body:
             continue  # a full screen: wait for room
         at, cells = game.picture()
         anchor = {"at": list(at), "space": "frame"}
-        with pilot.batch():
+        with _cli.in_sight(), pilot.batch():
             if snake is None:
                 snake = pilot.draw(cells=cells, frame=frame.id, at=at, space="frame")
             else:

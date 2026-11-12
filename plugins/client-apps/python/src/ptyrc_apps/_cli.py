@@ -4,13 +4,24 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
 import time
 from collections.abc import Callable, Iterator, Sequence
 
 from ptyrc import Frame, Pilot, PtyrcError
 
-__all__ = ["frame_arg", "hold", "parse", "parser", "pick", "run", "ticks"]
+__all__ = [
+    "frame_arg",
+    "hold",
+    "in_sight",
+    "on_screen",
+    "parse",
+    "parser",
+    "pick",
+    "run",
+    "ticks",
+]
 
 
 def parser(prog: str, description: str, frame: str = "raw") -> argparse.ArgumentParser:
@@ -99,3 +110,26 @@ def hold(pilot: Pilot, seconds: float | None = None) -> None:
     for `seconds`. Sprites live as long as the connection."""
     for _ in pilot.events("exit", timeout=seconds):
         return
+
+
+def on_screen(frame: Frame) -> bool:
+    """Refresh `frame`; False while it cannot be drawn on: out of sight
+    (another tmux window), or a new layout still settling. Its sprites
+    are kept by the driver and return with it."""
+    try:
+        return frame.refresh().usable
+    except PtyrcError as exc:
+        if exc.code != "no-frame":
+            raise
+        return False
+
+
+@contextlib.contextmanager
+def in_sight() -> Iterator[None]:
+    """Drop what is left of a step when its frame goes out of sight in
+    the middle of it; `on_screen` then waits for it."""
+    try:
+        yield
+    except PtyrcError as exc:
+        if exc.code != "not-usable":
+            raise

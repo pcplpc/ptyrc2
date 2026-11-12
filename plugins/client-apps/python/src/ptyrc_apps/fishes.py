@@ -115,12 +115,14 @@ def app(pilot: Pilot, args: argparse.Namespace) -> None:
     ]
     before = None
     for dt in _cli.ticks(TICK, args.seconds):
-        frame.refresh()  # the origin moves when the content scrolls
+        # Refreshed each tick: the origin moves when the content scrolls.
+        if not _cli.on_screen(frame):
+            continue
         box = tank(frame)
         at = pilot.cursor()
         cursor = frame.to_frame(at.x, at.y) if at.visible else None
         moving, before = cursor != before, cursor
-        with pilot.batch():
+        with _cli.in_sight(), pilot.batch():
             for fish in school:
                 swim(fish, dt, box, cursor, moving, rng)
                 x, y, glyph = fish.cell

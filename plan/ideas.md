@@ -114,3 +114,31 @@ Built: see "Heatmap" in `design.md`. Left:
 
 - Confetti party mode (`--spawn`) likely flickers less with the confetti
   and sparkles behind the text: use the back layer.
+
+## Client apps, second session
+
+Gaps met while writing the apps; none fixed in the core.
+
+- An effect cannot see the screen: `Effect::render` gets a canvas and a
+  time. The sand takes the pane's text as a `walls` parameter and is
+  started again when the text changes. An effect given the app cells
+  under its canvas would let it react by itself.
+- vim splits inside a tmux window are one pane. Reproduce:
+  `scripts/demo-frames.sh`, window 1 (`vim -u NONE -N -O a b` in a full
+  tmux window, 120x36). Expected: two panes, key `tmux:1:...`. Observed:
+  one pane `120x35+0+0`, no key, no `vim` support.
+- `less`, page down (space): the view lands on an island (origin
+  `0,100000`), `b` brings it back; line scrolls (`j`, `k`) are tracked.
+  Frame-anchored sprites stay behind on a page down. `fishes` clamps to
+  the new view, so the fishes jump.
+- A text-anchored sprite is centred on the word's row and clipped by the
+  view: a 7-row flower next to a word on the first rows loses its top.
+  An anchor that slides to stay whole would help.
+- `Frame.refresh` lists every frame to update one: use `frame.get`.
+- No event for idle or for a frame's text change: `sand` polls twice a
+  second.
+- `quietest` and `idle` name a pane at the time the sprite is added; an
+  app that waits for idle has to ask again (`sand` does).
+- Party mode behind busy text (120x40, two cells of three inked, one
+  burst of 64 over 3 s): 1493 host cells changed between 20 ms samples
+  on the back layer against 3681 in front, and none of them a text cell.

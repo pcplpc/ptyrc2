@@ -606,8 +606,26 @@ events), `Frame`, `Sprite` handles; mirrors the protocol one to one, plus
 `wait_for`, context managers and `Pilot.spawn(argv, headless=True)` for
 tests. `Frame.check_idle()` is the idle score, `Frame.is_idle` the
 boolean; both ask the driver when read. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
-`python -m ptyrc_apps.<name>` and `ptyrc-app <name>`: `confetti`,
-`flower`, `clock`, `fishes`, `snake`, `sand`.
+`python -m ptyrc_apps.<name>` and `ptyrc-app <name>`. Every app takes
+`-s SESSION` and `-f FRAME`; its sprites die with its connection.
+
+| app | default frame | what runs where |
+|---|---|---|
+| `confetti` | `raw` | native effect. `--spawn [--rate N]`: one request per burst, N a minute (20), until interrupted; back layer unless `--front` |
+| `clock` | `raw` | one `draw.update` a second; front layer |
+| `flower` | `raw` | text anchor and sway animation native; three requests in all |
+| `fishes` | `largest` | positions in frame coordinates, computed by the client, one batch every 100 ms; flee the cursor |
+| `snake` | `largest` | client: breadth-first search over the free cells of the view, one batch per move (12 a second); frame coordinates |
+| `sand` | `idle` | native effect `sand` (draw extension `sand`), walls sent once; the client polls the pane's text every 0.5 s, removes the sand when it changes and pours again once `is_idle` |
+
+Draw extension `sand`: effect `sand`, params `walls` (rows of text; a
+cell that is not a space holds the sand), `rate` (grains per second,
+30), `colors`, `duration_ms`, `seed`. 20 steps a second.
+
+`scripts/demo-apps.sh [snake] [--check]`: the apps on a scrolling vim
+buffer. `scripts/demo-frames.sh [--check]`: a tmux session of two
+windows under the driver, one drawing per pane, sand in the idle one.
+`--check` runs detached and asserts what is drawn.
 
 ## Tests
 
