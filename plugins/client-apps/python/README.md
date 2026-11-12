@@ -11,8 +11,16 @@ python -m ptyrc_apps.clock -s NAME
 
 | app | what it shows |
 |---|---|
-| `confetti` | a native effect started with one call |
+| `confetti` | a native effect started with one call; `--spawn [--rate N]`: a party, N bursts a minute (20 by default), behind the text |
 | `clock` | automatic placement, the front layer, a sprite updated in place, a draw extension |
+| `flower` | a drawing tied to a word (`near=`), opened by the client, then animated by the driver |
+| `fishes` | sprites in frame coordinates: they scroll with the text; the cursor read each tick; one batch per tick |
+| `snake` | the screen read as a map: glyphs are walls; one sprite redrawn in place each step |
+| `sand` | `Frame.is_idle` to choose a pane; a native simulation from a draw extension, with the pane's text as walls |
+
+`scripts/demo-apps.sh` runs them on a scrolling vim buffer;
+`scripts/demo-frames.sh` gives each pane of a tmux session its own
+drawing. Both take `--check`.
 
 ## Writing an app
 
@@ -45,9 +53,17 @@ What to know:
   from the right and bottom) or `space="frame"` (moves when the content
   scrolls); `near="word"` (follows the word); `auto="top-right"` (a free,
   still spot, chosen and kept by the driver); `cursor=(dx, dy)`.
-- **On what**: `frame=` an id or `raw`, `active`, `largest`, `quietest`.
-  `pilot.panes()` lists the panes found on screen; a pane is drawable once
-  it is `usable`.
+- **On what**: `frame=` an id or `raw`, `active`, `largest`, `quietest`,
+  `idle`. `pilot.panes()` lists the panes found on screen; a pane is
+  drawable once it is `usable`: a new layout settles for 1.5 s first.
+  `_cli.pick` falls back to the raw frame where there is no pane.
+- **When the frame leaves**: a pane out of sight (another tmux window)
+  keeps its sprites; drawing on it answers `not-usable`. A loop starts
+  each step with `_cli.on_screen(frame)` and wraps it in
+  `_cli.in_sight()`.
+- **Idle**: `frame.is_idle` is true once 80 % of a pane has been still
+  for 10 s. A big animation waits for it, and leaves when the text
+  changes (`sand.py`).
 - **What**: `rows` (a space is transparent), `cells` (styled runs),
   `frames` (an animation the driver plays alone), `effect` (a native
   generator), `pilot.ext(...)` (a draw extension).
@@ -64,7 +80,11 @@ What to know:
   remembers outside its view), `pilot.cursor(trail=True)`,
   `pilot.events("screen", "cursor", "frames")`.
 
-`confetti.py` and `clock.py` are meant to be read first.
+`_cli.ticks(period)` paces a loop and yields the measured step;
+`_cli.hold(pilot)` keeps an app with nothing to send connected.
+
+Read `confetti.py` and `clock.py` first, then `flower.py`, `fishes.py`,
+`snake.py`, `sand.py`.
 
 ## Tests
 

@@ -19,6 +19,7 @@ ptyrc-tui-tmux = { path = "../../plugins/tui-support/tmux" }
 ptyrc-tui-agent = { path = "../../plugins/tui-support/agent-tui" }
 ptyrc-draw-shapes = { path = "../../plugins/draw-ext/shapes" }
 ptyrc-draw-bigtext = { path = "../../plugins/draw-ext/bigtext" }
+ptyrc-draw-sand = { path = "../../plugins/draw-ext/sand" }
 clap = { version = "4", features = ["derive"] }
 
 [dev-dependencies]
