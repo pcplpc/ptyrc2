@@ -5,16 +5,17 @@
 //!
 //! Effect `snow`, params:
 //!
-//! - `rate`: flakes per second over 80 columns (default 14).
-//! - `wind`: drift, columns per second, to the right (default 0.6).
+//! - `rate`: flakes per second over 80 columns (default 7).
+//! - `wind`: drift, columns per second, to the right (default -1).
 //! - `duration_ms`: life of the effect. Absent: until removed.
 //! - `seed`.
 //!
 //! `tune`: `rate`, `wind`, `duration_ms`; the flakes and the snow stay.
 //!
 //! A flake is near (bright) or far (slow, faint: drawn at half
-//! opacity). It sways as it falls, and is not drawn in the blank
-//! between two words.
+//! opacity, its glyph by its height in the cell). It sways as it
+//! falls, eases into a new wind in `EASE_MS`, and is not drawn in the
+//! blank between two words.
 //!
 //! Settling. A ledge is a cell without ink, and none beside it, over a
 //! cell with ink, over
@@ -23,7 +24,14 @@
 //! ledge over text with probability `TAKE`, any other always. It adds
 //! `GAIN` eighths to the cell, or to the lower of its two neighbours
 //! when that one is a ledge and lower by more than `GAIN`: drifts are
-//! smooth. A cell is drawn `▁` to `█`. The last cell of a column
+//! smooth. A cell is drawn `▁` to `█`.
+//!
+//! Slumping. The surface of the snow, in eighths over the bottom of the
+//! canvas, steps by `SLOPE` at most between two columns: the excess
+//! slides, `SLIDE` a second, into the neighbour cell, or the one under
+//! it, when that cell holds snow and is not warm, or off the end of a
+//! ledge, as flakes. Drifts form smooth piles; a cap on a line is
+//! rounded at its ends. The last cell of a column
 //! fills up, eight eighths, then holds `CAP` more in the cell above;
 //! text holds `CAP` eighths: a white cap on a line, a drift on the floor.
 //!
@@ -51,7 +59,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 /// Time between two renders.
-const FRAME_MS: u64 = 80;
+const FRAME_MS: u64 = 50;
 /// A late render advances the snow by this much at most.
 const CATCH_UP_MS: u64 = 400;
 /// Canvas cells at most.
@@ -59,9 +67,9 @@ const MAX_CELLS: usize = 1 << 18;
 /// Flakes at once, at most.
 const MAX_FLAKES: usize = 4096;
 /// Chance that a flake settles on a ledge over text.
-const TAKE: f64 = 0.25;
+const TAKE: f64 = 0.5;
 /// Eighths of a cell a flake adds.
-const GAIN: f32 = 2.0;
+const GAIN: f32 = 3.0;
 /// Eighths in a full cell.
 const FULL: f32 = 8.0;
 /// Eighths of snow on text, and on a full cell of snow, at most.
@@ -69,7 +77,13 @@ const CAP: f32 = 4.0;
 /// A full cell melts in this long.
 const MELT_MS: f32 = 1500.0;
 /// Lying snow loses an eighth in this long, on average.
-const THAW_MS: f64 = 30_000.0;
+const THAW_MS: f64 = 60_000.0;
+/// Steepest step of the surface between two columns, eighths.
+const SLOPE: f32 = 2.0;
+/// Share of the excess over `SLOPE` that slides in a second.
+const SLIDE: f32 = 4.0;
+/// A flake takes the new wind in about this long.
+const EASE_MS: f64 = 1500.0;
 /// Columns on each side of the cursor that are warm.
 const WARM: i64 = 3;
 /// Rows, and columns, of snow kept above and below the view.
@@ -86,7 +100,8 @@ const TURN: (f64, f64) = (0.15, 0.4);
 const FAINT: f32 = 0.5;
 /// Glyphs of a near flake as it turns, and of a far one.
 const FLAKES: [&str; 4] = ["*", "+", "*", "·"];
-const SPECK: &str = "·";
+/// Glyphs of a far flake: high, middle, low in its cell.
+const SPECKS: [&str; 3] = ["˙", "·", "."];
 /// Depths of a cell, one eighth to eight.
 const DRIFT: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 /// Colours: a near flake, a far one, the snow.
@@ -106,8 +121,8 @@ struct Params {
 impl Default for Params {
     fn default() -> Params {
         Params {
-            rate: 14.0,
-            wind: 0.6,
+            rate: 7.0,
+            wind: -1.0,
             duration_ms: None,
             seed: 1,
         }
@@ -121,6 +136,8 @@ struct Flake {
     y: f64,
     /// Rows per second.
     v: f64,
+    /// Columns per second.
+    drift: f64,
     phase: f64,
     turn: f64,
     far: bool,
@@ -131,6 +148,11 @@ impl Flake {
     fn col(&self, secs: f64) -> i64 {
         let turn = (self.phase + self.turn * secs) * std::f64::consts::TAU;
         (self.x + SWAY * turn.sin()).floor() as i64
+    }
+
+    /// Columns per second it tends to in the wind `wind`.
+    fn blown(&self, wind: f64) -> f64 {
+        wind * if self.far { 0.6 } else { 1.0 }
     }
 }
 
@@ -155,6 +177,10 @@ pub struct Snow {
     last: Option<u64>,
     /// Flakes owed, a fraction.
     owed: f64,
+    /// Eighths let go and not yet a flake.
+    loose: f32,
+    /// Slumping runs right to left on odd frames.
+    odd: bool,
 }
 
 impl Snow {
@@ -173,6 +199,8 @@ impl Snow {
             flakes: Vec::new(),
             last: None,
             owed: 0.0,
+            loose: 0.0,
+            odd: false,
         }
     }
 
@@ -220,12 +248,91 @@ impl Snow {
         if y + 1 >= self.h { FULL } else { CAP }
     }
 
-    /// Snow may lie in `(x, y)`: free, a cell away from the text of its
-    /// row, held, and with room.
-    fn ledge(&self, x: usize, y: usize) -> bool {
+    /// Snow may lie in `(x, y)`: a cell away from the text of its row,
+    /// and held.
+    fn bed(&self, x: usize, y: usize) -> bool {
         let text = self.wall(x, y) || self.wall(x + 1, y) || (x > 0 && self.wall(x - 1, y));
-        let clear = !text;
-        clear && self.held(x, y) && self.depth(x, y) < self.room(y)
+        !text && self.held(x, y)
+    }
+
+    /// A bed with room.
+    fn ledge(&self, x: usize, y: usize) -> bool {
+        self.bed(x, y) && self.depth(x, y) < self.room(y)
+    }
+
+    /// Eighths from the bottom of the canvas to the top of the snow in
+    /// `(x, y)`.
+    fn surface(&self, x: usize, y: usize) -> f32 {
+        (self.h - 1 - y) as f32 * FULL + self.depth(x, y)
+    }
+
+    /// Snow melts in `(x, y)`: it, or what holds it, changed lately, or
+    /// the cursor is near.
+    fn warm(&self, x: usize, y: usize) -> bool {
+        let cursor = self.cursor.is_some_and(|(cx, cy)| {
+            let (dx, dy) = (cx as i64 - x as i64, cy as i64 - y as i64);
+            dx.abs() <= WARM && (0..=1).contains(&dy)
+        });
+        cursor || self.seen(&self.hot, x, y) || self.seen(&self.hot, x, y + 1)
+    }
+
+    /// Steps steeper than `SLOPE` slide down, a share each frame.
+    fn slump(&mut self, dt: f64) {
+        let share = (SLIDE * dt as f32).min(1.0);
+        if share <= 0.0 {
+            return;
+        }
+        self.odd = !self.odd;
+        let cols: Vec<usize> = if self.odd {
+            (0..self.w).rev().collect()
+        } else {
+            (0..self.w).collect()
+        };
+        for y in 0..self.h {
+            for &x in &cols {
+                // Only the top of a stack slides.
+                if self.depth(x, y) <= 0.0 || (y > 0 && self.depth(x, y - 1) > 0.0) {
+                    continue;
+                }
+                let sides = if self.odd {
+                    [x + 1, x.wrapping_sub(1)]
+                } else {
+                    [x.wrapping_sub(1), x + 1]
+                };
+                for nx in sides {
+                    if nx >= self.w {
+                        continue;
+                    }
+                    let Some(ny) = [y, y + 1]
+                        .into_iter()
+                        .find(|&ny| ny < self.h && self.bed(nx, ny))
+                    else {
+                        // The end of a ledge, over the air: the excess
+                        // falls off it.
+                        if !self.wall(nx, y) && !self.held(nx, y) {
+                            let moved = (self.depth(x, y) - SLOPE) / 2.0 * share;
+                            if moved > 0.0 {
+                                self.put(x, y, self.depth(x, y) - moved);
+                                self.let_go(nx, y, moved);
+                            }
+                        }
+                        continue;
+                    };
+                    if self.warm(nx, ny) {
+                        continue;
+                    }
+                    let (top, low) = (self.surface(x, y), self.surface(nx, ny));
+                    let space = self.room(ny) - self.depth(nx, ny);
+                    let moved = ((top - low - SLOPE) / 2.0 * share)
+                        .min(self.depth(x, y))
+                        .min(space);
+                    if moved > 0.0 {
+                        self.put(x, y, self.depth(x, y) - moved);
+                        self.put(nx, ny, self.depth(nx, ny) + moved);
+                    }
+                }
+            }
+        }
     }
 
     /// A flake comes to rest in `(x, y)`.
@@ -253,6 +360,7 @@ impl Snow {
                 x: self.rng.range(0.0, self.w as f64),
                 y: 0.0,
                 v: self.rng.range(lo, hi),
+                drift: self.params.wind * if far { 0.6 } else { 1.0 },
                 phase: self.rng.unit(),
                 turn: self.rng.range(TURN.0, TURN.1),
                 far,
@@ -263,11 +371,13 @@ impl Snow {
 
     fn fall(&mut self, secs: f64, dt: f64) {
         let (w, h) = (self.w as i64, self.h);
+        let ease = 1.0 - (-dt * 1000.0 / EASE_MS).exp();
         let mut flakes = std::mem::take(&mut self.flakes);
         flakes.retain_mut(|f| {
             let from = f.y as usize;
             f.y += f.v * dt;
-            f.x += self.params.wind * dt * if f.far { 0.6 } else { 1.0 };
+            f.drift += (f.blown(self.params.wind) - f.drift) * ease;
+            f.x += f.drift * dt;
             let x = f.col(secs);
             if x < 0 || x >= w {
                 // Blown out: it comes back by the other side.
@@ -298,6 +408,27 @@ impl Snow {
         self.flakes = flakes;
     }
 
+    /// `eighths` of snow fall from `(x, y)` as flakes; a remainder waits.
+    fn let_go(&mut self, x: usize, y: usize, eighths: f32) {
+        self.loose += eighths;
+        let n = (self.loose / GAIN).round().max(0.0);
+        self.loose -= n * GAIN;
+        for k in 0..n as usize {
+            if self.flakes.len() < MAX_FLAKES {
+                let flake = Flake {
+                    x: x as f64 + 0.5,
+                    y: y as f64 + 0.3 * k as f64,
+                    v: self.rng.range(NEAR.0, NEAR.1) * 1.5,
+                    drift: 0.0,
+                    phase: self.rng.unit(),
+                    turn: self.rng.range(TURN.0, TURN.1),
+                    far: false,
+                };
+                self.flakes.push(flake);
+            }
+        }
+    }
+
     /// The snow in sight: written over, melting, or let go.
     fn weather(&mut self, dt: f64) {
         let melt = FULL * (dt * 1000.0) as f32 / MELT_MS;
@@ -314,27 +445,10 @@ impl Snow {
                 if !self.held(x, y) {
                     // Nothing under it: it falls again.
                     self.put(x, y, 0.0);
-                    for k in 0..(depth / GAIN).ceil() as usize {
-                        if self.flakes.len() < MAX_FLAKES {
-                            let flake = Flake {
-                                x: x as f64 + 0.5,
-                                y: y as f64 + 0.3 * k as f64,
-                                v: self.rng.range(NEAR.0, NEAR.1) * 1.5,
-                                phase: self.rng.unit(),
-                                turn: self.rng.range(TURN.0, TURN.1),
-                                far: false,
-                            };
-                            self.flakes.push(flake);
-                        }
-                    }
+                    self.let_go(x, y, depth);
                     continue;
                 }
-                let warm = self.cursor.is_some_and(|(cx, cy)| {
-                    let (dx, dy) = (cx as i64 - x as i64, cy as i64 - y as i64);
-                    dx.abs() <= WARM && (0..=1).contains(&dy)
-                });
-                let hot = self.seen(&self.hot, x, y) || self.seen(&self.hot, x, y + 1);
-                if warm || hot {
+                if self.warm(x, y) {
                     self.put(x, y, depth - melt);
                 } else if self.rng.unit() < dt * 1000.0 / THAW_MS {
                     self.put(x, y, depth - 1.0);
@@ -355,7 +469,8 @@ impl Snow {
             x < 1 || !(self.wall(x as usize - 1, y) && self.wall(x as usize + 1, y))
         };
         for f in self.flakes.iter().filter(|f| f.far).filter(open) {
-            canvas.put_faded(f.col(secs) as i32, f.y as i32, SPECK, &pale, FAINT);
+            let speck = SPECKS[((f.y.fract() * 3.0) as usize).min(2)];
+            canvas.put_faded(f.col(secs) as i32, f.y as i32, speck, &pale, FAINT);
         }
         for f in self.flakes.iter().filter(|f| !f.far).filter(open) {
             let face = ((f.phase + f.turn * secs) * 4.0) as usize % FLAKES.len();
@@ -391,6 +506,7 @@ impl Effect for Snow {
         self.last = Some(ms);
         let secs = ms as f64 / 1000.0;
         self.weather(dt);
+        self.slump(dt);
         self.spawn(dt);
         self.fall(secs, dt);
         self.draw(secs, canvas);
