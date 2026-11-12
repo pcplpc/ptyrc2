@@ -580,9 +580,11 @@ impl Ext {
         }
     }
 
-    /// The view shows lines of another island: the current one joins it.
+    /// The view shows lines of another island: the two become one. The
+    /// island of the lower rows keeps its coordinates (it is the older
+    /// one, or the one with absolute rows); the other is translated.
     fn merge_islands(&mut self, o: &Obs) {
-        if self.islands.len() < 2 || self.absolute {
+        if self.islands.len() < 2 || o.hint_oy.is_some() {
             return;
         }
         let (lo, hi) = self.islands[self.cur];
@@ -594,25 +596,32 @@ impl Ext {
         if votes < need(nb, 50, 3) || oy == self.oy {
             return;
         }
-        let delta = oy - self.oy;
-        self.shift_rows(lo, hi, delta);
-        self.oy = oy;
-        let gone = self.cur;
-        self.islands.remove(gone);
-        let (nlo, nhi) = (lo + delta, hi + delta);
-        match self
+        let (vlo, vhi) = (oy + a as i64, oy + b as i64 - 1);
+        let Some(other) = self
             .islands
             .iter()
-            .position(|(x, y)| nlo <= *y + 1 && nhi + 1 >= *x)
-        {
-            Some(i) => {
-                self.islands[i].0 = self.islands[i].0.min(nlo);
-                self.islands[i].1 = self.islands[i].1.max(nhi);
-                self.cur = i;
-            }
-            None => {
-                self.islands.push((nlo, nhi));
-                self.cur = self.islands.len() - 1;
+            .position(|(x, y)| vlo <= *y && vhi >= *x)
+            .filter(|i| *i != self.cur)
+        else {
+            return;
+        };
+        let (olo, ohi) = self.islands[other];
+        if olo < lo {
+            // The current island joins the other.
+            let delta = oy - self.oy;
+            self.shift_rows(lo, hi, delta);
+            self.oy = oy;
+            self.islands[other] = (olo.min(lo + delta), ohi.max(hi + delta));
+            self.islands.remove(self.cur);
+            self.cur = if other > self.cur { other - 1 } else { other };
+        } else {
+            // The other island joins the current one.
+            let delta = self.oy - oy;
+            self.shift_rows(olo, ohi, delta);
+            self.islands[self.cur] = (lo.min(olo + delta), hi.max(ohi + delta));
+            self.islands.remove(other);
+            if other < self.cur {
+                self.cur -= 1;
             }
         }
     }

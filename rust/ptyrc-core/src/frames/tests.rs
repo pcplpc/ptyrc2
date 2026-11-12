@@ -535,6 +535,29 @@ fn islands_merge_when_they_touch() {
 }
 
 #[test]
+fn walking_into_an_island_brings_it_home() {
+    // The main island keeps its rows; the island met on the way joins it.
+    let d = doc(400);
+    let mut s = Sim::new();
+    s.settle(&view(&d, 0, 20, &[]));
+    let id = s.pane().id;
+    s.feed(&view(&d, 150, 20, &[]), 300);
+    assert!(s.pane().origin[1] >= ext::ISLAND_GAP);
+    s.feed(&view(&d, 300, 20, &[]), 300);
+    assert!(s.pane().origin[1] >= 2 * ext::ISLAND_GAP);
+    // Back to the start, found in the buffer.
+    s.feed(&view(&d, 0, 20, &[]), 300);
+    assert_eq!(s.pane().origin, [0, 0]);
+    for top in (10..=380).step_by(10) {
+        s.feed(&view(&d, top, 20, &[]), 200);
+        assert_eq!(s.pane().origin, [0, top as i64], "at {top}");
+    }
+    s.idle(300);
+    assert_eq!(s.pane().extent, [0, 399]);
+    assert_eq!(s.f.text(id, 0, 400), d);
+}
+
+#[test]
 fn shell_output_scrolls_with_vt_events() {
     // One prompt line moving up: too little to align by content alone.
     let mut s = Sim::new();
