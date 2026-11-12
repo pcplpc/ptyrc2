@@ -228,17 +228,50 @@ origin. Each update compares the previous view content with the new one:
    non-blank rows. `VtEvent::Scroll` inside the rect seeds the candidates.
    Rows that stay put while the rest shifts are chrome: the scroll band is
    the largest run of rows that moves, learned over time.
+   **Feed**: no row aligns, but the emulator counted the scroll. The
+   distance is trusted when the rows went into the host scrollback (main
+   screen), or when the screen was fed as a tape: one direction, fewer
+   lines than the scrolled region has rows, no clear in the last 100 ms.
+   Then every line that went through is on screen before or after. A
+   pager's page down or up is such a feed (`less`, `man`, `more`: one
+   line less than the screen). A pager paints a jump by a clear, by
+   cursor addressing, or by feeding a whole screen or more: not a feed.
+   Under a feed, the last rows that did not travel are bottom chrome.
 2. **Horizontal scroll**: same on columns when rows changed with `dy = 0`.
 3. **Splice**: the top aligns at one shift and the bottom at another. `k`
    lines were inserted or deleted at the seam; the buffer is spliced and
    the rows below move.
 4. **Jump**: nothing aligns. The new rows are looked up in the buffer by
    line hash; the origin with the most votes wins. Otherwise a line-number
-   gutter (increasing integers at the left of consecutive rows), or a
-   plugin `view_hint`, gives the absolute row. Otherwise a new island is
-   allocated far below the known extent; when a later scroll shows an
-   island touching another, they are merged and their sprites translated.
+   gutter (increasing integers at the left of consecutive rows), a
+   plugin `view_hint`, or a status row gives the absolute row. Otherwise
+   a new island is allocated far below the known extent; when a later
+   scroll shows an island touching another, they are merged and what is
+   fixed on their rows, remembered or only on screen, is translated
+   (`shift`).
 5. **Edit**: none of the above. Visible lines are rewritten in place.
+
+Status row: `line N` or `lines N-M` on the last row of the pane or the
+row below it, under the cursor, starting in standout, on the alternate
+screen (`man`, `less -M`). It gives absolute rows and is bottom chrome.
+It is the weakest witness: after the gutter and the plugin. When it moves
+less than the rows did it counts file lines, not screen rows (wrapped
+lines): it is not read any more for that frame.
+
+A hint that says further than a scroll moved, or the other way, makes the
+scroll a jump to the hinted row: a jump fed in two bursts looks like two
+scrolls.
+
+A pane wiped (one non-blank row or none) starts an island. When the
+rows painted next are remembered elsewhere (half of them, three or more),
+the view is there and the empty island is given back: a clear and its
+repaint may come in two bursts.
+
+Islands: at most 8 per frame; the one shown least recently is forgotten
+with its lines. `extent` in the frame info, and `frame.text` without a
+range, are those of the island on screen. Rows placed by a hint within
+50000 rows of an island belong to it. A splice moves the rows of its own
+island only.
 
 The origin follows at once (sprites move in the burst that scrolls).
 Content enters the remembered buffer once it has been unchanged for
@@ -289,8 +322,10 @@ Further rules, from real apps:
 - The alternate screen has its own frames; those of the main screen come
   back when it is left.
 - A key given by a preset for the whole screen (a tmux window) prefixes
-  the keys of its panes. Presets are looked for on every change and held
-  4 s.
+  the keys of its panes. Presets are looked for when two rows or more
+  changed, when the title or the layout changed, else once a second; a
+  preset found is held 4 s and asked (chrome, hint, key) on every change.
+  A preset that knows the whole screen may segment on any change.
 - When nothing aligns, the emulator's scroll counts are trusted only if
   rows entered the host scrollback (a shell printing a lot at once).
 - A pane replaced whole twice within 3 s is a monitor (htop): rewritten
@@ -455,7 +490,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `screen.wait` | `pattern` or `stable_ms` or `gone`, `timeout_ms`, `frame` | `{"matched":bool,"match":...}` |
 | `input.send` | `text` or `keys` or `bytes` (base64), `paste` | `{}` |
 | `frame.list` | | `{"frames":[info,...],"layout":id}` |
-| `frame.text` | `frame`, `y0`, `y1` | `{"lines":[...],"y0":n}` remembered buffer |
+| `frame.text` | `frame`, `y0`, `y1` | `{"lines":[...],"y0":n}` remembered buffer; default: the island on screen |
 | `frame.heat` | `frame` | `{"rows":["0123...",...]}` |
 | `frame.get` | `frame` | `{"frame":info}` |
 | `frame.at` | `x`, `y`, or `name` | `{"frame":id,"pos":[x,y]}` |
@@ -515,12 +550,12 @@ tests. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
 
 ## Tests
 
-- `scripts/e2e-frames.sh`: frames on real vim, tmux, less, htop, a shell
-  and a stand-in agent TUI, in a detached tmux.
+- `scripts/e2e-frames.sh`: frames on real vim, tmux, less, man, more,
+  htop, a shell and a stand-in agent TUI, in a detached tmux.
 - `scripts/e2e-render.sh`: the driver in a detached tmux; what tmux shows
   is compared, text and styles, with the driver's model of the host.
 - `scripts/bench.sh`: throughput and key-echo latency, bare, transparent,
-  engine, engine with sprites.
+  engine, engine without presets, engine with sprites.
 
 - Rust unit tests per crate, `cargo test --workspace`.
 - `ptyrc-vt`: the repair property above; recorded streams of real programs.
