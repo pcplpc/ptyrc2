@@ -2185,3 +2185,108 @@ fn a_wide_front_glyph_needs_one_backdrop() {
     let out = render(&mut scene, &mock, &grid, 0);
     assert_eq!(out.text()[0], "ab界ef");
 }
+
+/// Two glyphs, one whole and one at half opacity; counts its renders.
+struct Fade(u32);
+
+impl Effect for Fade {
+    fn render(&mut self, _t: Duration, canvas: &mut Canvas) -> bool {
+        self.0 += 1;
+        let style = StyleSpec::fg(rgb(255, 255, 255));
+        canvas.put(0, 0, "a", &style);
+        canvas.put_faded(1, 0, "b", &style, 0.5);
+        canvas.put(2, 0, &self.0.to_string(), &style);
+        true
+    }
+}
+
+#[test]
+fn an_effect_fades_its_own_glyphs() {
+    let mock = Mock::new();
+    let mut scene = Scene::new();
+    scene.set_host_colors(host());
+    scene.register_effect("fade", Box::new(|_| Ok(Box::new(Fade(0)))));
+    for (layer, alpha) in [("back", 1.0), ("front", 1.0), ("front", 0.5)] {
+        scene.clear(None);
+        let fx = json!({"layer": layer, "alpha": alpha, "effect": {"name": "fade"}});
+        scene.add(1, spec(fx), ms(0)).unwrap();
+        scene.tick(ms(0), &mock);
+        let out = scene.compose(&base(), &mock);
+        assert_eq!(out.text()[0], "ab1");
+        // White at `alpha` on the host's background (20, 20, 40); the
+        // faded glyph at half of it.
+        let on = |a: f32| {
+            let mix = |bg: u8| (bg as f32 + (255.0 - bg as f32) * a).round() as u8;
+            rgb(mix(20), mix(20), mix(40))
+        };
+        let whole = if alpha < 1.0 {
+            on(alpha)
+        } else {
+            rgb(255, 255, 255)
+        };
+        assert_eq!(out.cell(0, 0).style.fg, whole, "{layer} {alpha}");
+        assert_eq!(
+            out.cell(1, 0).style.fg,
+            on(alpha * 128.0 / 255.0),
+            "{layer} {alpha}"
+        );
+    }
+}
+
+#[test]
+fn a_running_effect_is_tuned_in_place() {
+    let mock = Mock::new();
+    let (mut scene, seen) = echo_scene(Looks::Cells);
+    scene.register_effect("fade", Box::new(|_| Ok(Box::new(Fade(0)))));
+    let id = scene
+        .add(1, spec(json!({"effect": {"name": "echo"}})), ms(0))
+        .unwrap();
+    scene.tick_on(ms(0), &base(), &mock);
+    scene.tick_on(ms(60), &base(), &mock);
+    assert_eq!(seen.lock().unwrap().looks, 2);
+    let patch = |v| serde_json::from_value::<SpritePatch>(v).unwrap();
+    // Same name: the effect is told, and keeps what it has.
+    let tune = json!({"effect": {"name": "echo", "params": {"rate": 3}}});
+    scene.update(id, patch(tune), ms(70)).unwrap();
+    assert_eq!(seen.lock().unwrap().params, json!({"rate": 3}));
+    assert_eq!(seen.lock().unwrap().looks, 2);
+    // Drawn again at once.
+    scene.tick_on(ms(71), &base(), &mock);
+    assert_eq!(seen.lock().unwrap().looks, 3);
+    // Refused by the effect: nothing changes, not the layer either.
+    let bad = json!({"layer": "front", "effect": {"name": "echo", "params": {"bad": 1}}});
+    assert_eq!(
+        scene.update(id, patch(bad), ms(80)).unwrap_err().code(),
+        "bad-params"
+    );
+    assert_eq!(scene.list()[0].layer, -1);
+    assert_eq!(seen.lock().unwrap().params, json!({"rate": 3}));
+    // An effect that takes no change says so.
+    for wrong in [
+        json!({"effect": {"name": "nope"}}),
+        json!({"effect": {"name": "echo"}, "content": {"rows": ["x"]}}),
+    ] {
+        assert!(scene.update(id, patch(wrong), ms(80)).is_err());
+    }
+    // Another effect starts in its place, with the sprite's fields.
+    scene
+        .update(id, patch(json!({"effect": {"name": "fade"}})), ms(90))
+        .unwrap();
+    assert_eq!(scene.list()[0].kind, "effect:fade");
+    assert_eq!(show(&mut scene, &mock, &base(), 90)[0], "ab1");
+    let again = json!({"effect": {"name": "fade", "params": {}}});
+    let err = scene.update(id, patch(again), ms(95)).unwrap_err();
+    assert!(err.to_string().contains("cannot be changed"), "{err}");
+    // A content becomes an effect.
+    let text = scene
+        .add(
+            1,
+            spec(json!({"content": {"rows": ["zz"]}, "anchor": {"at": [0, 2]}})),
+            ms(0),
+        )
+        .unwrap();
+    scene
+        .update(text, patch(json!({"effect": {"name": "fade"}})), ms(100))
+        .unwrap();
+    assert_eq!(show(&mut scene, &mock, &base(), 100)[2], "ab1");
+}

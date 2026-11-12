@@ -454,6 +454,10 @@ pub enum Draw {
     Effect {
         #[command(flatten)]
         place: Place,
+        /// Give this sprite's running effect new parameters instead of
+        /// adding one; another effect starts in its place
+        #[arg(long, value_name = "SPRITE")]
+        id: Option<u64>,
         name: String,
         /// Parameters of the effect, a JSON object
         params: Option<String>,
@@ -521,14 +525,18 @@ pub fn draw(common: &Common, verb: Draw) -> Done {
         }
         Draw::Effect {
             place,
+            id,
             name,
             params,
         } => {
+            let effect = json!({"name": name, "params": json_arg(params)?});
+            if let Some(id) = id {
+                // In place: the sprite keeps its frame, anchor and layer.
+                call(common, "draw.update", json!({"id": id, "effect": effect}))?;
+                return report_id(common, json!({"id": id}));
+            }
             let mut spec = place.fields()?;
-            spec.insert(
-                "effect".into(),
-                json!({"name": name, "params": json_arg(params)?}),
-            );
+            spec.insert("effect".into(), effect);
             report_id(common, call(common, "draw.put", Value::Object(spec))?)
         }
         Draw::Exts => {

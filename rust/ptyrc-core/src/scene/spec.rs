@@ -507,6 +507,10 @@ pub struct SpritePatch {
     pub frames: Option<Vec<AnimFrame>>,
     #[serde(default, rename = "loop", skip_serializing_if = "Option::is_none")]
     pub looping: Option<LoopSpec>,
+    /// The running effect of that name is given the `params` and keeps
+    /// its state; another effect starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect: Option<EffectSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layer: Option<Layer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

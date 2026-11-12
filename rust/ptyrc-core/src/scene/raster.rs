@@ -12,6 +12,15 @@ pub(crate) struct Glyph {
     pub fg: Option<Color>,
     pub bg: Option<Color>,
     pub attrs: Attrs,
+    /// Opacity, 255: opaque. Multiplies the sprite's `alpha`.
+    pub opacity: u8,
+}
+
+impl Glyph {
+    /// Opacity, `0..=1`.
+    pub fn alpha(&self) -> f32 {
+        self.opacity as f32 / 255.0
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -91,10 +100,25 @@ impl Canvas {
     /// Draw `text` from `(x, y)` to the right. Outside cells are dropped;
     /// a space is drawn as a blank.
     pub fn put(&mut self, x: i32, y: i32, text: &str, style: &StyleSpec) {
-        self.draw(x, y, text, style, true);
+        self.draw(x, y, text, style, true, 255);
     }
 
-    fn draw(&mut self, x: i32, y: i32, text: &str, style: &StyleSpec, spaces: bool) -> i32 {
+    /// `put` at an opacity in `0..=1`: the colours are mixed with what
+    /// is below, as the sprite's `alpha` does, and with it.
+    pub fn put_faded(&mut self, x: i32, y: i32, text: &str, style: &StyleSpec, opacity: f32) {
+        let opacity = (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
+        self.draw(x, y, text, style, true, opacity);
+    }
+
+    fn draw(
+        &mut self,
+        x: i32,
+        y: i32,
+        text: &str,
+        style: &StyleSpec,
+        spaces: bool,
+        opacity: u8,
+    ) -> i32 {
         let mut col = x;
         let mut last: Option<(u16, u16)> = None;
         let inside_row = y >= 0 && y < self.h as i32;
@@ -142,6 +166,7 @@ impl Canvas {
                         fg: style.fg.map(|c| c.0),
                         bg: style.bg.map(|c| c.0),
                         attrs: style.attrs(),
+                        opacity,
                     }),
                 );
                 last = Some((cx, cy));
@@ -177,7 +202,7 @@ impl Canvas {
                     .unwrap_or(0);
                 let mut canvas = Canvas::new(w, clamp_h(rows.len())?);
                 for (y, row) in rows.iter().enumerate() {
-                    canvas.draw(0, y as i32, row, &base, content.opaque);
+                    canvas.draw(0, y as i32, row, &base, content.opaque, 255);
                 }
                 Ok(canvas)
             }
@@ -195,7 +220,7 @@ impl Canvas {
                     for run in runs {
                         let style = merge(&base, &run.style);
                         let spaces = content.opaque || run.style.bg.is_some();
-                        x += canvas.draw(x, y as i32, &run.t, &style, spaces);
+                        x += canvas.draw(x, y as i32, &run.t, &style, spaces, 255);
                     }
                 }
                 Ok(canvas)

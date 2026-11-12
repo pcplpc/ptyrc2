@@ -453,6 +453,31 @@ impl Scene {
             .alpha
             .map(|a| Scene::check_alpha(Some(a)))
             .transpose()?;
+        if patch.effect.is_some() && (patch.content.is_some() || patch.frames.is_some()) {
+            return Err(SceneError::BadParams(
+                "effect excludes content and frames".into(),
+            ));
+        }
+        // An effect of the same name is tuned: it keeps its state.
+        // Another one, or an effect in place of a content, starts.
+        let mut started = None;
+        if let Some(fx) = &patch.effect {
+            match &mut self.sprites[index].body {
+                Body::Fx(old) if old.name == fx.name => {
+                    old.effect.tune(&fx.params).map_err(SceneError::BadParams)?;
+                    old.next = now;
+                }
+                _ => {
+                    let make = self.effects.get(&fx.name).ok_or_else(|| {
+                        SceneError::BadParams(format!("unknown effect: {}", fx.name))
+                    })?;
+                    started = Some((
+                        fx.name.clone(),
+                        make(&fx.params).map_err(SceneError::BadParams)?,
+                    ));
+                }
+            }
+        }
         let body = if patch.content.is_some() || patch.frames.is_some() {
             let looping = patch.looping.unwrap_or_default();
             let mut anim = self.body(&patch.content, &patch.frames, looping)?;
@@ -462,6 +487,24 @@ impl Scene {
             None
         };
         let sprite = &mut self.sprites[index];
+        if let Some((name, effect)) = started {
+            let size = match &sprite.body {
+                Body::Fx(old) => old.size,
+                Body::Anim(_) => None,
+            };
+            let [w, h] = size.unwrap_or([0, 0]);
+            sprite.body = Body::Fx(Fx {
+                name,
+                effect,
+                canvas: Canvas::new(w, h),
+                size,
+                next: now,
+                origin: None,
+                heat: None,
+            });
+            sprite.shown = false;
+            sprite.born = now;
+        }
         if let (Some(frame), Some(sel)) = (frame, patch.frame) {
             sprite.frame = frame;
             sprite.sel = sel;
@@ -976,15 +1019,16 @@ impl Scene {
         for sprite in &self.sprites[..front] {
             let tint = sprite.blend == Blend::Tint;
             each_glyph(sprite, base, surfaces, cursor, |x, y, glyph| {
-                back.paint(x, y, glyph, tint, sprite.alpha)
+                back.paint(x, y, glyph, tint, sprite.alpha * glyph.alpha())
             });
         }
         back.resolve(base, &mut out);
         for sprite in &self.sprites[front..] {
             let tint = sprite.blend == Blend::Tint;
             each_glyph(sprite, base, surfaces, cursor, |x, y, glyph| {
-                if sprite.alpha < 1.0 {
-                    paint_alpha(&mut out, x, y, glyph, tint, sprite.alpha, &self.host)
+                let alpha = sprite.alpha * glyph.alpha();
+                if alpha < 1.0 {
+                    paint_alpha(&mut out, x, y, glyph, tint, alpha, &self.host)
                 } else {
                     paint(&mut out, x, y, glyph, tint)
                 }
