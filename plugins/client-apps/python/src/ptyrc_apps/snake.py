@@ -16,7 +16,8 @@ What it shows:
   then. Between two changes a move costs one batch of drawing.
 - Frame coordinates: the snake and the apple belong to the text, not to
   the window. Scroll and they move with it; when the snake is scrolled
-  out of sight it starts again where you look.
+  out of sight it starts again where you look, and an apple the text
+  cuts off from it goes elsewhere.
 - One sprite for the whole snake, redrawn in place each step with
   `Sprite.update`: anchor and content change together, in one repaint.
 
@@ -268,6 +269,7 @@ class Game:
         self.serial = 0
         self.foe_due = rng.randint(20, 50) if enemies else 0
         self.beam_due = rng.randint(20, 50) if lasers else 0
+        self.map: tuple[Box, set[Cell]] | None = None  # the last seen
 
     def free_cell(self, box: Box, walls: set[Cell]) -> Cell | None:
         x0, y0, x1, y1 = box
@@ -351,6 +353,15 @@ class Game:
             self.body = deque([start] if start else [])
             self.grow = 3
             self.apple = None  # maybe out of its reach
+        elif self.apple is not None and self.map != (box, walls):
+            # The text moved or changed: an apple cut off from the head
+            # goes elsewhere.
+            def bare(c: Cell) -> bool:
+                return inside(c) and c not in walls
+
+            if route(self.body[0], self.apple, bare) is None:
+                self.apple = None
+        self.map = (box, walls)
         if self.apple is None or not inside(self.apple) or self.apple in walls:
             self._plant(box, walls, taken)
         if not self.body:

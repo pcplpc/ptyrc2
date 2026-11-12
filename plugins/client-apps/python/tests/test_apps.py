@@ -709,6 +709,18 @@ def test_snake_room() -> None:
         if game.apple is not None:
             assert game.apple in snake.room(box, walls, None, 1)
     assert game.eaten >= 5
+    # The text shuts the apple in: it goes where the head can reach.
+    x, y = game.apple
+    ring = {(x + dx, y + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)} - {(x, y)}
+    walls = walls - {(x, y)} | ring
+    cut = walls - set(game.body)
+    game.step(box, cut)
+    reach = snake.room(box, cut, game.body[0], 1) + list(game.body)
+    assert game.apple != (x, y) and game.apple in reach
+    # Unchanged map: the apple stays.
+    apple, eaten = game.apple, game.eaten
+    game.step(box, cut)
+    assert game.apple == apple or game.eaten > eaten
 
 
 def test_snake_arcade(session: Pilot) -> None:
