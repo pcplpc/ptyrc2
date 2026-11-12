@@ -908,7 +908,7 @@ fn effect_lifecycle() {
     let mock = Mock::new();
     let mut scene = Scene::new();
     scene.register_effect("blink", Box::new(|_| Ok(Box::new(Blink(0)))));
-    assert_eq!(scene.effects(), vec!["blink", "confetti"]);
+    assert_eq!(scene.effects(), vec!["blink", "confetti", "sparkle"]);
     scene
         .add(
             1,
@@ -982,4 +982,164 @@ fn confetti_is_deterministic_and_ends() {
     // Default params.
     assert!(confetti(&serde_json::Value::Null).is_ok());
     assert!(confetti(&json!({"count": "many"})).is_err());
+}
+
+#[test]
+fn shift_moves_frame_rows() {
+    let mut mock = Mock::new();
+    mock.lines = vec!["".into(), "".into(), "a word".into()];
+    let mut scene = Scene::new();
+    let add = |scene: &mut Scene, v| scene.add(1, spec(v), ms(0)).unwrap();
+    let fixed = add(
+        &mut scene,
+        json!({"frame": PANE, "anchor": {"at": [0, 2], "space": "frame"}, "content": {"rows": ["F"]}}),
+    );
+    let above = add(
+        &mut scene,
+        json!({"frame": PANE, "anchor": {"at": [1, 0], "space": "frame"}, "content": {"rows": ["A"]}}),
+    );
+    let hud = add(
+        &mut scene,
+        json!({"frame": PANE, "anchor": {"at": [0, 2], "space": "view"}, "content": {"rows": ["H"]}}),
+    );
+    let text = add(
+        &mut scene,
+        json!({"frame": PANE, "anchor": {"text": "word", "side": "over"}, "content": {"rows": ["T"]}}),
+    );
+    scene.tick(ms(0), &mock);
+    scene.take_dirty();
+    let at = |scene: &Scene, id| scene.list().iter().find(|s| s.id == id).unwrap().screen;
+    assert_eq!(at(&scene, fixed), Some([10, 3]));
+    assert_eq!(at(&scene, text), Some([12, 3]));
+
+    // A line inserted above row 2: rows 2.. go down by one.
+    scene.shift(PANE, 2, i64::MAX, 1);
+    assert!(scene.dirty());
+    mock.lines.insert(1, "".into());
+    scene.tick(ms(10), &mock);
+    assert_eq!(at(&scene, fixed), Some([10, 4]));
+    assert_eq!(at(&scene, above), Some([11, 1]));
+    assert_eq!(at(&scene, hud), Some([10, 3]));
+    assert_eq!(at(&scene, text), Some([12, 4]));
+
+    // Another frame's shift, or rows outside, change nothing.
+    scene.take_dirty();
+    scene.shift(RAW, 0, 100, 5);
+    scene.shift(PANE, 50, 60, 5);
+    assert!(!scene.dirty());
+}
+
+#[test]
+fn sprite_text_is_storable() {
+    let mock = Mock::new();
+    let mut scene = Scene::new();
+    // A tab and an escape are drawn as (transparent) spaces; marks beyond
+    // what a cell stores are dropped.
+    let marks = "\u{301}".repeat(40);
+    scene
+        .add(
+            1,
+            spec(json!({"content": {"rows": [format!("a\tb\u{1b}c e{marks}")]}})),
+            ms(0),
+        )
+        .unwrap();
+    let mut under = base();
+    for col in 0..8 {
+        under.put(col, 0, Cell::narrow("-", Style::default()));
+    }
+    scene.tick(ms(0), &mock);
+    let out = scene.compose(&under, &mock);
+    let row = out.row(0);
+    assert_eq!(row[0].text, "a");
+    assert_eq!(row[1].text, "-");
+    assert_eq!(row[2].text, "b");
+    assert_eq!(row[3].text, "-");
+    assert_eq!(row[4].text, "c");
+    assert!(row[6].text.starts_with('e'));
+    assert!(row[6].text.len() <= 32 && row[6].text.len() > 1);
+    for cell in row {
+        assert!(!cell.text.chars().any(char::is_control));
+    }
+}
+
+#[test]
+fn effects_leave_nothing_behind() {
+    let mock = Mock::new();
+    for (name, params) in [
+        ("confetti", json!({"duration_ms": 600})),
+        ("sparkle", json!({"duration_ms": 600, "count": 8})),
+    ] {
+        let mut scene = Scene::new();
+        scene
+            .add(
+                1,
+                spec(json!({"effect": {"name": name, "params": params}})),
+                ms(0),
+            )
+            .unwrap();
+        let mut seen = 0;
+        let mut t = 0;
+        while !scene.is_empty() {
+            let rows = show(&mut scene, &mock, &base(), t);
+            seen += rows.iter().filter(|r| !r.is_empty()).count();
+            // The scene asks to be woken later, at animation rate.
+            if !scene.is_empty() {
+                let wake = scene.next_wake().expect(name);
+                assert!(wake > ms(t) && wake <= ms(t + 250), "{name}: {wake:?}");
+            }
+            t += 33;
+            assert!(t < 3000, "{name} never ends");
+        }
+        assert!(seen > 0, "{name} drew nothing");
+        assert!(scene.next_wake().is_none());
+        assert_eq!(scene.compose(&base(), &mock), base(), "{name} left cells");
+    }
+}
+
+#[test]
+fn sparkle_twinkles_in_place() {
+    let mock = Mock::new();
+    let mut scene = Scene::new();
+    let p = json!({"count": 3, "life_ms": 700, "seed": 5});
+    scene
+        .add(
+            1,
+            spec(json!({"effect": {"name": "sparkle", "params": p}, "blend": "behind"})),
+            ms(0),
+        )
+        .unwrap();
+    // `behind`: text keeps its cells.
+    let mut under = base();
+    for row in 0..6 {
+        for col in 0..20 {
+            if (col + row) % 2 == 0 {
+                under.put(col, row, Cell::narrow("#", Style::default()));
+            }
+        }
+    }
+    let glyphs = |rows: &[String]| -> Vec<char> {
+        rows.iter()
+            .flat_map(|r| r.chars())
+            .filter(|c| !matches!(c, ' ' | '#'))
+            .collect()
+    };
+    let mut kinds = std::collections::BTreeSet::new();
+    for t in (0..4000).step_by(50) {
+        scene.tick(ms(t), &mock);
+        let out = scene.compose(&under, &mock);
+        for row in 0..6 {
+            for col in 0..20 {
+                if (col + row) % 2 == 0 {
+                    assert_eq!(out.cell(col, row).text, "#");
+                }
+            }
+        }
+        let g = glyphs(&out.text());
+        assert!(g.len() <= 3);
+        kinds.extend(g);
+    }
+    // It runs until removed, and goes through its shapes.
+    assert!(!scene.is_empty());
+    assert!(kinds.contains(&'✦') && kinds.contains(&'·'), "{kinds:?}");
+    assert!(sparkle(&json!({"colors": []})).is_err());
 }

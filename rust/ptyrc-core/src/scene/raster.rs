@@ -55,6 +55,9 @@ pub(crate) fn char_width(c: char) -> u8 {
     }
 }
 
+/// Longest text of one cell, in bytes: what the emulator stores.
+const CELL_BYTES: usize = 32;
+
 /// A rectangle of slots. Effects draw on it as their canvas.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Canvas {
@@ -122,11 +125,15 @@ impl Canvas {
         let mut last: Option<(u16, u16)> = None;
         let inside_row = y >= 0 && y < self.h as i32;
         for ch in text.chars() {
+            // A control character has no cell of its own on a terminal:
+            // it is drawn as a space.
+            let ch = if ch.is_control() { ' ' } else { ch };
             let width = char_width(ch);
             if width == 0 {
                 // Combining mark: joins the glyph before it.
                 if let Some((px, py)) = last
                     && let Slot::Glyph(g) = self.slot(px, py).clone()
+                    && g.cell.text.len() + ch.len_utf8() <= CELL_BYTES
                 {
                     let mut s = g.cell.text.to_string();
                     s.push(ch);
@@ -173,7 +180,13 @@ impl Canvas {
     /// Width in cells of a string.
     pub fn text_width(text: &str) -> u16 {
         text.chars()
-            .map(|c| char_width(c) as u32)
+            .map(|c| {
+                if c.is_control() {
+                    1
+                } else {
+                    char_width(c) as u32
+                }
+            })
             .sum::<u32>()
             .min(u16::MAX as u32) as u16
     }

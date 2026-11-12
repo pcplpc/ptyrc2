@@ -10,7 +10,7 @@ mod spec;
 #[cfg(test)]
 mod tests;
 
-pub use effect::{Effect, EffectFactory, Rng, confetti};
+pub use effect::{Effect, EffectFactory, Rng, confetti, sparkle};
 pub use raster::Canvas;
 pub use spec::*;
 
@@ -203,6 +203,7 @@ impl Scene {
             last_tick: Duration::ZERO,
         };
         scene.register_effect("confetti", Box::new(confetti));
+        scene.register_effect("sparkle", Box::new(sparkle));
         scene
     }
 
@@ -461,6 +462,29 @@ impl Scene {
         let before = self.sprites.len();
         self.sprites.retain(|s| s.owner != owner || s.persist);
         self.note_removed(before);
+    }
+
+    /// Rows `from..=to` of `frame` moved by `dy` in frame space (a splice,
+    /// an island merge): sprites fixed on those rows move with them.
+    pub fn shift(&mut self, frame: FrameId, from: i64, to: i64, dy: i64) {
+        let rows = from..=to;
+        for sprite in self.sprites.iter_mut().filter(|s| s.frame == Some(frame)) {
+            if let Anchor::At {
+                at,
+                space: Space::Frame,
+            } = &mut sprite.anchor
+                && rows.contains(&at[1])
+            {
+                at[1] += dy;
+                self.dirty = true;
+            }
+            if let Some((pos, _)) = &mut sprite.text_at
+                && rows.contains(&pos.y)
+            {
+                pos.y += dy;
+                self.dirty = true;
+            }
+        }
     }
 
     fn note_removed(&mut self, before: usize) -> usize {
