@@ -68,6 +68,9 @@ pub(crate) struct Wait {
     pub gone: bool,
     pub stable: Option<Duration>,
     pub deadline: Duration,
+    /// The same deadline on the real clock, for when the session's clock
+    /// stands still.
+    pub real_deadline: std::time::Instant,
 }
 
 /// What `debug.overlay` shows.
@@ -702,6 +705,21 @@ impl Engine for ScreenEngine {
                 .collect(),
             _ => Vec::new(),
         }
+    }
+
+    fn stall_wake(&self) -> Option<std::time::Instant> {
+        self.waits.iter().map(|w| w.real_deadline).min()
+    }
+
+    fn on_stall(&mut self, ctx: &mut Ctx) {
+        let now = std::time::Instant::now();
+        self.waits.retain(|wait| {
+            let late = now >= wait.real_deadline;
+            if late {
+                ctx.complete(wait.token, Ok(json!({"matched": false})));
+            }
+            !late
+        });
     }
 
     fn session_extras(&self) -> Value {

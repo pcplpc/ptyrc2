@@ -369,6 +369,7 @@ fn verb_run(args: Run) -> Result<ExitCode, Fail> {
         ask_host_colors: !args.transparent,
         record: args.record,
         record_input: args.record_input,
+        presets: !args.no_presets && !args.transparent,
     };
     let status = ptyrc_server::run(config, plugins::engine(args.transparent, !args.no_presets))?;
     Ok(ExitCode::from(status.clamp(0, 255) as u8))

@@ -7,6 +7,7 @@ mod common;
 use common::*;
 use serde_json::{Value, json};
 use std::path::Path;
+use std::time::Duration;
 
 fn tape(name: &str) -> String {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -145,6 +146,9 @@ fn record_then_replay() {
             "--record",
             file,
             "--record-input",
+            "--no-presets",
+            "--host-bg",
+            "#102030",
             "--",
             "sh",
             "-c",
@@ -165,6 +169,14 @@ fn record_then_replay() {
     assert!(
         text.lines().next().unwrap().contains("\"size\":[40,5]"),
         "{text}"
+    );
+    // What makes the replay the same session: colours, presets.
+    let header: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+    assert_eq!(header["version"], 2);
+    assert_eq!(header["presets"], false);
+    assert_eq!(
+        header["host_colors"],
+        json!({"fg": "#e5e5e5", "bg": "#102030"})
     );
     assert!(
         text.contains("\"size\":[30,4]") && text.contains("\"i\":\"key\\r\""),
@@ -187,6 +199,12 @@ fn record_then_replay() {
     assert_eq!(shots[0]["text"][0], "he│llo");
     let out = sb.run(&["replay", file, "--speed", "0"]);
     assert_eq!(out.status.code(), Some(3), "the status of the tape");
+
+    // The replay has the colours of the tape.
+    let _replay = sb.spawn("q", &["replay", file, "--name", "q", "--step"]);
+    let info = sb.client("q").call("session.info", json!({})).unwrap();
+    assert_eq!(info["host_colors"]["bg"], "#102030");
+    sb.run(&["-s", "q", "tape", "quit"]);
 }
 
 #[test]
@@ -228,8 +246,43 @@ fn a_replay_is_piloted() {
         client.call("screen.text", json!({})).unwrap()["lines"][0],
         "line number 31"
     );
-    let e = client.call("tape.seek", json!({"t": 1.0})).unwrap_err();
-    assert!(e.to_string().contains("a tape goes forward"), "{e}");
+
+    // Paused, a wait is held to the real clock: it times out, or settles
+    // when another client moves the tape.
+    let began = std::time::Instant::now();
+    let wait = json!({"pattern": "not on the tape", "timeout_ms": 150});
+    let missed = client.call("screen.wait", wait).unwrap();
+    assert_eq!(missed["matched"], false);
+    let took = began.elapsed();
+    assert!(
+        took >= Duration::from_millis(150) && took < Duration::from_secs(3),
+        "{took:?}"
+    );
+    let waiter = {
+        let mut other = sb.client("p");
+        std::thread::spawn(move || {
+            let wait = json!({"pattern": "line number 48", "timeout_ms": 20000});
+            other.call("screen.wait", wait).unwrap()
+        })
+    };
+    std::thread::sleep(Duration::from_millis(50));
+    client.call("tape.seek", json!({"t": 9.0})).unwrap();
+    assert_eq!(waiter.join().unwrap()["matched"], true);
+
+    // Back: replayed from the start, to the same answers.
+    let at_9 = sb.run(&["-s", "p", "snap"]).stdout;
+    let status = client.call("tape.seek", json!({"t": 1.0})).unwrap();
+    assert_eq!(
+        (status["t"].clone(), status["next"].clone()),
+        (json!(1.0), json!(1))
+    );
+    assert_eq!(
+        client.call("screen.text", json!({})).unwrap()["lines"][0],
+        "line number 1"
+    );
+    client.call("tape.seek", json!({"t": 9.0})).unwrap();
+    assert_eq!(sb.run(&["-s", "p", "snap"]).stdout, at_9);
+    client.call("tape.seek", json!({"t": 6.0})).unwrap();
     let e = client.call("input.send", json!({"text": "x"})).unwrap_err();
     assert!(e.to_string().contains("a replay takes no input"), "{e}");
     let e = client.call("tape.rewind", json!({})).unwrap_err();

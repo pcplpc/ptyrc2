@@ -4,8 +4,12 @@
 //! UTF-8 JSON, one object per line. The first line is the header:
 //!
 //! ```text
-//! {"ptyrc":"tape","version":1,"size":[80,24],"argv":["less","f"]}
+//! {"ptyrc":"tape","version":2,"size":[80,24],"argv":["less","f"],
+//!  "host_colors":{"fg":"#aaaaaa","bg":"#000000"},"presets":true}
 //! ```
+//!
+//! `host_colors` and `presets` came with version 2; a version 1 tape is
+//! read, with neither.
 //!
 //! Then one record per line, `t` in microseconds since the driver started,
 //! never decreasing:
@@ -15,12 +19,15 @@
 //! {"t":1520,"ob":"base64"}    a burst that is not valid UTF-8
 //! {"t":9000,"i":"j"}          bytes typed into the app (`ib`: base64)
 //! {"t":9100,"size":[100,30]}  a resize
+//! {"t":9200,"host_colors":{"fg":"#c0c0c0","bg":"#101010"}}  told later
 //! {"t":9900,"exit":0}         the app exited
 //! ```
 //!
 //! Unknown members and unknown records are ignored by a reader.
 
 use crate::keys::{base64_decode, base64_encode};
+use ptyrc_core::scene::HostColors;
+use ptyrc_vt::palette::parse_color_spec;
 use serde_json::{Value, json};
 use std::fs::File;
 use std::io::{self, Write};
@@ -28,7 +35,34 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Version of the format written.
-pub const VERSION: u64 = 1;
+pub const VERSION: u64 = 2;
+/// Oldest version read.
+const VERSION_MIN: u64 = 1;
+
+fn colors_json(colors: HostColors) -> Value {
+    let hex = |[r, g, b]: ptyrc_vt::Rgb| format!("#{r:02x}{g:02x}{b:02x}");
+    json!({"fg": hex(colors.fg), "bg": hex(colors.bg)})
+}
+
+fn colors_of(value: &Value) -> Option<HostColors> {
+    let color = |key: &str| parse_color_spec(value[key].as_str()?.as_bytes());
+    Some(HostColors {
+        fg: color("fg")?,
+        bg: color("bg")?,
+    })
+}
+
+/// What a tape says of its session before the first record.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Header {
+    /// `(cols, rows)` at the start.
+    pub size: (u16, u16),
+    pub argv: Vec<String>,
+    /// Default colours of the host at the start; `None`: not on the tape.
+    pub host_colors: Option<HostColors>,
+    /// The per-app presets were on.
+    pub presets: bool,
+}
 
 /// Writes a tape. A write that fails ends the recording, not the session.
 pub struct Recorder {
@@ -39,19 +73,20 @@ pub struct Recorder {
 impl Recorder {
     /// Create `path` and write the header. `input`: typed bytes are
     /// recorded too.
-    pub fn create(
-        path: &Path,
-        size: (u16, u16),
-        argv: &[String],
-        input: bool,
-    ) -> io::Result<Recorder> {
+    pub fn create(path: &Path, header: &Header, input: bool) -> io::Result<Recorder> {
         let mut recorder = Recorder {
             file: Some(File::create(path)?),
             input,
         };
-        recorder.line(&json!({
-            "ptyrc": "tape", "version": VERSION, "size": [size.0, size.1], "argv": argv,
-        }));
+        let mut head = json!({
+            "ptyrc": "tape", "version": VERSION,
+            "size": [header.size.0, header.size.1], "argv": header.argv,
+            "presets": header.presets,
+        });
+        if let Some(colors) = header.host_colors {
+            head["host_colors"] = colors_json(colors);
+        }
+        recorder.line(&head);
         Ok(recorder)
     }
 
@@ -93,6 +128,11 @@ impl Recorder {
         self.line(&json!({"t": t.as_micros() as u64, "size": [cols, rows]}));
     }
 
+    /// The host told other default colours.
+    pub fn host_colors(&mut self, t: Duration, colors: HostColors) {
+        self.line(&json!({"t": t.as_micros() as u64, "host_colors": colors_json(colors)}));
+    }
+
     pub fn exit(&mut self, t: Duration, status: i32) {
         self.line(&json!({"t": t.as_micros() as u64, "exit": status}));
     }
@@ -104,15 +144,14 @@ pub enum Record {
     Output(Vec<u8>),
     Input(Vec<u8>),
     Resize(u16, u16),
+    HostColors(HostColors),
     Exit(i32),
 }
 
 /// A tape read whole.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tape {
-    /// `(cols, rows)` at the start.
-    pub size: (u16, u16),
-    pub argv: Vec<String>,
+    pub header: Header,
     pub records: Vec<(Duration, Record)>,
 }
 
@@ -141,8 +180,12 @@ impl Tape {
             return Err(not_a_tape.into());
         }
         match header["version"].as_u64() {
-            Some(VERSION) => {}
-            Some(v) => return Err(format!("tape version {v}: this ptyrc reads {VERSION}")),
+            Some(VERSION_MIN..=VERSION) => {}
+            Some(v) => {
+                return Err(format!(
+                    "tape version {v}: this ptyrc reads {VERSION_MIN} to {VERSION}"
+                ));
+            }
             None => return Err("the header has no version".into()),
         }
         let size = size_of(&header["size"]).ok_or("the header has no size: [cols, rows]")?;
@@ -181,6 +224,10 @@ impl Tape {
             } else if !value["size"].is_null() {
                 let (cols, rows) = size_of(&value["size"]).ok_or_else(|| bad("size: [c, r]"))?;
                 Record::Resize(cols, rows)
+            } else if !value["host_colors"].is_null() {
+                let colors = colors_of(&value["host_colors"])
+                    .ok_or_else(|| bad("host_colors: {fg, bg}, as #rrggbb"))?;
+                Record::HostColors(colors)
             } else if let Some(status) = value["exit"].as_i64() {
                 Record::Exit(status as i32)
             } else {
@@ -188,11 +235,13 @@ impl Tape {
             };
             records.push((t, record));
         }
-        Ok(Tape {
+        let header = Header {
             size,
             argv,
-            records,
-        })
+            host_colors: colors_of(&header["host_colors"]),
+            presets: header["presets"].as_bool().unwrap_or(true),
+        };
+        Ok(Tape { header, records })
     }
 
     /// Time of the last record.
@@ -208,17 +257,30 @@ mod tests {
     #[test]
     fn round_trip() {
         let path = std::env::temp_dir().join(format!("ptyrc-tape-{}", std::process::id()));
-        let mut rec = Recorder::create(&path, (80, 24), &["sh".into()], true).unwrap();
+        let header = Header {
+            size: (80, 24),
+            argv: vec!["sh".into()],
+            host_colors: Some(HostColors {
+                fg: [1, 2, 3],
+                bg: [4, 5, 6],
+            }),
+            presets: false,
+        };
+        let mut rec = Recorder::create(&path, &header, true).unwrap();
         rec.output(Duration::from_micros(10), b"a\x1b[1mb\n");
         rec.output(Duration::from_micros(20), b"\xe2\x94");
         rec.input(Duration::from_micros(30), b"j");
         rec.resize(Duration::from_micros(40), 100, 30);
+        let told = HostColors {
+            fg: [255, 255, 255],
+            bg: [16, 16, 16],
+        };
+        rec.host_colors(Duration::from_micros(45), told);
         rec.exit(Duration::from_micros(50), 3);
         drop(rec);
         let tape = Tape::load(&path).unwrap();
         std::fs::remove_file(&path).unwrap();
-        assert_eq!(tape.size, (80, 24));
-        assert_eq!(tape.argv, ["sh"]);
+        assert_eq!(tape.header, header);
         let records: Vec<Record> = tape.records.iter().map(|(_, r)| r.clone()).collect();
         assert_eq!(
             records,
@@ -227,6 +289,7 @@ mod tests {
                 Record::Output(b"\xe2\x94".to_vec()),
                 Record::Input(b"j".to_vec()),
                 Record::Resize(100, 30),
+                Record::HostColors(told),
                 Record::Exit(3),
             ]
         );
@@ -242,13 +305,16 @@ mod tests {
                 .starts_with("not a tape")
         );
         let head = r#"{"ptyrc":"tape","version":1,"size":[80,24]}"#;
-        assert!(Tape::parse(head).unwrap().records.is_empty());
+        // Version 1: no colours, presets on.
+        let old = Tape::parse(head).unwrap();
+        assert!(old.records.is_empty());
+        assert_eq!((old.header.host_colors, old.header.presets), (None, true));
         let e = Tape::parse(&format!(
             "{head}\n{{\"t\":5,\"o\":\"a\"}}\n{{\"t\":4,\"o\":\"b\"}}"
         ));
         assert_eq!(e.unwrap_err(), "line 3: time goes backwards");
         let e = Tape::parse(r#"{"ptyrc":"tape","version":9,"size":[80,24]}"#);
-        assert_eq!(e.unwrap_err(), "tape version 9: this ptyrc reads 1");
+        assert_eq!(e.unwrap_err(), "tape version 9: this ptyrc reads 1 to 2");
         // An unknown record is skipped.
         let tape = Tape::parse(&format!("{head}\n{{\"t\":5,\"mark\":\"x\"}}")).unwrap();
         assert!(tape.records.is_empty());

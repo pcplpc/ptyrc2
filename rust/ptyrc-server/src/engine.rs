@@ -178,6 +178,16 @@ pub trait Engine {
         Vec::new()
     }
 
+    /// The clock stands still (a paused replay): the real time at which
+    /// `on_stall` is to be called, if any.
+    fn stall_wake(&self) -> Option<std::time::Instant> {
+        None
+    }
+
+    /// The clock stands still and `stall_wake` passed: answer what cannot
+    /// wait on it any longer.
+    fn on_stall(&mut self, _ctx: &mut Ctx) {}
+
     /// Members merged into the `session.info` result (an object, or null).
     fn session_extras(&self) -> Value {
         Value::Null

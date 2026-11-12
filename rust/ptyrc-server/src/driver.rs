@@ -10,7 +10,7 @@ use crate::keys;
 use crate::mouse;
 use crate::player::{Player, Replay, Step};
 use crate::pty::{self, Pty};
-use crate::record::{Record, Recorder};
+use crate::record::{Header, Record, Recorder};
 use crate::start::{self, RunError, RunErrorKind};
 use ptyrc_proto::envelope::{event, response};
 use ptyrc_proto::session::{self, ENV_SESSION, ENV_SOCKET};
@@ -70,6 +70,8 @@ pub struct Config {
     pub record: Option<PathBuf>,
     /// Record what is typed into the app too.
     pub record_input: bool,
+    /// Whether the engine has the per-app presets: written on the tape.
+    pub presets: bool,
 }
 
 impl Default for Config {
@@ -86,6 +88,7 @@ impl Default for Config {
             ask_host_colors: true,
             record: None,
             record_input: false,
+            presets: true,
         }
     }
 }
@@ -166,6 +169,8 @@ struct Driver {
     replies: Replies,
     /// When to stop waiting for the host's colours.
     replies_until: Option<Duration>,
+    /// A replay: makes the engine again when the tape is rewound.
+    factory: Option<Box<dyn FnMut() -> Box<dyn Engine>>>,
 }
 
 /// Name the session and listen on its socket.
@@ -221,16 +226,24 @@ fn bind_session(cfg: &Config) -> Result<(String, PathBuf, UnixListener), RunErro
 /// (128 + signal when killed).
 pub fn run(cfg: Config, mut engine: Box<dyn Engine>) -> Result<i32, RunError> {
     let mut driver = Driver::start(cfg)?;
-    let result = driver.serve(engine.as_mut());
+    let result = driver.serve(&mut engine);
     let status = driver.finish(engine.as_mut(), result.as_ref().ok().copied());
     result.and(Ok(status)).map_err(RunError::from)
 }
 
 /// Replay a tape in place of an app: a headless session whose clock is
 /// the tape's. Returns the status the tape ended with.
-pub fn replay(cfg: Config, replay: Replay, mut engine: Box<dyn Engine>) -> Result<i32, RunError> {
+/// `factory` makes the engine: once at the start, and again each time the
+/// tape is rewound.
+pub fn replay(
+    cfg: Config,
+    replay: Replay,
+    mut factory: Box<dyn FnMut() -> Box<dyn Engine>>,
+) -> Result<i32, RunError> {
     let mut driver = Driver::start_replay(cfg, replay)?;
-    let result = driver.serve(engine.as_mut());
+    let mut engine = factory();
+    driver.factory = Some(factory);
+    let result = driver.serve(&mut engine);
     let status = driver.finish(engine.as_mut(), result.as_ref().ok().copied());
     result.and(Ok(status)).map_err(RunError::from)
 }
@@ -289,17 +302,21 @@ impl Driver {
             if std::env::var_os("TERM").is_none() {
                 env.push(("TERM".to_string(), "xterm-256color".to_string()));
             }
+            let header = Header {
+                size: (cols, rows),
+                argv: cfg.argv.clone(),
+                host_colors: Some(Known::new(cfg.host_fg, cfg.host_bg).colors),
+                presets: cfg.presets,
+            };
             let recorder = match &cfg.record {
-                Some(path) => Some(
-                    Recorder::create(path, (cols, rows), &cfg.argv, cfg.record_input).map_err(
-                        |e| {
-                            RunError::new(
-                                RunErrorKind::Usage,
-                                format!("no tape {}: {}", path.display(), start::describe(&e)),
-                            )
-                        },
-                    )?,
-                ),
+                Some(path) => Some(Recorder::create(path, &header, cfg.record_input).map_err(
+                    |e| {
+                        RunError::new(
+                            RunErrorKind::Usage,
+                            format!("no tape {}: {}", path.display(), start::describe(&e)),
+                        )
+                    },
+                )?),
                 None => None,
             };
             let pty = pty::spawn(&cfg.argv, &env, cols, rows)
@@ -349,6 +366,7 @@ impl Driver {
             colors,
             replies: Replies::default(),
             replies_until: None,
+            factory: None,
         })
     }
 
@@ -361,17 +379,17 @@ impl Driver {
                 return Err(e.into());
             }
         };
-        let (cols, rows) = replay.tape.size;
+        let (cols, rows) = replay.tape.header.size;
         let info = SessionInfo {
             name,
             socket,
-            argv: replay.tape.argv.clone(),
+            argv: replay.tape.header.argv.clone(),
             pid: 0,
             cols,
             rows,
             headless: true,
         };
-        let colors = Known::new(cfg.host_fg, cfg.host_bg);
+        let colors = Self::tape_colors(&cfg, &replay.tape.header);
         Ok(Driver {
             stdin_open: false,
             cfg,
@@ -397,7 +415,51 @@ impl Driver {
             colors,
             replies: Replies::default(),
             replies_until: None,
+            factory: None,
         })
+    }
+
+    /// The colours a replay starts with: the options, else the tape's.
+    fn tape_colors(cfg: &Config, header: &Header) -> Known {
+        let tape = header.host_colors;
+        Known::new(
+            cfg.host_fg.or(tape.map(|c| c.fg)),
+            cfg.host_bg.or(tape.map(|c| c.bg)),
+        )
+    }
+
+    /// The tape was rewound: a new engine, the session as at its start.
+    /// Sprites are gone; requests the old engine held are refused.
+    fn rewind(&mut self, engine: &mut Box<dyn Engine>) {
+        let Some(player) = &self.player else {
+            return;
+        };
+        let header = player.tape().header.clone();
+        let held: Vec<Token> = self
+            .pending
+            .keys()
+            .filter(|token| !player.waiters.contains(token))
+            .copied()
+            .collect();
+        for token in held {
+            if let Some((conn, id)) = self.pending.remove(&token) {
+                let error = RpcError::new(ErrorCode::NotUsable, "the tape was rewound")
+                    .with_hint("ask again: the session started over");
+                self.respond(conn, &id, Err(error));
+            }
+        }
+        if let Some(factory) = &mut self.factory {
+            *engine = factory();
+        }
+        (self.info.cols, self.info.rows) = header.size;
+        self.colors = Self::tape_colors(&self.cfg, &header);
+        self.grab = None;
+        hook!(self, Duration::ZERO, |ctx| engine.on_start(ctx));
+        let colors = self.colors.colors;
+        hook!(self, Duration::ZERO, |ctx| engine
+            .on_host_colors(colors, ctx));
+        self.emit("size", json!({"size": [header.size.0, header.size.1]}));
+        self.repaint = true;
     }
 
     /// Monotonic time: since the start, or the tape's in a replay.
@@ -421,6 +483,14 @@ impl Driver {
                     hook!(self, now, |ctx| engine.on_burst(&burst, now, &mut out, ctx));
                 }
                 Step::Feed(Record::Resize(cols, rows)) => self.resize(engine, cols, rows)?,
+                Step::Feed(Record::HostColors(colors)) => {
+                    self.colors.learn(0, colors.fg);
+                    self.colors.learn(1, colors.bg);
+                    hook!(self, self.now(), |ctx| {
+                        engine.on_host_colors(colors, ctx);
+                        ctx.request_repaint();
+                    });
+                }
                 Step::Feed(_) => {}
                 Step::Paused => {
                     let status = player.status_json();
@@ -455,12 +525,16 @@ impl Driver {
     }
 
     /// The loop. Returns the exit status of the app.
-    fn serve(&mut self, engine: &mut dyn Engine) -> io::Result<i32> {
+    fn serve(&mut self, engine: &mut Box<dyn Engine>) -> io::Result<i32> {
         hook!(self, self.now(), |ctx| engine.on_start(ctx));
         let colors = self.colors.colors;
         hook!(self, self.now(), |ctx| engine.on_host_colors(colors, ctx));
         self.ask_host_colors()?;
         loop {
+            if self.player.as_mut().is_some_and(Player::take_rewound) {
+                self.rewind(engine);
+            }
+            let engine = engine.as_mut();
             self.play_tape(engine)?;
             // Tick: deadline passed, or repaint asked.
             let now = self.now();
@@ -498,6 +572,11 @@ impl Driver {
                     Some(at) if !player.paused() => {
                         Some(player.sleep_until(at).unwrap_or(Duration::ZERO))
                     }
+                    // The clock stands still: what waits on it is held
+                    // to the real one.
+                    _ if player.paused() => engine
+                        .stall_wake()
+                        .map(|at| at.saturating_duration_since(Instant::now())),
                     _ => None,
                 }
             } else {
@@ -509,6 +588,9 @@ impl Driver {
                 wake.map(|w| w.saturating_sub(now))
             };
             let ready = self.wait(timeout)?;
+            if self.player.as_ref().is_some_and(Player::paused) {
+                hook!(self, self.now(), |ctx| engine.on_stall(ctx));
+            }
 
             if ready.signal {
                 self.signals.drain();
@@ -714,7 +796,11 @@ impl Driver {
                 }
                 if changed {
                     let colors = self.colors.colors;
-                    hook!(self, self.now(), |ctx| {
+                    let now = self.now();
+                    if let Some(recorder) = &mut self.recorder {
+                        recorder.host_colors(now, colors);
+                    }
+                    hook!(self, now, |ctx| {
                         engine.on_host_colors(colors, ctx);
                         ctx.request_repaint();
                     });
@@ -1254,7 +1340,10 @@ impl Driver {
                 return Some(Ok(player.status_json()));
             }
             "tape.seek" => match seconds("t") {
-                Some(t) => player.seek(Duration::from_secs_f64(t)),
+                Some(t) => {
+                    player.seek(Duration::from_secs_f64(t));
+                    Ok(())
+                }
                 None => Err("t: seconds of tape time".to_string()),
             },
             "tape.step" => {

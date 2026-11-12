@@ -141,8 +141,11 @@ def test_record_and_replay(spawn: Spawn, tmp_path: Path) -> None:
         with pytest.raises(PtyrcError) as err:
             replay.send("x")
         assert "a replay takes no input" in err.value.message
-        with pytest.raises(PtyrcError):
-            replay.tape.seek(0.0)
+        # Back: the tape is replayed from its start.
+        assert replay.tape.seek(0.0)["next"] == 0
+        assert replay.text()[0] == ""
+        replay.tape.seek(end)
+        assert replay.snapshot() == now
         # Sprites are drawn on a replay as on a live session.
         sprite = replay.locator("two").nth(-1).right(2).draw(["!"], layer="front")
         replay.tape.seek(end + 1.0)
