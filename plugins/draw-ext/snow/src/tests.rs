@@ -57,7 +57,7 @@ const TEXT: [&str; 8] = ["", "", "", "     a line of text here", "", "", "", ""]
 #[test]
 #[ignore = "prints the snow: cargo test -p ptyrc-draw-snow show -- --ignored --nocapture"]
 fn show() {
-    let mut snow = make(json!({"rate": 60}));
+    let mut snow = make(json!({"rate": 60, "cover": true}));
     look(&mut snow, &TEXT, 0, &[], None);
     for t in (0..=40_000u64).step_by(FRAME_MS as usize) {
         let mut canvas = Canvas::new(40, 8);
@@ -92,7 +92,7 @@ fn show() {
 
 #[test]
 fn snow_settles_on_lines_and_on_the_floor() {
-    let mut snow = make(json!({"rate": 60, "seed": 3}));
+    let mut snow = make(json!({"rate": 60, "seed": 3, "cover": true}));
     look(&mut snow, &TEXT, 0, &[], None);
     run(&mut snow, 8, 0, 30_000);
     // On the line: the row above its text, nowhere under its glyphs.
@@ -105,9 +105,15 @@ fn snow_settles_on_lines_and_on_the_floor() {
     // On the floor, under the line too: half the flakes pass behind it.
     assert!(row(&snow, 7, 5, 24) > 20.0);
     assert!(row(&snow, 7, 26, 40) > 30.0);
-    // Nothing hangs in the air.
-    for y in [0, 4, 5] {
-        assert_eq!(row(&snow, y, 0, 40), 0.0, "row {y}");
+    // Nothing hangs in the air; stacks start on the line and the floor.
+    assert_eq!(row(&snow, 4, 0, 40), 0.0);
+    for y in 0..2 {
+        for x in 0..40 {
+            assert!(
+                snow.depth(x, y) == 0.0 || snow.depth(x, y + 1) >= FULL,
+                "{x}, {y}"
+            );
+        }
     }
     // Drifts are smooth: no cell stands far over its neighbour.
     for x in 26..39 {
@@ -144,18 +150,38 @@ fn snow_is_drawn_in_eighths_and_far_flakes_are_faint() {
 }
 
 #[test]
-fn a_cap_on_text_a_drift_on_the_floor_and_no_more() {
-    let mut snow = make(json!({"rate": 600, "seed": 5, "wind": 0}));
+fn without_cover_it_only_falls() {
+    let mut snow = make(json!({"rate": 600, "seed": 5}));
     look(&mut snow, &TEXT, 0, &[], None);
-    run(&mut snow, 8, 0, 60_000);
-    // Full, but for what thawed a moment ago.
-    let nearly = |got: f32, all: f32| got > 0.9 * all && got <= all;
-    assert!(nearly(row(&snow, 2, 5, 24), 19.0 * CAP));
-    assert_eq!(row(&snow, 1, 0, 40), 0.0);
-    assert!(nearly(row(&snow, 7, 0, 40), 40.0 * FULL));
-    assert!(nearly(row(&snow, 6, 0, 40), 40.0 * CAP));
-    assert!((0..40).all(|x| snow.depth(x, 6) <= CAP));
-    assert_eq!(row(&snow, 5, 0, 40), 0.0);
+    run(&mut snow, 8, 0, 10_000);
+    assert!(!snow.flakes.is_empty());
+    assert_eq!(snow.lying(), 0.0);
+    snow.tune(&json!({"cover": true})).unwrap();
+    run(&mut snow, 8, 10_050, 15_000);
+    assert!(snow.lying() > 0.0);
+}
+
+#[test]
+fn stacks_of_deep_cells_on_text_and_on_the_floor() {
+    let mut snow = make(json!({"rate": 600, "seed": 5, "wind": 0, "cover": true}));
+    let mut rows = [""; 12];
+    rows[7] = "     a line of text here";
+    look(&mut snow, &rows, 0, &[], None);
+    run(&mut snow, 12, 0, 60_000);
+    // Over the middle of the line: `DEEP` cells, the lowest ones full;
+    // its ends slope off.
+    let line = 7 - DEEP;
+    assert!(
+        (12..18).all(|x| snow.depth(x, 6) >= FULL),
+        "{:?}",
+        (5..24).map(|x| snow.depth(x, 6)).collect::<Vec<_>>()
+    );
+    assert!(row(&snow, line, 12, 18) > 0.0);
+    assert_eq!(row(&snow, line - 1, 0, 40), 0.0);
+    // On the floor: the same, no more.
+    assert!(snow.depth(30, 11) >= FULL && snow.depth(30, 10) >= FULL);
+    assert_eq!(row(&snow, 11 - DEEP, 0, 40), 0.0);
+    assert!(snow.depth(4, 7) + snow.depth(24, 7) == 0.0 || snow.depth(24, 7) <= FULL);
 }
 
 #[test]
@@ -181,7 +207,7 @@ fn snow_melts_where_the_screen_is_warm() {
 
 #[test]
 fn snow_written_over_is_gone_and_snow_let_go_falls() {
-    let mut snow = make(json!({"rate": 0}));
+    let mut snow = make(json!({"rate": 0, "cover": true}));
     look(&mut snow, &TEXT, 0, &[], None);
     run(&mut snow, 8, 0, 0);
     for x in 8..16 {
@@ -242,7 +268,7 @@ fn the_snow_scrolls_with_the_text() {
 #[test]
 fn same_seed_same_snow() {
     let fall = |seed: u64| {
-        let mut snow = make(json!({"seed": seed, "rate": 80}));
+        let mut snow = make(json!({"seed": seed, "rate": 80, "cover": true}));
         look(&mut snow, &TEXT, 0, &[], None);
         run(&mut snow, 8, 0, 5000);
         (snow.lying.clone(), snow.flakes.len())

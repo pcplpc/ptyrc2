@@ -5,44 +5,45 @@
 //!
 //! Effect `snow`, params:
 //!
-//! - `rate`: flakes per second over 80 columns (default 7).
+//! - `rate`: flakes per second over 80 columns (default 14).
 //! - `wind`: drift, columns per second, to the right (default -1).
+//! - `cover`: the snow lies (default false: it only falls).
 //! - `duration_ms`: life of the effect. Absent: until removed.
 //! - `seed`.
 //!
-//! `tune`: `rate`, `wind`, `duration_ms`; the flakes and the snow stay.
+//! `tune`: `rate`, `wind`, `cover`, `duration_ms`; the flakes and the
+//! snow stay.
 //!
 //! A flake is near (bright) or far (slow, faint: drawn at half
 //! opacity, its glyph by its height in the cell). It sways as it
 //! falls, eases into a new wind in `EASE_MS`, and is not drawn in the
 //! blank between two words.
 //!
-//! Settling. A ledge is a cell without ink, and none beside it, over a
-//! cell with ink, over
-//! the blank between two such cells, over a cell full of snow, or the
-//! last cell of a column: snow lies over a line, not between its words. A flake takes a
-//! ledge over text with probability `TAKE`, any other always. It adds
-//! `GAIN` eighths to the cell, or to the lower of its two neighbours
-//! when that one is a ledge and lower by more than `GAIN`: drifts are
-//! smooth. A cell is drawn `▁` to `█`.
+//! Settling, with `cover`. A ledge is a cell without ink, and none
+//! beside it, over a cell with ink, over the blank between two such
+//! cells, over a cell full of snow, or the last cell of a column: snow
+//! lies over a line, not between its words. A stack holds `DEEP` cells
+//! at most over what holds it, text or the floor. A flake takes a ledge
+//! over text with probability `TAKE`, any other always. It adds `GAIN`
+//! eighths to the cell, or to the lower of its two neighbours when that
+//! one is a ledge and lower by more than `GAIN`: drifts are smooth. A
+//! cell is drawn `▁` to `█`.
 //!
 //! Slumping. The surface of the snow, in eighths over the bottom of the
 //! canvas, steps by `SLOPE` at most between two columns: the excess
 //! slides, `SLIDE` a second, into the neighbour cell, or the one under
 //! it, when that cell holds snow and is not warm, or off the end of a
 //! ledge, as flakes. Drifts form smooth piles; a cap on a line is
-//! rounded at its ends. The last cell of a column
-//! fills up, eight eighths, then holds `CAP` more in the cell above;
-//! text holds `CAP` eighths: a white cap on a line, a drift on the floor.
+//! rounded at its ends.
 //!
 //! The snow lies on the rows of the frame: it scrolls with the text,
 //! and is kept out of sight (`ATTIC` rows and columns around the view).
 //! Rows told moved (`shift`: a splice, an island merge) take their snow
 //! along.
 //!
-//! Thaw. Lying snow loses an eighth every `THAW_MS` on average: under a
-//! light fall the snow thins from the top lines down and never covers
-//! all.
+//! Thaw. The top of a stack loses an eighth every `THAW_MS` on
+//! average: under a light fall the snow thins from the top lines down
+//! and never covers all.
 //!
 //! Melting. Snow goes in `MELT_MS` where the cell, or the cell that
 //! holds it, changed lately (heat class `hot`), and within `WARM`
@@ -72,8 +73,8 @@ const TAKE: f64 = 0.5;
 const GAIN: f32 = 3.0;
 /// Eighths in a full cell.
 const FULL: f32 = 8.0;
-/// Eighths of snow on text, and on a full cell of snow, at most.
-const CAP: f32 = 4.0;
+/// Cells of a stack, over text or the floor, at most.
+const DEEP: usize = 3;
 /// A full cell melts in this long.
 const MELT_MS: f32 = 1500.0;
 /// Lying snow loses an eighth in this long, on average.
@@ -114,6 +115,7 @@ const WHITE: Color = Color::Rgb(226, 232, 245);
 struct Params {
     rate: f64,
     wind: f64,
+    cover: bool,
     duration_ms: Option<u64>,
     seed: u64,
 }
@@ -121,8 +123,9 @@ struct Params {
 impl Default for Params {
     fn default() -> Params {
         Params {
-            rate: 7.0,
+            rate: 14.0,
             wind: -1.0,
+            cover: false,
             duration_ms: None,
             seed: 1,
         }
@@ -236,16 +239,19 @@ impl Snow {
     }
 
     /// Something holds snow in `(x, y)`: text, the blank between two
-    /// words, full snow, the floor.
+    /// words, the floor, or a stack of full snow under `DEEP` cells.
     fn held(&self, x: usize, y: usize) -> bool {
         let gap = || x > 0 && self.wall(x - 1, y + 1) && self.wall(x + 1, y + 1);
-        y + 1 >= self.h || self.wall(x, y + 1) || gap() || self.depth(x, y + 1) >= FULL
-    }
-
-    /// Eighths the cell `(x, y)` takes: a full cell on the floor, a cap
-    /// on text and on snow.
-    fn room(&self, y: usize) -> f32 {
-        if y + 1 >= self.h { FULL } else { CAP }
+        let stack = || {
+            (y + 1..self.h)
+                .take(DEEP)
+                .take_while(|&b| self.depth(x, b) >= FULL)
+                .count()
+        };
+        y + 1 >= self.h
+            || self.wall(x, y + 1)
+            || gap()
+            || (self.depth(x, y + 1) >= FULL && stack() < DEEP)
     }
 
     /// Snow may lie in `(x, y)`: a cell away from the text of its row,
@@ -257,7 +263,7 @@ impl Snow {
 
     /// A bed with room.
     fn ledge(&self, x: usize, y: usize) -> bool {
-        self.bed(x, y) && self.depth(x, y) < self.room(y)
+        self.bed(x, y) && self.depth(x, y) < FULL
     }
 
     /// Eighths from the bottom of the canvas to the top of the snow in
@@ -322,7 +328,7 @@ impl Snow {
                         continue;
                     }
                     let (top, low) = (self.surface(x, y), self.surface(nx, ny));
-                    let space = self.room(ny) - self.depth(nx, ny);
+                    let space = FULL - self.depth(nx, ny);
                     let moved = ((top - low - SLOPE) / 2.0 * share)
                         .min(self.depth(x, y))
                         .min(space);
@@ -344,7 +350,7 @@ impl Snow {
                 (at, low) = (nx, self.depth(nx, y));
             }
         }
-        self.put(at, y, (low + GAIN).min(self.room(y)));
+        self.put(at, y, low + GAIN);
     }
 
     fn spawn(&mut self, dt: f64) {
@@ -382,6 +388,9 @@ impl Snow {
             if x < 0 || x >= w {
                 // Blown out: it comes back by the other side.
                 f.x = f.x.rem_euclid(w as f64);
+                return (f.y as usize) < h;
+            }
+            if !self.params.cover {
                 return (f.y as usize) < h;
             }
             let x = x as usize;
@@ -448,9 +457,10 @@ impl Snow {
                     self.let_go(x, y, depth);
                     continue;
                 }
+                let top = y == 0 || self.depth(x, y - 1) <= 0.0;
                 if self.warm(x, y) {
                     self.put(x, y, depth - melt);
-                } else if self.rng.unit() < dt * 1000.0 / THAW_MS {
+                } else if top && self.rng.unit() < dt * 1000.0 / THAW_MS {
                     self.put(x, y, depth - 1.0);
                 }
             }
@@ -559,6 +569,7 @@ impl Effect for Snow {
         let mut merged = serde_json::Map::new();
         merged.insert("rate".into(), self.params.rate.into());
         merged.insert("wind".into(), self.params.wind.into());
+        merged.insert("cover".into(), self.params.cover.into());
         merged.insert("duration_ms".into(), self.params.duration_ms.into());
         merged.extend(new.clone());
         let params = checked(&merged.into())?;

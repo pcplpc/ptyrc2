@@ -1178,7 +1178,7 @@ Shared by the apps (`_cli.py`, `_arcade.py`):
 | `cat` | `largest` | one sprite in frame cells, back layer (`--front`); driven by the topics `idle`, `cursor` (frame cells), `screen`, `frames`, subscribed with a snapshot, no tick: it waits on the socket until its next step. It stands on a ledge (3x11 free cells over 5 cells of text at least, or the floor of the view), walks, sits, grooms; sleeps on `idle` (a looped animation, nothing sent); jumps when the cursor is within 7 columns and 2 rows, when `covered` > 0.2 or the line under it goes; `visible` false after a scroll: back into the view after 2 to 4 s |
 | `marks` | every pane, else `raw` | `PATTERN...`, `-e` regex, `-i`; one front `tint` per match in frame cells, a colour per pattern, on remembered rows too (`screen.find {known}`), 400 at most, nearest to the view first; looks again on `screen` and `frames` after 30 ms of silence (200 ms at most), finds in one batch, changes in another; topic `draw` drops what the driver removed; a display of the counts (in view, `/known`), `auto` top-right, front (`--no-hud`) |
 | `rain` | `raw` | native effect `rain` (draw extension `rain`), one request, back layer; `--rate` drops per second over 80 columns; a drop lands on a free cell over text with probability 0.45, on the cursor and the floor always; a column whose least still cell (heat, within 3 columns) just changed gets 10 % of its rain, all of it after 10 s; a replaced frame is followed as `sand` does |
-| `snow` | `largest` | native effect `snow` (draw extension `snow`), one request, back layer; `--rate` flakes per second over 80 columns (14), `--wind` columns per second (0.6): every 6 to 15 s the app sends another wind, 0.2 to 2 times as strong, the other way one time in five (`Sprite.tune(wind=)`: tuned in place), as the `beats` of `_cli.follow` |
+| `snow` | `largest` | native effect `snow` (draw extension `snow`), one request, back layer; `--rate` flakes per second over 80 columns (14), `--cover`: the snow lies, else it only falls, `--wind` columns per second (-1): every 6 to 15 s the app sends another wind, 0.2 to 2 times as strong, the other way one time in five (`Sprite.tune(wind=)`: tuned in place), as the `beats` of `_cli.follow` |
 
 Draw extension `sand`: effect `sand`. Grains are braille dots, 2 x 4 a
 cell, one step every 12 ms, a render every 48 ms.
@@ -1220,20 +1220,21 @@ Draw extension `snow`: effect `snow`, a render every 80 ms.
   far (40 %, 1.2 to 2 rows a second, `·` at half opacity); a sway of 1.1
   columns; `wind`; out by a side, in by the other. Not drawn in the
   blank between two words.
-- A ledge: a cell without ink, and none beside it, over ink, over the
-  blank between two inked cells, over a full cell of snow, or the last
-  of its column. A flake takes a ledge over text one time in four, any
-  other always, and adds two eighths there, or to a neighbour ledge
-  lower by more than two. Text holds 4 eighths (`▁` to `▄`); the floor
-  a full cell (`█`) and 4 more above.
+- With `cover` only, snow lies. A ledge: a cell without ink, and none
+  beside it, over ink, over the blank between two inked cells, over a
+  full cell of snow, or the last of its column. A flake takes a ledge
+  over text one time in two, any other always, and adds three eighths
+  there, or to a neighbour ledge lower by more than three. A stack
+  holds 3 cells (`▁` to `█` each) over text or the floor.
 - The snow lies on frame rows: it scrolls with the text; rows within
   2000 of the view are kept. Snow written over is gone; snow that lost
   what held it falls again as flakes.
-- Thaw: a cell loses an eighth every 30 s on average. Melt: a full cell
-  in 1.5 s where its cell or the one that holds it is hot, and within 3
-  columns of the cursor on its row and the row above.
-- Params: `rate` (14), `wind` (0.6), `duration_ms`, `seed`; `tune`:
-  `rate`, `wind`, `duration_ms`.
+- Thaw: the top of a stack loses an eighth every 60 s on average.
+  Melt: a full cell in 1.5 s where its cell or the one that holds it
+  is hot, and within 3 columns of the cursor on its row and the row
+  above.
+- Params: `rate` (14), `wind` (-1), `cover` (false), `duration_ms`,
+  `seed`; `tune`: `rate`, `wind`, `cover`, `duration_ms`.
 
 `scripts/demo-apps.sh [snake] [--check]`: the apps on a scrolling vim
 buffer. `scripts/demo-frames.sh [--check]`: a tmux session of two

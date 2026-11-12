@@ -1,16 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Snow: it settles on the lines of text and melts where they change.
+"""Snow: it falls; with `--cover` it settles on the lines of text and
+melts where they change.
 
     ptyrc-app snow
-    ptyrc-app snow --rate 40 --wind 2 -f active
+    ptyrc-app snow --cover --rate 40 --wind 2 -f active
 
 What it shows:
 
 - A native effect from a draw extension (`plugins/draw-ext/snow`): one
   request starts it, the driver plays it; the app only stays connected.
-- An effect that sees the cells under it: snow lies over a line of
-  text, a cell away from the words of its own row, and on the floor,
-  in smooth piles; flakes pass behind the text.
+- An effect that sees the cells under it: flakes pass behind the
+  text; with `--cover`, snow lies over a line of text, a cell away
+  from the words of its own row, and on the floor, in smooth piles up
+  to three rows deep.
 - An effect that sees the heat: the snow melts where the screen
   changed lately, and around the cursor. Type, and it goes.
 - Frame rows: the snow lies on the rows of the frame, so it scrolls
@@ -37,9 +39,16 @@ __all__ = ["gust", "gusts", "main", "snow"]
 GUST = (6.0, 15.0)  # seconds between two winds
 
 
-def snow(pilot: Pilot, frame: Frame, rate: float, wind: float) -> Sprite:
-    """Start the snow on `frame`."""
-    params = {"rate": rate, "wind": wind, "seed": random.getrandbits(32)}
+def snow(
+    pilot: Pilot, frame: Frame, rate: float, wind: float, cover: bool = False
+) -> Sprite:
+    """Start the snow on `frame`; `cover`: it lies."""
+    params = {
+        "rate": rate,
+        "wind": wind,
+        "cover": cover,
+        "seed": random.getrandbits(32),
+    }
     return pilot.effect("snow", params, frame=frame.id, layer="back")
 
 
@@ -58,19 +67,27 @@ def gusts(sprite: Sprite, wind: float, rng: random.Random) -> Iterator[float]:
 
 def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
     frame = _cli.pick(pilot, args.frame)
-    sprite = snow(pilot, frame, args.rate, args.wind)
+    sprite = snow(pilot, frame, args.rate, args.wind, args.cover)
     beats = gusts(sprite, args.wind, random.Random()) if args.wind else None
     _cli.follow(pilot, frame, sprite, seconds, beats)
 
 
 def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> int:
     """`seconds`: stop after this long (tests); else until interrupted."""
-    out = _cli.parser("snow", "Snow on the lines of text; it melts where they change.")
+    out = _cli.parser(
+        "snow",
+        "Snow; with --cover it lies on the lines of text and melts where they change.",
+    )
     out.add_argument(
         "--rate",
         type=float,
-        default=7.0,
-        help="flakes per second over 80 columns [default: 7]",
+        default=14.0,
+        help="flakes per second over 80 columns [default: 14]",
+    )
+    out.add_argument(
+        "--cover",
+        action="store_true",
+        help="the snow lies on the text and the floor; else it only falls",
     )
     out.add_argument(
         "--wind",

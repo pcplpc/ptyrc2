@@ -45,7 +45,7 @@ def test_snow(session: Pilot) -> None:
     session.send("clear; printf '\\n\\n\\n\\n          %040d\\n' 0\n")
     session.wait_for("0" * 40, frame="raw")
     time.sleep(0.3)
-    args = ["-s", session.session, "--rate", "900", "--wind", "0"]
+    args = ["-s", session.session, "--cover", "--rate", "900", "--wind", "0"]
     status: list[int] = []
     thread = threading.Thread(target=lambda: status.append(snow.main(args, seconds=9)))
     thread.start()
@@ -89,3 +89,23 @@ def test_snow(session: Pilot) -> None:
     assert session.sprites() == []
     assert session.dump()["host"] == session.text()
     assert snow.main(["-s", session.session, "--rate", "-1"]) == 1
+
+
+def test_snow_without_cover(session: Pilot) -> None:
+    """By default the flakes only fall."""
+    session.send("clear; printf '\\n\\n\\n\\n          %040d\\n' 0\n")
+    session.wait_for("0" * 40, frame="raw")
+    args = ["-s", session.session, "--rate", "900", "--wind", "0"]
+    thread = threading.Thread(target=lambda: snow.main(args, seconds=5))
+    thread.start()
+    try:
+        deadline = time.monotonic() + 4
+        seen = 0
+        while time.monotonic() < deadline:
+            assert sum(lying(session)) == 0
+            host = "".join(session.dump()["host"])
+            seen += any(c in host for c in "*+")
+            time.sleep(0.1)
+        assert seen > 10
+    finally:
+        thread.join()
