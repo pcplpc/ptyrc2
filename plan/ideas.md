@@ -55,3 +55,23 @@ Backlog. Not a commitment; moved to `design.md` when taken.
   after rather than counting writes, and separate what is background
   from what is foreground in a TUI. The heatmap should build on that:
   `activity` from visible change only, `occupancy` from foreground only.
+
+## From the owner, opening the second session (2026-11-12)
+
+Notes, not commitments. They extend "background against foreground" above.
+
+- Pagers and scrolling: better out of the box (`less`, `more`, `man`).
+- Tell a TUI's background from its foreground. A write that clears an
+  already clean area is not an update; an empty background is not "hot".
+- A big grey panel, as opentui apps draw, is not a full area: it is
+  background of another colour.
+- What does not move is not hot. The heat overlay should tell hot redraws
+  (red) from static text (light blue).
+- This must fit the layers and transparency work: what a background layer
+  shows through is the same notion of background.
+- `check_idle()`: a score in `0..=1`, the share of the frame that is
+  static (pure green on the heatmap, about 10 s without change).
+  `is_idle`: a boolean property, true from 80 %. Use: pick a frame fit for
+  a big animation (sand in an empty pane).
+- Team: the session agent pilots; forked siblings own disjoint paths and
+  may delegate bounded pieces to sub-agents.

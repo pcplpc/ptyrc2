@@ -171,6 +171,17 @@ glyphs. Unknown sequences are consumed and ignored. Modes that only
 concern input (mouse, bracketed paste, cursor keys) are tracked, not acted
 on.
 
+Background and foreground of a cell, the one notion shared by the
+frames, the heatmap and the layers:
+
+- `Cell::has_ink()`: foreground. A glyph, or a blank that is underlined,
+  struck or overlined. Hidden text is not ink.
+- `Cell::backdrop()`: background. The colour that fills the cell: `bg`,
+  or `fg` when inverse.
+- `Cell::looks_like(&other)`: same on screen. Two cells without ink look
+  alike when their backdrops are equal. A clear of a clean area, and an
+  identical redraw, change nothing.
+
 Test: `repair` property. For random streams of app bytes and random
 desired grids, after `repair` the host grid equals the desired grid and
 `host.same_state(app)`.
