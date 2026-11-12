@@ -164,22 +164,22 @@ a_htop() {
     begin htop htop || return
     sleep 3
     same_text htop
-    check "htop: meters and table are two panes, the header is chrome" \
-        'len(P) == 2 and P[0]["rect"][1] == 0 and P[0]["rect"][2] == W and P[1]["rect"][3] > H // 2 and len(C) >= 1'
-    known "htop: panes usable 3 s after the start (frames re-allocated at each refresh)" \
-        'all(f["usable"] for f in P)'
-    # The selected process is a full-width highlight: once it has moved it
-    # is known for a list entry, not a bar.
+    check "htop: meters and table are two panes; header and function bar chrome" \
+        'len(P) == 2 and [f["key"] for f in P] == ["htop:meters", "htop:processes"] and len(C) == 2 and P[1]["rect"][1] == C[0]["rect"][1] + 1 and C[1]["rect"] == [0, H - 1, W, 1]'
+    check "htop: panes usable 3 s after the start" 'all(f["usable"] for f in P)'
+    local ids; ids=$(frames_json | python3 -c 'import json, sys; print(sorted(f["id"] for f in json.load(sys.stdin)["frames"] if f["key"]))')
+    # The selected process is a full-width highlight: an entry of the
+    # table from the start, not a bar.
+    check "htop: the selection is not a separator" 'P[1]["rect"][3] == H - 2 - C[0]["rect"][1]'
     e2e_keys down; quiet; e2e_keys down; quiet
-    check "htop: the selection is not a separator" \
-        'len(P) == 2 and len(C) == 1 and P[1]["rect"][1] == C[0]["rect"][1] + 1'
     local before; before=$(rects)
     e2e_keys down; quiet; e2e_keys up; quiet; e2e_keys pagedown; quiet
     if [ "$(rects)" = "$before" ]; then pass "htop: moving the selection keeps the layout"
     else fail "htop: moving the selection keeps the layout"; fi
-    # After a page down the table is re-sorted at each refresh; rows that
-    # happen to stay are learned as chrome and the pane shrinks.
-    steady htop 6 known
+    # After a page down the table is re-sorted at each refresh: no row
+    # that happens to stay is learned as chrome, the frames stay.
+    steady htop 6
+    check "htop: the same frames since the start" "sorted(f[\"id\"] for f in P) == $ids"
     sprite htop
     sprite htop --near Uptime --side below
     same_text htop
@@ -243,9 +243,23 @@ a_ranger() {
     sleep 3
     same_text ranger
     check "ranger: panes found, usable" 'len(P) >= 1 and all(f["usable"] for f in P)'
-    known "ranger: the three columns are three panes (no border, no backdrop)" 'len(P) >= 3'
+    check "ranger: the three columns are three panes, title and status rows chrome" \
+        'len(P) == 3 and all(f["support"] == "ranger" and f["rect"][1] == 1 and f["rect"][3] == H - 2 for f in P) and [f["rect"] for f in C] == [[0, 0, W, 1], [0, H - 1, W, 1]]'
+    check "ranger: the main column is keyed by its directory" \
+        '[f["key"] for f in P] == [None, "ranger:/usr/share/doc", None]'
+    local main
+    main=$(frames_json | python3 -c 'import json, sys; print(next(f["id"] for f in json.load(sys.stdin)["frames"] if f["key"]))')
     e2e_keys down; quiet; e2e_keys down; quiet; e2e_keys up; quiet
     same_text ranger
+    e2e_keys pagedown; quiet 1
+    check "ranger: the main column scrolls in its frame" \
+        "P[1][\"id\"] == $main and P[1][\"origin\"][1] > 0 and P[1][\"usable\"]"
+    e2e_keys right; quiet 2.5
+    check "ranger: another directory, another frame" \
+        "len(P) >= 2 and all(f[\"id\"] != $main for f in P) and any((f[\"key\"] or \"\").startswith(\"ranger:/usr/share/doc/\") for f in P)"
+    e2e_keys left; quiet 2.5
+    check "ranger: back, the frame of the directory is found again" \
+        "len(P) == 3 and P[1][\"id\"] == $main and P[1][\"origin\"][1] > 0"
     steady ranger 2
     sprite ranger
     e2e_keys q

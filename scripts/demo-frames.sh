@@ -15,7 +15,7 @@ demo_setup
 text=temp/demo-frames.txt
 seq 1 300 | sed 's/.*/line &: the quick brown fox jumps over the lazy dog/' >"$text"
 inner=ptyrc-demo-$$                    # its own tmux server, never the default
-vim="/usr/bin/vim -u NONE -N"
+vim="/usr/bin/vim -u NONE -N -n"      # -n: one file in two windows, no swap prompt
 noise='while :; do od -An -N12 -tx1 /dev/urandom; sleep 0.3; done'
 e2e_start demo-frames 120x36 tmux -L "$inner" -f /dev/null \
     new-session "$vim $text" \; \
@@ -51,7 +51,7 @@ demo_ok "the quiet pane becomes idle, the noisy one does not" demo_until 20 eval
     '[ "$(demo_json frames "[f[\"is_idle\"] for f in d[\"frames\"] if f[\"id\"] in ($quiet, $noisy)]")" = "[False, True]" ]'
 demo_ok "sand falls in the idle pane" demo_until 8 eval 'drawn | grep -qw "$quiet"'
 tmux -L "$inner" select-window -t 1
-demo_ok "window 1: other panes" demo_until 8 eval '[ -n "$(panes True)" ] && ! panes True | grep -qw -e "$in_vim" -e "$noisy" -e "$quiet"'
+demo_ok "window 1: two vim splits, other panes" demo_until 8 eval '[ "$(panes "f[\"support\"] == \"vim\" and (f[\"key\"] or \"\").startswith(\"tmux:0:1/vim:\")" | wc -w)" -eq 2 ] && ! panes True | grep -qw -e "$in_vim" -e "$noisy" -e "$quiet"'
 demo_ok "drawings of window 0 are out of sight" test -z "$(drawn)"
 tmux -L "$inner" select-window -t 0
 demo_ok "window 0 is back with the same frames" demo_until 8 eval '[ "$(panes True | xargs -n1 | sort -n | xargs)" = "$(echo $in_vim $noisy $quiet | xargs -n1 | sort -n | xargs)" ]'

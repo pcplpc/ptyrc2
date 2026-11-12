@@ -9,6 +9,8 @@ pub fn tui_support() -> Vec<Box<dyn TuiSupport>> {
     vec![
         Box::new(ptyrc_tui_tmux::Tmux),
         Box::new(ptyrc_tui_vim::Vim),
+        Box::new(ptyrc_tui_ranger::Ranger),
+        Box::new(ptyrc_tui_htop::Htop),
         Box::new(ptyrc_tui_agent::AgentTui),
     ]
 }

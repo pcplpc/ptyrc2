@@ -9,3 +9,6 @@ license.workspace = true
 ptyrc-core.workspace = true
 ptyrc-vt.workspace = true
 regex.workspace = true
+
+[dev-dependencies]
+ptyrc-tui-vim = { path = "../vim" }
