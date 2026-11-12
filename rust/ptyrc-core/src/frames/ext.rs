@@ -63,6 +63,9 @@ pub(crate) struct Obs<'a> {
     pub width: u16,
     /// Sum of the emulator scroll events over the pane, as a `dy`.
     pub seed: i64,
+    /// Every one of those events pushed rows into the host scrollback: a
+    /// real scroll of the main screen, not a repaint by line feeds.
+    pub seed_real: bool,
     /// Cursor row inside the pane.
     pub cursor_row: Option<usize>,
     /// Absolute frame row of pane row 0, when the app shows it.
@@ -356,6 +359,10 @@ impl Ext {
             self.bottom = b;
             self.rect_changed = true;
         }
+        if o.side_pending && self.rows.len() == h {
+            // The content columns are in doubt: this screen is not read.
+            return Outcome::Same;
+        }
         if self.rows.len() != h {
             self.rows = (0..h).map(|i| self.fresh(o, i)).collect();
             self.hint(o, true);
@@ -427,10 +434,11 @@ impl Ext {
             self.apply_scroll(o, &ph, dy);
             return Outcome::Scroll { dx: 0, dy };
         }
-        // The emulator saw the pane scroll, and no row is where it was: a
-        // page or more at once. Nothing to align, but the distance is
-        // known.
-        if o.seed != 0 && nb >= 1 && c0 * 5 < nb * 2 {
+        // The main screen scrolled into the scrollback and no row is where
+        // it was: a page or more of output at once. Nothing to align, but
+        // the distance is known. (On the alternate screen a pager repaints
+        // a jump with the same line feeds as a page down: not trusted.)
+        if o.seed != 0 && o.seed_real && nb >= 1 && c0 * 5 < nb * 2 {
             self.flush(o.now);
             self.oy += o.seed;
             self.rows = (0..h).map(|i| self.fresh(o, i)).collect();

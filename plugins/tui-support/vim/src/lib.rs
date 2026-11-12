@@ -5,6 +5,7 @@
 //! (`-- INSERT --`), the `~` filler rows.
 
 use ptyrc_core::plugin::{Chrome, PaneView, TuiSupport, ViewHint};
+use ptyrc_vt::{Attrs, Color};
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -25,6 +26,28 @@ fn screen_row(pane: &PaneView, y: u16) -> String {
         .filter(|c| c.width != 0)
         .map(|c| c.text.as_str())
         .collect()
+}
+
+/// Share of the cells of a pane row that are highlighted: inverse,
+/// underlined or on a coloured background.
+fn highlighted(pane: &PaneView, row: u16) -> f32 {
+    let y = pane.rect.y + row;
+    let lit = (pane.rect.x..pane.rect.right())
+        .filter(|x| {
+            let style = &pane.grid.cell(*x, y).style;
+            style.bg != Color::Default || style.attrs.0 & (Attrs::INVERSE | Attrs::UNDERLINE) != 0
+        })
+        .count();
+    lit as f32 / pane.rect.w.max(1) as f32
+}
+
+/// The tab line: the first screen row, highlighted from edge to edge above
+/// text that is not.
+fn tab_line(pane: &PaneView) -> bool {
+    pane.rect.y == 0
+        && pane.rect.h >= 3
+        && highlighted(pane, 0) >= 0.8
+        && highlighted(pane, 1) < 0.2
 }
 
 /// The pane reaches the bottom of the screen: it holds the command line.
@@ -100,8 +123,10 @@ impl TuiSupport for Vim {
             None if at_bottom(pane) => 1,
             None => 0,
         };
+        let top = tab_line(pane) as u16;
         Some(Chrome {
-            bottom: bottom.min(h.saturating_sub(1)),
+            top,
+            bottom: bottom.min(h.saturating_sub(1 + top)),
             ..Chrome::default()
         })
     }
@@ -111,11 +136,11 @@ impl TuiSupport for Vim {
     /// numbers); row 0 when the ruler says `Top` or `All`.
     fn view_hint(&self, pane: &PaneView) -> Option<ViewHint> {
         let chrome = self.chrome(pane).unwrap_or_default();
-        let body = pane.rect.h.saturating_sub(chrome.bottom);
+        let body = pane.rect.h.saturating_sub(chrome.top + chrome.bottom);
         let mut first: Option<i64> = None;
         let mut consecutive = body >= 2;
         for row in 0..body {
-            let text = pane.row_text(row);
+            let text = pane.row_text(chrome.top + row);
             if text.trim_end() == "~" {
                 break;
             }
@@ -244,6 +269,28 @@ mod tests {
         assert_eq!(Vim.frame_key(&top).unwrap(), "vim:dir/other.txt");
         assert_eq!(Vim.view_hint(&low).unwrap().row, Some(0));
         assert_eq!(Vim.frame_key(&low).unwrap(), "vim:dir/long.txt");
+    }
+
+    #[test]
+    fn tab_line_is_top_chrome() {
+        let mut grid = Grid::from_lines(
+            30,
+            &[
+                " a.txt  b.txt",
+                "hello",
+                "world",
+                "~",
+                "~",
+                "                 1,1    All",
+            ],
+        );
+        for x in 0..30 {
+            grid.cell_mut(x, 0).style.attrs.insert(Attrs::INVERSE);
+        }
+        let p = pane(&grid, "");
+        let chrome = Vim.chrome(&p).unwrap();
+        assert_eq!((chrome.top, chrome.bottom), (1, 1));
+        assert_eq!(Vim.view_hint(&p).unwrap().row, Some(0));
     }
 
     #[test]

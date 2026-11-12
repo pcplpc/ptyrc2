@@ -1257,7 +1257,24 @@ impl Frames {
                 };
                 // A number column is taken at once; its loss is believed
                 // the second time (a half-drawn screen has none).
-                if found.is_some() || p.ext.lines.is_empty() || p.gutter_cand.1 >= 2 {
+                // Sooner when the rows are the old ones moved left by the
+                // width of the column.
+                let moved_left = found.is_none() && p.left > width && {
+                    let (mut same, mut all) = (0usize, 0usize);
+                    for (i, row) in p.ext.rows.iter().enumerate().take(p.rect.h as usize) {
+                        if row.line.text.is_empty() {
+                            continue;
+                        }
+                        all += 1;
+                        let x = p.rect.x + width;
+                        let end = p.rect.right().saturating_sub(p.left - width).max(x);
+                        let mut now_there = self.screen.lines[p.rect.y as usize + i].slice(x, end);
+                        now_there.trim_end();
+                        same += (now_there.text == row.line.text) as usize;
+                    }
+                    all >= 2 && same * 10 >= all * 6
+                };
+                if found.is_some() || moved_left || p.ext.lines.is_empty() || p.gutter_cand.1 >= 2 {
                     p.gutter_cand = (width, 0);
                     p.left = width;
                     p.ext.reset_view();
@@ -1297,12 +1314,19 @@ impl Frames {
             l
         };
         let mut seed = 0i64;
+        let mut seed_real = true;
         if let Some(inp) = input {
             for e in inp.events {
-                if let VtEvent::Scroll { region, dy, .. } = e {
+                if let VtEvent::Scroll {
+                    region,
+                    dy,
+                    scrollback,
+                } = e
+                {
                     let x = region.intersect(&rect);
                     if x.w as u32 * 5 >= rect.w as u32 * 4 && x.h as u32 * 5 >= rect.h as u32 * 4 {
                         seed -= *dy as i64;
+                        seed_real &= *scrollback;
                     }
                 }
             }
@@ -1320,6 +1344,7 @@ impl Frames {
             line: &line,
             width: b - a,
             seed,
+            seed_real,
             cursor_row: rect
                 .contains(cur.0, cur.1)
                 .then(|| (cur.1 - rect.y) as usize),

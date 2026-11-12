@@ -522,7 +522,14 @@ fn number_column_under_a_plugin() {
     s.feed(&nu(120), 300);
     assert_eq!(s.pane().origin, [0, 120]);
     s.feed(&nu(0), 300);
-    // Numbers off: believed at the second screen.
+    // Numbers off: the same rows, four columns to the left. Taken at
+    // once, and not as a horizontal scroll or a jump.
+    s.feed(&nu(120), 300);
+    s.feed(&plain(120), 300);
+    assert_eq!(
+        (s.pane().rect, s.pane().origin),
+        ([0, 0, COLS, 20], [0, 120])
+    );
     s.feed(&plain(0), 300);
     s.feed(&plain(1), 300);
     assert_eq!((s.pane().rect, s.pane().origin), ([0, 0, COLS, 20], [0, 1]));
@@ -1334,10 +1341,12 @@ fn the_alternate_screen_has_its_own_frames() {
 }
 
 #[test]
-fn a_page_at_once_by_vt_events() {
-    // A pager: the whole page is replaced, the emulator saw 19 line feeds.
+fn a_pager_page_is_not_trusted_as_a_scroll() {
+    // A pager repaints a page down and a jump with the same line feeds:
+    // without rows to align, the view goes to an island, and comes back.
     let d = doc(200);
     let mut s = Sim::new();
+    s.alt = true;
     s.settle(&view(&d, 0, 19, &[":"]));
     let id = s.pane().id;
     let scroll = VtEvent::Scroll {
@@ -1345,12 +1354,11 @@ fn a_page_at_once_by_vt_events() {
         dy: -19,
         scrollback: false,
     };
-    s.feed_ev(&view(&d, 19, 19, &[":"]), 300, &[scroll]);
-    assert_eq!((s.pane().id, s.pane().origin), (id, [0, 19]));
-    s.feed_ev(&view(&d, 38, 19, &[":"]), 300, &[scroll]);
-    assert_eq!(s.pane().origin, [0, 38]);
-    s.idle(300);
-    assert_eq!(s.f.text(id, 0, 19), d[..19].to_vec());
+    s.feed_ev(&view(&d, 150, 19, &[":"]), 300, &[scroll]);
+    assert_eq!(s.pane().id, id);
+    assert!(s.pane().origin[1] >= ext::ISLAND_GAP);
+    s.feed_ev(&view(&d, 0, 19, &[":"]), 300, &[scroll]);
+    assert_eq!(s.pane().origin, [0, 0]);
 }
 
 #[test]
