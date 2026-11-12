@@ -128,6 +128,10 @@ s_vim() {
         || { echo "FAIL  vim: the opened line is spliced in"; FAILED=1; }
     e2e_send 'dd'; quiet 0.5
     known "vim: deleted again, the buffer is the file" "$id" "$WORK/long.txt"
+    e2e_send 'gg'; quiet
+    e2e_keys ctrl+f; quiet; e2e_keys ctrl+f; quiet; e2e_keys ctrl+f; quiet
+    check "vim: ctrl+f, a page with two rows of overlap, is a scroll" \
+        "ids() == [$id] and pane()['origin'][1] == 81 and pane()['extent'][0] == 0 and pane()['extent'][1] < 300"
     e2e_stop
 }
 

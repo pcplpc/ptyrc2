@@ -334,6 +334,7 @@ Built (see `design.md`, "Extended frame", "Further rules", "Plugins"):
   screen; a rule from top to bottom cuts before presets are asked.
 - `scripts/demo-frames.sh`: window 2, ranger beside a shell, a mark
   fixed on a row of the list.
+- A page with two rows of overlap (vim `ctrl+f`) is a scroll.
 
 Left:
 

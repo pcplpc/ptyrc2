@@ -696,6 +696,18 @@ impl Ext {
         {
             dy = Some(d);
         }
+        // A page with an overlap (an editor keeps two rows): few rows
+        // align, but every row that could does, each unique in the view,
+        // and none stayed.
+        if dy.is_none()
+            && let Some((d, c, w)) = best
+            && c >= 2
+            && c as i64 == span - d.abs()
+            && w == 2 * c
+            && c0 == 0
+        {
+            dy = Some(d);
+        }
         if o.seed != 0 && o.seed.abs() < span && dy != Some(o.seed) {
             let (c, w) = score(o.seed);
             if c >= 1 && w >= w0 && best.is_none_or(|(_, _, bw)| w * 2 >= bw) {

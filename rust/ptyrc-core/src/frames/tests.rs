@@ -3082,3 +3082,30 @@ fn ink_of_a_row_out_of_the_view_is_remembered() {
     assert_eq!(s.f.ink_row(id, 60, 0, 12), None);
     assert_eq!(s.f.ink_row(RAW, 3, 0, 12), None);
 }
+
+#[test]
+fn a_page_with_two_rows_of_overlap_is_a_scroll() {
+    // An editor's page down keeps the last two rows at the top, and
+    // repaints: no scroll counted, two rows of twenty align.
+    let d = doc(200);
+    let mut s = Sim::new();
+    s.settle(&view(&d, 0, 20, &[]));
+    let id = s.pane().id;
+    for page in 1..=3 {
+        let ev = s.feed(&view(&d, 18 * page, 20, &[]), 300);
+        assert!(ev.contains(&FrameEvent::Scroll {
+            frame: id,
+            dx: 0,
+            dy: 18
+        }));
+        assert_eq!(s.pane().origin, [0, 18 * page as i64]);
+    }
+    s.feed(&view(&d, 36, 20, &[]), 300);
+    assert_eq!(s.pane().origin, [0, 36]);
+    s.idle(300);
+    assert_eq!(s.pane().extent, [0, 73]);
+    // One row in common is not enough.
+    s.feed(&view(&d, 150, 20, &[]), 300);
+    s.feed(&view(&d, 169, 20, &[]), 300);
+    assert_ne!(s.pane().origin, [0, 169]);
+}

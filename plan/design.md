@@ -251,6 +251,9 @@ origin. Each update compares the previous view content with the new one:
    do not vote, rows unique in the view weigh more). Accepted when it
    beats `dy = 0` clearly and aligns at least `max(2, 30 %)` of the
    non-blank rows. `VtEvent::Scroll` inside the rect seeds the candidates.
+   Fewer are enough when every row that could align does (two or more,
+   each unique in the view) and none stayed: a page with an overlap
+   (vim `ctrl+f` keeps two rows).
    Rows that stay put while the rest shifts are chrome: the scroll band is
    the largest run of rows that moves, learned over time. Rows inside a
    region the emulator scrolled are not top chrome.
