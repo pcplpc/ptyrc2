@@ -1,0 +1,10 @@
+[package]
+name = "ptyrc-tui-htop"
+description = "ptyrc: tui-support preset: htop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ptyrc-core.workspace = true
+ptyrc-vt.workspace = true

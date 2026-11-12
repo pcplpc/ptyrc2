@@ -164,22 +164,22 @@ a_htop() {
     begin htop htop || return
     sleep 3
     same_text htop
-    check "htop: meters and table are two panes, the header is chrome" \
-        'len(P) == 2 and P[0]["rect"][1] == 0 and P[0]["rect"][2] == W and P[1]["rect"][3] > H // 2 and len(C) >= 1'
-    known "htop: panes usable 3 s after the start (frames re-allocated at each refresh)" \
-        'all(f["usable"] for f in P)'
-    # The selected process is a full-width highlight: once it has moved it
-    # is known for a list entry, not a bar.
+    check "htop: meters and table are two panes; header and function bar chrome" \
+        'len(P) == 2 and [f["key"] for f in P] == ["htop:meters", "htop:processes"] and len(C) == 2 and P[1]["rect"][1] == C[0]["rect"][1] + 1 and C[1]["rect"] == [0, H - 1, W, 1]'
+    check "htop: panes usable 3 s after the start" 'all(f["usable"] for f in P)'
+    local ids; ids=$(frames_json | python3 -c 'import json, sys; print(sorted(f["id"] for f in json.load(sys.stdin)["frames"] if f["key"]))')
+    # The selected process is a full-width highlight: an entry of the
+    # table from the start, not a bar.
+    check "htop: the selection is not a separator" 'P[1]["rect"][3] == H - 2 - C[0]["rect"][1]'
     e2e_keys down; quiet; e2e_keys down; quiet
-    check "htop: the selection is not a separator" \
-        'len(P) == 2 and len(C) == 1 and P[1]["rect"][1] == C[0]["rect"][1] + 1'
     local before; before=$(rects)
     e2e_keys down; quiet; e2e_keys up; quiet; e2e_keys pagedown; quiet
     if [ "$(rects)" = "$before" ]; then pass "htop: moving the selection keeps the layout"
     else fail "htop: moving the selection keeps the layout"; fi
-    # After a page down the table is re-sorted at each refresh; rows that
-    # happen to stay are learned as chrome and the pane shrinks.
-    steady htop 6 known
+    # After a page down the table is re-sorted at each refresh: no row
+    # that happens to stay is learned as chrome, the frames stay.
+    steady htop 6
+    check "htop: the same frames since the start" "sorted(f[\"id\"] for f in P) == $ids"
     sprite htop
     sprite htop --near Uptime --side below
     same_text htop
