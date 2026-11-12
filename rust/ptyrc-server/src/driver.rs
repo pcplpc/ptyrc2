@@ -746,6 +746,8 @@ impl Driver {
             conn.topics.extend(topics);
         }
         self.refresh_topics();
+        // A tick, so that the engine sees the new topics.
+        self.repaint = true;
         Ok(json!({}))
     }
 

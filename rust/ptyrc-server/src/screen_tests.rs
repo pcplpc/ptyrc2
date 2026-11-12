@@ -22,6 +22,9 @@ struct Rig {
     /// What a real host would show.
     host: Vt,
     next: u64,
+    /// Events and completions of the hooks, in order.
+    events: Vec<(String, Value)>,
+    done: Vec<(Token, Value)>,
 }
 
 impl Rig {
@@ -42,6 +45,8 @@ impl Rig {
             now: Duration::ZERO,
             host: Vt::new(cols, rows),
             next: 0,
+            events: Vec::new(),
+            done: Vec::new(),
         };
         let mut fx = Effects::default();
         let mut ctx = Ctx {
@@ -64,7 +69,11 @@ impl Rig {
             now: self.now,
             fx: &mut fx,
         };
-        f(&mut self.engine, &mut ctx)
+        let r = f(&mut self.engine, &mut ctx);
+        self.events.extend(fx.events);
+        self.done
+            .extend(fx.completions.into_iter().map(|(t, r)| (t, r.unwrap())));
+        r
     }
 
     /// App output; returns what went to the host.
@@ -439,4 +448,78 @@ fn bench_burst_path() {
             if sprites { " with a sprite" } else { "" },
         );
     }
+}
+
+/// A `screen.wait` left pending; its token.
+fn pending(rig: &mut Rig, params: Value) -> Token {
+    rig.next += 1;
+    let token = Token(rig.next);
+    let reply = rig.ctx(|e, ctx| e.handle(ConnId(7), token, "screen.wait", params, ctx));
+    assert!(matches!(reply, Reply::Pending), "{reply:?}");
+    token
+}
+
+#[test]
+fn wait_idle_answers_when_the_frame_is_idle() {
+    let mut rig = Rig::new(40, 10);
+    rig.burst(b"hello");
+    let token = pending(&mut rig, json!({"idle": true, "timeout_ms": 30000}));
+    rig.advance(9000);
+    assert!(rig.done.is_empty(), "idle before 10 s");
+    rig.advance(1500);
+    let (t, result) = rig.done.pop().expect("answered");
+    assert_eq!(t, token);
+    assert_eq!(result["matched"], true);
+    assert_eq!(result["frame"], 0);
+    assert_eq!(result["idle"]["idle"], true);
+    // Idle now: answered at once.
+    let now = rig.call("screen.wait", json!({"idle": true, "frame": "idle"}));
+    assert_eq!(now["matched"], true);
+}
+
+#[test]
+fn wait_idle_times_out_on_a_busy_screen() {
+    let mut rig = Rig::new(40, 10);
+    let token = pending(&mut rig, json!({"idle": true, "timeout_ms": 3000}));
+    for i in 0..40 {
+        // Most of the screen changes, again and again.
+        let fill = format!("\x1b[H{}", format!("{i:040}").repeat(10));
+        rig.burst(fill.as_bytes());
+        rig.advance(100);
+    }
+    assert_eq!(rig.done, vec![(token, json!({"matched": false}))]);
+}
+
+#[test]
+fn idle_events_on_change_only() {
+    let mut rig = Rig::new(40, 10);
+    rig.topics.insert("idle".into());
+    rig.burst(b"hello");
+    rig.advance(12000);
+    let idle: Vec<_> = rig
+        .events
+        .iter()
+        .filter(|(t, d)| t == "idle" && d["frame"] == 0)
+        .collect();
+    assert_eq!(idle.len(), 1, "{idle:?}");
+    assert_eq!(idle[0].1["idle"], true);
+    rig.events.clear();
+    for i in 0..5 {
+        let fill = format!("\x1b[H{}", format!("{i:040}").repeat(10));
+        rig.burst(fill.as_bytes());
+        rig.advance(300);
+    }
+    let idle: Vec<_> = rig
+        .events
+        .iter()
+        .filter(|(t, d)| t == "idle" && d["frame"] == 0)
+        .collect();
+    assert_eq!(idle.len(), 1, "{idle:?}");
+    assert_eq!(idle[0].1["idle"], false);
+    // No subscriber: no wake for the watch.
+    rig.topics.clear();
+    rig.advance(1000);
+    let before = rig.engine.ticks;
+    rig.advance(5000);
+    assert_eq!(rig.engine.ticks, before);
 }
