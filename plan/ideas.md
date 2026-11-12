@@ -221,5 +221,6 @@ Gaps met while writing the apps; none fixed in the core.
 
 ## From the owner, late in the second session
 
-- Confetti bursts spawn at random places on the screen, cold areas of
-  the heatmap first.
+- Built: confetti bursts spawn at random places on the screen, cold
+  areas of the heatmap first (`confetti.spot`; `--anywhere` turns it
+  off).

@@ -11,7 +11,7 @@ python -m ptyrc_apps.clock -s NAME
 
 | app | what it shows |
 |---|---|
-| `confetti` | a native effect started with one call; `--spawn [--rate N]`: a party, N bursts a minute (20 by default), behind the text |
+| `confetti` | a native effect started with one call; `--spawn [--rate N]`: a party, N bursts a minute (20 by default), behind the text, each at a random cell weighted towards cold areas of the heatmap (`--anywhere`: uniform) |
 | `clock` | automatic placement, the front layer, a sprite updated in place, a draw extension |
 | `flower` | a drawing tied to a word (`near=`), opened by the client, then animated by the driver |
 | `fishes` | sprites in frame coordinates: they scroll with the text; the cursor read each tick; one batch per tick |

@@ -697,7 +697,7 @@ boolean; both ask the driver when read. `plugins/client-apps/python`: `ptyrc-app
 
 | app | default frame | what runs where |
 |---|---|---|
-| `confetti` | `raw` | native effect. `--spawn [--rate N]`: one request per burst, N a minute (20), until interrupted; back layer unless `--front` |
+| `confetti` | `raw` | native effect. `--spawn [--rate N]`: N bursts a minute (20), until interrupted; each burst reads `frame.heat` once and starts at a random cell weighted by the share of non-hot cells within 3 of it, hot cells excluded unless all are, never within 3 of the previous origin (`--anywhere`: uniform); back layer unless `--front` |
 | `clock` | `raw` | one `draw.update` a second; front layer |
 | `flower` | `raw` | text anchor and sway animation native; three requests in all |
 | `fishes` | `largest` | positions in frame coordinates, computed by the client, one batch every 100 ms; flee the cursor |

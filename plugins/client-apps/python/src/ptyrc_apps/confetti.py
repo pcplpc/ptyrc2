@@ -9,6 +9,11 @@ travels on the socket while it plays.
     ptyrc-app confetti --front
     ptyrc-app confetti --spawn              # party: a burst every 3 s
     ptyrc-app confetti --spawn --rate 60    # a burst every second
+    ptyrc-app confetti --spawn --anywhere   # ignore the heatmap
+
+In party mode each burst starts at a random cell, cold areas first: the
+app reads the frame's heat classes once per burst (`Frame.heat_classes`)
+and leaves alone what the program keeps changing.
 
 By default the pieces fall behind the app's text, in the cells it leaves
 free; `--front` lets them fall over it. Behind the text a burst repaints
@@ -26,7 +31,7 @@ from ptyrc import Pilot, Sprite
 
 from . import _cli
 
-__all__ = ["burst", "main"]
+__all__ = ["burst", "main", "spot"]
 
 
 def burst(
@@ -53,21 +58,62 @@ def burst(
     return pilot.effect("confetti", params, frame=frame, layer=layer, z=100)
 
 
+def spot(
+    classes: Sequence[str],
+    rng: random.Random,
+    last: tuple[int, int] | None = None,
+    reach: int = 3,
+) -> tuple[int, int]:
+    """A random cell `(x, y)` of a view given by its heat classes, one
+    string per row. A cell not hot (`h`) weighs the share of cells not
+    hot within `reach` of it; a hot cell weighs nothing, unless all are
+    hot. Never within `reach` of `last`, unless nothing else is left."""
+    h, w = len(classes), max(map(len, classes), default=0)
+    if not h or not w:
+        return 0, 0
+    cold = [[c != "h" for c in row.ljust(w, ".")] for row in classes]
+    cells, weights = [], []
+    for y in range(h):
+        for x in range(w):
+            if last and abs(x - last[0]) <= reach and abs(y - last[1]) <= reach:
+                continue
+            near = [
+                cold[j][i]
+                for j in range(max(0, y - reach), min(h, y + reach + 1))
+                for i in range(max(0, x - reach), min(w, x + reach + 1))
+            ]
+            cells.append((x, y))
+            weights.append(sum(near) / len(near) if cold[y][x] else 0.0)
+    if not cells:  # a view smaller than the gap: forget `last`
+        return spot(classes, rng, None, reach)
+    if not any(weights):  # all hot: anywhere
+        return rng.choice(cells)
+    return rng.choices(cells, weights)[0]
+
+
 def party(pilot: Pilot, args: argparse.Namespace) -> None:
     """`--spawn`: bursts at random places, `rate` per minute, until
-    interrupted. Each burst is one request; the driver plays it."""
+    interrupted. Each burst costs two requests, the heatmap and the burst;
+    the driver plays it."""
     rng = random.Random(args.seed)
     layer = "front" if args.front else "back"
     end = None if args.seconds is None else time.monotonic() + args.seconds
+    last = None
     while end is None or time.monotonic() < end:
-        # Asked again each time: the pane may have been resized.
-        w, h = _cli.pick(pilot, args.frame).size
+        # Asked again each time: the pane may have been resized or gone.
+        frame = _cli.pick(pilot, args.frame)
+        if args.anywhere:
+            w, h = frame.size
+            classes = ["." * w] * h
+        else:
+            classes = frame.heat_classes()
+        last = spot(classes, rng, last)
         burst(
             pilot,
-            frame=args.frame,
+            frame=frame.id,
             count=args.count,
             duration=args.duration,
-            origin=(rng.uniform(0.15, 0.85) * w, rng.uniform(0.15, 0.6) * h),
+            origin=last,
             seed=rng.getrandbits(32),
             layer=layer,
         )
@@ -111,6 +157,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="with --spawn: bursts per minute [default: 20, one every 3 s]",
     )
     out.add_argument("--seconds", type=float, help="with --spawn: stop after this")
+    out.add_argument(
+        "--anywhere",
+        action="store_true",
+        help="with --spawn: uniform over the view, ignore the heatmap",
+    )
     args = _cli.parse(out, argv)
     if args.rate <= 0:
         out.error("--rate must be positive")

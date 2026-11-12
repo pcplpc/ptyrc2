@@ -96,6 +96,51 @@ def test_confetti_party(session: Pilot) -> None:
         confetti.main(["--spawn", "--rate", "0"])
 
 
+def test_confetti_spot() -> None:
+    rng = random.Random(7)
+    # Left half hot, right half static text and free cells.
+    classes = ["h" * 20 + "t." * 10] * 10
+    last = None
+    for _ in range(2000):
+        x, y = confetti.spot(classes, rng, last)
+        assert 20 <= x < 40 and 0 <= y < 10  # never on the hot side
+        if last:
+            assert max(abs(x - last[0]), abs(y - last[1])) > 3  # moves on
+        last = x, y
+    # All hot: still a cell. Smaller than the gap: still a cell.
+    x, y = confetti.spot(["hhh"] * 2, rng, (1, 1))
+    assert 0 <= x < 3 and 0 <= y < 2
+    assert confetti.spot([], rng) == (0, 0)
+
+
+def test_confetti_party_avoids_hot(
+    session: Pilot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Rows 0 to 11, columns 0 to 78, rewritten five times a second; the
+    # rest stays blank.
+    session.send(
+        "a=$(printf '%079d' 0); b=$(echo $a | tr 0 o); while :; do"
+        " for l in $a $b; do printf '\\033[H'; for r in 1 2 3 4 5 6 7 8 9 10 11 12;"
+        " do echo $l; done; sleep 0.2; done; done\n"
+    )
+    session.wait_for("ooooo", frame="raw")
+    time.sleep(0.5)
+    hot = session.frame("raw").heat_classes()
+    assert all(set(row[:79]) == {"h"} for row in hot[:12]), hot
+    origins: list[tuple[float, float]] = []
+
+    def burst(*args: object, origin: tuple[float, float], **kw: object) -> object:
+        origins.append(origin)
+        return real(*args, origin=origin, **kw)
+
+    real = confetti.burst
+    monkeypatch.setattr(confetti, "burst", burst)
+    args = ["-s", session.session, "--spawn", "--rate", "600", "--seconds", "1.5"]
+    assert confetti.main([*args, "--duration", "0.3", "--seed", "2"]) == 0
+    assert len(origins) >= 8
+    assert all(y >= 12 for _, y in origins), origins
+
+
 def page(pilot: Pilot, *lines: str) -> None:
     """Fill the screen of the shell with `lines`."""
     text = "\\n".join(lines)
