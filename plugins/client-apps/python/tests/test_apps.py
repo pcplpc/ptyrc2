@@ -572,6 +572,8 @@ def test_sand(session: Pilot) -> None:
         time.sleep(0.02)
     thread.join()
     assert status == [0] and piled and stayed
+    # The driver takes the sand away when it sees the connection closed.
+    assert until(lambda: session.sprites() == [], 2)
     assert session.dump()["host"] == session.text()
 
 
