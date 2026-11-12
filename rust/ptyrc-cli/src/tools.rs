@@ -519,7 +519,12 @@ fn html(rows: &[Vec<Piece>], theme: Theme) -> String {
         let last = row
             .iter()
             .rposition(|p| p.bg.is_some() || !p.text.trim().is_empty());
-        for piece in &row[..last.map_or(0, |i| i + 1)] {
+        let shown = &row[..last.map_or(0, |i| i + 1)];
+        for (i, piece) in shown.iter().enumerate() {
+            let text = match piece.bg {
+                None if i + 1 == shown.len() => piece.text.trim_end_matches(' '),
+                _ => &piece.text,
+            };
             let mut style = String::new();
             if piece.fg != theme.fg {
                 let _ = write!(style, "color:{};", hex(piece.fg));
@@ -549,7 +554,7 @@ fn html(rows: &[Vec<Piece>], theme: Theme) -> String {
                 }
             }
             if style.is_empty() {
-                out.push_str(&escape(&piece.text));
+                out.push_str(&escape(text));
             } else {
                 let _ = write!(
                     out,
