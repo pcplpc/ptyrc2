@@ -6,6 +6,8 @@
 #
 #   scripts/demo-apps.sh              watch; scroll with ^E ^Y ^D ^U, :q ends
 #   scripts/demo-apps.sh snake        the snake instead of the fishes
+#   scripts/demo-apps.sh brick        the brick breaker, all of it
+#   scripts/demo-apps.sh blocks       the falling pieces, all of it
 #   scripts/demo-apps.sh --check      self-test, detached
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib-demo.sh"
@@ -30,6 +32,10 @@ demo_app marks 'lazy dog' fox
 demo_app rain
 if [ "${1:-}" = snake ]; then
     demo_app snake
+elif [ "${1:-}" = brick ]; then
+    demo_app brick -a
+elif [ "${1:-}" = blocks ]; then
+    demo_app blocks -a
 else
     demo_app fishes --count 7
     [ "${1:-}" = --check ] || demo_app confetti --party --sparkle
