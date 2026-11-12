@@ -747,9 +747,18 @@ impl Engine for ScreenEngine {
     }
 
     fn session_extras(&self) -> Value {
+        let modes = self.app.modes();
+        let mouse = [(1, 9), (2, 1000), (4, 1002), (8, 1003)];
+        let mouse = mouse.iter().filter(|(bit, _)| modes.mouse_bits & bit != 0);
         json!({
-            "alt_screen": self.app.modes().alt_screen,
+            "alt_screen": modes.alt_screen,
             "title": self.app.title(),
+            "modes": {
+                "app_cursor": modes.app_cursor,
+                "bracketed_paste": modes.bracketed_paste,
+                "mouse": mouse.map(|(_, mode)| mode).collect::<Vec<_>>(),
+                "mouse_sgr": modes.mouse_sgr,
+            },
         })
     }
 }

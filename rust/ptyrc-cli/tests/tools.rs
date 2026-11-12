@@ -417,6 +417,56 @@ fn attach_mirrors_and_types() {
 }
 
 #[test]
+fn attach_takes_the_modes_and_follows_the_size() {
+    use std::os::fd::AsFd;
+    let sb = Sandbox::new("attach2");
+    let script = format!("printf '\\033[?1h\\033[?1000h\\033[?1006hready'; {SHOW_KEYS}");
+    let _driver = sb.headless("b", "40x6", &["sh", "-c", &script]);
+    let mut client = sb.client("b");
+    let size =
+        |client: &mut Client| client.call("session.info", json!({})).unwrap()["size"].clone();
+    client
+        .call(
+            "screen.wait",
+            json!({"pattern": "ready", "timeout_ms": 5000}),
+        )
+        .unwrap();
+
+    // --resize: the session takes the size of this terminal.
+    let (mut host, mut attach) = HostPty::spawn(&sb, &[BIN, "-s", "b", "attach", "--resize"]);
+    host.wait_seen("ready");
+    assert_eq!(size(&mut client), json!([80, 24]));
+    // The modes of the app are this terminal's: application cursor
+    // keys, the mouse in the SGR form; the others are off.
+    host.wait_seen("\x1b[?1h\x1b[?9l\x1b[?1000h\x1b[?1002l\x1b[?1003l\x1b[?1006h\x1b[?2004l");
+    // So an arrow and a click are typed as the app reads them.
+    host.type_in(b"\x1bOA\x1b[<0;3;2M");
+    client
+        .call(
+            "screen.wait",
+            json!({"pattern": "^[OA^[[<0;3;2M", "timeout_ms": 5000}),
+        )
+        .unwrap();
+
+    // Resized after the start: followed.
+    ptyrc_server::pty::set_winsize(host.master.as_fd(), 60, 10).unwrap();
+    wait_for(|| size(&mut client) == json!([60, 10]), "the new size");
+
+    // Written there, shown here, at the new size.
+    client.call("input.send", json!({"text": "x"})).unwrap();
+    host.wait_seen("^[[<0;3;2Mx");
+    host.seen.clear();
+    host.type_in(b"\x1d");
+    assert_eq!(host.wait_exit(&mut attach), 0);
+    // Left: the modes are given back.
+    assert!(
+        seen(&host).contains("\x1b[?1l\x1b[?9l\x1b[?1000l"),
+        "{:?}",
+        seen(&host)
+    );
+}
+
+#[test]
 fn events_start_with_the_state_when_asked() {
     use std::io::{BufRead, BufReader};
     let sb = Sandbox::new("evsnap");

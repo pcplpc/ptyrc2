@@ -36,12 +36,35 @@ fn special_key(what: &str, key: &str) -> Result<Vec<u8>, Fail> {
     }
 }
 
+/// The private modes of the app that this terminal takes while attached:
+/// its keys and its mouse are then written as the app wants them.
+const MIRRORED: [u16; 7] = [1, 9, 1000, 1002, 1003, 1006, 2004];
+
+/// The modes of `MIRRORED` that are on, from `session.info`.
+fn modes_on(info: &Value) -> Vec<u16> {
+    let modes = &info["modes"];
+    let mut on = Vec::new();
+    if modes["app_cursor"] == true {
+        on.push(1);
+    }
+    let mouse = modes["mouse"].as_array().into_iter().flatten();
+    on.extend(mouse.filter_map(|m| m.as_u64()).map(|m| m as u16));
+    if modes["mouse_sgr"] == true {
+        on.push(1006);
+    }
+    if modes["bracketed_paste"] == true {
+        on.push(2004);
+    }
+    on
+}
+
 #[derive(Args)]
 pub struct Attach {
-    /// The key that leaves; it is not sent
+    /// The key that leaves; it is not sent [ctrl+] when not given]
     #[arg(long, value_name = "KEY", default_value = "ctrl+]")]
     detach: String,
-    /// Give the session the size of this terminal (headless sessions)
+    /// Give the session the size of this terminal, and again when this
+    /// terminal is resized (headless sessions)
     #[arg(long)]
     resize: bool,
     /// Show the sprites too
@@ -52,7 +75,9 @@ pub struct Attach {
 /// The remote screen here, and the keys of this terminal there.
 ///
 /// The remote size is left alone unless `--resize`; a larger remote
-/// screen is cut at this terminal's size.
+/// screen is cut at this terminal's size. This terminal is given the
+/// cursor-key, mouse and paste modes of the app, looked at with each
+/// redraw: arrows, clicks and pastes are typed as the app reads them.
 pub fn attach(common: &Common, args: Attach) -> Done {
     let detach = special_key("--detach", &args.detach)?;
     if !std::io::stdin().is_terminal() {
@@ -66,7 +91,8 @@ pub fn attach(common: &Common, args: Attach) -> Done {
     let name = client.hello()["session"].as_str().unwrap_or("").to_string();
     // Raw mode; restored when `host` goes, and on a panic.
     let host = Host::terminal()?;
-    let local = host.size().unwrap_or((80, 24));
+    let mut local = host.size().unwrap_or((80, 24));
+    let mut mirrored: Vec<u16> = Vec::new();
     if args.resize {
         client.call("session.resize", json!({"size": [local.0, local.1]}))?;
     }
@@ -102,7 +128,26 @@ pub fn attach(common: &Common, args: Attach) -> Done {
     let _ = out.write_all(b"\x1b[?1049h");
     let result = (|| -> Result<bool, Fail> {
         loop {
-            let size = client.call("session.info", json!({}))?["size"].clone();
+            // This terminal was resized: the cut follows, and the
+            // session with --resize.
+            let now = host.size().unwrap_or(local);
+            if now != local {
+                local = now;
+                if args.resize {
+                    client.call("session.resize", json!({"size": [local.0, local.1]}))?;
+                }
+            }
+            let info = client.call("session.info", json!({}))?;
+            let size = info["size"].clone();
+            let wanted = modes_on(&info);
+            let mut frame = String::new();
+            if wanted != mirrored {
+                for mode in MIRRORED {
+                    let set = if wanted.contains(&mode) { 'h' } else { 'l' };
+                    let _ = write!(frame, "\x1b[?{mode}{set}");
+                }
+                mirrored = wanted;
+            }
             let cut = |i: usize, local: u16| size[i].as_u64().unwrap_or(1).min(local as u64);
             let rect = [0, 0, cut(0, local.0), cut(1, local.1)];
             let screen = client.call(
@@ -110,7 +155,7 @@ pub fn attach(common: &Common, args: Attach) -> Done {
                 json!({"ansi": true, "rect": rect, "sprites": args.sprites}),
             )?;
             let cursor = client.call("screen.cursor", json!({}))?;
-            let mut frame = String::from("\x1b[?25l\x1b[H");
+            frame.push_str("\x1b[?25l\x1b[H");
             let lines = screen["lines"].as_array().map_or(&[][..], Vec::as_slice);
             for (i, line) in lines.iter().enumerate() {
                 frame.push_str(line.as_str().unwrap_or(""));
@@ -130,6 +175,7 @@ pub fn attach(common: &Common, args: Attach) -> Done {
             out.write_all(frame.as_bytes()).and_then(|_| out.flush())?;
             // Wait for a change, then let a burst of them pass.
             let mut changed = false;
+            let mut quiet = 0;
             while !changed {
                 if leave.load(Ordering::Relaxed) {
                     return Ok(false);
@@ -137,8 +183,18 @@ pub fn attach(common: &Common, args: Attach) -> Done {
                 match client.next_event(Some(Duration::from_millis(50))) {
                     Ok(Some(event)) if event.event == "exit" => return Ok(true),
                     Ok(Some(_)) => changed = true,
-                    // Sprites move without an event.
-                    Ok(None) => changed = args.sprites,
+                    // Sprites move without an event; so does the size
+                    // of this terminal.
+                    Ok(None) => {
+                        quiet += 1;
+                        changed = args.sprites || host.size().is_some_and(|s| s != local);
+                        // A mode set with nothing drawn comes with no
+                        // event: looked at four times a second.
+                        if !changed && quiet % 5 == 0 {
+                            let info = client.call("session.info", json!({}))?;
+                            changed = modes_on(&info) != mirrored;
+                        }
+                    }
                     Err(ClientError::Closed) => return Ok(true),
                     Err(e) => return Err(e.into()),
                 }
@@ -150,6 +206,9 @@ pub fn attach(common: &Common, args: Attach) -> Done {
             }
         }
     })();
+    for mode in MIRRORED {
+        let _ = write!(out, "\x1b[?{mode}l");
+    }
     let _ = out.write_all(b"\x1b[?25h\x1b[?1049l");
     let _ = out.flush();
     drop(host);
