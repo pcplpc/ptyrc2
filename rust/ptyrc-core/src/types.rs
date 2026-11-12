@@ -155,9 +155,9 @@ pub trait Surfaces {
         taken: &[Rect],
     ) -> Option<(u16, u16)>;
 
-    /// Text of the rows of a frame's view, top first.
-    fn text(&self, _id: FrameId) -> Vec<String> {
-        Vec::new()
+    /// Heat of a frame's view at `now`.
+    fn heat(&self, _id: FrameId, _now: Duration) -> Option<crate::frames::HeatView> {
+        None
     }
 
     /// Current cursor, screen coordinates.

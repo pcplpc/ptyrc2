@@ -189,7 +189,7 @@ impl ScreenEngine {
             self.overlay_due = now + DEBUG_PERIOD;
             rpc::refresh_overlay(self, now);
         }
-        self.scene.tick(now, &self.frames);
+        self.scene.tick_on(now, self.app.grid(), &self.frames);
         self.scene.take_dirty();
         if self.scene.is_empty() && !self.painted {
             return;
