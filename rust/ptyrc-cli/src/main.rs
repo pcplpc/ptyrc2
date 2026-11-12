@@ -111,6 +111,14 @@ struct Run {
     /// Plain pass-through: no screen model, no drawing
     #[arg(long)]
     transparent: bool,
+    /// Default foreground of the host, #rrggbb [default: asked of the
+    /// host terminal; #e5e5e5 without an answer]
+    #[arg(long, value_name = "COLOR", value_parser = parse_rgb)]
+    host_fg: Option<[u8; 3]>,
+    /// Default background of the host, #rrggbb [default: asked of the
+    /// host terminal; #000000 without an answer]
+    #[arg(long, value_name = "COLOR", value_parser = parse_rgb)]
+    host_bg: Option<[u8; 3]>,
     /// Generic heuristics only: no per-app preset (vim, tmux...)
     #[arg(long)]
     no_presets: bool,
@@ -120,6 +128,14 @@ struct Run {
     /// The program and its arguments [default: $SHELL]
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     command: Vec<String>,
+}
+
+fn parse_rgb(text: &str) -> Result<[u8; 3], String> {
+    let hex = text.strip_prefix('#').unwrap_or(text);
+    let value = u32::from_str_radix(hex, 16).ok().filter(|_| hex.len() == 6);
+    value
+        .map(|v| [(v >> 16) as u8, (v >> 8) as u8, v as u8])
+        .ok_or_else(|| format!("{text}: a colour as #rrggbb"))
 }
 
 fn parse_size(text: &str) -> Result<(u16, u16), String> {
@@ -311,6 +327,10 @@ fn verb_run(args: Run) -> Result<ExitCode, Fail> {
         } else {
             args.coalesce_ms
         },
+        host_fg: args.host_fg,
+        host_bg: args.host_bg,
+        // A transparent stream is not touched: nothing is asked.
+        ask_host_colors: !args.transparent,
     };
     let status = ptyrc_server::run(config, plugins::engine(args.transparent, !args.no_presets))?;
     Ok(ExitCode::from(status.clamp(0, 255) as u8))

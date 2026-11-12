@@ -506,6 +506,10 @@ impl Engine for ScreenEngine {
         self.app.modes().bracketed_paste
     }
 
+    fn on_host_colors(&mut self, colors: ptyrc_core::scene::HostColors, _ctx: &mut Ctx) {
+        self.scene.set_host_colors(colors);
+    }
+
     fn session_extras(&self) -> Value {
         json!({
             "alt_screen": self.app.modes().alt_screen,

@@ -10,6 +10,7 @@ pub mod driver;
 pub mod engine;
 mod hints;
 pub mod host;
+pub mod hostcolors;
 pub mod keys;
 pub mod pty;
 mod rpc;

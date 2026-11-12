@@ -163,6 +163,10 @@ pub trait Engine {
         false
     }
 
+    /// The default colours of the host: at start, then when the host
+    /// tells others.
+    fn on_host_colors(&mut self, _colors: ptyrc_core::scene::HostColors, _ctx: &mut Ctx) {}
+
     /// Members merged into the `session.info` result (an object, or null).
     fn session_extras(&self) -> Value {
         Value::Null
