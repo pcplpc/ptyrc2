@@ -135,6 +135,9 @@ pub struct Wait {
     /// Wait until the screen has not changed for MS milliseconds
     #[arg(long, value_name = "MS")]
     stable: Option<u64>,
+    /// Wait until the frame is idle (80 % static for 10 s)
+    #[arg(long)]
+    idle: bool,
     /// Give up after MS milliseconds
     #[arg(long, value_name = "MS", default_value_t = 5000)]
     timeout: u64,
@@ -144,10 +147,10 @@ pub struct Wait {
 
 /// Exit status 1 on timeout.
 pub fn wait(common: &Common, args: Wait) -> Done {
-    if args.pattern.is_none() && args.stable.is_none() {
+    if args.pattern.is_none() && args.stable.is_none() && !args.idle {
         return Err(Fail::usage(
             "wait: nothing to wait for",
-            "give a PATTERN, or --stable MS for a screen that stopped changing",
+            "give a PATTERN, --stable MS for a screen that stopped changing, or --idle",
         ));
     }
     let mut params = Map::new();
@@ -161,9 +164,13 @@ pub fn wait(common: &Common, args: Wait) -> Done {
     if let Some(ms) = args.stable {
         params.insert("stable_ms".into(), json!(ms));
     }
+    if args.idle {
+        params.insert("idle".into(), json!(true));
+    }
     let what = match (params.get("pattern").and_then(Value::as_str), args.gone) {
         (Some(pattern), true) => format!("{pattern:?} is still shown"),
         (Some(pattern), false) => format!("{pattern:?} is not shown"),
+        (None, _) if args.idle => "the frame is not idle".to_string(),
         (None, _) => "the screen is still changing".to_string(),
     };
     let result = call(common, "screen.wait", Value::Object(params))?;
@@ -552,7 +559,8 @@ pub fn draw(common: &Common, verb: Draw) -> Done {
             }
             for s in result["sprites"].as_array().into_iter().flatten() {
                 let screen = match s["screen"].as_array() {
-                    Some(p) => format!("{},{}", p[0], p[1]),
+                    Some(p) if s["visible"] == true => format!("{},{}", p[0], p[1]),
+                    Some(_) => "out".into(),
                     None => "hidden".into(),
                 };
                 println!(

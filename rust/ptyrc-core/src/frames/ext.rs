@@ -202,6 +202,13 @@ impl Ext {
                 self.remove_line(k);
             }
             self.islands.remove(old);
+            // Not a move: what is drawn on these rows goes with them.
+            let gone = crate::scene::ROWS_GONE;
+            self.shifts.push(Shift {
+                from: lo - 200,
+                to: hi + 200,
+                dy: gone,
+            });
             if old < self.cur {
                 self.cur -= 1;
             }

@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 
+import pytest
 from conftest import wait_pane
-from ptyrc import Pilot
+from ptyrc import Pilot, PtyrcError
 from tests_support import until
 
 
@@ -95,3 +96,30 @@ def test_idle(vim: Pilot) -> None:
     until(lambda: pane.check_idle() < idle["score"])
     classes = pane.heat_classes()
     assert classes[2][7] == "h" and classes[2][2] == "t"
+
+
+def test_wait_idle(vim: Pilot) -> None:
+    pane = wait_pane(vim)
+    # Just opened: not idle yet, and a short wait says so.
+    with pytest.raises(TimeoutError):
+        vim.wait_idle(pane.id, timeout=0.3)
+    # One request, answered when the pane is idle; a name is resolved by
+    # the driver.
+    vim.subscribe("idle")
+    assert vim.wait_idle("idle", timeout=15).id == pane.id
+    assert pane.wait_idle(timeout=1).info["is_idle"] is True
+    # The event came on its own, once per frame.
+    seen = [d for _, d in vim.events(timeout=0.5) if d["frame"] == pane.id]
+    assert [d["idle"] for d in seen] == [True] and seen[0]["score"] >= 0.8
+
+
+def test_frame_errors_carry_the_hint(vim: Pilot) -> None:
+    with pytest.raises(PtyrcError) as err:
+        vim.frame("activ")
+    assert err.value.code == "no-frame"
+    assert err.value.hint is not None and "did you mean active?" in err.value.hint
+    pane = wait_pane(vim)
+    pane.info["id"] = 99
+    with pytest.raises(PtyrcError) as err:
+        pane.refresh()
+    assert err.value.code == "no-frame" and err.value.hint

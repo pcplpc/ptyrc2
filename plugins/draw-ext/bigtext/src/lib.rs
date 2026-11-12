@@ -127,14 +127,17 @@ impl DrawExt for BigText {
         if function != "text" {
             return Err(format!("no function {function}"));
         }
-        let text = params
-            .get("text")
-            .and_then(Value::as_str)
-            .ok_or("text: required")?;
+        let text = match params.get("text") {
+            None | Some(Value::Null) => return Err("text: required".into()),
+            Some(v) => v.as_str().ok_or(format!("text: a string, not {v}"))?,
+        };
         if text.is_empty() || text.chars().count() > 64 || text.contains('\n') {
             return Err("text: one line of 1 to 64 characters".into());
         }
-        let scale = params.get("scale").and_then(Value::as_u64).unwrap_or(1);
+        let scale = match params.get("scale") {
+            None | Some(Value::Null) => 1,
+            Some(v) => v.as_u64().ok_or(format!("scale: 1 to 4, not {v}"))?,
+        };
         if !(1..=4).contains(&scale) {
             return Err("scale: 1 to 4".into());
         }
@@ -178,6 +181,12 @@ mod tests {
                 .is_ok()
         );
         assert!(BigText.draw("text", &json!({})).is_err());
+        let err = |p: Value| BigText.draw("text", &p).unwrap_err();
+        assert_eq!(err(json!({"text": 5})), "text: a string, not 5");
+        assert_eq!(
+            err(json!({"text": "a", "scale": "2"})),
+            "scale: 1 to 4, not \"2\""
+        );
         assert!(
             BigText
                 .draw("text", &json!({"text": "a", "scale": 9}))

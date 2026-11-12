@@ -5,13 +5,14 @@
 
 use crate::engine::{ConnId, Ctx, Engine, Reply, Token};
 use crate::rpc;
-use ptyrc_core::frames::{FrameConfig, Frames, ScreenInput};
+use ptyrc_core::frames::{FrameConfig, FrameEvent, Frames, ScreenInput};
 use ptyrc_core::plugin::{DrawExt, TuiSupport};
 use ptyrc_core::scene::Scene;
-use ptyrc_core::{FrameId, OwnerId, TextQuery};
+use ptyrc_core::{FrameId, FrameSel, OwnerId, TextQuery};
 use ptyrc_proto::{ErrorCode, RpcError};
 use ptyrc_vt::{Grid, Vt, VtEvent, repair};
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::time::Duration;
 
 /// Begin and end of a synchronized update.
@@ -22,12 +23,18 @@ const ESU: &[u8] = b"\x1b[?2026l";
 pub(crate) const DEBUG_OWNER: OwnerId = u64::MAX;
 /// Refresh period of the debug overlay.
 const DEBUG_PERIOD: Duration = Duration::from_millis(400);
+/// Period of the idle watch: `idle` events and `screen.wait {idle}`.
+const IDLE_PERIOD: Duration = Duration::from_millis(250);
 
 /// A `screen.wait` left pending.
 pub(crate) struct Wait {
     pub token: Token,
     pub conn: ConnId,
     pub frame: FrameId,
+    /// With `idle`: a frame name, resolved again at each check.
+    pub name: Option<FrameSel>,
+    /// Wait for the frame to be idle.
+    pub idle: bool,
     pub query: Option<TextQuery>,
     pub gone: bool,
     pub stable: Option<Duration>,
@@ -63,6 +70,12 @@ pub struct ScreenEngine {
     last_cursor: (u16, u16),
     pub(crate) overlay: Overlay,
     overlay_due: Duration,
+    /// A client subscribed to `idle`, as of the last hook.
+    idle_watch: bool,
+    /// Next look of the idle watch.
+    idle_due: Duration,
+    /// `idle` of each frame on screen at the last look.
+    idle_seen: HashMap<FrameId, bool>,
     /// Bytes of our own written to the host, for `debug.dump`.
     pub(crate) injected: u64,
     /// Bursts seen.
@@ -97,6 +110,9 @@ impl ScreenEngine {
             last_cursor: (0, 0),
             overlay: Overlay::Off,
             overlay_due: Duration::ZERO,
+            idle_watch: false,
+            idle_due: Duration::ZERO,
+            idle_seen: HashMap::new(),
             injected: 0,
             bursts: 0,
             ticked: Duration::ZERO,
@@ -129,23 +145,36 @@ impl ScreenEngine {
             events,
         };
         let changes = self.frames.update(&input, now);
-        self.shift_sprites(&changes);
+        self.shift_sprites(&changes, ctx);
         if !changes.is_empty() && ctx.has_subscribers("frames") {
             ctx.emit("frames", json!({"frames": self.frames.list()}));
         }
     }
 
-    /// Frame rows that moved in frame space take their sprites along.
-    fn shift_sprites(&mut self, changes: &[ptyrc_core::frames::FrameEvent]) {
+    /// Frame rows that moved in frame space take their sprites along;
+    /// rows and frames that are forgotten take theirs away (topic
+    /// `draw`).
+    fn shift_sprites(&mut self, changes: &[FrameEvent], ctx: &mut Ctx) {
         for change in changes {
-            if let ptyrc_core::frames::FrameEvent::Shift {
-                frame,
-                from,
-                to,
-                dy,
-            } = *change
-            {
-                self.scene.shift(frame, from, to, dy);
+            let (frame, removed, rows) = match *change {
+                FrameEvent::Shift {
+                    frame,
+                    from,
+                    to,
+                    dy,
+                } => (
+                    frame,
+                    self.scene.shift(frame, from, to, dy),
+                    Some([from, to]),
+                ),
+                FrameEvent::Dropped { frame } => (frame, self.scene.drop_frame(frame), None),
+                _ => continue,
+            };
+            if !removed.is_empty() {
+                ctx.emit(
+                    "draw",
+                    json!({"removed": removed, "frame": frame, "rows": rows}),
+                );
             }
         }
     }
@@ -212,6 +241,38 @@ impl ScreenEngine {
         {
             self.inject(ESU, out);
         }
+    }
+
+    /// The `idle` topic: one event per frame on screen whose `idle`
+    /// changed since the last look. Frames are not idle until seen so.
+    fn watch_idle(&mut self, now: Duration, ctx: &mut Ctx) {
+        self.idle_watch = ctx.has_subscribers("idle");
+        if now < self.idle_due {
+            return;
+        }
+        self.idle_due = now + IDLE_PERIOD;
+        if !self.idle_watch {
+            self.idle_seen.clear();
+            return;
+        }
+        let mut seen = HashMap::new();
+        for info in self.frames.list() {
+            if info.state == ptyrc_core::FrameState::Inactive {
+                continue;
+            }
+            let Some(idle) = self.frames.idle(info.id, now) else {
+                continue;
+            };
+            let was = self.idle_seen.get(&info.id).copied().unwrap_or(false);
+            if idle.idle != was {
+                ctx.emit(
+                    "idle",
+                    json!({"frame": info.id, "idle": idle.idle, "score": idle.score, "free": idle.free}),
+                );
+            }
+            seen.insert(info.id, idle.idle);
+        }
+        self.idle_seen = seen;
     }
 
     /// Answer the waits that are satisfied or expired.
@@ -346,6 +407,7 @@ impl Engine for ScreenEngine {
             }
         }
         self.emit_changes(changed_rows, ctx);
+        self.watch_idle(now, ctx);
         self.settle_waits(now, ctx);
         self.burst_time += started.elapsed();
     }
@@ -354,12 +416,13 @@ impl Engine for ScreenEngine {
         self.ticked = now;
         self.ticks += 1;
         let changes = self.frames.tick(now);
-        self.shift_sprites(&changes);
+        self.shift_sprites(&changes, ctx);
         if !changes.is_empty() && ctx.has_subscribers("frames") {
             ctx.emit("frames", json!({"frames": self.frames.list()}));
         }
         self.paint(now, out);
         self.close_sync(out);
+        self.watch_idle(now, ctx);
         self.settle_waits(now, ctx);
     }
 
@@ -373,6 +436,9 @@ impl Engine for ScreenEngine {
         merge(self.frames.next_wake());
         if self.overlay != Overlay::Off {
             merge(Some(self.overlay_due));
+        }
+        if self.idle_watch || self.waits.iter().any(|w| w.idle) {
+            merge(Some(self.idle_due));
         }
         for wait in &self.waits {
             merge(Some(wait.deadline));

@@ -523,6 +523,17 @@ def test_sand(session: Pilot) -> None:
     assert session.dump()["host"] == session.text()
 
 
+def test_sand_waits_for_idle(session: Pilot) -> None:
+    page(session, "top")
+    # Busy: no sand, and the wait ends with the app.
+    assert sand.still(session, "idle", 0.3) is None
+    assert sand.main(["-s", session.session], seconds=1) == 0
+    assert session.sprites() == []
+    # Left alone, the driver answers when the pane is idle.
+    frame = sand.still(session, "idle", 15)
+    assert frame is not None and frame.is_idle
+
+
 def test_sand_survives_a_resize(session: Pilot) -> None:
     page(session, "top")
     args = ["-s", session.session, "--now", "--rate", "400"]

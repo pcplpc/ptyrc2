@@ -94,8 +94,12 @@ impl Dots {
     }
 }
 
-fn num(params: &Value, key: &str, default: i64) -> i64 {
-    params.get(key).and_then(Value::as_i64).unwrap_or(default)
+/// An integer parameter; `default` when absent. Another type is refused.
+fn num(params: &Value, key: &str, default: i64) -> Result<i64, String> {
+    match params.get(key) {
+        None | Some(Value::Null) => Ok(default),
+        Some(v) => v.as_i64().ok_or(format!("{key}: an integer, not {v}")),
+    }
 }
 
 fn sprite(rows: Vec<String>, params: &Value) -> Result<SpriteSpec, String> {
@@ -110,7 +114,7 @@ fn sprite(rows: Vec<String>, params: &Value) -> Result<SpriteSpec, String> {
 }
 
 fn size(params: &Value, key: &str, default: i64) -> Result<usize, String> {
-    let v = num(params, key, default);
+    let v = num(params, key, default)?;
     if (1..=500).contains(&v) {
         Ok(v as usize)
     } else {
@@ -149,11 +153,14 @@ impl DrawExt for Shapes {
     }
 
     fn draw(&self, function: &str, params: &Value) -> Result<SpriteSpec, String> {
-        let fill = params.get("fill").and_then(Value::as_bool).unwrap_or(false);
+        let fill = match params.get("fill") {
+            None | Some(Value::Null) => false,
+            Some(v) => v.as_bool().ok_or(format!("fill: true or false, not {v}"))?,
+        };
         match function {
             "line" => {
-                let (x1, y1) = (num(params, "x1", 0), num(params, "y1", 0));
-                let (x2, y2) = (num(params, "x2", 0), num(params, "y2", 0));
+                let (x1, y1) = (num(params, "x1", 0)?, num(params, "y1", 0)?);
+                let (x2, y2) = (num(params, "x2", 0)?, num(params, "y2", 0)?);
                 if [x1, y1, x2, y2].iter().any(|v| !(0..500).contains(v)) {
                     return Err("coordinates: 0 to 499".into());
                 }
@@ -163,10 +170,10 @@ impl DrawExt for Shapes {
             }
             "rect" => {
                 let (w, h) = (size(params, "w", 4)?, size(params, "h", 3)?);
-                let border = params
-                    .get("border")
-                    .and_then(Value::as_str)
-                    .unwrap_or("light");
+                let border = match params.get("border") {
+                    None | Some(Value::Null) => "light",
+                    Some(v) => v.as_str().ok_or(format!("border: a name, not {v}"))?,
+                };
                 let g: [char; 6] = match border {
                     "light" => ['┌', '┐', '└', '┘', '─', '│'],
                     "heavy" => ['┏', '┓', '┗', '┛', '━', '┃'],
@@ -251,5 +258,19 @@ mod tests {
         assert_eq!(r.len(), 3);
         assert_ne!(r[0].chars().next(), Some(' '));
         assert!(Shapes.draw("spiral", &json!({})).is_err());
+    }
+
+    #[test]
+    fn a_parameter_of_the_wrong_type_is_refused() {
+        let err = |f: &str, p: Value| Shapes.draw(f, &p).unwrap_err();
+        assert_eq!(err("circle", json!({"r": "x"})), "r: an integer, not \"x\"");
+        assert_eq!(err("circle", json!({"r": 2.5})), "r: an integer, not 2.5");
+        assert_eq!(err("line", json!({"x2": [1]})), "x2: an integer, not [1]");
+        assert_eq!(
+            err("rect", json!({"fill": "yes"})),
+            "fill: true or false, not \"yes\""
+        );
+        assert_eq!(err("rect", json!({"border": 3})), "border: a name, not 3");
+        assert!(Shapes.draw("circle", &json!({"r": null})).is_ok());
     }
 }
