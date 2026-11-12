@@ -1,0 +1,1178 @@
+[
+  {
+    "alt_screen": true,
+    "cursor": [
+      10,
+      1,
+      false
+    ],
+    "frames": [
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "raw",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          0
+        ],
+        "key": null,
+        "kind": "chrome",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          1
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          1,
+          9,
+          22
+        ],
+        "state": "stable",
+        "support": "ranger",
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": "ranger:/tmp/tmp.vhQjoJOumm/tree",
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          10,
+          1,
+          29,
+          22
+        ],
+        "state": "stable",
+        "support": "ranger",
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          40,
+          1,
+          40,
+          22
+        ],
+        "state": "stable",
+        "support": "ranger",
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          0
+        ],
+        "key": null,
+        "kind": "chrome",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          23,
+          80,
+          1
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      }
+    ],
+    "size": [
+      80,
+      24
+    ],
+    "t": 2.459,
+    "text": [
+      "user@host /tmp/tmp.vhQjoJOumm/tree/alpha",
+      " tree      alpha                     3   file1.txt",
+      " num~.txt  beta                      1   file2.txt",
+      "                                         file3.txt",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "drwxr-xr-x 2 user user 3 2026-11-12 22:42            0 sum, 6.81G free  1/2  All"
+    ],
+    "title": ""
+  },
+  {
+    "alt_screen": true,
+    "cursor": [
+      10,
+      2,
+      false
+    ],
+    "frames": [
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "raw",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          0
+        ],
+        "key": null,
+        "kind": "chrome",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          1
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          1,
+          9,
+          22
+        ],
+        "state": "stable",
+        "support": "ranger",
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": "ranger:/tmp/tmp.vhQjoJOumm/tree",
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          10,
+          1,
+          29,
+          22
+        ],
+        "state": "stable",
+        "support": "ranger",
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          40,
+          1,
+          40,
+          22
+        ],
+        "state": "stable",
+        "support": "ranger",
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          0
+        ],
+        "key": null,
+        "kind": "chrome",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          23,
+          80,
+          1
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      }
+    ],
+    "size": [
+      80,
+      24
+    ],
+    "t": 4.965,
+    "text": [
+      "user@host /tmp/tmp.vhQjoJOumm/tree/beta",
+      " tree      alpha                     3   notes.txt",
+      " num~.txt  beta                      1",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "drwxr-xr-x 2 user user 1 2026-11-12 22:42            0 sum, 6.81G free  2/2  All"
+    ],
+    "title": ""
+  },
+  {
+    "alt_screen": true,
+    "cursor": [
+      10,
+      1,
+      false
+    ],
+    "frames": [
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "raw",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          0
+        ],
+        "key": null,
+        "kind": "chrome",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          1
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          1,
+          9,
+          22
+        ],
+        "state": "inactive",
+        "support": "ranger",
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": "ranger:/tmp/tmp.vhQjoJOumm/tree",
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          10,
+          1,
+          29,
+          22
+        ],
+        "state": "inactive",
+        "support": "ranger",
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          40,
+          1,
+          40,
+          22
+        ],
+        "state": "stable",
+        "support": "ranger",
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          0
+        ],
+        "key": null,
+        "kind": "chrome",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          23,
+          80,
+          1
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          1,
+          9,
+          22
+        ],
+        "state": "stable",
+        "support": "ranger",
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": "ranger:/tmp/tmp.vhQjoJOumm/tree/beta",
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          10,
+          1,
+          29,
+          22
+        ],
+        "state": "stable",
+        "support": "ranger",
+        "usable": true
+      }
+    ],
+    "size": [
+      80,
+      24
+    ],
+    "t": 7.47,
+    "text": [
+      "user@host /tmp/tmp.vhQjoJOumm/tree/beta/notes.txt",
+      " alpha     notes.txt             381 B  beta line 1",
+      " beta                                   beta line 2",
+      "                                        beta line 3",
+      "                                        beta line 4",
+      "                                        beta line 5",
+      "                                        beta line 6",
+      "                                        beta line 7",
+      "                                        beta line 8",
+      "                                        beta line 9",
+      "                                        beta line 10",
+      "                                        beta line 11",
+      "                                        beta line 12",
+      "                                        beta line 13",
+      "                                        beta line 14",
+      "                                        beta line 15",
+      "                                        beta line 16",
+      "                                        beta line 17",
+      "                                        beta line 18",
+      "                                        beta line 19",
+      "                                        beta line 20",
+      "                                        beta line 21",
+      "                                        beta line 22",
+      "-rw-r--r-- 1 user user 381B 2026-11-12 22:42      381B sum, 6.81G free  1/1  All"
+    ],
+    "title": ""
+  },
+  {
+    "alt_screen": true,
+    "cursor": [
+      10,
+      1,
+      false
+    ],
+    "frames": [
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "raw",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          0
+        ],
+        "key": null,
+        "kind": "chrome",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          1
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          1,
+          9,
+          22
+        ],
+        "state": "inactive",
+        "support": "ranger",
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": "ranger:/tmp/tmp.vhQjoJOumm/tree",
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          10,
+          1,
+          29,
+          22
+        ],
+        "state": "inactive",
+        "support": "ranger",
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          40,
+          1,
+          40,
+          22
+        ],
+        "state": "stable",
+        "support": "ranger",
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          0
+        ],
+        "key": null,
+        "kind": "chrome",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          23,
+          80,
+          1
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          1,
+          9,
+          22
+        ],
+        "state": "stable",
+        "support": "ranger",
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": "ranger:/tmp/tmp.vhQjoJOumm/tree/beta",
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          10,
+          1,
+          29,
+          22
+        ],
+        "state": "stable",
+        "support": "ranger",
+        "usable": true
+      }
+    ],
+    "size": [
+      80,
+      24
+    ],
+    "t": 9.977,
+    "text": [
+      "user@host /tmp/tmp.vhQjoJOumm/tree/beta/notes.txt",
+      " alpha     notes.txt             381 B  beta line 1",
+      " beta                                   beta line 2",
+      "                                        beta line 3",
+      "                                        beta line 4",
+      "                                        beta line 5",
+      "                                        beta line 6",
+      "                                        beta line 7",
+      "                                        beta line 8",
+      "                                        beta line 9",
+      "                                        beta line 10",
+      "                                        beta line 11",
+      "                                        beta line 12",
+      "                                        beta line 13",
+      "                                        beta line 14",
+      "                                        beta line 15",
+      "                                        beta line 16",
+      "                                        beta line 17",
+      "                                        beta line 18",
+      "                                        beta line 19",
+      "                                        beta line 20",
+      "                                        beta line 21",
+      "                                        beta line 22",
+      "-rw-r--r-- 1 user user 381B 2026-11-12 22:42      381B sum, 6.81G free  1/1  All"
+    ],
+    "title": ""
+  },
+  {
+    "alt_screen": true,
+    "cursor": [
+      10,
+      2,
+      false
+    ],
+    "frames": [
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "raw",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          0
+        ],
+        "key": null,
+        "kind": "chrome",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          1
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          1,
+          9,
+          22
+        ],
+        "state": "stable",
+        "support": "ranger",
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": "ranger:/tmp/tmp.vhQjoJOumm/tree",
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          10,
+          1,
+          29,
+          22
+        ],
+        "state": "stable",
+        "support": "ranger",
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          40,
+          1,
+          40,
+          22
+        ],
+        "state": "stable",
+        "support": "ranger",
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          0
+        ],
+        "key": null,
+        "kind": "chrome",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          23,
+          80,
+          1
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          1,
+          9,
+          22
+        ],
+        "state": "inactive",
+        "support": "ranger",
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          21
+        ],
+        "key": "ranger:/tmp/tmp.vhQjoJOumm/tree/beta",
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          10,
+          1,
+          29,
+          22
+        ],
+        "state": "inactive",
+        "support": "ranger",
+        "usable": false
+      }
+    ],
+    "size": [
+      80,
+      24
+    ],
+    "t": 12.477,
+    "text": [
+      "user@host /tmp/tmp.vhQjoJOumm/tree/beta",
+      " tree      alpha                     3   notes.txt",
+      " num~.txt  beta                      1",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "drwxr-xr-x 2 user user 1 2026-11-12 22:42            0 sum, 6.81G free  2/2  All"
+    ],
+    "title": ""
+  }
+]

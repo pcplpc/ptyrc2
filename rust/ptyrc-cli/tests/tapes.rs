@@ -66,17 +66,8 @@ fn pager_tape_keeps_its_frames() {
 fn tmux_tape_keeps_its_frames() {
     let sb = Sandbox::new("tape-tmux");
     check(&sb, "tmux");
-    let shots: Value =
-        serde_json::from_str(&std::fs::read_to_string(tape("tmux.snap")).unwrap()).unwrap();
-    let usable = |i: usize| -> Vec<Value> {
-        let frames = shots[i]["frames"].as_array().unwrap();
-        let panes = frames
-            .iter()
-            .filter(|f| f["kind"] == "pane" && f["usable"] == true);
-        panes
-            .map(|f| json!([f["rect"], f["origin"], f["key"]]))
-            .collect()
-    };
+    let shots = shots_of("tmux.snap");
+    let usable = |i: usize| usable_panes(&shots[i]);
     let split = json!([
         [[0, 0, 40, 23], [0, 19], "tmux:tape:0"],
         [[41, 0, 39, 23], [0, 0], "tmux:tape:0"]
@@ -91,6 +82,96 @@ fn tmux_tape_keeps_its_frames() {
         split,
         "the first window comes back as it was"
     );
+}
+
+fn shots_of(name: &str) -> Value {
+    serde_json::from_str(&std::fs::read_to_string(tape(name)).unwrap()).unwrap()
+}
+
+/// `[rect, origin, key]` of the usable panes of a snapshot.
+fn usable_panes(shot: &Value) -> Vec<Value> {
+    let frames = shot["frames"].as_array().unwrap();
+    let panes = frames
+        .iter()
+        .filter(|f| f["kind"] == "pane" && f["usable"] == true);
+    panes
+        .map(|f| json!([f["rect"], f["origin"], f["key"]]))
+        .collect()
+}
+
+/// vim: half pages, a split, `G`, `gg`, the split closed.
+#[test]
+fn vim_tape_keeps_its_frames() {
+    let sb = Sandbox::new("tape-vim");
+    check(&sb, "vim");
+    let shots = shots_of("vim.snap");
+    let panes = |i: usize| json!(usable_panes(&shots[i]));
+    let whole = |origin: i64| json!([[[0, 0, 60, 15], [0, origin], null]]);
+    assert_eq!(panes(0), whole(0));
+    assert_eq!(panes(1), whole(7), "a half page is a scroll");
+    assert_eq!(panes(2), whole(14));
+    let lower = json!([[0, 8, 60, 6], [0, 0], "vim:numbers.txt"]);
+    assert_eq!(
+        panes(3),
+        json!([[[0, 0, 60, 7], [0, 14], "vim:numbers.txt"], lower]),
+        "a split: two windows, the upper one keeps its place"
+    );
+    let jumped = panes(4);
+    assert!(
+        jumped[0][1][1].as_i64().unwrap() > 1000,
+        "G is a jump: an island"
+    );
+    assert_eq!(jumped[1], lower, "the other window did not move");
+    assert_eq!(panes(5)[0][1], json!([0, 0]), "gg: the top is found again");
+    assert_eq!(
+        panes(6),
+        whole(14),
+        "the split closed: the first frame again"
+    );
+}
+
+/// htop: meters over a process list, the setup screen, back.
+#[test]
+fn htop_tape_keeps_its_frames() {
+    let sb = Sandbox::new("tape-htop");
+    check(&sb, "htop");
+    let shots = shots_of("htop.snap");
+    let panes = |i: usize| json!(usable_panes(&shots[i]));
+    let monitor = json!([
+        [[0, 0, 80, 10], [0, 0], "htop:meters"],
+        [[0, 11, 80, 12], [0, 0], "htop:processes"]
+    ]);
+    assert_eq!(panes(0), monitor);
+    assert_eq!(panes(1), monitor, "meters that change move no frame");
+    assert_ne!(panes(2), monitor, "the setup screen is another layout");
+    assert_eq!(panes(3), monitor, "the monitor comes back as it was");
+}
+
+/// ranger: three columns, a directory entered and left.
+#[test]
+fn ranger_tape_keeps_its_frames() {
+    let sb = Sandbox::new("tape-ranger");
+    check(&sb, "ranger");
+    let shots = shots_of("ranger.snap");
+    let columns = |i: usize| -> Vec<Value> {
+        let panes = usable_panes(&shots[i]);
+        panes.iter().map(|p| p[0].clone()).collect()
+    };
+    let three = json!([[0, 1, 9, 22], [10, 1, 29, 22], [40, 1, 40, 22]]);
+    for i in 0..5 {
+        let mut rects = columns(i);
+        rects.sort_by_key(|r| r[0].as_i64());
+        assert_eq!(json!(rects), three, "snapshot {i}");
+    }
+    // The middle column is keyed by its directory.
+    let middle = |i: usize| -> String {
+        let panes = usable_panes(&shots[i]);
+        let pane = panes.iter().find(|p| p[0][0] == 10).unwrap();
+        pane[2].as_str().unwrap().to_string()
+    };
+    assert!(middle(0).ends_with("/tree"), "{}", middle(0));
+    assert!(middle(2).ends_with("/tree/beta"), "{}", middle(2));
+    assert_eq!(middle(4), middle(0), "left: the first column set again");
 }
 
 #[test]

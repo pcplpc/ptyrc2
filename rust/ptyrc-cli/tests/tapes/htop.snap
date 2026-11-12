@@ -1,0 +1,800 @@
+[
+  {
+    "alt_screen": true,
+    "cursor": [
+      79,
+      23,
+      false
+    ],
+    "frames": [
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "raw",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          9
+        ],
+        "key": "htop:meters",
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          10
+        ],
+        "state": "stable",
+        "support": "htop",
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          0
+        ],
+        "key": null,
+        "kind": "chrome",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          10,
+          80,
+          1
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          11
+        ],
+        "key": "htop:processes",
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          11,
+          80,
+          12
+        ],
+        "state": "stable",
+        "support": "htop",
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          0
+        ],
+        "key": null,
+        "kind": "chrome",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          23,
+          80,
+          1
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      }
+    ],
+    "size": [
+      80,
+      24
+    ],
+    "t": 2.46,
+    "text": [
+      "",
+      "    0[||       2.8%]   4[|        2.9%]   8[|||||    31.4%] 12[||||     19.8%]",
+      "    1[         0.0%]   5[|        1.9%]   9[          0.0%] 13[||        3.7%]",
+      "    2[||       4.7%]   6[||       2.8%]  10[||        1.9%] 14[|         1.0%]",
+      "    3[         0.0%]   7[|        0.9%]  11[||        1.9%] 15[|         0.9%]",
+      "  Mem[|||||||||||||||||||||11.1G/14.4G] Tasks: 340, 3315 thr, 261 kthr; 2 runn",
+      "  Swp[|||||||||||||||||||||9.85G/16.0G] Load average: 12.12 15.97 8.12",
+      "                                        Uptime: 4 days, 07:59:10",
+      "",
+      "  [Main] [I/O]",
+      "    PID USER       PRI  NI  VIRT   RES  PRIV S  CPU%-MEM%   TIME+  Command",
+      "      1 root        20   0 21220 10156  3612 S   0.0  0.1  0:14.35 /usr/lib/syst",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "F1Help  F2Setup F3SearchF4FilterF5Tree  F6SortByF7Nice -F8Nice +F9Kill  F10Quit"
+    ],
+    "title": ""
+  },
+  {
+    "alt_screen": true,
+    "cursor": [
+      79,
+      23,
+      false
+    ],
+    "frames": [
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "raw",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          9
+        ],
+        "key": "htop:meters",
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          10
+        ],
+        "state": "stable",
+        "support": "htop",
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          0
+        ],
+        "key": null,
+        "kind": "chrome",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          10,
+          80,
+          1
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          11
+        ],
+        "key": "htop:processes",
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          11,
+          80,
+          12
+        ],
+        "state": "stable",
+        "support": "htop",
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          0
+        ],
+        "key": null,
+        "kind": "chrome",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          23,
+          80,
+          1
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      }
+    ],
+    "size": [
+      80,
+      24
+    ],
+    "t": 4.967,
+    "text": [
+      "",
+      "    0[|        1.9%]   4[|||      3.7%]   8[||||     17.6%] 12[||        8.5%]",
+      "    1[         0.0%]   5[         0.0%]   9[|         0.9%] 13[||        4.7%]",
+      "    2[||       3.7%]   6[||       1.9%]  10[||        2.8%] 14[||        1.9%]",
+      "    3[|        0.9%]   7[         0.0%]  11[          0.0%] 15[|         0.9%]",
+      "  Mem[|||||||||||||||||||||11.1G/14.4G] Tasks: 334, 3305 thr, 261 kthr; 1 runn",
+      "  Swp[|||||||||||||||||||||9.85G/16.0G] Load average: 12.12 15.97 8.12",
+      "                                        Uptime: 4 days, 07:59:12",
+      "",
+      "  [Main] [I/O]",
+      "    PID USER       PRI  NI  VIRT   RES  PRIV S  CPU%-MEM%   TIME+  Command",
+      "      1 root        20   0 21220 10156  3612 S   0.0  0.1  0:14.35 /usr/lib/syst",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "F1Help  F2Setup F3SearchF4FilterF5Tree  F6SortByF7Nice -F8Nice +F9Kill  F10Quit"
+    ],
+    "title": ""
+  },
+  {
+    "alt_screen": true,
+    "cursor": [
+      17,
+      11,
+      false
+    ],
+    "frames": [
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "raw",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          9
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          10
+        ],
+        "state": "stable",
+        "support": "htop",
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          0
+        ],
+        "key": null,
+        "kind": "chrome",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          10,
+          80,
+          1
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          11
+        ],
+        "key": "htop:processes",
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          11,
+          80,
+          12
+        ],
+        "state": "inactive",
+        "support": "htop",
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          0
+        ],
+        "key": null,
+        "kind": "chrome",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          23,
+          80,
+          1
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          12
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          11,
+          80,
+          13
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      }
+    ],
+    "size": [
+      80,
+      24
+    ],
+    "t": 7.473,
+    "text": [
+      "",
+      "    0[|||      4.6%]   4[||       1.9%]   8[|||      13.2%] 12[||||     20.6%]",
+      "    1[         0.0%]   5[         0.0%]   9[|         4.8%] 13[||        3.8%]",
+      "    2[|        1.9%]   6[||       1.9%]  10[||        1.9%] 14[||        1.9%]",
+      "    3[|        0.9%]   7[         0.0%]  11[          0.0%] 15[          0.0%]",
+      "  Mem[|||||||||||||||||||||11.1G/14.4G] Tasks: 334, 3332 thr, 261 kthr; 2 runn",
+      "  Swp[|||||||||||||||||||||9.85G/16.0G] Load average: 11.15 15.70 8.08",
+      "                                        Uptime: 4 days, 07:59:15",
+      "",
+      "  [Setup]",
+      "Categories       Display options",
+      "Display options  For current screen tab: Main",
+      "Header layout    [ ]    Tree view",
+      "Meters           [ ]    - Tree view is always sorted by PID (htop 2 behavior)",
+      "Screens          [ ]    - Tree view is collapsed by default",
+      "Colors           [0]    - Tree view is kept visually stable (0 - off, 1 - soft,",
+      "                 Global options:",
+      "                 [x]    Show tabs for screens",
+      "                 [ ]    Shadow other users' processes",
+      "                 [x]    Hide kernel threads",
+      "                 [ ]    Hide userland process threads",
+      "                 [ ]    Hide processes running in containers",
+      "                 [x]    Display threads in a different color",
+      "F1      F2      F3      F4      F5      F6      F7      F8      F9      F10Done"
+    ],
+    "title": ""
+  },
+  {
+    "alt_screen": true,
+    "cursor": [
+      79,
+      23,
+      false
+    ],
+    "frames": [
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "raw",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          23
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          24
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          9
+        ],
+        "key": "htop:meters",
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          80,
+          10
+        ],
+        "state": "stable",
+        "support": "htop",
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          0
+        ],
+        "key": null,
+        "kind": "chrome",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          10,
+          80,
+          1
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          11
+        ],
+        "key": "htop:processes",
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          11,
+          80,
+          12
+        ],
+        "state": "stable",
+        "support": "htop",
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          0
+        ],
+        "key": null,
+        "kind": "chrome",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          23,
+          80,
+          1
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          12
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          11,
+          80,
+          13
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      }
+    ],
+    "size": [
+      80,
+      24
+    ],
+    "t": 9.973,
+    "text": [
+      "",
+      "    0[||       2.8%]   4[||       1.9%]   8[||        8.5%] 12[|||      11.2%]",
+      "    1[         0.0%]   5[|        0.9%]   9[|         1.0%] 13[||        1.9%]",
+      "    2[||       4.8%]   6[|        1.9%]  10[|         0.9%] 14[||        3.7%]",
+      "    3[         0.0%]   7[         0.0%]  11[          0.0%] 15[          0.0%]",
+      "  Mem[|||||||||||||||||||||11.1G/14.4G] Tasks: 334, 3330 thr, 261 kthr; 2 runn",
+      "  Swp[|||||||||||||||||||||9.85G/16.0G] Load average: 11.15 15.70 8.08",
+      "                                        Uptime: 4 days, 07:59:17",
+      "",
+      "  [Main] [I/O]",
+      "    PID USER       PRI  NI  VIRT   RES  PRIV S  CPU%-MEM%   TIME+  Command",
+      "      1 root        20   0 21220 10156  3612 S   0.0  0.1  0:14.35 /usr/lib/syst",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "F1Help  F2Setup F3SearchF4FilterF5Tree  F6SortByF7Nice -F8Nice +F9Kill  F10Quit"
+    ],
+    "title": ""
+  }
+]
