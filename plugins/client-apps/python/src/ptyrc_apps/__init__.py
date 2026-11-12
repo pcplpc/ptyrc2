@@ -16,6 +16,7 @@ APPS = {
     "fishes": "fishes behind the text, afraid of the cursor",
     "flower": "a flower next to a word",
     "marks": "a highlighter: the matches of patterns, in colours",
+    "rain": "quiet rain behind the text",
     "sand": "sand falling in an idle pane",
     "snake": "a snake that plays alone between the words",
 }

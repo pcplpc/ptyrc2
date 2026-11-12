@@ -24,6 +24,7 @@ from ptyrc_apps import (
     fishes,
     flower,
     marks,
+    rain,
     sand,
     snake,
 )
@@ -953,6 +954,27 @@ def test_marks(session: Pilot) -> None:
     assert status == [0]
     assert until(lambda: session.sprites() == [], 3)
     assert marks.main(["-s", session.session, "-e", "("]) == 1
+
+
+def test_rain(session: Pilot) -> None:
+    session.send("clear; printf '\\n\\n\\n\\n%070d\\n' 0\n")
+    session.wait_for("0" * 70, frame="raw")
+    time.sleep(0.3)
+    splashes: set[int] = set()
+    drops: set[str] = set()
+
+    def seen(host: str) -> bool:
+        rows = host.split("\n")
+        splashes.update(y for y, row in enumerate(rows) if "'" in row or "." in row)
+        drops.update(c for c in "│╎" if c in host)
+        return len(drops) == 2 and {3, 23} <= splashes
+
+    args = ["-s", session.session, "--rate", "300"]
+    watch(session, lambda: rain.main(args, seconds=2.5), seen)
+    # On the line of text (the row above it) and on the floor; behind
+    # the text, nothing shows.
+    assert 4 not in splashes, splashes
+    assert rain.main(["-s", session.session, "--rate", "-1"]) == 1
 
 
 def test_clock(session: Pilot) -> None:
