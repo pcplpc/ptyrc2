@@ -246,8 +246,14 @@ pub struct Frames {
     title_hash: u64,
     alt: bool,
     started: bool,
+    /// Identity of what fills the whole screen, from a plugin: prefixes
+    /// the key of every pane.
+    screen_key: Option<String>,
     placed: RefCell<PlaceCache>,
 }
+
+/// How long a preset outlives its last detection.
+const SUPPORT_HOLD: Duration = Duration::from_secs(4);
 
 fn ms(v: u32) -> Duration {
     Duration::from_millis(v as u64)
@@ -278,6 +284,7 @@ impl Frames {
             title_hash: 0,
             alt: false,
             started: false,
+            screen_key: None,
             placed: RefCell::new(HashMap::new()),
         }
     }
@@ -322,6 +329,15 @@ impl Frames {
         }
         self.cursor = input.cursor;
         self.started = true;
+        if !self.supports.is_empty() && (self.screen.any_change || title_changed) {
+            let all = Rect::new(0, 0, self.screen.cols, self.screen.rows);
+            let pv = self.pane_view(input, all);
+            self.screen_key = self
+                .supports
+                .iter()
+                .filter(|s| s.detect(&pv) >= 0.5)
+                .find_map(|s| s.frame_key(&pv));
+        }
 
         // Segmentation, when something structural may have changed.
         let cursor_row = Some(input.cursor.row);
@@ -1092,15 +1108,24 @@ impl Frames {
             && consult
         {
             let pv = self.pane_view(inp, p.rect);
-            if p.support_at
-                .is_none_or(|t| now >= t + Duration::from_secs(1))
-            {
-                p.support = self.detect(&pv);
-                p.support_at = Some(now);
-                if let Some(s) = p.support {
-                    let t = self.supports[s].tuning();
-                    p.settle = ms(t.settle_ms.unwrap_or(self.cfg.settle_ms));
-                    p.commit = ms(t.commit_ms.unwrap_or(self.cfg.commit_ms));
+            // Looked for on every change; once found, a preset is kept
+            // through `SUPPORT_HOLD` of not being seen (a command line
+            // hides the ruler vim is known by).
+            match self.detect(&pv) {
+                Some(s) => {
+                    if p.support != Some(s) {
+                        let t = self.supports[s].tuning();
+                        p.settle = ms(t.settle_ms.unwrap_or(self.cfg.settle_ms));
+                        p.commit = ms(t.commit_ms.unwrap_or(self.cfg.commit_ms));
+                    }
+                    p.support = Some(s);
+                    p.support_at = Some(now);
+                }
+                None => {
+                    if p.support.is_none() || p.support_at.is_none_or(|t| now >= t + SUPPORT_HOLD) {
+                        p.support = None;
+                        p.support_at = Some(now);
+                    }
                 }
             }
             match p.support {
@@ -1125,6 +1150,13 @@ impl Frames {
                     new_key = None;
                 }
             }
+            // What fills the screen comes first: a tmux window, then the
+            // file a pane of it shows.
+            new_key = match (&self.screen_key, new_key) {
+                (Some(s), Some(k)) if *s != k => Some(format!("{s}/{k}")),
+                (Some(s), _) => Some(s.clone()),
+                (None, k) => k,
+            };
         }
 
         // Generic gutter: a number column is left chrome, with or without
