@@ -203,13 +203,39 @@ impl Rect {
 
 /// `cols x rows` cells. Rows are stored through an indirection table, so a
 /// vertical scroll moves no cell.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Grid {
     cols: u16,
     rows: u16,
     cells: Vec<Cell>,
     /// Storage row of each screen row.
     lines: Vec<u16>,
+    /// Unique among the grids of the process; a clone gets its own.
+    epoch: u64,
+    /// Last stamp given.
+    tick: u64,
+    /// Per screen row: `tick` at its last write.
+    stamps: Vec<u64>,
+}
+
+fn next_epoch() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static EPOCH: AtomicU64 = AtomicU64::new(1);
+    EPOCH.fetch_add(1, Ordering::Relaxed)
+}
+
+impl Clone for Grid {
+    fn clone(&self) -> Grid {
+        Grid {
+            cols: self.cols,
+            rows: self.rows,
+            cells: self.cells.clone(),
+            lines: self.lines.clone(),
+            epoch: next_epoch(),
+            tick: self.tick,
+            stamps: self.stamps.clone(),
+        }
+    }
 }
 
 impl PartialEq for Grid {
@@ -229,7 +255,22 @@ impl Grid {
             rows,
             cells: vec![Cell::default(); cols as usize * rows as usize],
             lines: (0..rows).collect(),
+            epoch: next_epoch(),
+            tick: 0,
+            stamps: vec![0; rows as usize],
         }
+    }
+
+    /// Identity of the content of a row: two equal values, from this grid
+    /// or another, mean the same cells. Changed by every write to the row,
+    /// whether or not the cells differ after it.
+    pub fn row_stamp(&self, row: u16) -> (u64, u64) {
+        (self.epoch, self.stamps[row as usize])
+    }
+
+    fn touch(&mut self, row: u16) {
+        self.tick += 1;
+        self.stamps[row as usize] = self.tick;
     }
 
     /// A grid from text lines, one cell per `char` (narrow), default style.
@@ -269,6 +310,7 @@ impl Grid {
 
     /// Raw access: the caller keeps wide pairs consistent. Prefer `put`.
     pub fn cell_mut(&mut self, col: u16, row: u16) -> &mut Cell {
+        self.touch(row);
         let i = self.index(col, row);
         &mut self.cells[i]
     }
@@ -279,6 +321,7 @@ impl Grid {
     }
 
     pub fn row_mut(&mut self, row: u16) -> &mut [Cell] {
+        self.touch(row);
         let start = self.index(0, row);
         let cols = self.cols as usize;
         &mut self.cells[start..start + cols]
@@ -337,6 +380,7 @@ impl Grid {
         }
         self.orphan(col, row);
         self.orphan(col + n as u16 - 1, row);
+        self.touch(row);
         let start = self.index(col, row);
         for (cell, b) in self.cells[start..start + n].iter_mut().zip(bytes) {
             let ch = [*b];
@@ -362,6 +406,7 @@ impl Grid {
         }
         self.orphan(c0, row);
         self.orphan(c1 - 1, row);
+        self.touch(row);
         let start = self.index(c0, row);
         for cell in &mut self.cells[start..start + (c1 - c0) as usize] {
             cell.clone_from(fill);
@@ -376,6 +421,7 @@ impl Grid {
         }
         let n = n.min(bottom - top);
         self.lines[top as usize..bottom as usize].rotate_left(n as usize);
+        (top..bottom).for_each(|row| self.touch(row));
         for row in bottom - n..bottom {
             self.clear_row(row, fill);
         }
@@ -389,6 +435,7 @@ impl Grid {
         }
         let n = n.min(bottom - top);
         self.lines[top as usize..bottom as usize].rotate_right(n as usize);
+        (top..bottom).for_each(|row| self.touch(row));
         for row in top..top + n {
             self.clear_row(row, fill);
         }
@@ -405,6 +452,7 @@ impl Grid {
             self.orphan(col, row);
             *self.cell_mut(col, row) = fill.clone();
         }
+        self.touch(row);
         let start = self.index(col, row);
         let end = self.index(0, row) + self.cols as usize;
         let tail = &mut self.cells[start..end];
@@ -428,6 +476,7 @@ impl Grid {
         if self.cell(col, row).width == 0 {
             self.orphan(col, row);
         }
+        self.touch(row);
         let start = self.index(col, row);
         let end = self.index(0, row) + self.cols as usize;
         let tail = &mut self.cells[start..end];
@@ -529,6 +578,57 @@ mod tests {
         assert!(!Cell::blank(grey).looks_like(&Cell::default()));
         assert!(!Cell::narrow("a", grey).looks_like(&Cell::blank(grey)));
         assert!(Cell::narrow("a", grey).looks_like(&Cell::narrow("a", grey)));
+    }
+
+    #[test]
+    fn stamps_follow_writes() {
+        let s = Style::default();
+        let blank = Cell::default();
+        let mut g = Grid::from_lines(6, &["ab", "cd", "ef", "gh"]);
+        let stamps = |g: &Grid| (0..4).map(|r| g.row_stamp(r)).collect::<Vec<_>>();
+        // Each write changes the stamp of its row and of no other.
+        type Write = fn(&mut Grid, &Cell, Style);
+        let writes: [(Write, &[u16]); 10] = [
+            (
+                |g, _, s| {
+                    g.put(1, 1, Cell::narrow("x", s));
+                },
+                &[1],
+            ),
+            (|g, _, s| g.put_ascii(0, 2, b"yz", s), &[2]),
+            (|g, _, _| g.cell_mut(0, 3).width = 1, &[3]),
+            (
+                |g, _, _| {
+                    g.row_mut(0);
+                },
+                &[0],
+            ),
+            (|g, b, _| g.clear_row(1, b), &[1]),
+            (|g, b, _| g.erase(2, 0, 3, b), &[2]),
+            (|g, b, _| g.insert_cells(1, 3, 2, b), &[3]),
+            (|g, b, _| g.delete_cells(1, 0, 2, b), &[0]),
+            (|g, b, _| g.scroll_up(1, 3, 1, b), &[1, 2]),
+            (|g, b, _| g.scroll_down(0, 2, 1, b), &[0, 1]),
+        ];
+        for (k, (write, rows)) in writes.iter().enumerate() {
+            let before = stamps(&g);
+            write(&mut g, &blank, s);
+            let after = stamps(&g);
+            for r in 0..4u16 {
+                let changed = before[r as usize] != after[r as usize];
+                assert_eq!(changed, rows.contains(&r), "write {k}, row {r}");
+            }
+        }
+        // A clone is another grid: its stamps never meet the original's.
+        let mut c = g.clone();
+        assert_eq!(c, g);
+        assert!((0..4).all(|r| c.row_stamp(r) != g.row_stamp(r)));
+        c.put(0, 0, Cell::narrow("q", s));
+        g.put(0, 0, Cell::narrow("r", s));
+        assert_ne!(c.row_stamp(0), g.row_stamp(0));
+        let before = g.row_stamp(0);
+        g.resize(3, 2);
+        assert_ne!(g.row_stamp(0), before);
     }
 
     #[test]

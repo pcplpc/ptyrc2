@@ -2,7 +2,7 @@
 //! Screen state kept between updates: per-cell hashes and classes, per-row
 //! text. Everything the frames need after the grid is gone.
 
-use ptyrc_vt::{Attrs, Cell, Color, Grid};
+use ptyrc_vt::{Attrs, Cell, Color, Grid, Style};
 
 /// FNV-1a.
 pub(crate) fn fnv(bytes: &[u8]) -> u64 {
@@ -38,6 +38,15 @@ pub(crate) struct Line {
 
 impl Line {
     pub fn from_cells(cells: &[Cell]) -> Line {
+        // One ASCII char per cell: the usual row.
+        if cells.iter().all(|c| c.width == 1 && c.text.len() <= 1) {
+            let byte = |c: &Cell| c.text.as_bytes().first().map_or(' ', |b| *b as char);
+            return Line {
+                text: cells.iter().map(byte).collect(),
+                cols: None,
+                ascii: true,
+            };
+        }
         let mut text = String::with_capacity(cells.len());
         let mut cols: Option<Vec<u16>> = None;
         let mut ascii = true;
@@ -54,7 +63,7 @@ impl Line {
             } else {
                 cell.text.as_str()
             };
-            let n = t.chars().count();
+            let n = if t.len() == 1 { 1 } else { t.chars().count() };
             if (n != 1 || c != count) && cols.is_none() {
                 cols = Some((0..count as u16).collect());
             }
@@ -156,6 +165,13 @@ pub(crate) mod class {
 
 fn classify(text: &str) -> u16 {
     use class::*;
+    match text.as_bytes().first() {
+        None | Some(b' ') => return BLANK,
+        Some(b'|') => return PIPE,
+        Some(b'-') => return DASH,
+        Some(b) if b.is_ascii() => return 0,
+        Some(_) => {}
+    }
     let Some(ch) = text.chars().next() else {
         return BLANK;
     };
@@ -186,21 +202,20 @@ fn color_code(c: Color) -> u32 {
 
 /// What fills the background of a cell: 0 for nothing, else a key of the
 /// colour shown.
-fn paint(cell: &Cell) -> u16 {
-    if cell.style.attrs.contains(Attrs::INVERSE) {
-        let c = color_code(cell.style.fg);
+fn paint(style: &Style) -> u16 {
+    if style.attrs.contains(Attrs::INVERSE) {
+        let c = color_code(style.fg);
         0x8000 | ((c ^ (c >> 15)) as u16 & 0x7fff)
     } else {
-        match color_code(cell.style.bg) {
+        match color_code(style.bg) {
             0 => 0,
             c => ((c ^ (c >> 15)) as u16 & 0x7fff).max(1),
         }
     }
 }
 
-fn cell_hash(cell: &Cell) -> u32 {
-    let mut h = fnv(cell.text.as_bytes());
-    let s = &cell.style;
+fn style_hash(s: &Style) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for v in [
         color_code(s.fg),
         color_code(s.bg),
@@ -210,13 +225,43 @@ fn cell_hash(cell: &Cell) -> u32 {
     ] {
         h = (h ^ v as u64).wrapping_mul(0x0100_0000_01b3);
     }
+    h
+}
+
+/// Hash of a cell; `style` is the `style_hash` of its style.
+fn cell_hash(cell: &Cell, style: u64) -> u32 {
+    let h = (fnv(cell.text.as_bytes()) ^ style).wrapping_mul(0x0100_0000_01b3);
     (h ^ (h >> 32)) as u32
+}
+
+/// What a run of cells of one style shares.
+struct Pen {
+    style: Style,
+    hash: u64,
+    paint: u16,
+    /// Colour code of the backdrop.
+    back: u32,
+    /// `Cell::has_ink` of a blank, and of a glyph.
+    ink: [bool; 2],
+}
+
+impl Pen {
+    fn new(style: Style) -> Pen {
+        let probe = |text| Cell::narrow(text, style);
+        Pen {
+            style,
+            hash: style_hash(&style),
+            paint: paint(&style),
+            back: color_code(probe(" ").backdrop()),
+            ink: [probe(" ").has_ink(), probe("a").has_ink()],
+        }
+    }
 }
 
 /// Hash of what a cell shows: equal for cells that look alike
 /// (`Cell::looks_like`). `full` is its `cell_hash`.
-fn look_hash(cell: &Cell, full: u32, back: u32) -> u32 {
-    if cell.has_ink() {
+fn look_hash(ink: bool, full: u32, back: u32) -> u32 {
+    if ink {
         full | 1
     } else {
         back.wrapping_mul(0x9e37_79b1) & !1
@@ -242,6 +287,10 @@ pub(crate) struct Screen {
     pub prev_lines: Vec<Line>,
     pub any_change: bool,
     pub class_change: bool,
+    /// `Grid::row_stamp` of each row at its last scan.
+    stamps: Vec<(u64, u64)>,
+    /// Number of scans that found a change.
+    pub changes: u64,
 }
 
 impl Screen {
@@ -263,31 +312,47 @@ impl Screen {
             self.row_dirty = vec![false; rows as usize];
             self.lines = vec![Line::default(); rows as usize];
             self.prev_lines = vec![Line::default(); rows as usize];
+            self.stamps = vec![(0, 0); rows as usize];
         }
         self.any_change = resized;
         self.class_change = resized;
         let w = cols as usize;
+        // The style of a run of cells is hashed once.
+        let mut pen = Pen::new(Style::default());
         for r in 0..rows as usize {
             let cells = grid.row(r as u16);
             let base = r * w;
+            // A row not written since its last scan: nothing to read.
+            let stamp = grid.row_stamp(r as u16);
+            if stamp == self.stamps[r] {
+                debug_assert!(self.same_row(r, cells), "row {r} written, stamp kept");
+                self.row_dirty[r] = false;
+                continue;
+            }
+            self.stamps[r] = stamp;
             let mut dirty = resized;
             for (c, cell) in cells.iter().enumerate() {
-                let h = cell_hash(cell);
+                if cell.style != pen.style {
+                    pen = Pen::new(cell.style);
+                }
+                let h = cell_hash(cell, pen.hash);
                 let i = base + c;
                 if h != self.hash[i] || resized {
                     self.hash[i] = h;
                     dirty = true;
                     let cl = classify(&cell.text);
-                    let p = paint(cell);
+                    let p = pen.paint;
                     if cl != self.class[i] || p != self.paint[i] {
                         self.class[i] = cl;
                         self.paint[i] = p;
                         self.class_change = true;
                     }
-                    let back = color_code(cell.backdrop());
-                    self.back[i] = back;
-                    self.ink[i] = cell.has_ink();
-                    self.look[i] = look_hash(cell, h, back);
+                    let ink = pen.ink[!cell.is_blank() as usize];
+                    debug_assert_eq!(ink, cell.has_ink());
+                    debug_assert_eq!(pen.back, color_code(cell.backdrop()));
+                    self.back[i] = pen.back;
+                    self.ink[i] = ink;
+                    self.look[i] = look_hash(ink, h, pen.back);
                 }
             }
             self.row_dirty[r] = dirty;
@@ -297,7 +362,17 @@ impl Screen {
                 self.prev_lines[r] = std::mem::replace(&mut self.lines[r], line);
             }
         }
+        self.changes += self.any_change as u64;
         resized
+    }
+
+    /// The cells are those of the last scan of row `r`.
+    fn same_row(&self, r: usize, cells: &[Cell]) -> bool {
+        let base = r * self.cols as usize;
+        cells
+            .iter()
+            .enumerate()
+            .all(|(c, cell)| cell_hash(cell, style_hash(&cell.style)) == self.hash[base + c])
     }
 
     /// Forget the change marks of the last scan.
@@ -354,6 +429,22 @@ mod tests {
     }
 
     #[test]
+    fn ascii_rows_take_the_short_path() {
+        let mut g = Grid::from_lines(6, &["a|-  b"]);
+        g.cell_mut(4, 0).text = Default::default();
+        let l = Line::from_cells(g.row(0));
+        assert_eq!(
+            (l.text.as_str(), l.trivial(), l.ascii),
+            ("a|-  b", true, true)
+        );
+        let classes: Vec<u16> = g.row(0).iter().map(|c| classify(&c.text)).collect();
+        use class::*;
+        assert_eq!(classes, [0, PIPE, DASH, BLANK, BLANK, 0]);
+        assert_eq!(classify("é"), 0);
+        assert_eq!(classify("│"), V);
+    }
+
+    #[test]
     fn scan_marks_changes() {
         let mut s = Screen::default();
         let g = Grid::from_lines(4, &["ab", "cd"]);
@@ -364,6 +455,45 @@ mod tests {
         s.scan(&g2);
         assert!(s.any_change && s.row_dirty[1] && !s.row_dirty[0]);
         assert_eq!(s.prev_lines[1].text, "cd  ");
+    }
+
+    #[test]
+    fn scan_skips_rows_not_written() {
+        let mut s = Screen::default();
+        let mut g = Grid::from_lines(4, &["ab", "cd", "ef"]);
+        s.scan(&g);
+        let changes = s.changes;
+        // Same grid: no row is read.
+        s.scan(&g);
+        assert!(!s.any_change && s.changes == changes);
+        // A write that changes nothing: the row is read, and found clean.
+        g.put(0, 1, Cell::narrow("c", Style::default()));
+        s.scan(&g);
+        assert!(!s.any_change && !s.row_dirty[1]);
+        g.put(1, 2, Cell::narrow("x", Style::default()));
+        s.scan(&g);
+        assert_eq!(s.row_dirty, [false, false, true]);
+        assert_eq!(s.changes, changes + 1);
+        assert_eq!(s.lines[2].text, "ex  ");
+        s.settle();
+        // Another grid, equal or not, is read whole.
+        let c = g.clone();
+        s.scan(&c);
+        assert!(!s.any_change);
+        let other = Grid::from_lines(4, &["ab", "cd", "zz"]);
+        s.scan(&other);
+        assert_eq!(s.row_dirty, [false, false, true]);
+        s.settle();
+        // Back to the first one, whose stamps were seen: read again.
+        s.scan(&g);
+        assert_eq!(s.row_dirty, [false, false, true]);
+        assert_eq!(s.lines[2].text, "ex  ");
+        // A scroll moves every row of its region.
+        s.settle();
+        g.scroll_up(0, 3, 1, &Cell::default());
+        s.scan(&g);
+        assert_eq!(s.row_dirty, [true, true, true]);
+        assert_eq!(s.lines[0].text, "cd  ");
     }
 
     #[test]

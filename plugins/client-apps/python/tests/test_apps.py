@@ -162,6 +162,45 @@ def test_confetti_spot() -> None:
     assert confetti.spot([], rng) == (0, 0)
 
 
+def test_confetti_spot_weights() -> None:
+    """The pick is the one of the plain double loop, cell for cell."""
+
+    def plain(
+        classes: list[str], rng: random.Random, avoid: list[tuple[int, int]], reach: int
+    ) -> tuple[int, int]:
+        h, w = len(classes), max(map(len, classes))
+        cold = [[c != "h" for c in row.ljust(w, ".")] for row in classes]
+        cells, weights = [], []
+        for y in range(h):
+            for x in range(w):
+                if any(abs(x - i) <= reach and abs(y - j) <= reach for i, j in avoid):
+                    continue
+                near = [
+                    cold[j][i]
+                    for j in range(max(0, y - reach), min(h, y + reach + 1))
+                    for i in range(max(0, x - reach), min(w, x + reach + 1))
+                ]
+                cells.append((x, y))
+                weights.append(sum(near) / len(near) if cold[y][x] else 0.0)
+        if not any(weights):
+            return rng.choice(cells)
+        return rng.choices(cells, weights)[0]
+
+    draw = random.Random(11)
+    for n in range(60):
+        w, h = draw.randint(8, 30), draw.randint(8, 14)
+        classes = [
+            "".join(draw.choice("hht.p") for _ in range(draw.randint(1, w)))
+            for _ in range(h)
+        ]
+        classes[0] = classes[0].ljust(w, "h")
+        avoid = [(draw.randrange(w), draw.randrange(h)) for _ in range(n % 3)]
+        reach = draw.randint(0, 3)
+        seed = draw.getrandbits(32)
+        got = confetti.spot(classes, random.Random(seed), avoid, reach)
+        assert got == plain(classes, random.Random(seed), avoid, reach), classes
+
+
 def test_confetti_party_avoids_hot(
     session: Pilot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
