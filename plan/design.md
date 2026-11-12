@@ -302,9 +302,41 @@ Further rules, from real apps:
 
 ### Heatmap
 
-Per frame, in view coordinates, per cell: `activity` (EWMA of change
-events, time constants 2 s and 60 s) and `occupancy` (EWMA of non-blank).
-`safe = (1 - activity) * (1 - occupancy)`. Exposed as digits 0 to 9.
+Per frame, in view coordinates, per cell:
+
+- `activity`: EWMA of change events, time constants 2 s and 60 s. An
+  event is a visible change: the cell does not look as it did at the last
+  update (`Cell::looks_like`). Being written is not an event: a clear of a
+  clean area, an identical redraw, another pen on a blank count for
+  nothing. A change undone within 150 ms never happened (a clear in one
+  burst, the same text again in the next).
+- `occupancy`: EWMA of foreground (`Cell::has_ink`), 5 s. A background
+  colour does not occupy.
+- `still`: seconds without a visible change, from 0 when the frame is
+  first watched or resized.
+- `safe = (1 - activity) * (1 - occupancy)`. Exposed as digits 0 to 9.
+
+The backdrop of a frame is the `Cell::backdrop` most of its cells have.
+Class of a cell, exposed as a letter:
+
+| class | letter | meaning |
+|---|---|---|
+| `hot` | `h` | changed on screen within 10 s |
+| `text` | `t` | foreground that does not move |
+| `panel` | `p` | no foreground, a backdrop other than the frame's |
+| `free` | `.` | no foreground, the frame's backdrop |
+
+A panel is background of another colour: not occupied, as safe as a free
+cell.
+
+Idle: `score` is the share of the view's cells that are not hot and have
+`still >= 10 s`; text that does not move is static. `idle` is `score >=
+0.8`. `free` is the share static and without foreground. All three are
+computed at the time of the request: time passes without a tick.
+
+`debug overlay heat`: red for hot (brighter when busier), light blue for
+static text, green for free, violet for a panel; the last three brighten
+until the cell has been still for 10 s.
 
 ### Placement
 
@@ -363,7 +395,8 @@ Sprite, as JSON (the wire form; serde on the core types):
   once and the sprite is removed; frame `ms` 100.
 - `size: [w, h]`: canvas of an effect; default the frame's view.
 - `frame`: an id, or `"raw"`, `"active"` (pane holding the cursor),
-  `"largest"`, `"quietest"`. A name is resolved when the sprite is added.
+  `"largest"`, `"quietest"` (least mean activity), `"idle"` (highest idle
+  score, then most free, then largest). A name is resolved when the sprite is added.
 - `anchor`, one of:
   - `{"at": [x, y], "space": "frame" | "view"}`: fixed in the frame (moves
     with scrolling) or in the view (HUD). Negative `view` coordinates count
@@ -509,7 +542,8 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `input.send` | `text` or `keys` or `bytes` (base64), `paste` | `{}` |
 | `frame.list` | | `{"frames":[info,...],"layout":id}` |
 | `frame.text` | `frame`, `y0`, `y1` | `{"lines":[...],"y0":n}` remembered buffer |
-| `frame.heat` | `frame` | `{"rows":["0123...",...]}` |
+| `frame.heat` | `frame` | `{"rows":["0123...",...],"classes":["ht.p...",...]}` |
+| `frame.idle` | `frame` | `{"score":0..1,"idle":bool,"free":0..1}` |
 | `frame.get` | `frame` | `{"frame":info}` |
 | `frame.at` | `x`, `y`, or `name` | `{"frame":id,"pos":[x,y]}` |
 | `draw.put` | sprite | `{"id":n}` |
@@ -526,7 +560,8 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 
 Frame info: `{"id","kind":"raw"|"pane"|"chrome","state":"candidate"|
 "stable"|"inactive","usable","rect":[x,y,w,h],"origin":[x,y],
-"extent":[y_min,y_max],"key","support":"vim"|null}`.
+"extent":[y_min,y_max],"key","support":"vim"|null,"idle":0..1,
+"is_idle":bool}`.
 
 Keys for `input.send`: `enter`, `tab`, `esc`, `space`, `backspace`,
 `delete`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`,
@@ -549,7 +584,8 @@ ptyrc send TEXT                   type text
 ptyrc keys KEY...                 press keys
 ptyrc wait [PATTERN] [--stable MS] [--gone] [--timeout MS]
 ptyrc frames [--watch]
-ptyrc heat [-f FRAME]
+ptyrc heat [-f FRAME] [--classes]
+ptyrc idle [-f FRAME]             score; status 0 when idle, 1 when not
 ptyrc draw text|ext|effect|exts|rm|ls|clear ...   (sprites persist)
       [--layer back|front|N] [--blend normal|tint] [-z N]
       draw ext --id SPRITE NAME FUNCTION [JSON]   redraw in place
@@ -564,7 +600,8 @@ ptyrc call METHOD [JSON]          raw request
 `python/ptyrc`: `Pilot` (blocking, stdlib sockets, one reader thread for
 events), `Frame`, `Sprite` handles; mirrors the protocol one to one, plus
 `wait_for`, context managers and `Pilot.spawn(argv, headless=True)` for
-tests. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
+tests. `Frame.check_idle()` is the idle score, `Frame.is_idle` the
+boolean; both ask the driver when read. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
 `python -m ptyrc_apps.<name>` and `ptyrc-app <name>`: `confetti`,
 `flower`, `clock`, `fishes`, `snake`, `sand`.
 
@@ -574,6 +611,7 @@ tests. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
   and a stand-in agent TUI, in a detached tmux.
 - `scripts/e2e-render.sh`: the driver in a detached tmux; what tmux shows
   is compared, text and styles, with the driver's model of the host.
+- `scripts/e2e-heat.sh`: heat classes and idle on a shell, vim and htop.
 - `scripts/bench.sh`: throughput and key-echo latency, bare, transparent,
   engine, engine with sprites.
 

@@ -28,7 +28,7 @@ fn strings(value: &Value) -> Vec<&str> {
 
 #[derive(Args)]
 pub struct Text {
-    /// Frame id or name: raw, active, largest, quietest
+    /// Frame id or name: raw, active, largest, quietest, idle
     #[arg(short, long, default_value = "raw")]
     frame: String,
     /// Keep colours and attributes
@@ -171,8 +171,8 @@ pub fn wait(common: &Common, args: Wait) -> Done {
 
 fn print_frames(result: &Value) {
     println!(
-        "{:>4}  {:<6}  {:<9}  {:<14}  {:<12}  {:<13}  KEY",
-        "ID", "KIND", "STATE", "RECT", "ORIGIN", "EXTENT"
+        "{:>4}  {:<6}  {:<9}  {:<14}  {:<12}  {:<13}  {:<5}  KEY",
+        "ID", "KIND", "STATE", "RECT", "ORIGIN", "EXTENT", "IDLE"
     );
     for f in result["frames"].as_array().into_iter().flatten() {
         let r = &f["rect"];
@@ -185,14 +185,20 @@ fn print_frames(result: &Value) {
             .as_str()
             .map(|s| format!(" [{s}]"))
             .unwrap_or_default();
+        let idle = format!(
+            "{:.0}%{}",
+            f["idle"].as_f64().unwrap_or(0.0) * 100.0,
+            if f["is_idle"] == true { "*" } else { "" }
+        );
         println!(
-            "{:>4}  {:<6}  {:<9}  {:<14}  {:<12}  {:<13}  {}{}",
+            "{:>4}  {:<6}  {:<9}  {:<14}  {:<12}  {:<13}  {:<5}  {}{}",
             f["id"].to_string(),
             f["kind"].as_str().unwrap_or("?"),
             state,
             format!("{}x{}+{}+{}", r[2], r[3], r[0], r[1]),
             format!("{},{}", f["origin"][0], f["origin"][1]),
             format!("{}..{}", f["extent"][0], f["extent"][1]),
+            idle,
             f["key"].as_str().unwrap_or("-"),
             support,
         );
@@ -248,16 +254,38 @@ pub fn frames(common: &Common, args: Frames) -> Done {
     }
 }
 
-pub fn heat(common: &Common, frame: &str) -> Done {
+pub fn heat(common: &Common, frame: &str, classes: bool) -> Done {
     let result = call(common, "frame.heat", json!({"frame": frame_value(frame)}))?;
     if common.json {
         print_json(&result, false);
     } else {
-        for line in strings(&result["rows"]) {
+        let rows = if classes { "classes" } else { "rows" };
+        for line in strings(&result[rows]) {
             println!("{line}");
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// Exit status 0 when the frame is idle, 1 otherwise.
+pub fn idle(common: &Common, frame: &str) -> Done {
+    let result = call(common, "frame.idle", json!({"frame": frame_value(frame)}))?;
+    let is_idle = result["idle"] == true;
+    if common.json {
+        print_json(&result, false);
+    } else {
+        println!(
+            "{:.2} {} (free {:.2})",
+            result["score"].as_f64().unwrap_or(0.0),
+            if is_idle { "idle" } else { "busy" },
+            result["free"].as_f64().unwrap_or(0.0),
+        );
+    }
+    Ok(if is_idle {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    })
 }
 
 /// Where and how a sprite goes.

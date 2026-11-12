@@ -70,6 +70,14 @@ enum Verb {
     Heat {
         #[arg(short, long, default_value = "raw")]
         frame: String,
+        /// Print classes instead: h hot, t static text, p panel, . free
+        #[arg(short, long)]
+        classes: bool,
+    },
+    /// Print how much of a frame is static; status 0 when idle (80 %)
+    Idle {
+        #[arg(short, long, default_value = "raw")]
+        frame: String,
     },
     /// Draw on the screen
     #[command(subcommand)]
@@ -172,7 +180,8 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
         Verb::Cursor => verbs::cursor(&common),
         Verb::Wait(args) => verbs::wait(&common, args),
         Verb::Frames(args) => verbs::frames(&common, args),
-        Verb::Heat { frame } => verbs::heat(&common, &frame),
+        Verb::Heat { frame, classes } => verbs::heat(&common, &frame, classes),
+        Verb::Idle { frame } => verbs::idle(&common, &frame),
         Verb::Draw(verb) => verbs::draw(&common, verb),
         Verb::Show => verbs::show(&common),
         Verb::Debug(verb) => verbs::debug(&common, verb),

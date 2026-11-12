@@ -31,7 +31,7 @@ const MOTION_STEP: Duration = Duration::from_millis(33);
 /// A text anchor keeps its match when one is found this close (rows).
 const TEXT_STICKY_ROWS: i64 = 3;
 
-const FRAME_NAMES: [&str; 4] = ["raw", "active", "largest", "quietest"];
+const FRAME_NAMES: [&str; 5] = ["raw", "active", "largest", "quietest", "idle"];
 
 struct Anim {
     frames: Vec<Canvas>,

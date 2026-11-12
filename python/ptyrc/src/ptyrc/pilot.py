@@ -319,7 +319,29 @@ class Frame:
         return self._pilot.find(pattern, frame=self.id, **kw)
 
     def heat(self) -> list[str]:
+        """Safety of each cell of the view, digits: 9 free and still, 0
+        busy."""
         return self._pilot.call("frame.heat", frame=self.id)["rows"]
+
+    def heat_classes(self) -> list[str]:
+        """Class of each cell of the view: `h` hot (changed within 10 s),
+        `t` static text, `p` panel (background of another colour), `.`
+        free."""
+        return self._pilot.call("frame.heat", frame=self.id)["classes"]
+
+    def idle(self) -> dict[str, Any]:
+        """`score`: share of the view static for 10 s; `idle`: score >=
+        0.8; `free`: share static and without text."""
+        return self._pilot.call("frame.idle", frame=self.id)
+
+    def check_idle(self) -> float:
+        """Share of the view that is static, 0 to 1. Asked now."""
+        return float(self.idle()["score"])
+
+    @property
+    def is_idle(self) -> bool:
+        """At least 80 % of the view is static. Asked now."""
+        return bool(self.idle()["idle"])
 
     def draw(self, rows: Any = None, **kw: Any) -> Sprite:
         return self._pilot.draw(rows, frame=self.id, **kw)
@@ -584,7 +606,7 @@ class Pilot:
 
     def frame(self, sel: int | str = "raw") -> Frame:
         """A frame by id or name: `raw`, `active` (the pane holding the
-        cursor), `largest`, `quietest`."""
+        cursor), `largest`, `quietest`, `idle` (the most static pane)."""
         frames = self.frames(inactive=True)
         if isinstance(sel, int) or sel.isdigit():
             fid = int(sel)

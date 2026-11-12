@@ -4,6 +4,7 @@
 
 use crate::engine::{ConnId, Ctx, Reply, Token};
 use crate::screen::{DEBUG_OWNER, Overlay, ScreenEngine, Wait};
+use ptyrc_core::frames::{HeatClass, IDLE_SECS};
 use ptyrc_core::scene::{ColorSpec, SpritePatch, SpriteSpec};
 use ptyrc_core::{FrameId, FrameKind, FrameSel, FrameState, RAW, Surfaces, TextMatch, TextQuery};
 use ptyrc_proto::{ErrorCode, RpcError};
@@ -330,22 +331,32 @@ fn frame_text(engine: &ScreenEngine, params: Value) -> Res {
     Ok(json!({"lines": engine.frames.text(id, y0, y1), "y0": y0}))
 }
 
-fn frame_heat(engine: &ScreenEngine, params: Value) -> Res {
+fn frame_heat(engine: &ScreenEngine, params: Value, now: Duration) -> Res {
     let p: ViewParams = parse(params)?;
     let id = frame_of(engine, &p.frame)?;
     let heat = engine
         .frames
-        .heat(id)
+        .heat_at(id, now)
         .ok_or_else(|| ScreenEngine::no_frame(id))?;
-    Ok(json!({"rows": heat.digits()}))
+    Ok(json!({"rows": heat.digits(), "classes": heat.classes()}))
 }
 
-fn frame_get(engine: &ScreenEngine, params: Value) -> Res {
+fn frame_idle(engine: &ScreenEngine, params: Value, now: Duration) -> Res {
+    let p: ViewParams = parse(params)?;
+    let id = frame_of(engine, &p.frame)?;
+    let idle = engine
+        .frames
+        .idle(id, now)
+        .ok_or_else(|| ScreenEngine::no_frame(id))?;
+    Ok(json!(idle))
+}
+
+fn frame_get(engine: &ScreenEngine, params: Value, now: Duration) -> Res {
     let p: ViewParams = parse(params)?;
     let id = frame_of(engine, &p.frame)?;
     let info = engine
         .frames
-        .list()
+        .list_at(now)
         .into_iter()
         .find(|f| f.id == id)
         .ok_or_else(|| ScreenEngine::no_frame(id))?;
@@ -486,7 +497,20 @@ fn set_overlay(engine: &mut ScreenEngine, params: Value, now: Duration) -> Res {
     Ok(json!({}))
 }
 
-const HEAT_BG: [u8; 10] = [52, 88, 124, 130, 136, 100, 64, 28, 22, 22];
+/// Background of a cell of the heat overlay, 256-colour palette. Red:
+/// hot, brighter when busier. Light blue: text that does not move. Green:
+/// free. Violet: a panel. The last three brighten until the cell is
+/// static.
+fn heat_bg(class: HeatClass, activity: f32, still: f32) -> u8 {
+    let calm = (still / IDLE_SECS).clamp(0.0, 1.0);
+    let (ramp, level) = match class {
+        HeatClass::Hot => ([52, 88, 124, 160, 196], activity),
+        HeatClass::Text => ([24, 31, 38, 75, 117], calm),
+        HeatClass::Panel => ([53, 53, 54, 54, 97], calm),
+        HeatClass::Free => ([22, 28, 34, 40, 46], calm),
+    };
+    ramp[((level * 4.0).floor() as usize).min(4)]
+}
 
 /// Rebuild the sprites of the debug overlay from the frames as they are.
 pub(crate) fn refresh_overlay(engine: &mut ScreenEngine, now: Duration) {
@@ -512,17 +536,15 @@ pub(crate) fn refresh_overlay(engine: &mut ScreenEngine, now: Duration) {
         };
         if engine.overlay == Overlay::Heat
             && info.kind == FrameKind::Pane
-            && let Some(heat) = engine.frames.heat(info.id)
+            && let Some(heat) = engine.frames.heat_at(info.id, now)
         {
-            let rows: Vec<Value> = heat
-                .digits()
-                .iter()
-                .map(|row| {
-                    let runs: Vec<Value> = row
-                        .bytes()
-                        .map(|d| {
-                            let level = (d.saturating_sub(b'0') as usize).min(9);
-                            json!({"t": "·", "bg": HEAT_BG[level]})
+            let rows: Vec<Value> = (0..heat.rows as usize)
+                .map(|r| {
+                    let runs: Vec<Value> = (0..heat.cols as usize)
+                        .map(|c| {
+                            let i = r * heat.cols as usize + c;
+                            let bg = heat_bg(heat.class[i], heat.activity[i], heat.still[i]);
+                            json!({"t": "·", "bg": bg})
                         })
                         .collect();
                     Value::Array(runs)
@@ -620,12 +642,13 @@ pub(crate) fn handle(
         "screen.cursor" => screen_cursor(engine, params),
         "screen.wait" => return screen_wait(engine, conn, token, params, ctx),
         "frame.list" => {
-            Ok(json!({"frames": engine.frames.list(), "layout": engine.frames.layout()}))
+            Ok(json!({"frames": engine.frames.list_at(now), "layout": engine.frames.layout()}))
         }
         "frame.text" => frame_text(engine, params),
-        "frame.heat" => frame_heat(engine, params),
+        "frame.heat" => frame_heat(engine, params, now),
+        "frame.idle" => frame_idle(engine, params, now),
         "frame.at" => frame_at(engine, params),
-        "frame.get" => frame_get(engine, params),
+        "frame.get" => frame_get(engine, params, now),
         "draw.put" => draw_put(engine, conn, params, now),
         "draw.update" => draw_update(engine, params, now),
         "draw.remove" => match params.get("id").and_then(Value::as_u64) {
