@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Cost of the driver: throughput of a flood and latency of a key echo,
-# for no driver, `--transparent`, the screen engine, and the engine with
-# sprites up.
+# for no driver, `--transparent`, the screen engine, the engine without
+# presets (`--no-presets`), and the engine with sprites up.
+#
+#   BENCH_ONLY=latency scripts/bench.sh     skip the flood
 #
 #   scripts/bench.sh [MEGABYTES]      default 50
 #
@@ -84,6 +86,7 @@ def variants(app):
         ("no driver", app, None),
         ("transparent", [binary, "run", "--transparent", "--name", name, "--", *app], None),
         ("engine", [binary, "run", "--name", name, "--", *app], None),
+        ("engine, bare", [binary, "run", "--no-presets", "--name", name, "--", *app], None),
         ("engine+sprites", [binary, "run", "--name", name, "--", *app], name),
     ]
 
@@ -148,6 +151,7 @@ def latency():
 
 flood = f"{work}/flood.txt"
 size = make_flood(flood)
-throughput(flood, size)
+if os.environ.get("BENCH_ONLY") != "latency":
+    throughput(flood, size)
 latency()
 PY

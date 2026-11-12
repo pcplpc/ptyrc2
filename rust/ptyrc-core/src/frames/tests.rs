@@ -2057,6 +2057,59 @@ fn random_screens_do_not_break_anything() {
     }
 }
 
+/// Counts how often it is asked; knows a screen by its first row.
+struct Counting(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+impl TuiSupport for Counting {
+    fn name(&self) -> &'static str {
+        "counting"
+    }
+
+    fn detect(&self, pane: &PaneView) -> f32 {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if pane.row_text(0).starts_with("APP") {
+            1.0
+        } else {
+            0.0
+        }
+    }
+}
+
+#[test]
+fn presets_are_not_looked_for_on_every_key() {
+    use std::sync::atomic::Ordering;
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut s = Sim::with(
+        FrameConfig::default(),
+        vec![Box::new(Counting(calls.clone()))],
+    );
+    let d = doc(40);
+    let screen = |typed: &str| {
+        let mut g = view(&d, 0, 19, &[""]);
+        put(&mut g, 0, 19, typed);
+        g
+    };
+    s.settle(&screen("$"));
+    assert_eq!(s.pane().support, None);
+    // Keys echoed on one row, 10 ms apart: nothing is asked.
+    let before = calls.load(Ordering::Relaxed);
+    for n in 1..=20 {
+        s.feed(&screen(&format!("$ {}", "x".repeat(n))), 10);
+    }
+    assert_eq!(calls.load(Ordering::Relaxed), before);
+    // A second later one key asks again: the screen, and the pane when
+    // it is not the whole screen.
+    s.feed(&screen("$ y"), 1100);
+    let after = calls.load(Ordering::Relaxed);
+    assert!(after > before && after <= before + 2, "{before} {after}");
+    // An app that paints several rows is seen in the same burst.
+    let mut g = screen("$ y");
+    put(&mut g, 0, 0, "APP header                  ");
+    put(&mut g, 0, 1, "second row                  ");
+    s.feed(&g, 10);
+    assert_eq!(s.pane().support.as_deref(), Some("counting"));
+}
+
 struct Halves;
 
 impl TuiSupport for Halves {

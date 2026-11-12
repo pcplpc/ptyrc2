@@ -164,6 +164,9 @@ struct Pane {
     key: Option<String>,
     support: Option<usize>,
     support_at: Option<Duration>,
+    /// Last answer of `detect`, and when it was asked.
+    found: Option<usize>,
+    found_at: Option<Duration>,
     suspended: bool,
     /// New or attached again: not observed yet.
     fresh: bool,
@@ -269,6 +272,10 @@ pub struct Frames {
     /// Identity of what fills the whole screen, from a plugin: prefixes
     /// the key of every pane.
     screen_key: Option<String>,
+    /// Confidence of every preset on the whole screen, and when asked.
+    screen_conf: Vec<f32>,
+    screen_conf_at: Option<Duration>,
+    title_changed: bool,
     /// Preset answers for the leaves of the pending layout.
     advice: HashMap<segment::Rect4, Advice>,
     placed: RefCell<PlaceCache>,
@@ -276,6 +283,11 @@ pub struct Frames {
 
 /// Replacements closer than this are in a row.
 const CHURN: Duration = Duration::from_secs(3);
+
+/// A preset is looked for again on a change of one row only this long
+/// after the last time. A change of two rows or more, of the title or of
+/// the layout asks at once.
+const DETECT_EVERY: Duration = Duration::from_secs(1);
 
 /// How long a preset outlives its last detection.
 const SUPPORT_HOLD: Duration = Duration::from_secs(4);
@@ -352,6 +364,9 @@ impl Frames {
             alt: false,
             started: false,
             screen_key: None,
+            screen_conf: Vec::new(),
+            screen_conf_at: None,
+            title_changed: false,
             advice: HashMap::new(),
             placed: RefCell::new(HashMap::new()),
         }
@@ -397,21 +412,29 @@ impl Frames {
         }
         self.cursor = input.cursor;
         self.started = true;
+        self.title_changed = title_changed;
+        let mut screen_presets = false;
         if !self.supports.is_empty() && (self.screen.any_change || title_changed) {
             let all = Rect::new(0, 0, self.screen.cols, self.screen.rows);
             let pv = self.pane_view(input, all);
+            if resized || alt_changed || self.detect_due(all, self.screen_conf_at, now) {
+                self.screen_conf = self.supports.iter().map(|s| s.detect(&pv)).collect();
+                self.screen_conf_at = Some(now);
+            }
+            screen_presets = self.screen_conf.iter().any(|c| *c >= 0.5);
             self.screen_key = self
                 .supports
                 .iter()
-                .filter(|s| s.detect(&pv) >= 0.5)
-                .find_map(|s| s.frame_key(&pv));
+                .zip(&self.screen_conf)
+                .filter(|(_, c)| **c >= 0.5)
+                .find_map(|(s, _)| s.frame_key(&pv));
         }
 
         // Segmentation, when something structural may have changed.
         let cursor_row = Some(input.cursor.row);
         let expired = self.distrust.iter().any(|d| d.until <= now);
-        // A plugin may segment on anything it sees.
-        let plugins = !self.supports.is_empty() && (self.screen.any_change || title_changed);
+        // A plugin that knows the screen may segment on anything it sees.
+        let plugins = screen_presets;
         if self.seg.is_none()
             || self.screen.class_change
             || cursor_row != self.seg_cursor
@@ -812,10 +835,28 @@ impl Frames {
         }
     }
 
+    /// Is it time to look for presets again over `rect`, last asked at
+    /// `at`.
+    fn detect_due(&self, rect: Rect, at: Option<Duration>, now: Duration) -> bool {
+        self.title_changed
+            || at.is_none_or(|t| now >= t + DETECT_EVERY)
+            || (rect.y..rect.bottom())
+                .filter(|r| self.screen.row_dirty[*r as usize])
+                .nth(1)
+                .is_some()
+    }
+
     fn detect(&self, pv: &PaneView) -> Option<usize> {
+        let whole = pv.rect == Rect::new(0, 0, self.screen.cols, self.screen.rows)
+            && self.screen_conf_at == Some(self.now)
+            && self.screen_conf.len() == self.supports.len();
         let mut best: Option<(usize, f32)> = None;
         for (i, s) in self.supports.iter().enumerate() {
-            let c = s.detect(pv);
+            let c = if whole {
+                self.screen_conf[i]
+            } else {
+                s.detect(pv)
+            };
             if c >= 0.5 && best.is_none_or(|b| c > b.1) {
                 best = Some((i, c));
             }
@@ -852,8 +893,12 @@ impl Frames {
     fn segment(&self, input: &ScreenInput, now: Duration) -> (Vec<Leaf>, Vec<Sep>) {
         let all = Rect::new(0, 0, self.screen.cols, self.screen.rows);
         let pv = self.pane_view(input, all);
-        for s in &self.supports {
-            if s.detect(&pv) >= 0.5
+        for (i, s) in self.supports.iter().enumerate() {
+            let conf = match self.screen_conf.get(i) {
+                Some(c) if self.screen_conf_at.is_some() => *c,
+                _ => s.detect(&pv),
+            };
+            if conf >= 0.5
                 && let Some(rects) = s.segment(&pv)
             {
                 let mut leaves: Vec<Leaf> = rects
@@ -958,6 +1003,8 @@ impl Frames {
                 key: None,
                 support: None,
                 support_at: None,
+                found: None,
+                found_at: None,
                 suspended: false,
                 fresh: true,
                 reattach: false,
@@ -1303,7 +1350,11 @@ impl Frames {
             // Looked for on every change; once found, a preset is kept
             // through `SUPPORT_HOLD` of not being seen (a command line
             // hides the ruler vim is known by).
-            let found = self.detect(&pv);
+            if p.fresh || !p.hashes_valid || self.detect_due(p.rect, p.found_at, now) {
+                p.found = self.detect(&pv);
+                p.found_at = Some(now);
+            }
+            let found = p.found;
             let held = p.support.is_some() && p.support_at.is_some_and(|t| now < t + SUPPORT_HOLD);
             let support = found.or(if held { p.support } else { None });
             if found.is_some() || !held {
