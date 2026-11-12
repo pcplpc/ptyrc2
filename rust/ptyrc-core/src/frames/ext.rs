@@ -427,9 +427,10 @@ impl Ext {
             self.apply_scroll(o, &ph, dy);
             return Outcome::Scroll { dx: 0, dy };
         }
-        // The emulator saw the pane scroll further than it is tall:
-        // nothing left to align, but the distance is known.
-        if o.seed.abs() >= span && nb >= 1 && c0 * 5 < nb * 2 {
+        // The emulator saw the pane scroll, and no row is where it was: a
+        // page or more at once. Nothing to align, but the distance is
+        // known.
+        if o.seed != 0 && nb >= 1 && c0 * 5 < nb * 2 {
             self.flush(o.now);
             self.oy += o.seed;
             self.rows = (0..h).map(|i| self.fresh(o, i)).collect();
@@ -486,7 +487,12 @@ impl Ext {
             self.rows = (0..h).map(|i| self.fresh(o, i)).collect();
             return Outcome::Jump;
         }
-        if nb >= 2 && c0 * 5 < nb * 2 {
+        // A jump replaces what was there. Lines added to a pane that had
+        // little (a command and its output) are an edit.
+        let replaced = (a..b)
+            .filter(|i| ph[*i] != BLANK && nh[*i] != ph[*i])
+            .count();
+        if nb >= 2 && c0 * 5 < nb * 2 && replaced >= 2 && c0 * 5 < prev_nb * 2 {
             if let Some(oy) = o.hint_oy {
                 let (mut known, mut same) = (0usize, 0usize);
                 for i in a..b {

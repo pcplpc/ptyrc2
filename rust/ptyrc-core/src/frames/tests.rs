@@ -1288,6 +1288,72 @@ fn scroll_further_than_the_view_by_vt_events() {
 }
 
 #[test]
+fn output_added_to_a_nearly_empty_pane_is_an_edit() {
+    let mut s = Sim::new();
+    let mut lines = vec!["$ seq 1 10".to_string()];
+    let screen = |lines: &[String]| {
+        let mut refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        refs.resize(20, "");
+        Grid::from_lines(COLS, &refs)
+    };
+    s.settle(&screen(&lines));
+    let id = s.pane().id;
+    lines.extend((1..=10).map(|i| i.to_string()));
+    lines.push("$ ".into());
+    let ev = s.feed(&screen(&lines), 300);
+    assert!(
+        !ev.iter().any(|e| matches!(e, FrameEvent::Jump { .. })),
+        "{ev:?}"
+    );
+    assert_eq!((s.pane().id, s.pane().origin), (id, [0, 0]));
+}
+
+#[test]
+fn the_alternate_screen_has_its_own_frames() {
+    let d = doc(100);
+    let other: Vec<String> = (0..100).map(|i| format!("editor {i:03}")).collect();
+    let mut s = Sim::new();
+    s.settle(&view(&d, 0, 20, &[]));
+    let shell = s.pane().id;
+    s.alt = true;
+    s.feed_ev(&view(&other, 0, 20, &[]), 300, &[VtEvent::AltScreen(true)]);
+    s.idle(2000);
+    let editor = s.pane().id;
+    assert_ne!(editor, shell);
+    s.feed(&view(&other, 5, 20, &[]), 300);
+    s.alt = false;
+    s.feed_ev(&view(&d, 0, 20, &[]), 300, &[VtEvent::AltScreen(false)]);
+    assert_eq!((s.pane().id, s.pane().origin), (shell, [0, 0]));
+    // An empty alternate screen does not take the shell's frame either.
+    s.alt = true;
+    s.feed_ev(&Grid::new(COLS, 20), 300, &[VtEvent::AltScreen(true)]);
+    assert_ne!(s.pane().id, shell);
+    s.idle(300);
+    assert_eq!(s.f.text(shell, 0, 20), d[..20].to_vec());
+    assert_eq!(s.f.text(editor, 0, 25), other[..25].to_vec());
+}
+
+#[test]
+fn a_page_at_once_by_vt_events() {
+    // A pager: the whole page is replaced, the emulator saw 19 line feeds.
+    let d = doc(200);
+    let mut s = Sim::new();
+    s.settle(&view(&d, 0, 19, &[":"]));
+    let id = s.pane().id;
+    let scroll = VtEvent::Scroll {
+        region: Rect::new(0, 0, COLS, 20),
+        dy: -19,
+        scrollback: false,
+    };
+    s.feed_ev(&view(&d, 19, 19, &[":"]), 300, &[scroll]);
+    assert_eq!((s.pane().id, s.pane().origin), (id, [0, 19]));
+    s.feed_ev(&view(&d, 38, 19, &[":"]), 300, &[scroll]);
+    assert_eq!(s.pane().origin, [0, 38]);
+    s.idle(300);
+    assert_eq!(s.f.text(id, 0, 19), d[..19].to_vec());
+}
+
+#[test]
 fn wire_forms() {
     let mut s = Sim::new();
     s.settle(&view(&doc(30), 0, 20, &[]));

@@ -171,6 +171,8 @@ struct Pane {
     last_active: Duration,
     /// Last time the cursor was seen inside, while on screen.
     cursor_seen: Duration,
+    /// Born on the alternate screen.
+    alt: bool,
     left: u16,
     right: u16,
     gutter_cand: (u16, u8),
@@ -396,7 +398,14 @@ impl Frames {
             self.seg = Some(leaves);
             self.seg_cursor = cursor_row;
         }
-        self.reconcile(now, Some(input), resized, &mut ev);
+        if alt_changed {
+            // The other screen is other documents: every frame leaves, and
+            // the ones of this screen are looked for again.
+            for id in std::mem::take(&mut self.active) {
+                self.deactivate(id, now, &mut ev);
+            }
+        }
+        self.reconcile(now, Some(input), resized || alt_changed, &mut ev);
 
         // Panes.
         let chrome_changed = title_changed
@@ -888,6 +897,7 @@ impl Frames {
                 reattach: false,
                 last_active: now,
                 cursor_seen: Duration::ZERO,
+                alt: self.alt,
                 left: 0,
                 right: 0,
                 gutter_cand: (0, 0),
@@ -942,7 +952,10 @@ impl Frames {
         for exact in [true, false] {
             let mut best: Option<(FrameId, f32, (Duration, Duration))> = None;
             for p in self.panes.values() {
-                if p.state != FrameState::Inactive || p.kind != leaf.kind() || skip.contains(&p.id)
+                if p.state != FrameState::Inactive
+                    || p.kind != leaf.kind()
+                    || p.alt != self.alt
+                    || skip.contains(&p.id)
                 {
                     continue;
                 }
