@@ -28,9 +28,15 @@ pub(crate) struct Stored {
 pub(crate) enum Outcome {
     Same,
     Edit,
-    Scroll { dx: i64, dy: i64 },
+    Scroll {
+        dx: i64,
+        dy: i64,
+    },
     /// Rows `[from, to]` of the buffer moved by `dy`.
-    Splice { from: i64, dy: i64 },
+    Splice {
+        from: i64,
+        dy: i64,
+    },
     Jump,
     /// Whole change, origin unknown. Nothing was applied.
     Lost,
@@ -91,7 +97,11 @@ fn need(nb: usize, percent: usize, floor: usize) -> usize {
 
 impl Ext {
     pub fn new(max_lines: usize) -> Ext {
-        Ext { islands: vec![(0, 0)], max_lines, ..Ext::default() }
+        Ext {
+            islands: vec![(0, 0)],
+            max_lines,
+            ..Ext::default()
+        }
     }
 
     fn band(&self, h: usize) -> (usize, usize) {
@@ -113,7 +123,12 @@ impl Ext {
     }
 
     fn fresh(&self, o: &Obs, i: usize) -> Row {
-        Row { hash: o.hashes[i], since: o.now, committed: false, line: (o.line)(i) }
+        Row {
+            hash: o.hashes[i],
+            since: o.now,
+            committed: false,
+            line: (o.line)(i),
+        }
     }
 
     /// Forget the view rows; the next observation starts anew.
@@ -161,9 +176,21 @@ impl Ext {
         let stored = match merged {
             Some((mx0, text)) => {
                 let ascii = text.is_ascii();
-                Stored { x0: mx0, line: Line { text, cols: None, ascii }, hash }
+                Stored {
+                    x0: mx0,
+                    line: Line {
+                        text,
+                        cols: None,
+                        ascii,
+                    },
+                    hash,
+                }
             }
-            None => Stored { x0, line: line.clone(), hash },
+            None => Stored {
+                x0,
+                line: line.clone(),
+                hash,
+            },
         };
         self.insert_line(y, stored);
         let isl = &mut self.islands[self.cur];
@@ -173,7 +200,11 @@ impl Ext {
             let mid = self.oy;
             let first = *self.lines.first_key_value().unwrap().0;
             let last = *self.lines.last_key_value().unwrap().0;
-            self.remove_line(if mid - first > last - mid { first } else { last });
+            self.remove_line(if mid - first > last - mid {
+                first
+            } else {
+                last
+            });
         }
     }
 
@@ -225,7 +256,11 @@ impl Ext {
 
     pub fn next_commit(&self, commit: Duration) -> Option<Duration> {
         let (a, b) = self.band(self.rows.len());
-        self.rows[a..b].iter().filter(|r| !r.committed).map(|r| r.since + commit).min()
+        self.rows[a..b]
+            .iter()
+            .filter(|r| !r.committed)
+            .map(|r| r.since + commit)
+            .min()
     }
 
     // -- lookups -------------------------------------------------------
@@ -247,9 +282,13 @@ impl Ext {
                 }
             }
         }
-        votes
-            .into_iter()
-            .max_by_key(|(o, n)| (*n, std::cmp::Reverse((*o - self.oy).abs()), std::cmp::Reverse(*o)))
+        votes.into_iter().max_by_key(|(o, n)| {
+            (
+                *n,
+                std::cmp::Reverse((*o - self.oy).abs()),
+                std::cmp::Reverse(*o),
+            )
+        })
     }
 
     /// Share of the non-blank view rows found in the buffer, anywhere.
@@ -258,7 +297,10 @@ impl Ext {
         if nb < 2 {
             return 0.0;
         }
-        let hit = hashes.iter().filter(|h| **h != BLANK && self.index.contains_key(h)).count();
+        let hit = hashes
+            .iter()
+            .filter(|h| **h != BLANK && self.index.contains_key(h))
+            .count();
         hit as f32 / nb as f32
     }
 
@@ -324,6 +366,7 @@ impl Ext {
         out
     }
 
+    #[allow(clippy::needless_range_loop)]
     fn classify(&mut self, o: &Obs) -> Outcome {
         let h = o.hashes.len();
         let nh = o.hashes;
@@ -385,8 +428,11 @@ impl Ext {
         }
 
         // 3. Horizontal scroll.
-        let changed = (a..b).filter(|i| nh[*i] != ph[*i] && (nh[*i] != BLANK || ph[*i] != BLANK)).count();
-        if nb >= 2 && changed * 2 >= nb
+        let changed = (a..b)
+            .filter(|i| nh[*i] != ph[*i] && (nh[*i] != BLANK || ph[*i] != BLANK))
+            .count();
+        if nb >= 2
+            && changed * 2 >= nb
             && let Some(dx) = self.hscroll(o, a, b)
         {
             for i in a..b {
@@ -420,13 +466,21 @@ impl Ext {
             {
                 self.oy = oy;
                 self.enter_island(h);
+            } else if self.lines.is_empty() {
+                // Nothing remembered: nothing to keep apart.
+                self.rows = (0..h).map(|i| self.fresh(o, i)).collect();
+                return Outcome::Edit;
             } else {
                 return Outcome::Lost;
             }
             self.rows = (0..h).map(|i| self.fresh(o, i)).collect();
             // What matched is already remembered.
             for i in a..b {
-                if self.lines.get(&(self.oy + i as i64)).is_some_and(|s| s.hash == nh[i]) {
+                if self
+                    .lines
+                    .get(&(self.oy + i as i64))
+                    .is_some_and(|s| s.hash == nh[i])
+                {
                     self.rows[i].committed = true;
                 }
             }
@@ -442,6 +496,7 @@ impl Ext {
         Outcome::Edit
     }
 
+    #[allow(clippy::needless_range_loop)]
     fn apply_scroll(&mut self, o: &Obs, ph: &[u64], dy: i64) {
         let h = ph.len();
         let nh = o.hashes;
@@ -485,13 +540,19 @@ impl Ext {
             let j = i + dy;
             j >= 0 && j < h && nh[i as usize] == ph[j as usize]
         };
-        let Some(first) = (0..h).find(|i| moved(*i)) else { return };
+        let Some(first) = (0..h).find(|i| moved(*i)) else {
+            return;
+        };
         let last = (0..h).rev().find(|i| moved(*i)).unwrap();
         let lead_end = if dy < 0 { first + dy } else { first };
         let tail_start = if dy > 0 { last + dy + 1 } else { last + 1 };
-        let top = (0..lead_end.max(0)).rev().find(|i| nh[*i as usize] != BLANK).map_or(0, |i| i + 1);
-        let bottom =
-            (tail_start.min(h)..h).find(|i| nh[*i as usize] != BLANK).map_or(0, |i| h - i);
+        let top = (0..lead_end.max(0))
+            .rev()
+            .find(|i| nh[*i as usize] != BLANK)
+            .map_or(0, |i| i + 1);
+        let bottom = (tail_start.min(h)..h)
+            .find(|i| nh[*i as usize] != BLANK)
+            .map_or(0, |i| h - i);
         self.chrome_obs.push_back((top as u16, bottom as u16));
         if self.chrome_obs.len() > 4 {
             self.chrome_obs.pop_front();
@@ -527,7 +588,9 @@ impl Ext {
         let (lo, hi) = self.islands[self.cur];
         let (a, b) = self.band(o.hashes.len());
         let nb = o.hashes[a..b].iter().filter(|x| **x != BLANK).count();
-        let Some((oy, votes)) = self.lookup(o.hashes, Some((lo, hi))) else { return };
+        let Some((oy, votes)) = self.lookup(o.hashes, Some((lo, hi))) else {
+            return;
+        };
         if votes < need(nb, 50, 3) || oy == self.oy {
             return;
         }
@@ -537,7 +600,11 @@ impl Ext {
         let gone = self.cur;
         self.islands.remove(gone);
         let (nlo, nhi) = (lo + delta, hi + delta);
-        match self.islands.iter().position(|(x, y)| nlo <= *y + 1 && nhi + 1 >= *x) {
+        match self
+            .islands
+            .iter()
+            .position(|(x, y)| nlo <= *y + 1 && nhi + 1 >= *x)
+        {
             Some(i) => {
                 self.islands[i].0 = self.islands[i].0.min(nlo);
                 self.islands[i].1 = self.islands[i].1.max(nhi);
@@ -551,6 +618,7 @@ impl Ext {
     }
 
     /// Lines inserted or deleted at a seam near the cursor.
+    #[allow(clippy::needless_range_loop)]
     fn splice(&mut self, o: &Obs, ph: &[u64], nb: usize, c0: usize) -> Option<Outcome> {
         let h = ph.len();
         let nh = o.hashes;
@@ -592,7 +660,9 @@ impl Ext {
                     let mid = ck[e] - ck[top_s];
                     if mid >= 2
                         && p0[top_s] >= 1
-                        && best.is_none_or(|(bt, _, _, be)| total > bt || (total == bt && e > be && k == best.unwrap().1))
+                        && best.is_none_or(|(bt, _, _, be)| {
+                            total > bt || (total == bt && e > be && k == best.unwrap().1)
+                        })
                     {
                         best = Some((total, k, top_s, e));
                     }

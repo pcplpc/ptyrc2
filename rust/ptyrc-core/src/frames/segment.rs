@@ -30,7 +30,11 @@ impl Leaf {
     }
 
     pub fn kind(&self) -> FrameKind {
-        if self.kind == 0 { FrameKind::Pane } else { FrameKind::Chrome }
+        if self.kind == 0 {
+            FrameKind::Pane
+        } else {
+            FrameKind::Chrome
+        }
     }
 }
 
@@ -89,7 +93,9 @@ impl Segmenter<'_> {
     }
 
     fn distrusted(&self, bar: bool, r: &Rect) -> bool {
-        self.distrust.iter().any(|d| d.bar == bar && d.until > self.now && contains(&d.area, r))
+        self.distrust
+            .iter()
+            .any(|d| d.bar == bar && d.until > self.now && contains(&d.area, r))
     }
 
     /// Share of filled cells and dominant paint of a row span.
@@ -126,20 +132,22 @@ impl Segmenter<'_> {
                 strong += (k & class::H != 0) as u32;
                 dash += (k & class::DASH != 0) as u32;
             }
-            let ends = self.cls(r.x, row) & class::H != 0
-                && self.cls(r.right() - 1, row) & class::H != 0;
+            let ends =
+                self.cls(r.x, row) & class::H != 0 && self.cls(r.right() - 1, row) & class::H != 0;
             if (ends && strong * 10 >= r.w as u32 * 7) || (dash == r.w as u32 && r.w >= 8) {
                 return Some(false);
             }
         }
-        if r.h >= 2 && Some(row) != self.cursor_row && !self.distrusted(true, r) {
-            if let Some(key) = self.is_bar_row(r, row) {
-                let same = |other: u16| self.is_bar_row(r, other) == Some(key);
-                let above = row > r.y && same(row - 1);
-                let below = row + 1 < r.bottom() && same(row + 1);
-                if !above && !below {
-                    return Some(true);
-                }
+        if r.h >= 2
+            && Some(row) != self.cursor_row
+            && !self.distrusted(true, r)
+            && let Some(key) = self.is_bar_row(r, row)
+        {
+            let same = |other: u16| self.is_bar_row(r, other) == Some(key);
+            let above = row > r.y && same(row - 1);
+            let below = row + 1 < r.bottom() && same(row + 1);
+            if !above && !below {
+                return Some(true);
             }
         }
         None
@@ -167,7 +175,10 @@ impl Segmenter<'_> {
         // A filled column of blanks or pipes between unfilled neighbours.
         if soft == h && filled == h && h >= 3 {
             let col_filled = |c: u16| {
-                (r.y..r.bottom()).filter(|&row| self.paint(c, row) != 0).count() as u32 * 10
+                (r.y..r.bottom())
+                    .filter(|&row| self.paint(c, row) != 0)
+                    .count() as u32
+                    * 10
                     >= h * 9
             };
             let left = col > r.x && col_filled(col - 1);
@@ -181,7 +192,11 @@ impl Segmenter<'_> {
         if r.is_empty() {
             return;
         }
-        let kind = if r.h >= self.min_rows && r.w >= self.min_cols { 0 } else { 1 };
+        let kind = if r.h >= self.min_rows && r.w >= self.min_cols {
+            0
+        } else {
+            1
+        };
         self.leaves.push(Leaf { rect: r4(r), kind });
     }
 
@@ -194,17 +209,27 @@ impl Segmenter<'_> {
             return;
         }
         // Horizontal cuts.
-        let cuts: Vec<(u16, bool)> =
-            (r.y..r.bottom()).filter_map(|row| self.hsep(&r, row).map(|bar| (row, bar))).collect();
+        let cuts: Vec<(u16, bool)> = (r.y..r.bottom())
+            .filter_map(|row| self.hsep(&r, row).map(|bar| (row, bar)))
+            .collect();
         if !cuts.is_empty() && cuts.len() < r.h as usize {
             let mut top = r.y;
             for (row, bar) in cuts {
-                self.seps.push(Sep { pos: row, a: r.x, b: r.right(), bar, parent: r });
+                self.seps.push(Sep {
+                    pos: row,
+                    a: r.x,
+                    b: r.right(),
+                    bar,
+                    parent: r,
+                });
                 if row > top {
                     self.split(Rect::new(r.x, top, r.w, row - top), depth + 1);
                 }
                 if bar {
-                    self.leaves.push(Leaf { rect: r4(Rect::new(r.x, row, r.w, 1)), kind: 1 });
+                    self.leaves.push(Leaf {
+                        rect: r4(Rect::new(r.x, row, r.w, 1)),
+                        kind: 1,
+                    });
                 }
                 top = row + 1;
             }
@@ -248,7 +273,9 @@ impl Segmenter<'_> {
                 }
                 // Top edge.
                 let mut x2 = x + 1;
-                while x2 < r.right() && self.cls(x2, y) & class::H != 0 && self.cls(x2, y) & class::TR == 0
+                while x2 < r.right()
+                    && self.cls(x2, y) & class::H != 0
+                    && self.cls(x2, y) & class::TR == 0
                 {
                     x2 += 1;
                 }
@@ -257,7 +284,9 @@ impl Segmenter<'_> {
                 }
                 // Left edge.
                 let mut y2 = y + 1;
-                while y2 < r.bottom() && self.cls(x, y2) & class::V != 0 && self.cls(x, y2) & class::BL == 0
+                while y2 < r.bottom()
+                    && self.cls(x, y2) & class::V != 0
+                    && self.cls(x, y2) & class::BL == 0
                 {
                     y2 += 1;
                 }
@@ -268,7 +297,9 @@ impl Segmenter<'_> {
                     continue;
                 }
                 let right_ok = (y + 1..y2).all(|row| self.cls(x2, row) & class::V != 0);
-                let bottom = (x + 1..x2).filter(|&c| self.cls(c, y2) & class::H != 0).count();
+                let bottom = (x + 1..x2)
+                    .filter(|&c| self.cls(c, y2) & class::H != 0)
+                    .count();
                 if !right_ok || bottom * 10 < (x2 - x - 1) as usize * 7 {
                     continue;
                 }
@@ -294,12 +325,20 @@ pub(crate) fn scrolled_seps(
 ) -> Vec<Sep> {
     let mut out = Vec::new();
     for o in old {
-        if new.iter().any(|n| n.pos == o.pos && n.a == o.a && n.b == o.b && n.bar == o.bar) {
+        if new
+            .iter()
+            .any(|n| n.pos == o.pos && n.a == o.a && n.b == o.b && n.bar == o.bar)
+        {
             continue;
         }
-        for n in new.iter().filter(|n| n.a == o.a && n.b == o.b && n.bar == o.bar && n.pos != o.pos)
+        for n in new
+            .iter()
+            .filter(|n| n.a == o.a && n.b == o.b && n.bar == o.bar && n.pos != o.pos)
         {
-            if old.iter().any(|x| x.pos == n.pos && x.a == n.a && x.b == n.b && x.bar == n.bar) {
+            if old
+                .iter()
+                .any(|x| x.pos == n.pos && x.a == n.a && x.b == n.b && x.bar == n.bar)
+            {
                 continue;
             }
             let d = n.pos as i32 - o.pos as i32;

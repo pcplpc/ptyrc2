@@ -21,7 +21,13 @@ impl Sim {
     }
 
     fn with(cfg: FrameConfig, supports: Vec<Box<dyn TuiSupport>>) -> Sim {
-        Sim { f: Frames::new(cfg, supports), now: Duration::ZERO, cursor: (0, 0), alt: false, title: String::new() }
+        Sim {
+            f: Frames::new(cfg, supports),
+            now: Duration::ZERO,
+            cursor: (0, 0),
+            alt: false,
+            title: String::new(),
+        }
     }
 
     /// Advance `dt` ms, then show `g`.
@@ -31,8 +37,19 @@ impl Sim {
 
     fn feed_ev(&mut self, g: &Grid, dt: u64, events: &[VtEvent]) -> Vec<FrameEvent> {
         let mut ev = self.idle(dt);
-        let cursor = Cursor { col: self.cursor.0, row: self.cursor.1, visible: true, pending_wrap: false };
-        let input = ScreenInput { grid: g, cursor, alt_screen: self.alt, title: &self.title, events };
+        let cursor = Cursor {
+            col: self.cursor.0,
+            row: self.cursor.1,
+            visible: true,
+            pending_wrap: false,
+        };
+        let input = ScreenInput {
+            grid: g,
+            cursor,
+            alt_screen: self.alt,
+            title: &self.title,
+            events,
+        };
         ev.extend(self.f.update(&input, self.now));
         ev
     }
@@ -65,11 +82,18 @@ impl Sim {
     }
 
     fn on_screen(&self) -> Vec<FrameInfo> {
-        self.f.list().into_iter().filter(|i| i.state != FrameState::Inactive && i.id != RAW).collect()
+        self.f
+            .list()
+            .into_iter()
+            .filter(|i| i.state != FrameState::Inactive && i.id != RAW)
+            .collect()
     }
 
     fn panes(&self) -> Vec<FrameInfo> {
-        self.on_screen().into_iter().filter(|i| i.kind == FrameKind::Pane).collect()
+        self.on_screen()
+            .into_iter()
+            .filter(|i| i.kind == FrameKind::Pane)
+            .collect()
     }
 
     fn pane(&self) -> FrameInfo {
@@ -84,12 +108,19 @@ impl Sim {
 }
 
 fn doc(n: usize) -> Vec<String> {
-    (0..n).map(|i| format!("line {i:04} {}", "abcdefghij".repeat(1 + i % 3))).collect()
+    (0..n)
+        .map(|i| format!("line {i:04} {}", "abcdefghij".repeat(1 + i % 3)))
+        .collect()
 }
 
 /// `rows` lines of `doc` from `top`, then `tail` lines.
 fn view(doc: &[String], top: usize, rows: usize, tail: &[&str]) -> Grid {
-    let mut lines: Vec<&str> = doc.iter().skip(top).take(rows).map(String::as_str).collect();
+    let mut lines: Vec<&str> = doc
+        .iter()
+        .skip(top)
+        .take(rows)
+        .map(String::as_str)
+        .collect();
     lines.resize(rows, "");
     lines.extend_from_slice(tail);
     Grid::from_lines(COLS, &lines)
@@ -119,7 +150,11 @@ fn put(g: &mut Grid, x: u16, y: u16, text: &str) {
 }
 
 fn lit(p: &str) -> TextQuery {
-    TextQuery { pattern: p.to_string(), regex: false, ignore_case: false }
+    TextQuery {
+        pattern: p.to_string(),
+        regex: false,
+        ignore_case: false,
+    }
 }
 
 // -- raw frame ---------------------------------------------------------
@@ -130,19 +165,43 @@ fn raw_frame_text_find_cursor() {
     let g = Grid::from_lines(COLS, &["hello world", "a flower here", "Flower again"]);
     s.cursor = (3, 1);
     s.feed(&g, 0);
-    assert_eq!(s.f.text(RAW, 0, 4), vec!["hello world", "a flower here", "Flower again", ""]);
+    assert_eq!(
+        s.f.text(RAW, 0, 4),
+        vec!["hello world", "a flower here", "Flower again", ""]
+    );
     let m = s.f.find(RAW, &lit("flower"), false);
     assert_eq!(m.len(), 1);
-    assert_eq!((m[0].x, m[0].y, m[0].len, m[0].screen), (2, 1, 6, Some((2, 1))));
-    let q = TextQuery { pattern: "f.ower".into(), regex: true, ignore_case: true };
+    assert_eq!(
+        (m[0].x, m[0].y, m[0].len, m[0].screen),
+        (2, 1, 6, Some((2, 1)))
+    );
+    let q = TextQuery {
+        pattern: "f.ower".into(),
+        regex: true,
+        ignore_case: true,
+    };
     assert_eq!(s.f.find(RAW, &q, false).len(), 2);
-    assert!(s.f.try_find(RAW, &TextQuery { pattern: "(".into(), regex: true, ignore_case: false }, false).is_err());
+    assert!(
+        s.f.try_find(
+            RAW,
+            &TextQuery {
+                pattern: "(".into(),
+                regex: true,
+                ignore_case: false
+            },
+            false
+        )
+        .is_err()
+    );
     assert_eq!(s.f.cursor(), (3, 1));
     s.cursor = (5, 2);
     s.feed(&g, 10);
     let t = s.f.cursor_trail();
     assert_eq!(t.len(), 2);
-    assert_eq!((t[1].col, t[1].row, t[1].at), (5, 2, Duration::from_millis(10)));
+    assert_eq!(
+        (t[1].col, t[1].row, t[1].at),
+        (5, 2, Duration::from_millis(10))
+    );
     // Raw is usable 250 ms after the first screen (a resize).
     assert!(!s.f.info(RAW).unwrap().usable);
     s.idle(300);
@@ -179,7 +238,14 @@ fn scroll_by_one_and_back() {
     assert_eq!(s.pane().origin, [0, 0]);
     for top in 1..=30 {
         let ev = s.feed(&view(&d, top, 20, &[]), 30);
-        assert!(ev.contains(&FrameEvent::Scroll { frame: id, dx: 0, dy: 1 }), "{top}: {ev:?}");
+        assert!(
+            ev.contains(&FrameEvent::Scroll {
+                frame: id,
+                dx: 0,
+                dy: 1
+            }),
+            "{top}: {ev:?}"
+        );
         assert_eq!(s.pane().origin, [0, top as i64]);
     }
     for top in (0..30).rev() {
@@ -230,7 +296,10 @@ fn frame_positions_follow_the_text() {
     s.settle(&view(&d, 0, 20, &[]));
     let id = s.pane().id;
     let m = s.f.find(id, &lit("line 0012"), false);
-    let pos = FramePos { x: m[0].x, y: m[0].y };
+    let pos = FramePos {
+        x: m[0].x,
+        y: m[0].y,
+    };
     assert_eq!(s.f.info(id).unwrap().to_screen(pos), Some((0, 12)));
     s.feed(&view(&d, 5, 20, &[]), 50);
     assert_eq!(s.f.info(id).unwrap().to_screen(pos), Some((0, 7)));
@@ -281,7 +350,10 @@ fn top_chrome_shifts_origin_not_content() {
     let id = s.pane().id;
     let pos = {
         let m = s.f.find(id, &lit("line 0007"), false);
-        FramePos { x: m[0].x, y: m[0].y }
+        FramePos {
+            x: m[0].x,
+            y: m[0].y,
+        }
     };
     for top in 1..=5 {
         s.feed(&screen(top), 50);
@@ -295,7 +367,9 @@ fn top_chrome_shifts_origin_not_content() {
 #[test]
 fn horizontal_scroll() {
     let pat = "0123456789abcdefghijklmnopqrstuvwxyz".repeat(6);
-    let d: Vec<String> = (0..20).map(|i| format!("{}: {}", (b'a' + i as u8) as char, &pat[i * 3..i * 3 + 140])).collect();
+    let d: Vec<String> = (0..20)
+        .map(|i| format!("{}: {}", (b'a' + i as u8) as char, &pat[i * 3..i * 3 + 140]))
+        .collect();
     let mut s = Sim::new();
     let screen = |dx: usize| {
         let lines: Vec<String> = d.iter().map(|l| l.chars().skip(dx).collect()).collect();
@@ -305,7 +379,14 @@ fn horizontal_scroll() {
     s.settle(&screen(0));
     let id = s.pane().id;
     let ev = s.feed(&screen(7), 300);
-    assert!(ev.contains(&FrameEvent::Scroll { frame: id, dx: 7, dy: 0 }), "{ev:?}");
+    assert!(
+        ev.contains(&FrameEvent::Scroll {
+            frame: id,
+            dx: 7,
+            dy: 0
+        }),
+        "{ev:?}"
+    );
     assert_eq!(s.pane().origin, [7, 0]);
     s.feed(&screen(20), 300);
     assert_eq!(s.pane().origin, [20, 0]);
@@ -335,14 +416,30 @@ fn splice_insert_and_delete() {
     e.insert(9, "NEW two".into());
     s.cursor = (0, 9);
     let ev = s.feed(&view(&e, 0, 20, &[]), 100);
-    assert!(ev.contains(&FrameEvent::Shift { frame: id, from: 8, to: i64::MAX - ext::ISLAND_GAP, dy: 2 }), "{ev:?}");
+    assert!(
+        ev.contains(&FrameEvent::Shift {
+            frame: id,
+            from: 8,
+            to: i64::MAX - ext::ISLAND_GAP,
+            dy: 2
+        }),
+        "{ev:?}"
+    );
     assert_eq!(s.pane().origin, [0, 0]);
     s.idle(300);
-    assert_eq!(s.f.text(id, 0, 27), e[..27].to_vec(), "rows below the view moved too");
+    assert_eq!(
+        s.f.text(id, 0, 27),
+        e[..27].to_vec(),
+        "rows below the view moved too"
+    );
     // And deleted again.
     s.cursor = (0, 8);
     let ev = s.feed(&view(&d, 0, 20, &[]), 100);
-    assert!(ev.iter().any(|x| matches!(x, FrameEvent::Shift { dy: -2, .. })), "{ev:?}");
+    assert!(
+        ev.iter()
+            .any(|x| matches!(x, FrameEvent::Shift { dy: -2, .. })),
+        "{ev:?}"
+    );
     s.idle(300);
     assert_eq!(s.f.text(id, 0, 25), d[..25].to_vec());
     // An edit in place is no splice.
@@ -356,8 +453,13 @@ fn splice_insert_and_delete() {
 }
 
 fn numbered(doc: &[String], top: usize, rows: usize) -> Grid {
-    let lines: Vec<String> =
-        doc.iter().enumerate().skip(top).take(rows).map(|(i, l)| format!("{:>4} {l}", i + 1)).collect();
+    let lines: Vec<String> = doc
+        .iter()
+        .enumerate()
+        .skip(top)
+        .take(rows)
+        .map(|(i, l)| format!("{:>4} {l}", i + 1))
+        .collect();
     let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
     Grid::from_lines(COLS, &refs)
 }
@@ -385,7 +487,17 @@ fn gutter_gives_absolute_rows() {
     let mut e = d.clone();
     e.insert(50, "inserted above".into());
     let ev = s.feed(&numbered(&e, 101, 20), 300);
-    assert!(ev.iter().any(|x| matches!(x, FrameEvent::Shift { from: 100, dy: 1, .. })), "{ev:?}");
+    assert!(
+        ev.iter().any(|x| matches!(
+            x,
+            FrameEvent::Shift {
+                from: 100,
+                dy: 1,
+                ..
+            }
+        )),
+        "{ev:?}"
+    );
     assert_eq!(s.pane().origin, [0, 101]);
 }
 
@@ -434,8 +546,23 @@ fn shell_output_scrolls_with_vt_events() {
     put(&mut g2, 0, 6, "$ make");
     put(&mut g2, 0, 7, "cc -o a a.c");
     put(&mut g2, 0, 9, "$");
-    let ev = s.feed_ev(&g2, 100, &[VtEvent::Scroll { region: Rect::new(0, 0, COLS, 10), dy: -3, scrollback: true }]);
-    assert!(ev.contains(&FrameEvent::Scroll { frame: id, dx: 0, dy: 3 }), "{ev:?}");
+    let ev = s.feed_ev(
+        &g2,
+        100,
+        &[VtEvent::Scroll {
+            region: Rect::new(0, 0, COLS, 10),
+            dy: -3,
+            scrollback: true,
+        }],
+    );
+    assert!(
+        ev.contains(&FrameEvent::Scroll {
+            frame: id,
+            dx: 0,
+            dy: 3
+        }),
+        "{ev:?}"
+    );
 }
 
 #[test]
@@ -472,9 +599,19 @@ fn half_drawn_screens_are_not_remembered() {
 fn tmux(left: &[String], right: &[String], below: &[String], status: &str) -> Grid {
     let mut g = Grid::new(COLS, 24);
     for r in 0..10u16 {
-        put(&mut g, 0, r, &left[r as usize].chars().take(29).collect::<String>());
+        put(
+            &mut g,
+            0,
+            r,
+            &left[r as usize].chars().take(29).collect::<String>(),
+        );
         put(&mut g, 29, r, "│");
-        put(&mut g, 30, r, &right[r as usize].chars().take(30).collect::<String>());
+        put(
+            &mut g,
+            30,
+            r,
+            &right[r as usize].chars().take(30).collect::<String>(),
+        );
     }
     put(&mut g, 0, 10, &"─".repeat(COLS as usize));
     put(&mut g, 29, 10, "┴");
@@ -491,21 +628,44 @@ fn tmux_layout() {
     let (a, b, c) = (doc(100), doc(100), doc(100));
     let mut s = Sim::new();
     s.feed(&tmux(&a, &b[20..], &c[40..], "[0] 0:zsh*"), 0);
-    assert_eq!(s.rects(), vec![[0, 0, 29, 10], [30, 0, 30, 10], [0, 11, COLS, 12]]);
-    let chrome: Vec<_> = s.on_screen().into_iter().filter(|i| i.kind == FrameKind::Chrome).collect();
+    assert_eq!(
+        s.rects(),
+        vec![[0, 0, 29, 10], [30, 0, 30, 10], [0, 11, COLS, 12]]
+    );
+    let chrome: Vec<_> = s
+        .on_screen()
+        .into_iter()
+        .filter(|i| i.kind == FrameKind::Chrome)
+        .collect();
     assert_eq!(chrome.len(), 1);
     assert_eq!(chrome[0].rect, [0, 23, COLS, 1]);
     // Candidates first, stable after the settle time.
-    assert!(s.panes().iter().all(|p| p.state == FrameState::Candidate && !p.usable));
+    assert!(
+        s.panes()
+            .iter()
+            .all(|p| p.state == FrameState::Candidate && !p.usable)
+    );
     s.idle(1400);
     assert!(s.panes().iter().all(|p| !p.usable));
     let ev = s.idle(200);
-    assert_eq!(ev.iter().filter(|e| matches!(e, FrameEvent::Stable { .. })).count(), 4);
+    assert_eq!(
+        ev.iter()
+            .filter(|e| matches!(e, FrameEvent::Stable { .. }))
+            .count(),
+        4
+    );
     assert!(s.panes().iter().all(|p| p.usable));
     // One pane scrolls: the others do not move.
     let ids: Vec<_> = s.panes().iter().map(|p| p.id).collect();
     let ev = s.feed(&tmux(&a, &b[23..], &c[40..], "[0] 0:zsh*"), 100);
-    assert_eq!(ev, vec![FrameEvent::Scroll { frame: ids[1], dx: 0, dy: 3 }]);
+    assert_eq!(
+        ev,
+        vec![FrameEvent::Scroll {
+            frame: ids[1],
+            dx: 0,
+            dy: 3
+        }]
+    );
     assert_eq!(s.panes()[0].origin, [0, 0]);
     assert_eq!(s.panes()[1].origin, [0, 3]);
     // Names.
@@ -514,11 +674,18 @@ fn tmux_layout() {
     assert_eq!(s.f.resolve(&FrameSel::Name("active".into())), Some(ids[1]));
     assert_eq!(s.f.resolve(&FrameSel::Name("largest".into())), Some(ids[2]));
     assert_eq!(s.f.resolve(&FrameSel::Name("raw".into())), Some(RAW));
-    assert_eq!(s.f.resolve(&FrameSel::Name(ids[0].to_string())), Some(ids[0]));
+    assert_eq!(
+        s.f.resolve(&FrameSel::Name(ids[0].to_string())),
+        Some(ids[0])
+    );
     assert_eq!(s.f.resolve(&FrameSel::Id(999)), None);
     assert_eq!(s.f.resolve(&FrameSel::Name("nope".into())), None);
     s.idle(3000);
-    assert_eq!(s.f.resolve(&FrameSel::Name("quietest".into())), Some(ids[2]), "largest of the calm ones");
+    assert_eq!(
+        s.f.resolve(&FrameSel::Name("quietest".into())),
+        Some(ids[2]),
+        "largest of the calm ones"
+    );
     assert_eq!(s.f.at(29, 3), Some((RAW, FramePos { x: 29, y: 3 })));
     assert_eq!(s.f.at(31, 3).unwrap().0, ids[1]);
 }
@@ -538,12 +705,21 @@ fn layout_switch_and_back_keeps_identities() {
     assert!(ev.is_empty(), "suspended first: {ev:?}");
     assert!(s.panes().iter().all(|p| !p.usable));
     let ev = s.idle(150);
-    assert!(ev.iter().any(|x| matches!(x, FrameEvent::Layout { .. })), "{ev:?}");
+    assert!(
+        ev.iter().any(|x| matches!(x, FrameEvent::Layout { .. })),
+        "{ev:?}"
+    );
     assert_ne!(s.f.layout(), layout);
     let big = s.pane();
     assert!(!ids.contains(&big.id));
     assert_eq!(big.rect, [0, 0, COLS, 23]);
-    assert_eq!(s.f.list().iter().filter(|i| i.state == FrameState::Inactive).count(), 3);
+    assert_eq!(
+        s.f.list()
+            .iter()
+            .filter(|i| i.state == FrameState::Inactive)
+            .count(),
+        3
+    );
     s.idle(2000);
     // Back to window 0, the middle pane has scrolled meanwhile.
     s.feed(&tmux(&a, &b[22..], &c[40..], "[0] 0:zsh* 1:vim-"), 500);
@@ -576,7 +752,10 @@ fn same_layout_other_window() {
     let ev = s.feed(&win(&b[300..], "0:a- 1:b*"), 500);
     let second = s.pane().id;
     assert_ne!(first, second);
-    assert!(ev.contains(&FrameEvent::Inactive { frame: first }) && ev.contains(&FrameEvent::Added { frame: second }));
+    assert!(
+        ev.contains(&FrameEvent::Inactive { frame: first })
+            && ev.contains(&FrameEvent::Added { frame: second })
+    );
     assert!(!s.pane().usable);
     s.idle(2000);
     let ev = s.feed(&win(&a, "0:a* 1:b-"), 500);
@@ -616,15 +795,27 @@ fn flapping_segmentation_only_suspends() {
 fn vim(left: &[String], right: &[String]) -> Grid {
     let mut g = Grid::new(COLS, 24);
     for r in 0..22u16 {
-        put(&mut g, 0, r, &left[r as usize].chars().take(29).collect::<String>());
+        put(
+            &mut g,
+            0,
+            r,
+            &left[r as usize].chars().take(29).collect::<String>(),
+        );
         put(&mut g, 29, r, "|");
-        put(&mut g, 30, r, &right[r as usize].chars().take(30).collect::<String>());
+        put(
+            &mut g,
+            30,
+            r,
+            &right[r as usize].chars().take(30).collect::<String>(),
+        );
     }
     inverse(&mut g, Rect::new(29, 0, 1, 22));
     put(&mut g, 0, 22, "left.txt");
     put(&mut g, 30, 22, "right.txt");
     inverse(&mut g, Rect::new(0, 22, COLS, 1));
-    paint(&mut g, Rect::new(0, 22, 30, 1), |s| s.attrs.insert(Attrs::BOLD));
+    paint(&mut g, Rect::new(0, 22, 30, 1), |s| {
+        s.attrs.insert(Attrs::BOLD)
+    });
     put(&mut g, 0, 23, ":set nu");
     g
 }
@@ -636,8 +827,12 @@ fn vim_splits() {
     s.cursor = (3, 3);
     s.settle(&vim(&a, &b[50..]));
     assert_eq!(s.rects(), vec![[0, 0, 29, 22], [30, 0, 30, 22]]);
-    let chrome: Vec<_> =
-        s.on_screen().into_iter().filter(|i| i.kind == FrameKind::Chrome).map(|i| i.rect).collect();
+    let chrome: Vec<_> = s
+        .on_screen()
+        .into_iter()
+        .filter(|i| i.kind == FrameKind::Chrome)
+        .map(|i| i.rect)
+        .collect();
     assert_eq!(chrome, vec![[0, 22, COLS, 1], [0, 23, COLS, 1]]);
     // A cursor line highlight is not a bar.
     let mut g = vim(&a, &b[50..]);
@@ -653,7 +848,12 @@ fn boxes() {
     let mut g = Grid::new(COLS, 20);
     let draw = |g: &mut Grid, r: Rect| {
         put(g, r.x, r.y, &format!("┌{}┐", "─".repeat(r.w as usize - 2)));
-        put(g, r.x, r.bottom() - 1, &format!("└{}┘", "─".repeat(r.w as usize - 2)));
+        put(
+            g,
+            r.x,
+            r.bottom() - 1,
+            &format!("└{}┘", "─".repeat(r.w as usize - 2)),
+        );
         for y in r.y + 1..r.bottom() - 1 {
             put(g, r.x, y, "│");
             put(g, r.right() - 1, y, "│");
@@ -666,7 +866,10 @@ fn boxes() {
     put(&mut g, 22, 2, "diff");
     let mut s = Sim::new();
     s.settle(&g);
-    assert_eq!(s.rects(), vec![[1, 1, 18, 8], [21, 1, 38, 18], [1, 11, 18, 8]]);
+    assert_eq!(
+        s.rects(),
+        vec![[1, 1, 18, 8], [21, 1, 38, 18], [1, 11, 18, 8]]
+    );
     // A box floating over text: a pane inside the pane.
     let d = doc(30);
     let mut g = view(&d, 0, 20, &[]);
@@ -694,8 +897,12 @@ fn small_leaves_are_chrome() {
     let mut s = Sim::new();
     s.settle(&g);
     assert_eq!(s.rects(), vec![[0, 0, COLS, 20]]);
-    let chrome: Vec<_> =
-        s.on_screen().into_iter().filter(|i| i.kind == FrameKind::Chrome).map(|i| i.rect).collect();
+    let chrome: Vec<_> = s
+        .on_screen()
+        .into_iter()
+        .filter(|i| i.kind == FrameKind::Chrome)
+        .map(|i| i.rect)
+        .collect();
     assert_eq!(chrome, vec![[0, 21, COLS, 1]]);
 }
 
@@ -706,10 +913,18 @@ fn separator_that_scrolls_is_content() {
     d[12] = "─".repeat(COLS as usize);
     let mut s = Sim::new();
     s.settle(&view(&d, 0, 20, &[]));
-    assert_eq!(s.rects(), vec![[0, 0, COLS, 12], [0, 13, COLS, 7]], "believed while static");
+    assert_eq!(
+        s.rects(),
+        vec![[0, 0, COLS, 12], [0, 13, COLS, 7]],
+        "believed while static"
+    );
     s.feed(&view(&d, 1, 20, &[]), 100);
     s.idle(200);
-    assert_eq!(s.rects(), vec![[0, 0, COLS, 20]], "demoted once it moved with the text");
+    assert_eq!(
+        s.rects(),
+        vec![[0, 0, COLS, 20]],
+        "demoted once it moved with the text"
+    );
     // Other rules in the same place are not believed either.
     d[40] = "─".repeat(COLS as usize);
     s.feed(&view(&d, 30, 20, &[]), 100);
@@ -770,16 +985,24 @@ fn placement_and_hysteresis() {
     s.settle(&g);
     let id = s.pane().id;
     assert_eq!(s.f.place(id, 18, 6, Prefer::TopLeft, &[]), Some((0, 0)));
-    assert_eq!(s.f.place(id, 18, 6, Prefer::BottomRight, &[]), Some((42, 14)));
+    assert_eq!(
+        s.f.place(id, 18, 6, Prefer::BottomRight, &[]),
+        Some((42, 14))
+    );
     // Top-right is occupied: next to it.
     let (x, y) = s.f.place(id, 18, 6, Prefer::TopRight, &[]).unwrap();
     assert!(x + 18 <= 40 || y >= 10, "{x},{y}");
     let first = (x, y);
     // Another sprite does not get the same spot.
-    let other = s.f.place(id, 18, 6, Prefer::TopRight, &[Rect::new(x, y, 18, 6)]).unwrap();
+    let other =
+        s.f.place(id, 18, 6, Prefer::TopRight, &[Rect::new(x, y, 18, 6)])
+            .unwrap();
     assert!(!Rect::new(other.0, other.1, 18, 6).intersects(&Rect::new(x, y, 18, 6)));
     assert_eq!(s.f.place(id, 18, 6, Prefer::TopRight, &[]), Some(first));
-    assert_eq!(s.f.place(id, 18, 6, Prefer::TopRight, &[Rect::new(x, y, 18, 6)]), Some(other));
+    assert_eq!(
+        s.f.place(id, 18, 6, Prefer::TopRight, &[Rect::new(x, y, 18, 6)]),
+        Some(other)
+    );
     // The corner clears: a better spot, taken only after it stayed better.
     s.feed(&Grid::new(COLS, 20), 100);
     s.idle(400_000);
@@ -802,25 +1025,43 @@ impl TuiSupport for Fake {
     }
 
     fn detect(&self, pane: &PaneView) -> f32 {
-        if pane.row_text(pane.rect.h - 1).starts_with("FAKE") { 1.0 } else { 0.0 }
+        if pane.row_text(pane.rect.h - 1).starts_with("FAKE") {
+            1.0
+        } else {
+            0.0
+        }
     }
 
     fn chrome(&self, _pane: &PaneView) -> Option<Chrome> {
-        Some(Chrome { top: 0, bottom: 1, left: 0, right: 0 })
+        Some(Chrome {
+            top: 0,
+            bottom: 1,
+            left: 0,
+            right: 0,
+        })
     }
 
     fn view_hint(&self, pane: &PaneView) -> Option<ViewHint> {
         let t = pane.row_text(pane.rect.h - 1);
         let row = t.split_whitespace().nth(2)?.parse().ok()?;
-        Some(ViewHint { row: Some(row), col: None })
+        Some(ViewHint {
+            row: Some(row),
+            col: None,
+        })
     }
 
     fn frame_key(&self, pane: &PaneView) -> Option<String> {
-        pane.row_text(pane.rect.h - 1).split_whitespace().nth(1).map(str::to_string)
+        pane.row_text(pane.rect.h - 1)
+            .split_whitespace()
+            .nth(1)
+            .map(str::to_string)
     }
 
     fn tuning(&self) -> crate::plugin::Tuning {
-        crate::plugin::Tuning { settle_ms: Some(1000), commit_ms: None }
+        crate::plugin::Tuning {
+            settle_ms: Some(1000),
+            commit_ms: None,
+        }
     }
 }
 
@@ -828,7 +1069,9 @@ impl TuiSupport for Fake {
 fn plugin_chrome_hint_key() {
     let (a, b) = (doc(1000), doc(2000));
     let mut s = Sim::with(FrameConfig::default(), vec![Box::new(Fake)]);
-    let screen = |d: &[String], name: &str, top: usize| view(&d[top..], 0, 20, &[&format!("FAKE {name} {top}")]);
+    let screen = |d: &[String], name: &str, top: usize| {
+        view(&d[top..], 0, 20, &[&format!("FAKE {name} {top}")])
+    };
     s.feed(&screen(&a, "a.txt", 0), 0);
     let first = s.pane();
     assert_eq!(first.support.as_deref(), Some("fake"));
@@ -866,13 +1109,24 @@ fn wire_forms() {
             "rect": [0, 0, 60, 20], "origin": [0, 0], "extent": [0, 19], "key": null, "support": null})
     );
     assert_eq!(v[0]["kind"], "raw");
-    let e = serde_json::to_value(FrameEvent::Scroll { frame: 1, dx: 0, dy: 2 }).unwrap();
-    assert_eq!(e, serde_json::json!({"type": "scroll", "frame": 1, "dx": 0, "dy": 2}));
+    let e = serde_json::to_value(FrameEvent::Scroll {
+        frame: 1,
+        dx: 0,
+        dy: 2,
+    })
+    .unwrap();
+    assert_eq!(
+        e,
+        serde_json::json!({"type": "scroll", "frame": 1, "dx": 0, "dy": 2})
+    );
 }
 
 #[test]
 fn ids_are_never_reused_and_inactive_frames_are_capped() {
-    let cfg = FrameConfig { max_inactive: 3, ..FrameConfig::default() };
+    let cfg = FrameConfig {
+        max_inactive: 3,
+        ..FrameConfig::default()
+    };
     let mut s = Sim::with(cfg, Vec::new());
     let mut seen = Vec::new();
     for i in 0..8 {
@@ -884,7 +1138,13 @@ fn ids_are_never_reused_and_inactive_frames_are_capped() {
         assert!(!seen.contains(&id));
         seen.push(id);
     }
-    assert_eq!(s.f.list().iter().filter(|i| i.state == FrameState::Inactive).count(), 3);
+    assert_eq!(
+        s.f.list()
+            .iter()
+            .filter(|i| i.state == FrameState::Inactive)
+            .count(),
+        3
+    );
 }
 
 /// `cargo test -p ptyrc-core --release frames::tests::bench -- --ignored --nocapture`
@@ -892,7 +1152,9 @@ fn ids_are_never_reused_and_inactive_frames_are_capped() {
 #[ignore]
 fn bench_update_cost() {
     let cols = 200u16;
-    let d: Vec<String> = (0..5000).map(|i| format!("{i:05} {}", "lorem ipsum dolor sit amet ".repeat(6))).collect();
+    let d: Vec<String> = (0..5000)
+        .map(|i| format!("{i:05} {}", "lorem ipsum dolor sit amet ".repeat(6)))
+        .collect();
     let screens: Vec<Grid> = (0..200)
         .map(|top| {
             let lines: Vec<&str> = d.iter().skip(top).take(60).map(String::as_str).collect();
@@ -907,16 +1169,222 @@ fn bench_update_cost() {
     for _ in 0..rounds {
         for g in &screens {
             now += Duration::from_millis(16);
-            f.update(&ScreenInput { grid: g, cursor, alt_screen: false, title: "", events: &[] }, now);
+            f.update(
+                &ScreenInput {
+                    grid: g,
+                    cursor,
+                    alt_screen: false,
+                    title: "",
+                    events: &[],
+                },
+                now,
+            );
         }
     }
     let scroll = start.elapsed() / (rounds * screens.len() as u32);
     let start = std::time::Instant::now();
     for _ in 0..2000 {
         now += Duration::from_millis(16);
-        f.update(&ScreenInput { grid: &screens[0], cursor, alt_screen: false, title: "", events: &[] }, now);
+        f.update(
+            &ScreenInput {
+                grid: &screens[0],
+                cursor,
+                alt_screen: false,
+                title: "",
+                events: &[],
+            },
+            now,
+        );
     }
     let idle = start.elapsed() / 2000;
     eprintln!("200x60: full scroll {scroll:?} per update, unchanged {idle:?} per update");
     assert!(scroll < Duration::from_millis(1));
+}
+
+// -- identity through changes of shape -----------------------------------
+
+#[test]
+fn resized_pane_keeps_its_frame() {
+    let d = doc(300);
+    let mut s = Sim::new();
+    s.settle(&view(&d, 40, 20, &[]));
+    let id = s.pane().id;
+    for top in 41..=50 {
+        s.feed(&view(&d, top, 20, &[]), 100);
+    }
+    s.idle(500);
+    let origin = s.pane().origin;
+    // The terminal grows by four rows: more of the same text.
+    let ev = s.feed(&view(&d, 50, 24, &[]), 100);
+    assert!(ev.contains(&FrameEvent::Attached { frame: id }), "{ev:?}");
+    assert_eq!(
+        (s.pane().id, s.pane().origin, s.pane().rect),
+        (id, origin, [0, 0, COLS, 24])
+    );
+    assert!(!s.pane().usable);
+    s.idle(1600);
+    assert!(s.pane().usable);
+    assert_eq!(s.f.text(id, 0, 2), d[40..42].to_vec());
+}
+
+#[test]
+fn transcript_with_prompt_box() {
+    // A coding-agent TUI: a transcript that scrolls, a prompt between two
+    // rules, a status line.
+    let mut d = doc(300);
+    let rule = "─".repeat(COLS as usize);
+    let screen = |d: &[String], top: usize| {
+        view(
+            &d[top..],
+            0,
+            18,
+            &[&rule, "> ask anything", &rule, "  ? for shortcuts"],
+        )
+    };
+    let mut s = Sim::new();
+    s.settle(&screen(&d, 0));
+    let id = s.pane().id;
+    assert_eq!(s.pane().rect, [0, 0, COLS, 18]);
+    for top in 1..40 {
+        let ev = s.feed(&screen(&d, top), 60);
+        assert_eq!(
+            ev,
+            vec![FrameEvent::Scroll {
+                frame: id,
+                dx: 0,
+                dy: 1
+            }]
+        );
+    }
+    assert!(s.pane().usable);
+    s.idle(300);
+    // A rule inside the transcript scrolls by: rules are no longer
+    // believed, the frame survives in a larger rectangle.
+    d[60] = rule.clone();
+    for top in 40..50 {
+        s.feed(&screen(&d, top), 60);
+    }
+    s.idle(2000);
+    for top in 50..56 {
+        s.feed(&screen(&d, top), 60);
+    }
+    let p = s.pane();
+    assert_eq!(p.id, id);
+    assert_eq!(p.origin, [0, 55]);
+    assert_eq!(
+        p.rect,
+        [0, 0, COLS, 18],
+        "the prompt box is learned as chrome"
+    );
+    assert_eq!(s.f.text(id, 3, 5), d[3..5].to_vec());
+}
+
+// -- robustness --------------------------------------------------------
+
+struct Lcg(u64);
+
+impl Lcg {
+    fn next(&mut self, n: u64) -> u64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (self.0 >> 33) % n
+    }
+}
+
+#[test]
+fn random_screens_do_not_break_anything() {
+    let glyphs = [
+        "a", "b", " ", " ", " ", "│", "─", "┌", "┐", "└", "┘", "┼", "|", "-", "1", "2", "世",
+    ];
+    for seed in 0..12u64 {
+        let mut rng = Lcg(seed * 7919 + 1);
+        let mut s = Sim::new();
+        let (mut cols, mut rows) = (1 + rng.next(40) as u16, 1 + rng.next(16) as u16);
+        let mut g = Grid::new(cols, rows);
+        let mut max_id = 0;
+        for _ in 0..120 {
+            match rng.next(10) {
+                0 => {
+                    (cols, rows) = (1 + rng.next(40) as u16, 1 + rng.next(16) as u16);
+                    g = Grid::new(cols, rows);
+                }
+                1 => g = Grid::new(cols, rows),
+                2 => {
+                    // Scroll up by one.
+                    let mut n = Grid::new(cols, rows);
+                    for r in 1..rows {
+                        for c in 0..cols {
+                            *n.cell_mut(c, r - 1) = g.cell(c, r).clone();
+                        }
+                    }
+                    g = n;
+                }
+                3 => {
+                    let r = rng.next(rows as u64) as u16;
+                    let c = glyphs[rng.next(glyphs.len() as u64) as usize];
+                    for x in 0..cols {
+                        g.put(
+                            x,
+                            r,
+                            Cell::narrow(if c == "世" { "x" } else { c }, Style::default()),
+                        );
+                    }
+                    if rng.next(2) == 0 {
+                        inverse(&mut g, Rect::new(0, r, cols, 1));
+                    }
+                }
+                4 => {
+                    let c = rng.next(cols as u64) as u16;
+                    for y in 0..rows {
+                        g.put(c, y, Cell::narrow("│", Style::default()));
+                    }
+                }
+                _ => {
+                    for _ in 0..1 + rng.next(30) {
+                        let (c, r) = (rng.next(cols as u64) as u16, rng.next(rows as u64) as u16);
+                        let t = glyphs[rng.next(glyphs.len() as u64) as usize];
+                        if t == "世" {
+                            g.put(c, r, Cell::wide(t, Style::default()));
+                        } else {
+                            g.put(c, r, Cell::narrow(t, Style::default()));
+                        }
+                    }
+                }
+            }
+            s.cursor = (rng.next(cols as u64) as u16, rng.next(rows as u64) as u16);
+            s.alt = rng.next(20) == 0;
+            let ev = s.feed(&g, rng.next(400));
+            for e in &ev {
+                if let FrameEvent::Added { frame } = e {
+                    assert!(*frame > max_id, "ids grow");
+                    max_id = *frame;
+                }
+            }
+            // Every query answers, every frame on screen is inside it.
+            for i in s.f.list() {
+                let info = s.f.info(i.id).unwrap();
+                if i.state != FrameState::Inactive {
+                    assert!(
+                        info.rect.right() <= cols && info.rect.bottom() <= rows,
+                        "{i:?}"
+                    );
+                    assert!(!info.rect.is_empty() || cols == 0);
+                }
+                s.f.text(i.id, i.extent[0] - 2, i.extent[0] + 5);
+                s.f.find(i.id, &lit("a"), true);
+                s.f.heat(i.id).unwrap().digits();
+                s.f.place(i.id, 2, 1, Prefer::TopRight, &[]);
+            }
+            for name in ["active", "largest", "quietest"] {
+                assert!(s.f.resolve(&FrameSel::Name(name.into())).is_some());
+            }
+            s.f.at(s.cursor.0, s.cursor.1).unwrap();
+            // The wake time moves on.
+            if let Some(w) = s.f.next_wake() {
+                assert!(w > s.now, "wake {w:?} at {:?}", s.now);
+            }
+        }
+    }
 }

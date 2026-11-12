@@ -20,7 +20,11 @@ pub(crate) const BLANK: u64 = 0;
 /// Hash of a row text, trailing spaces ignored. `BLANK` when empty.
 pub(crate) fn text_hash(s: &str) -> u64 {
     let t = s.trim_end_matches(' ');
-    if t.is_empty() { BLANK } else { fnv(t.as_bytes()).max(1) }
+    if t.is_empty() {
+        BLANK
+    } else {
+        fnv(t.as_bytes()).max(1)
+    }
 }
 
 /// Text of a run of cells. `cols[k]` is the column of the `k`-th char;
@@ -45,7 +49,11 @@ impl Line {
                 }
                 continue;
             }
-            let t: &str = if cell.text.is_empty() { " " } else { cell.text.as_str() };
+            let t: &str = if cell.text.is_empty() {
+                " "
+            } else {
+                cell.text.as_str()
+            };
             let n = t.chars().count();
             if (n != 1 || c != count) && cols.is_none() {
                 cols = Some((0..count as u16).collect());
@@ -57,7 +65,11 @@ impl Line {
             text.push_str(t);
             count += n;
         }
-        Line { text, cols: cols.map(Vec::into_boxed_slice), ascii }
+        Line {
+            text,
+            cols: cols.map(Vec::into_boxed_slice),
+            ascii,
+        }
     }
 
     /// One narrow char per column.
@@ -70,7 +82,11 @@ impl Line {
         if self.cols.is_none() && self.ascii {
             let end = (b as usize).min(self.text.len());
             let start = (a as usize).min(end);
-            return Line { text: self.text[start..end].to_string(), cols: None, ascii: true };
+            return Line {
+                text: self.text[start..end].to_string(),
+                cols: None,
+                ascii: true,
+            };
         }
         let mut text = String::new();
         let mut cols: Vec<u16> = Vec::new();
@@ -86,13 +102,24 @@ impl Line {
             text.push(ch);
         }
         let ascii = text.is_ascii();
-        Line { text, cols: if trivial { None } else { Some(cols.into_boxed_slice()) }, ascii }
+        Line {
+            text,
+            cols: if trivial {
+                None
+            } else {
+                Some(cols.into_boxed_slice())
+            },
+            ascii,
+        }
     }
 
     /// Column of the `k`-th char.
     pub fn col_of(&self, k: usize) -> u16 {
         match &self.cols {
-            Some(c) => c.get(k).copied().unwrap_or_else(|| c.last().map_or(0, |l| l + 1)),
+            Some(c) => c
+                .get(k)
+                .copied()
+                .unwrap_or_else(|| c.last().map_or(0, |l| l + 1)),
             None => k as u16,
         }
     }
@@ -129,12 +156,16 @@ pub(crate) mod class {
 
 fn classify(text: &str) -> u16 {
     use class::*;
-    let Some(ch) = text.chars().next() else { return BLANK };
+    let Some(ch) = text.chars().next() else {
+        return BLANK;
+    };
     match ch {
         ' ' => BLANK,
         '|' => PIPE,
         '-' => DASH,
-        '│' | '┃' | '║' | '╎' | '╏' | '┆' | '┇' | '┊' | '┋' | '▏' | '▕' | '▌' | '▐' => V,
+        '│' | '┃' | '║' | '╎' | '╏' | '┆' | '┇' | '┊' | '┋' | '▏' | '▕' | '▌' | '▐' => {
+            V
+        }
         '─' | '━' | '═' | '╌' | '╍' | '┄' | '┅' | '┈' | '┉' => H,
         '┌' | '╭' | '┏' | '╔' => V | H | TL,
         '┐' | '╮' | '┓' | '╗' => V | H | TR,
@@ -170,7 +201,13 @@ fn paint(cell: &Cell) -> u16 {
 fn cell_hash(cell: &Cell) -> u32 {
     let mut h = fnv(cell.text.as_bytes());
     let s = &cell.style;
-    for v in [color_code(s.fg), color_code(s.bg), color_code(s.ul), s.attrs.0 as u32, s.link] {
+    for v in [
+        color_code(s.fg),
+        color_code(s.bg),
+        color_code(s.ul),
+        s.attrs.0 as u32,
+        s.link,
+    ] {
         h = (h ^ v as u64).wrapping_mul(0x0100_0000_01b3);
     }
     (h ^ (h >> 32)) as u32

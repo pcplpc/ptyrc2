@@ -35,10 +35,15 @@ impl Heat {
             self.slow = vec![0.0; n];
             self.occ = vec![0.0; n];
         }
-        let dt = self.last.map_or(0.0, |l| now.saturating_sub(l).as_secs_f32());
+        let dt = self
+            .last
+            .map_or(0.0, |l| now.saturating_sub(l).as_secs_f32());
         self.last = Some(now);
-        let (ff, fs, fo) =
-            ((-dt / TAU_FAST).exp(), (-dt / TAU_SLOW).exp(), 1.0 - (-dt / TAU_OCC).exp());
+        let (ff, fs, fo) = (
+            (-dt / TAU_FAST).exp(),
+            (-dt / TAU_SLOW).exp(),
+            1.0 - (-dt / TAU_OCC).exp(),
+        );
         for r in 0..rect.h {
             let base = screen.idx(rect.x, rect.y + r);
             let own = r as usize * rect.w as usize;
@@ -92,7 +97,13 @@ impl Heat {
                 occupancy.push(if known { self.occ[i] } else { 1.0 });
             }
         }
-        HeatView { cols: sub.w, rows: sub.h, safe, activity, occupancy }
+        HeatView {
+            cols: sub.w,
+            rows: sub.h,
+            safe,
+            activity,
+            occupancy,
+        }
     }
 }
 
@@ -117,7 +128,9 @@ impl HeatView {
         self.safe
             .chunks(self.cols.max(1) as usize)
             .map(|row| {
-                row.iter().map(|v| (b'0' + (v * 9.0).round().clamp(0.0, 9.0) as u8) as char).collect()
+                row.iter()
+                    .map(|v| (b'0' + (v * 9.0).round().clamp(0.0, 9.0) as u8) as char)
+                    .collect()
             })
             .collect()
     }
@@ -130,7 +143,9 @@ impl HeatView {
         let mut sum = 0.0;
         for r in y..y + h {
             let base = r as usize * self.cols as usize;
-            sum += self.safe[base + x as usize..base + (x + w) as usize].iter().sum::<f32>();
+            sum += self.safe[base + x as usize..base + (x + w) as usize]
+                .iter()
+                .sum::<f32>();
         }
         Some(sum / (w as f32 * h as f32) + self.bias(x, y, w, h, prefer))
     }
@@ -149,8 +164,16 @@ impl HeatView {
             Prefer::BottomRight => (1.0, 1.0),
             Prefer::Any => return 0.0,
         };
-        let dx = if fx > 0.0 { (x as f32 / fx - tx).abs() } else { 0.0 };
-        let dy = if fy > 0.0 { (y as f32 / fy - ty).abs() } else { 0.0 };
+        let dx = if fx > 0.0 {
+            (x as f32 / fx - tx).abs()
+        } else {
+            0.0
+        };
+        let dy = if fy > 0.0 {
+            (y as f32 / fy - ty).abs()
+        } else {
+            0.0
+        };
         BIAS * (1.0 - (dx + dy) / 2.0)
     }
 
@@ -177,7 +200,8 @@ impl HeatView {
                     continue;
                 }
                 let (x0, y0, x1, y1) = (x as usize, y as usize, (x + w) as usize, (y + h) as usize);
-                let sum = sat[y1 * cw + x1] - sat[y0 * cw + x1] - sat[y1 * cw + x0] + sat[y0 * cw + x0];
+                let sum =
+                    sat[y1 * cw + x1] - sat[y0 * cw + x1] - sat[y1 * cw + x0] + sat[y0 * cw + x0];
                 let s = (sum / area) as f32 + self.bias(x, y, w, h, prefer);
                 if best.is_none_or(|b| s > b.2 + 1e-6) {
                     best = Some((x, y, s));
@@ -194,23 +218,43 @@ mod tests {
 
     fn flat(cols: u16, rows: u16) -> HeatView {
         let n = cols as usize * rows as usize;
-        HeatView { cols, rows, safe: vec![1.0; n], activity: vec![0.0; n], occupancy: vec![0.0; n] }
+        HeatView {
+            cols,
+            rows,
+            safe: vec![1.0; n],
+            activity: vec![0.0; n],
+            occupancy: vec![0.0; n],
+        }
     }
 
     #[test]
     fn corners() {
         let v = flat(40, 10);
-        assert_eq!(v.best(6, 3, Prefer::TopRight, &[]).map(|b| (b.0, b.1)), Some((34, 0)));
-        assert_eq!(v.best(6, 3, Prefer::BottomLeft, &[]).map(|b| (b.0, b.1)), Some((0, 7)));
-        assert_eq!(v.best(6, 3, Prefer::Center, &[]).map(|b| (b.0, b.1)), Some((17, 3)));
-        assert_eq!(v.best(6, 3, Prefer::Any, &[]).map(|b| (b.0, b.1)), Some((0, 0)));
+        assert_eq!(
+            v.best(6, 3, Prefer::TopRight, &[]).map(|b| (b.0, b.1)),
+            Some((34, 0))
+        );
+        assert_eq!(
+            v.best(6, 3, Prefer::BottomLeft, &[]).map(|b| (b.0, b.1)),
+            Some((0, 7))
+        );
+        assert_eq!(
+            v.best(6, 3, Prefer::Center, &[]).map(|b| (b.0, b.1)),
+            Some((17, 3))
+        );
+        assert_eq!(
+            v.best(6, 3, Prefer::Any, &[]).map(|b| (b.0, b.1)),
+            Some((0, 0))
+        );
         assert_eq!(v.best(41, 3, Prefer::Any, &[]), None);
     }
 
     #[test]
     fn avoids_taken_and_unsafe() {
         let mut v = flat(40, 10);
-        let got = v.best(6, 3, Prefer::TopRight, &[Rect::new(30, 0, 10, 3)]).unwrap();
+        let got = v
+            .best(6, 3, Prefer::TopRight, &[Rect::new(30, 0, 10, 3)])
+            .unwrap();
         assert!(!Rect::new(got.0, got.1, 6, 3).intersects(&Rect::new(30, 0, 10, 3)));
         // The top-right corner is busy: the spot moves off it.
         for r in 0..4 {
@@ -219,7 +263,10 @@ mod tests {
             }
         }
         let got = v.best(6, 3, Prefer::TopRight, &[]).unwrap();
-        assert!(!Rect::new(got.0, got.1, 6, 3).intersects(&Rect::new(28, 0, 12, 4)), "{got:?}");
+        assert!(
+            !Rect::new(got.0, got.1, 6, 3).intersects(&Rect::new(28, 0, 12, 4)),
+            "{got:?}"
+        );
         assert_eq!(v.digits()[0].len(), 40);
     }
 }

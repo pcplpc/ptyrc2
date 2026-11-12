@@ -90,25 +90,50 @@ pub struct ScreenInput<'a> {
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum FrameEvent {
     /// The set of panes changed.
-    Layout { layout: u32 },
+    Layout {
+        layout: u32,
+    },
     /// A new frame, candidate.
-    Added { frame: FrameId },
+    Added {
+        frame: FrameId,
+    },
     /// A remembered frame is on screen again, candidate.
-    Attached { frame: FrameId },
-    Stable { frame: FrameId },
+    Attached {
+        frame: FrameId,
+    },
+    Stable {
+        frame: FrameId,
+    },
     /// Left the screen; remembered.
-    Inactive { frame: FrameId },
+    Inactive {
+        frame: FrameId,
+    },
     /// Forgotten.
-    Dropped { frame: FrameId },
+    Dropped {
+        frame: FrameId,
+    },
     /// The origin moved: the view shows other rows or columns.
-    Scroll { frame: FrameId, dx: i64, dy: i64 },
+    Scroll {
+        frame: FrameId,
+        dx: i64,
+        dy: i64,
+    },
     /// The frame rows `[from, to]` moved by `dy` (splice, island merge,
     /// renumbering). Drawings fixed on those rows move with them.
-    Shift { frame: FrameId, from: i64, to: i64, dy: i64 },
+    Shift {
+        frame: FrameId,
+        from: i64,
+        to: i64,
+        dy: i64,
+    },
     /// The view went elsewhere in the frame.
-    Jump { frame: FrameId },
+    Jump {
+        frame: FrameId,
+    },
     /// The content rect changed (chrome learned).
-    Rect { frame: FrameId },
+    Rect {
+        frame: FrameId,
+    },
 }
 
 /// A frame, as on the wire.
@@ -166,7 +191,12 @@ impl Pane {
         if l + r >= self.rect.w {
             (l, r) = (0, 0);
         }
-        Rect::new(self.rect.x + l, self.rect.y + t, self.rect.w - l - r, self.rect.h - t - b)
+        Rect::new(
+            self.rect.x + l,
+            self.rect.y + t,
+            self.rect.w - l - r,
+            self.rect.h - t - b,
+        )
     }
 
     fn top(&self) -> u16 {
@@ -174,9 +204,11 @@ impl Pane {
     }
 
     fn origin(&self) -> FramePos {
-        FramePos { x: self.ext.ox, y: self.ext.oy + self.top() as i64 }
+        FramePos {
+            x: self.ext.ox,
+            y: self.ext.oy + self.top() as i64,
+        }
     }
-
 }
 
 struct Placed {
@@ -184,6 +216,9 @@ struct Placed {
     better_since: Option<Duration>,
     used: Duration,
 }
+
+/// Spots handed out, by `(frame, w, h, prefer)`.
+type PlaceCache = HashMap<(FrameId, u16, u16, u8), Vec<Placed>>;
 
 /// Every frame of a screen.
 pub struct Frames {
@@ -209,7 +244,7 @@ pub struct Frames {
     title_hash: u64,
     alt: bool,
     started: bool,
-    placed: RefCell<HashMap<(FrameId, u16, u16, u8), Vec<Placed>>>,
+    placed: RefCell<PlaceCache>,
 }
 
 fn ms(v: u32) -> Duration {
@@ -260,7 +295,10 @@ impl Frames {
         self.now = now;
         let resized = self.screen.scan(input.grid);
         let alt_changed = self.started && input.alt_screen != self.alt
-            || input.events.iter().any(|e| matches!(e, VtEvent::AltScreen(_)));
+            || input
+                .events
+                .iter()
+                .any(|e| matches!(e, VtEvent::AltScreen(_)));
         if resized || alt_changed {
             self.raw_ready = now + ms(self.cfg.raw_settle_ms);
         }
@@ -271,7 +309,11 @@ impl Frames {
         if !self.started
             || (self.cursor.col, self.cursor.row) != (input.cursor.col, input.cursor.row)
         {
-            self.trail.push_back(CursorSample { at: now, col: input.cursor.col, row: input.cursor.row });
+            self.trail.push_back(CursorSample {
+                at: now,
+                col: input.cursor.col,
+                row: input.cursor.row,
+            });
             while self.trail.len() > self.cfg.trail.max(1) {
                 self.trail.pop_front();
             }
@@ -282,16 +324,28 @@ impl Frames {
         // Segmentation, when something structural may have changed.
         let cursor_row = Some(input.cursor.row);
         let expired = self.distrust.iter().any(|d| d.until <= now);
-        if self.seg.is_none() || self.screen.class_change || cursor_row != self.seg_cursor || expired {
+        if self.seg.is_none()
+            || self.screen.class_change
+            || cursor_row != self.seg_cursor
+            || expired
+        {
             self.distrust.retain(|d| d.until > now);
             let (mut leaves, mut seps) = self.segment(input, now);
             let moved = {
                 let s = &self.screen;
                 let prev = |r: u16| {
-                    if s.row_dirty[r as usize] { s.prev_lines[r as usize].clone() } else { s.lines[r as usize].clone() }
+                    if s.row_dirty[r as usize] {
+                        s.prev_lines[r as usize].clone()
+                    } else {
+                        s.lines[r as usize].clone()
+                    }
                 };
                 let next = |r: u16| s.lines[r as usize].clone();
-                if resized { Vec::new() } else { scrolled_seps(&self.seps, &seps, &prev, &next) }
+                if resized {
+                    Vec::new()
+                } else {
+                    scrolled_seps(&self.seps, &seps, &prev, &next)
+                }
             };
             if !moved.is_empty() {
                 for m in moved {
@@ -307,7 +361,7 @@ impl Frames {
             self.seg = Some(leaves);
             self.seg_cursor = cursor_row;
         }
-        self.reconcile(now, Some(input), &mut ev);
+        self.reconcile(now, Some(input), resized, &mut ev);
 
         // Panes.
         let chrome_changed = title_changed
@@ -345,7 +399,7 @@ impl Frames {
             return ev;
         }
         self.now = now;
-        self.reconcile(now, None, &mut ev);
+        self.reconcile(now, None, false, &mut ev);
         for id in self.active.clone() {
             let p = &self.panes[&id];
             if p.fresh {
@@ -381,7 +435,7 @@ impl Frames {
             if p.fresh {
                 at(self.now);
             }
-            if p.state == FrameState::Candidate {
+            if p.state == FrameState::Candidate && !p.suspended {
                 at(p.since + p.settle);
             }
             if !p.suspended
@@ -399,7 +453,11 @@ impl Frames {
         let mut out = vec![FrameInfo {
             id: RAW,
             kind: FrameKind::Raw,
-            state: if self.now >= self.raw_ready { FrameState::Stable } else { FrameState::Candidate },
+            state: if self.now >= self.raw_ready {
+                FrameState::Stable
+            } else {
+                FrameState::Candidate
+            },
             usable: self.started && self.now >= self.raw_ready,
             rect: [0, 0, self.screen.cols, self.screen.rows],
             origin: [0, 0],
@@ -439,14 +497,19 @@ impl Frames {
             return (y0..y1)
                 .map(|y| {
                     if y >= 0 && y < self.screen.rows as i64 {
-                        self.screen.lines[y as usize].text.trim_end_matches(' ').to_string()
+                        self.screen.lines[y as usize]
+                            .text
+                            .trim_end_matches(' ')
+                            .to_string()
                     } else {
                         String::new()
                     }
                 })
                 .collect();
         }
-        let Some(p) = self.panes.get(&id) else { return Vec::new() };
+        let Some(p) = self.panes.get(&id) else {
+            return Vec::new();
+        };
         let shown = self.is_active(id) && !p.ext.rows.is_empty();
         let c = p.content();
         let top = p.top() as i64;
@@ -481,11 +544,17 @@ impl Frames {
     /// Heatmap of the frame's view.
     pub fn heat(&self, id: FrameId) -> Option<HeatView> {
         if id == RAW {
-            return Some(self.raw_heat.view(Rect::new(0, 0, self.screen.cols, self.screen.rows)));
+            return Some(
+                self.raw_heat
+                    .view(Rect::new(0, 0, self.screen.cols, self.screen.rows)),
+            );
         }
         let p = self.panes.get(&id)?;
         let c = p.content();
-        Some(p.heat.view(Rect::new(c.x - p.rect.x, c.y - p.rect.y, c.w, c.h)))
+        Some(
+            p.heat
+                .view(Rect::new(c.x - p.rect.x, c.y - p.rect.y, c.w, c.h)),
+        )
     }
 
     /// The innermost pane showing a screen cell, and the frame position
@@ -502,13 +571,28 @@ impl Frames {
             .min_by_key(|i| (i.kind != FrameKind::Pane, i.rect.w as u32 * i.rect.h as u32));
         match hit {
             Some(i) => Some((i.id, i.to_frame(col, row)?)),
-            None => Some((RAW, FramePos { x: col as i64, y: row as i64 })),
+            None => Some((
+                RAW,
+                FramePos {
+                    x: col as i64,
+                    y: row as i64,
+                },
+            )),
         }
     }
 
     /// As `Surfaces::find`, with the error of a bad regular expression.
-    pub fn try_find(&self, id: FrameId, query: &TextQuery, known: bool) -> Result<Vec<TextMatch>, String> {
-        let pattern = if query.regex { query.pattern.clone() } else { regex::escape(&query.pattern) };
+    pub fn try_find(
+        &self,
+        id: FrameId,
+        query: &TextQuery,
+        known: bool,
+    ) -> Result<Vec<TextMatch>, String> {
+        let pattern = if query.regex {
+            query.pattern.clone()
+        } else {
+            regex::escape(&query.pattern)
+        };
         let re = regex::RegexBuilder::new(&pattern)
             .case_insensitive(query.ignore_case)
             .build()
@@ -522,14 +606,21 @@ impl Frames {
                 let k0 = line.text[..m.start()].chars().count();
                 let k1 = k0 + m.as_str().chars().count();
                 let (c0, c1) = (line.col_of(k0), line.col_of(k1));
-                let pos = FramePos { x: x0 + c0 as i64, y };
+                let pos = FramePos {
+                    x: x0 + c0 as i64,
+                    y,
+                };
                 out.push(TextMatch {
                     frame: info.id,
                     x: pos.x,
                     y,
                     len: c1.saturating_sub(c0).max(1),
                     text: m.as_str().to_string(),
-                    screen: if info.state == FrameState::Inactive { None } else { info.to_screen(pos) },
+                    screen: if info.state == FrameState::Inactive {
+                        None
+                    } else {
+                        info.to_screen(pos)
+                    },
                 });
             }
         };
@@ -560,7 +651,12 @@ impl Frames {
                         scan(&s.line, s.x0, y, &info)
                     }
                     Some(row) => scan(&row.line, p.ext.ox, y, &info),
-                    None => scan(&self.screen.lines[(c.y + r) as usize].slice(c.x, c.right()), p.ext.ox, y, &info),
+                    None => scan(
+                        &self.screen.lines[(c.y + r) as usize].slice(c.x, c.right()),
+                        p.ext.ox,
+                        y,
+                        &info,
+                    ),
                 }
             }
         }
@@ -650,12 +746,18 @@ impl Frames {
     }
 
     /// Bring the layout in line with the last segmentation.
-    fn reconcile(&mut self, now: Duration, input: Option<&ScreenInput>, ev: &mut Vec<FrameEvent>) {
+    fn reconcile(
+        &mut self,
+        now: Duration,
+        input: Option<&ScreenInput>,
+        force: bool,
+        ev: &mut Vec<FrameEvent>,
+    ) {
         let Some(seg) = self.seg.clone() else { return };
-        if seg == self.layout && !self.active.is_empty() {
+        if seg == self.layout && self.layout_id != 0 && !force {
             self.pending = None;
-            for id in &self.active {
-                self.panes.get_mut(id).unwrap().suspended = false;
+            for id in self.active.clone() {
+                self.resume(id);
             }
             return;
         }
@@ -663,16 +765,32 @@ impl Frames {
             Some((p, since)) if *p == seg => *since,
             _ => now,
         };
-        if self.active.is_empty() || now >= start + ms(self.cfg.flap_ms) {
+        if force || self.layout_id == 0 || now >= start + ms(self.cfg.flap_ms) {
             self.pending = None;
             self.commit_layout(seg, now, input, ev);
         } else {
-            for id in &self.active {
-                let p = self.panes.get_mut(id).unwrap();
-                let leaf = Leaf { rect: r4(p.rect), kind: (p.kind != FrameKind::Pane) as u8 };
-                p.suspended = !seg.contains(&leaf);
+            for id in self.active.clone() {
+                let p = &self.panes[&id];
+                let leaf = Leaf {
+                    rect: r4(p.rect),
+                    kind: (p.kind != FrameKind::Pane) as u8,
+                };
+                if seg.contains(&leaf) {
+                    self.resume(id);
+                } else {
+                    self.panes.get_mut(&id).unwrap().suspended = true;
+                }
             }
             self.pending = Some((seg, start));
+        }
+    }
+
+    /// End a suspension: what the pane missed is looked at again.
+    fn resume(&mut self, id: FrameId) {
+        let p = self.panes.get_mut(&id).unwrap();
+        if p.suspended {
+            p.suspended = false;
+            p.hashes_valid = false;
         }
     }
 
@@ -712,43 +830,74 @@ impl Frames {
     }
 
     fn hashes_for(&self, rect: Rect, left: u16, right: u16) -> Vec<u64> {
-        let (a, b) = if left + right >= rect.w { (rect.x, rect.right()) } else { (rect.x + left, rect.right() - right) };
-        (rect.y..rect.bottom()).map(|r| self.screen.row_hash(r, a, b)).collect()
+        let (a, b) = if left + right >= rect.w {
+            (rect.x, rect.right())
+        } else {
+            (rect.x + left, rect.right() - right)
+        };
+        (rect.y..rect.bottom())
+            .map(|r| self.screen.row_hash(r, a, b))
+            .collect()
     }
 
     /// The remembered frame that this rectangle of the screen shows.
-    fn recognise(&self, leaf: &Leaf, input: Option<&ScreenInput>, skip: &[FrameId]) -> Option<FrameId> {
+    fn recognise(
+        &self,
+        leaf: &Leaf,
+        input: Option<&ScreenInput>,
+        skip: &[FrameId],
+    ) -> Option<FrameId> {
         let rect = leaf.rect();
         let key = input.and_then(|inp| {
             let pv = self.pane_view(inp, rect);
-            self.detect(&pv).and_then(|s| self.supports[s].frame_key(&pv))
+            self.detect(&pv)
+                .and_then(|s| self.supports[s].frame_key(&pv))
         });
-        let mut best: Option<(FrameId, f32, Duration)> = None;
-        for p in self.panes.values() {
-            if p.state != FrameState::Inactive || p.rect != rect || p.kind != leaf.kind() || skip.contains(&p.id)
-            {
-                continue;
+        // Same rectangle first; else a frame whose rectangle overlaps (a
+        // pane resized keeps its identity).
+        for exact in [true, false] {
+            let mut best: Option<(FrameId, f32, Duration)> = None;
+            for p in self.panes.values() {
+                if p.state != FrameState::Inactive || p.kind != leaf.kind() || skip.contains(&p.id)
+                {
+                    continue;
+                }
+                if exact != (p.rect == rect) {
+                    continue;
+                }
+                if !exact {
+                    let x = p.rect.intersect(&rect);
+                    let small =
+                        (p.rect.w as u32 * p.rect.h as u32).min(rect.w as u32 * rect.h as u32);
+                    if p.kind == FrameKind::Chrome || (x.w as u32 * x.h as u32) * 2 < small {
+                        continue;
+                    }
+                }
+                let score = if p.kind == FrameKind::Chrome {
+                    1.0
+                } else if key.is_some() && p.key == key {
+                    2.0
+                } else if key.is_some() && p.key.is_some() {
+                    0.0
+                } else {
+                    p.ext.share(&self.hashes_for(rect, p.left, p.right))
+                };
+                if score >= self.cfg.identity
+                    && best.is_none_or(|b| score > b.1 || (score == b.1 && p.last_active > b.2))
+                {
+                    best = Some((p.id, score, p.last_active));
+                }
             }
-            let score = if p.kind == FrameKind::Chrome {
-                1.0
-            } else if key.is_some() && p.key == key {
-                2.0
-            } else if key.is_some() && p.key.is_some() {
-                0.0
-            } else {
-                p.ext.share(&self.hashes_for(rect, p.left, p.right))
-            };
-            if score >= self.cfg.identity
-                && best.is_none_or(|b| score > b.1 || (score == b.1 && p.last_active > b.2))
-            {
-                best = Some((p.id, score, p.last_active));
+            if best.is_some() {
+                return best.map(|b| b.0);
             }
         }
-        best.map(|b| b.0)
+        None
     }
 
-    fn attach(&mut self, id: FrameId, now: Duration, ev: &mut Vec<FrameEvent>) {
+    fn attach(&mut self, id: FrameId, rect: Rect, now: Duration, ev: &mut Vec<FrameEvent>) {
         let p = self.panes.get_mut(&id).unwrap();
+        p.rect = rect;
         p.state = FrameState::Candidate;
         p.since = now;
         p.suspended = false;
@@ -793,31 +942,39 @@ impl Frames {
         ev: &mut Vec<FrameEvent>,
     ) {
         let old = std::mem::take(&mut self.active);
-        let mut active: Vec<FrameId> = Vec::with_capacity(seg.len());
-        let mut fresh: Vec<FrameEvent> = Vec::new();
-        for leaf in &seg {
-            let keep = old.iter().copied().find(|id| {
-                let p = &self.panes[id];
-                p.rect == leaf.rect() && p.kind == leaf.kind() && !active.contains(id)
-            });
-            if let Some(id) = keep {
-                self.panes.get_mut(&id).unwrap().suspended = false;
-                active.push(id);
-            } else if let Some(id) = self.recognise(leaf, input, &active) {
-                self.attach(id, now, &mut fresh);
-                active.push(id);
-            } else {
-                let id = self.new_pane(leaf, now);
-                fresh.push(FrameEvent::Added { frame: id });
-                active.push(id);
-            }
-        }
+        // Panes whose rectangle is gone leave first: a new leaf may take
+        // their identity.
+        let mut kept: Vec<FrameId> = Vec::new();
         for id in old {
-            if !active.contains(&id) {
+            let p = &self.panes[&id];
+            let leaf = Leaf {
+                rect: r4(p.rect),
+                kind: (p.kind != FrameKind::Pane) as u8,
+            };
+            if seg.contains(&leaf) && !kept.iter().any(|k| self.panes[k].rect == p.rect) {
+                kept.push(id);
+            } else {
                 self.deactivate(id, now, ev);
             }
         }
-        ev.append(&mut fresh);
+        let mut active: Vec<FrameId> = Vec::with_capacity(seg.len());
+        for leaf in &seg {
+            let keep = kept.iter().copied().find(|id| {
+                let p = &self.panes[id];
+                p.rect == leaf.rect() && p.kind == leaf.kind()
+            });
+            if let Some(id) = keep {
+                self.resume(id);
+                active.push(id);
+            } else if let Some(id) = self.recognise(leaf, input, &active) {
+                self.attach(id, leaf.rect(), now, ev);
+                active.push(id);
+            } else {
+                let id = self.new_pane(leaf, now);
+                ev.push(FrameEvent::Added { frame: id });
+                active.push(id);
+            }
+        }
         self.active = active;
         self.layout_id = match self.layouts.iter().position(|l| *l == seg) {
             Some(i) => i as u32 + 1,
@@ -827,7 +984,9 @@ impl Frames {
             }
         };
         self.layout = seg;
-        ev.push(FrameEvent::Layout { layout: self.layout_id });
+        ev.push(FrameEvent::Layout {
+            layout: self.layout_id,
+        });
         self.prune(ev);
     }
 
@@ -868,10 +1027,12 @@ impl Frames {
                 ok = digits > 0 && ch == ' ';
                 break;
             }
-            let numbered = (ok || (digits > 0 && line.text.trim_end_matches(' ').chars().count() == end as usize))
-                && digits > 0;
+            let numbered = digits > 0
+                && (ok || line.text.trim_end_matches(' ').chars().count() == end as usize);
             run = match run {
-                Some((first, n0, e, len)) if numbered && e == end && n == n0 + (i - first) as i64 => {
+                Some((first, n0, e, len))
+                    if numbered && e == end && n == n0 + (i - first) as i64 =>
+                {
                     Some((first, n0, e, len + 1))
                 }
                 _ if numbered => Some((i, n, end, 1)),
@@ -900,7 +1061,9 @@ impl Frames {
         chrome_changed: bool,
         ev: &mut Vec<FrameEvent>,
     ) {
-        let Some(mut p) = self.panes.remove(&id) else { return };
+        let Some(mut p) = self.panes.remove(&id) else {
+            return;
+        };
         if p.suspended {
             self.panes.insert(id, p);
             return;
@@ -921,7 +1084,9 @@ impl Frames {
             && (dirty || p.fresh)
         {
             let pv = self.pane_view(inp, p.rect);
-            if p.support_at.is_none_or(|t| now >= t + Duration::from_secs(1)) {
+            if p.support_at
+                .is_none_or(|t| now >= t + Duration::from_secs(1))
+            {
                 p.support = self.detect(&pv);
                 p.support_at = Some(now);
                 if let Some(s) = p.support {
@@ -961,8 +1126,11 @@ impl Frames {
             if width == p.left {
                 p.gutter_cand = (width, 0);
             } else {
-                p.gutter_cand =
-                    if p.gutter_cand.0 == width { (width, p.gutter_cand.1 + 1) } else { (width, 1) };
+                p.gutter_cand = if p.gutter_cand.0 == width {
+                    (width, p.gutter_cand.1 + 1)
+                } else {
+                    (width, 1)
+                };
                 if p.ext.lines.is_empty() || p.gutter_cand.1 >= 2 {
                     p.left = width;
                     p.ext.reset_view();
@@ -974,11 +1142,17 @@ impl Frames {
 
         // Row hashes of the content columns.
         let (a, b) = {
-            let (l, r) = if p.left + p.right >= p.rect.w { (0, 0) } else { (p.left, p.right) };
+            let (l, r) = if p.left + p.right >= p.rect.w {
+                (0, 0)
+            } else {
+                (p.left, p.right)
+            };
             (p.rect.x + l, p.rect.right() - r)
         };
         if !p.hashes_valid || p.hashes.len() != p.rect.h as usize {
-            p.hashes = (p.rect.y..p.rect.bottom()).map(|r| self.screen.row_hash(r, a, b)).collect();
+            p.hashes = (p.rect.y..p.rect.bottom())
+                .map(|r| self.screen.row_hash(r, a, b))
+                .collect();
             p.hashes_valid = true;
         } else {
             for r in 0..p.rect.h {
@@ -1017,7 +1191,9 @@ impl Frames {
             line: &line,
             width: b - a,
             seed,
-            cursor_row: rect.contains(cur.0, cur.1).then(|| (cur.1 - rect.y) as usize),
+            cursor_row: rect
+                .contains(cur.0, cur.1)
+                .then(|| (cur.1 - rect.y) as usize),
             hint_oy,
             hint_ox,
             fixed_tb: p.fixed_tb,
@@ -1028,10 +1204,19 @@ impl Frames {
             p.reattach = false;
         }
         let key_changed = p.key.is_some() && new_key.is_some() && p.key != new_key && !p.fresh;
-        let out = if p.fresh || dirty || p.ext.rows.is_empty() { p.ext.observe(&obs) } else { Outcome::Same };
+        let out = if p.fresh || dirty || p.ext.rows.is_empty() {
+            p.ext.observe(&obs)
+        } else {
+            Outcome::Same
+        };
         p.fresh = false;
         for s in p.ext.shifts.drain(..) {
-            ev.push(FrameEvent::Shift { frame: id, from: s.from, to: s.to, dy: s.dy });
+            ev.push(FrameEvent::Shift {
+                frame: id,
+                from: s.from,
+                to: s.to,
+                dy: s.dy,
+            });
         }
         match out {
             Outcome::Scroll { dx, dy } => ev.push(FrameEvent::Scroll { frame: id, dx, dy }),
@@ -1050,13 +1235,20 @@ impl Frames {
         }
 
         // The pane shows something else entirely.
-        let leaf = Leaf { rect: r4(p.rect), kind: 0 };
+        let leaf = Leaf {
+            rect: r4(p.rect),
+            kind: 0,
+        };
         let same_key = p.key.is_some() && p.key == new_key;
         self.panes.insert(id, p);
-        let other = if same_key { None } else { self.recognise(&leaf, input, &self.active) };
+        let other = if same_key {
+            None
+        } else {
+            self.recognise(&leaf, input, &self.active)
+        };
         let next = if let Some(other) = other {
             self.deactivate(id, now, ev);
-            self.attach(other, now, ev);
+            self.attach(other, leaf.rect(), now, ev);
             Some(other)
         } else if key_changed || (chrome_changed && !same_key) {
             self.deactivate(id, now, ev);
@@ -1091,7 +1283,11 @@ impl Surfaces for Frames {
             return Some(SurfaceInfo {
                 id,
                 kind: FrameKind::Raw,
-                state: if ready { FrameState::Stable } else { FrameState::Candidate },
+                state: if ready {
+                    FrameState::Stable
+                } else {
+                    FrameState::Candidate
+                },
                 rect: Rect::new(0, 0, self.screen.cols, self.screen.rows),
                 origin: FramePos::default(),
                 usable: ready,
@@ -1113,17 +1309,29 @@ impl Surfaces for Frames {
             FrameSel::Id(id) => return (*id == RAW || self.panes.contains_key(id)).then_some(*id),
             FrameSel::Name(n) => n.as_str(),
         };
-        let panes = || self.active.iter().map(|id| &self.panes[id]).filter(|p| p.kind == FrameKind::Pane);
+        let panes = || {
+            self.active
+                .iter()
+                .map(|id| &self.panes[id])
+                .filter(|p| p.kind == FrameKind::Pane)
+        };
         let area = |p: &Pane| p.rect.w as u32 * p.rect.h as u32;
         match name {
             "raw" => Some(RAW),
             "active" => {
                 let (c, r) = (self.cursor.col, self.cursor.row);
-                Some(panes().filter(|p| p.rect.contains(c, r)).min_by_key(|p| area(p)).map_or(RAW, |p| p.id))
+                Some(
+                    panes()
+                        .filter(|p| p.rect.contains(c, r))
+                        .min_by_key(|p| area(p))
+                        .map_or(RAW, |p| p.id),
+                )
             }
-            "largest" => {
-                Some(panes().max_by_key(|p| (area(p), std::cmp::Reverse(p.id))).map_or(RAW, |p| p.id))
-            }
+            "largest" => Some(
+                panes()
+                    .max_by_key(|p| (area(p), std::cmp::Reverse(p.id)))
+                    .map_or(RAW, |p| p.id),
+            ),
             "quietest" => Some(
                 panes()
                     .filter(|p| self.usable(p))
@@ -1145,7 +1353,14 @@ impl Surfaces for Frames {
         self.try_find(id, query, known).unwrap_or_default()
     }
 
-    fn place(&self, id: FrameId, w: u16, h: u16, prefer: Prefer, taken: &[Rect]) -> Option<(u16, u16)> {
+    fn place(
+        &self,
+        id: FrameId,
+        w: u16,
+        h: u16,
+        prefer: Prefer,
+        taken: &[Rect],
+    ) -> Option<(u16, u16)> {
         let view = self.heat(id)?;
         let best = view.best(w, h, prefer, taken)?;
         let now = self.now;
@@ -1156,7 +1371,9 @@ impl Surfaces for Frames {
             if taken.iter().any(|t| t.intersects(&r)) {
                 continue;
             }
-            let Some(current) = view.score(e.pos.0, e.pos.1, w, h, prefer) else { continue };
+            let Some(current) = view.score(e.pos.0, e.pos.1, w, h, prefer) else {
+                continue;
+            };
             e.used = now;
             if (best.0, best.1) == e.pos || best.2 <= current + self.cfg.replace_margin {
                 e.better_since = None;
@@ -1169,7 +1386,11 @@ impl Surfaces for Frames {
             }
             return Some(e.pos);
         }
-        entries.push(Placed { pos: (best.0, best.1), better_since: None, used: now });
+        entries.push(Placed {
+            pos: (best.0, best.1),
+            better_since: None,
+            used: now,
+        });
         Some((best.0, best.1))
     }
 
