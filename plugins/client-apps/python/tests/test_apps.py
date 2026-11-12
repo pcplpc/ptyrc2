@@ -249,6 +249,10 @@ def test_flower_pool() -> None:
     assert flower.pool(rows, ["over", "gone"], 2, rng)[0] == "over"
     assert flower.pool(rows, ["over", "gone"], 2, rng)[1] != "gone"
     assert flower.pool([""], ["over"], 3, rng) == []
+    # Cut to `size`, the oldest kept; `avoid` not drawn.
+    assert flower.pool(rows, ["over", "quick", "fox"], 1, rng) == ["over"]
+    for _ in range(10):
+        assert "over" not in flower.pool(rows, [], 4, rng, ["over"])
 
 
 def test_flower_not_between_words() -> None:

@@ -4,7 +4,8 @@
     ptyrc-app flower                       # one flower, next to "flower"
     ptyrc-app flower --word TODO --count 3
     ptyrc-app flower --count 0             # every match gets one
-    ptyrc-app flower -a                    # next to words of the view
+    ptyrc-app flower -a                    # anywhere: 5 words of the view
+    ptyrc-app flower -a --count 0          # anywhere: 10 to 30 words
 
 The client reads the view twice a second: the matches of `--word`
 (`Frame.find`) and the heat classes (`Frame.heat_classes`). A match
@@ -21,10 +22,12 @@ covers it; with matches to spare, after 20 to 40 s (`LIFE`), and
 another blooms elsewhere. Flowers and bold words hold frame positions:
 they scroll with the text.
 
-`-a`: the words are a pool of 3 to 5 (`POOL`) drawn from the view
-(`pool`): words of 4 letters or more, matched whole. A word leaves the
-pool when it leaves the view or no flower fits next to it; another is
-drawn. `--count` is the size of the pool unless given. No bold.
+`-a`: the words are a pool of `--count` (default `POOL`) drawn from the
+view (`pool`): words of 4 letters or more, matched whole, a flower for
+each. A word leaves the pool when it leaves the view or no flower fits
+next to it, and every `SWAP` seconds the oldest one leaves; another is
+drawn. `--count 0`: the size is drawn from `CROWD` every `RECOUNT`
+seconds. No bold.
 """
 
 from __future__ import annotations
@@ -42,11 +45,14 @@ from ptyrc import Frame, Match, Pilot, Sprite
 from . import _cli
 
 __all__ = [
+    "CROWD",
     "GAP",
     "LIFE",
     "POOL",
+    "RECOUNT",
     "RISE",
     "SHAPES",
+    "SWAP",
     "Colors",
     "Shape",
     "main",
@@ -61,7 +67,10 @@ LIFE = (20.0, 40.0)  # seconds, while matches are left without a flower
 SCAN = 0.5  # seconds between two reads of the view
 STEP = 0.35  # seconds between two growth steps
 HEARTS = "o@*"
-POOL = (3, 5)  # words, with `-a`
+POOL = 5  # words, with `-a`
+CROWD = (10, 30)  # words, with `-a --count 0`
+SWAP = 10.0  # seconds between two changes of the pool, with `-a`
+RECOUNT = 60.0  # seconds between two draws from `CROWD`
 WORD = re.compile(r"[^\W\d_]{4,}")
 
 Rows = tuple[str, ...]
@@ -386,13 +395,19 @@ def covered(flower: Flower, rows: Sequence[str], origin: tuple[int, int]) -> boo
 
 
 def pool(
-    rows: Sequence[str], words: Sequence[str], size: int, rng: random.Random
+    rows: Sequence[str],
+    words: Sequence[str],
+    size: int,
+    rng: random.Random,
+    avoid: Iterable[str] = (),
 ) -> list[str]:
-    """`words` still in `rows`, the view's text, then words drawn at
-    random from it up to `size`. Lower case, 4 letters or more."""
+    """The first `size` of `words` still in `rows`, the view's text, then
+    words drawn at random from it up to `size`, none in `avoid`. Lower
+    case, 4 letters or more."""
     seen = sorted({w.lower() for row in rows for w in WORD.findall(row)})
-    out = [w for w in words if w in seen]
-    rest = [w for w in seen if w not in out]
+    out = [w for w in words if w in seen][:size]
+    avoid = set(avoid)
+    rest = [w for w in seen if w not in out and w not in avoid]
     return out + rng.sample(rest, min(len(rest), max(0, size - len(out))))
 
 
@@ -401,7 +416,10 @@ class Garden:
     """What the app keeps between two scans."""
 
     flowers: list[Flower] = field(default_factory=list)
-    words: list[str] = field(default_factory=list)  # with `-a`
+    words: list[str] = field(default_factory=list)  # with `-a`, oldest first
+    size: int = 0  # of the pool
+    swap: float = 0.0  # time the oldest word leaves
+    recount: float = 0.0  # time `size` is drawn anew, with `--count 0`
 
 
 def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
@@ -409,11 +427,10 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     # Planted on cold cells, a flower is seen on either layer; `--front`
     # keeps it whole when text comes over it before it wilts.
     layer = "front" if args.front else "back"
-    size = rng.randint(*POOL)
     if args.count is None:
-        args.count = size if args.anywhere else 1
+        args.count = POOL if args.anywhere else 1
     frame = _cli.pick(pilot, args.frame)
-    garden = Garden()
+    garden = Garden(size=args.count, swap=time.monotonic() + SWAP)
     scanned = -math.inf
     for _ in _cli.ticks(0.05, seconds):
         now = time.monotonic()
@@ -427,7 +444,7 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
             continue
         scanned = now
         with _cli.in_sight():
-            scan(pilot, frame, garden, args, size, layer, now, rng)
+            scan(pilot, frame, garden, args, layer, now, rng)
 
 
 def scan(
@@ -435,7 +452,6 @@ def scan(
     frame: Frame,
     garden: Garden,
     args: argparse.Namespace,
-    size: int,
     layer: str,
     now: float,
     rng: random.Random,
@@ -444,7 +460,14 @@ def scan(
     origin = frame.origin
     rows = frame.text()
     if args.anywhere:
-        garden.words = pool(rows, garden.words, size, rng)
+        if args.count == 0 and now >= garden.recount:
+            garden.size = rng.randint(*CROWD)
+            garden.recount = now + RECOUNT
+        gone = []
+        if now >= garden.swap:
+            gone, garden.words = garden.words[:1], garden.words[1:]
+            garden.swap = now + SWAP
+        garden.words = pool(rows, garden.words, garden.size, rng, gone)
         if not garden.words:
             return
         words = "|".join(map(re.escape, garden.words))
@@ -461,7 +484,10 @@ def scan(
             if f.key not in by_key or covered(f, rows, origin) or old:
                 wilt(f, now)
     living = [f for f in garden.flowers if f.dies is None]
-    want = len(matches) if args.count == 0 else args.count
+    if args.anywhere:
+        want = garden.size
+    else:
+        want = len(matches) if args.count == 0 else args.count
     free = [m for k, m in by_key.items() if k not in {f.key for f in living}]
     if len(living) >= want or not free:
         return
@@ -504,13 +530,14 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
         "-a",
         "--anywhere",
         action="store_true",
-        help="words drawn from the screen, 3 to 5, in place of --word; no bold",
+        help="draw flowers anywhere: next to words of the screen, renewed",
     )
     out.add_argument(
         "--count",
         type=int,
         metavar="N",
-        help="flowers, 0: one per match [default: 1; with -a, one per word]",
+        help="number of flowers; 0: one per match, with -a 10 to 30"
+        " [default: 1; with -a, 5]",
     )
     out.add_argument("--front", action="store_true", help="over the text")
     out.add_argument("--seed", type=int, help="same seed, same garden")

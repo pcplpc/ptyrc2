@@ -91,3 +91,7 @@ Supersedes `--spawn --rate` above.
 - No `--color`: random sizes and colours.
 - `-a`, `--anywhere`: a pool of words seen on the screen, 3 to 5, and
   flowers next to their matches. No bold then.
+- `-a` draws flowers anywhere: `--count` (number of flowers) is the
+  size of the pool, 5 by default. Every 10 s one word leaves the pool,
+  then another comes in. `-a --count 0`: the size is drawn between 10
+  and 30, periodically.
