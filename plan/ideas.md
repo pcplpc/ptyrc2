@@ -172,9 +172,6 @@ Open, in the frames (`frames/mod.rs`, `frames/ext.rs`):
   needs a prompt submitted to a model. The preset is checked on the home
   screen only. Messages of a transcript are panels too: expect candidate
   panes that come and go while it scrolls.
-- ranger: one pane. The three columns have no border and no backdrop;
-  only a preset can tell them (`plugins/tui-support/ranger`): column
-  widths from the `column_ratios` look of the status rows.
 - less, man: open and segment as one pane; the prompt row is not chrome.
   Paging is in `scripts/e2e-frames.sh`.
 
@@ -190,10 +187,6 @@ Gaps met while writing the apps; none fixed in the core.
 - Built: an effect sees the screen (`Effect::look`: rows of the view,
   cursor). The sand reads its walls there. Left: text only, no styles;
   rows of the view, not of the canvas, when the two differ.
-- vim splits inside a tmux window are one pane. Reproduce:
-  `scripts/demo-frames.sh`, window 1 (`vim -u NONE -N -O a b` in a full
-  tmux window, 120x36). Expected: two panes, key `tmux:1:...`. Observed:
-  one pane `120x35+0+0`, no key, no `vim` support.
 - `less`, page down (space): the view lands on an island (origin
   `0,100000`), `b` brings it back; line scrolls (`j`, `k`) are tracked.
   Frame-anchored sprites stay behind on a page down. `fishes` clamps to
@@ -253,3 +246,19 @@ Built: `screen.wait {idle}`, topics `idle` and `draw`, `visible` and
   unchecked.
 - `scripts/demo-frames.sh` `drawn()` reads `screen`; `visible` is the
   field. Most `demo_until` checks in `demo-apps.sh` evaluate once.
+
+## Presets, third session
+
+Built: `ranger`, `htop`; vim splits in tmux (advice was cleared by a
+tick while a layout was pending). Left:
+
+- A preset cannot split inside another app's pane (ranger, htop in a
+  tmux pane): `segment` per pane.
+- `Tuning.monitor`: a preset declares a pane rewritten in place (htop
+  table, ranger preview hop islands, `0,200000` then `0,400000`, on each
+  whole rewrite; ids and rects hold).
+- ranger: an inverse run inside a text preview is read as a column;
+  `draw_borders` not tried; the preview pane gets a new frame id on the
+  first selection change.
+- glances has no preset. htop menus (sort, setup) are left to the
+  generic segmentation.

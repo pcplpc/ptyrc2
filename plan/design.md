@@ -339,6 +339,8 @@ Further rules, from real apps:
   changed, when the title or the layout changed, else once a second; a
   preset found is held 4 s and asked (chrome, hint, key) on every change.
   A preset that knows the whole screen may segment on any change.
+- Advice asked of the presets for a pending layout is kept until the
+  layout is committed or replaced; ticks do not clear it.
 - When nothing aligns, the emulator's scroll counts are trusted only if
   rows entered the host scrollback (a shell printing a lot at once).
 - A pane replaced whole twice within 3 s is a monitor (htop): rewritten
@@ -574,9 +576,16 @@ pub trait DrawExt: Send {
 ```
 
 A `TuiSupport` is consulted for a pane (and for the whole screen) when its
-`detect` is at least 0.5. First: `vim`, `tmux`, `agent-tui` (the family of
-coding-agent TUIs: a prompt box, rounded, between rules or a panel edged
-by `┃`, under a streaming transcript). First draw
+`detect` is at least 0.5. Presets: `tmux`, `vim`, `ranger`, `htop`, `agent-tui` (the
+family of coding-agent TUIs: a prompt box, rounded, between rules or a
+panel edged by `┃`, under a streaming transcript). `ranger`: columns
+from the selected entries (inverse runs), a column without one takes
+what is left; title and status rows chrome; main column keyed
+`ranger:<dir>`, hinted by the selected index. `htop`: main screen only
+(`F1Help F2Setup`); meters `htop:meters` and table `htop:processes`
+around the header row, function bar chrome; no learned chrome in the
+table. A preset segments only the whole screen; inside another app's
+pane it is detected and keyed, not split. First draw
 extensions: `shapes` (line, rect, circle, ellipse), `bigtext` (block
 letters). A draw extension refuses a parameter of the wrong type.
 
