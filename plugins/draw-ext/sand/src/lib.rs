@@ -6,7 +6,7 @@
 //!
 //! Effect `sand`, params:
 //!
-//! - `rate`: grains per second (default 120).
+//! - `rate`: grains per second (default 60).
 //! - `cursor`: the spout is over the cursor's column (default false).
 //! - `colors`: strata; the stream goes from one to the next and around
 //!   (default: sand tones).
@@ -80,7 +80,7 @@ impl Default for Params {
         let rgb = |v: u32| ColorSpec(Color::Rgb((v >> 16) as u8, (v >> 8) as u8, v as u8));
         Params {
             walls: Vec::new(),
-            rate: 120.0,
+            rate: 60.0,
             cursor: false,
             colors: [
                 0xe8c98a, 0xd9a65a, 0xc47f3c, 0xa65a32, 0xc9825e, 0xe6b89a, 0xf0dcb4, 0xcdb27a,

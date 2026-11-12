@@ -93,7 +93,7 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
     """`seconds`: stop after this long (tests); else until interrupted."""
     out = _cli.parser("sand", "Sand falling in an idle pane.", frame="idle")
     out.add_argument(
-        "--rate", type=float, default=120.0, help="grains per second [default: 120]"
+        "--rate", type=float, default=60.0, help="grains per second [default: 60]"
     )
     out.add_argument(
         "--cursor",
