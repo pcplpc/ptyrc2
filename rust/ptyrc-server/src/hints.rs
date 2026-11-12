@@ -112,14 +112,22 @@ fn bad_params(engine: &ScreenEngine, error: &mut RpcError) -> Option<String> {
         let name = rest.split(" (").next().unwrap_or(rest);
         let layers = engine.scene.layers();
         error.message = format!("bad layer: {name}");
+        let fixed = ptyrc_core::scene::Layer::NAMES;
+        let declared: Vec<String> = layers
+            .iter()
+            .filter(|(n, _)| !fixed.iter().any(|(f, _)| f == n))
+            .map(|(n, z)| format!("{n} ({z})"))
+            .collect();
         return Some(format!(
-            "{}layers: {}; or an integer other than 0; `layer.define` declares a name",
+            "{}layers: wallpaper, back, front, hud{}{}, or an integer other than 0; \
+             `layer.define` declares a name",
             suggest::did_you_mean(name, layers.iter().map(|(n, _)| n.as_str())),
-            layers
-                .iter()
-                .map(|(n, z)| format!("{n} ({z})"))
-                .collect::<Vec<_>>()
-                .join(", ")
+            if declared.is_empty() {
+                ""
+            } else {
+                "; declared: "
+            },
+            declared.join(", ")
         ));
     }
     if message.contains("untagged enum Anchor") {

@@ -773,7 +773,7 @@ fn a_declared_layer_name_is_used_and_hinted() {
     let hint = error.hint.unwrap();
     assert!(hint.starts_with("did you mean stage?"), "{hint}");
     assert!(
-        hint.contains("stage (-50)") && hint.contains("hud (100)"),
+        hint.contains("declared: stage (-50)") && hint.contains("back, front"),
         "{hint}"
     );
     for params in [

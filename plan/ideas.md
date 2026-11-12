@@ -318,13 +318,8 @@ Left:
 Built: host colours (OSC 10, 11), `alpha`, `wallpaper` and `hud` (see
 `design.md`). Left:
 
-- The named layers are a fixed table; a client cannot declare names.
-- An opaque back colour is still hidden under an app panel; only a
-  glaze shows there. A back glyph on an inverse app cell does not fade.
 - A lone ESC as the last byte of a read is forwarded, not held: a reply
   split exactly there reaches the app.
-- No event when the host colours change; no method to set them at run
-  time.
 - Draw extensions and effects take `alpha` only through the sprite
   fields. Mixes are linear in sRGB.
 
@@ -448,3 +443,46 @@ on the heat; `snow` (see `design.md`, "Effects"). Left:
   `snow.py` repeats the loop of `sand.follow` to send its gusts between
   two events. `Sprite.tune(params)` in the Python pilot
   would spare `update(effect={"name": ..., "params": ...})`.
+
+## Effects and layers, fifth session, second round
+
+Built (see `design.md`, "Rendering", "Effects", "Layers"):
+
+- `Effect::shift`; `Under::row` over `Surfaces::ink_row`: the rows a
+  frame remembers out of the view. Sand: a world of the canvas and up
+  to 16 remembered rows on each side, simulated; grains kept by frame
+  cell when they leave by any side (1024 rows of 1024 cells). Snow:
+  `shift`, a bound in columns.
+- `panel`: a sprite clipped to a backdrop, its opaque `bg` laid on it.
+  A back glyph fades on an inverse cell. `layer.define`, `layer.list`.
+- `session.colors`, topic `colors`.
+- A scroll unpaints only the rows that leave for the scrollback.
+  `scripts/e2e-render.sh flicker`: per effect the host log replayed,
+  cells written against cells changed (`E2E_VERBOSE=1` prints them).
+  Measured, 3 s at 60x16: static, 0 wasted of 274 to 7849 written for
+  sand, rain, snow, confetti; scrolling at 20 lines a second, sand
+  1297 wasted of 5371 before, 0 of 4338 after; confetti 17 of 7925
+  (cells of the row that leaves). Nothing out of an update.
+
+Left:
+
+- No anchor relative to a panel (its rectangle): a sprite on a panel
+  is a view-sized canvas clipped to it. `panel` cannot be unset by
+  `draw.update`. No `--panel` in the CLI, no `Sprite` field in the
+  Python pilot; nor `layer.define` and `session.colors` there
+  (`Pilot.call`).
+- `ink_row` is text only: a remembered underline or line drawn by
+  attribute is not ink. The raw frame remembers nothing. Rows of the
+  view are not in the buffer until committed: `Under::row` gives them
+  from the screen only inside the canvas.
+- Sand: the margin costs steps (a world up to 32 rows taller). Beyond
+  it grains are frozen. Forgotten rows (`FrameEvent::Forgotten`) keep
+  their grains in the attic until it overflows. Rain does nothing
+  with `shift` (it keeps nothing on rows).
+- A declared layer name is not in `draw.list` (the integer is); names
+  are not saved in a tape.
+- `session.colors {ask}` in a host that never answers waits 1 s, as at
+  start; a tape does not record the change.
+- A view-fixed sprite over a scroll is still erased where the scroll
+  took it and painted again: inherent to pass-through.
+- Mixes in linear light: not tried.
