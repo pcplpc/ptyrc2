@@ -1,0 +1,18 @@
+[project]
+name = "ptyrc-apps"
+version = "2.0.0"
+description = "ptyrc client apps: confetti, flower, clock, fishes, snake, sand."
+readme = "README.md"
+requires-python = ">=3.13"
+license = "GPL-3.0-or-later"
+dependencies = ["ptyrc"]
+
+[project.scripts]
+ptyrc-app = "ptyrc_apps.__main__:main"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ptyrc_apps"]
