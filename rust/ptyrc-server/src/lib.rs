@@ -8,18 +8,24 @@
 mod conn;
 pub mod driver;
 pub mod engine;
+mod grab;
 mod hints;
 pub mod host;
 pub mod hostcolors;
 pub mod keys;
+pub mod mouse;
+pub mod player;
 pub mod pty;
+pub mod record;
 mod rpc;
 pub mod screen;
 #[cfg(test)]
 mod screen_tests;
 pub mod start;
 
-pub use driver::{Config, run};
+pub use driver::{Config, replay, run};
 pub use engine::{ConnId, Ctx, Engine, PassThrough, Reply, SessionInfo, Token};
+pub use player::Replay;
+pub use record::Tape;
 pub use screen::ScreenEngine;
 pub use start::{RunError, RunErrorKind};

@@ -140,29 +140,41 @@ struct ViewParams {
     rect: Option<[u16; 4]>,
     #[serde(default)]
     ansi: bool,
+    /// What the host shows: the app and the sprites over it.
+    #[serde(default)]
+    sprites: bool,
+}
+
+/// The grid a view is read from: the app's, or the composed one.
+fn shown(engine: &ScreenEngine, sprites: bool) -> std::borrow::Cow<'_, Grid> {
+    if sprites {
+        std::borrow::Cow::Owned(engine.scene.compose(engine.app.grid(), &engine.frames))
+    } else {
+        std::borrow::Cow::Borrowed(engine.app.grid())
+    }
 }
 
 fn screen_text(engine: &ScreenEngine, params: Value) -> Res {
     let p: ViewParams = parse(params)?;
     let id = frame_of(engine, &p.frame)?;
     let rect = view_rect(engine, id, p.rect)?;
+    let grid = shown(engine, p.sprites);
     let lines = if p.ansi {
-        let all = render_ansi(engine.app.grid(), Some(&engine.app));
-        if rect == engine.app.grid().rect() {
+        let all = render_ansi(&grid, Some(&engine.app));
+        if rect == grid.rect() {
             all
         } else {
             // Styled text of a sub-rect: render a cropped copy.
             let mut crop = Grid::new(rect.w, rect.h);
             for row in 0..rect.h {
                 for col in 0..rect.w {
-                    *crop.cell_mut(col, row) =
-                        engine.app.grid().cell(rect.x + col, rect.y + row).clone();
+                    *crop.cell_mut(col, row) = grid.cell(rect.x + col, rect.y + row).clone();
                 }
             }
             render_ansi(&crop, Some(&engine.app))
         }
     } else {
-        rect_text(engine.app.grid(), rect)
+        rect_text(&grid, rect)
     };
     Ok(json!({"lines": lines, "size": [rect.w, rect.h], "rect": [rect.x, rect.y, rect.w, rect.h]}))
 }
@@ -171,7 +183,7 @@ fn screen_cells(engine: &ScreenEngine, params: Value) -> Res {
     let p: ViewParams = parse(params)?;
     let id = frame_of(engine, &p.frame)?;
     let rect = view_rect(engine, id, p.rect)?;
-    let grid = engine.app.grid();
+    let grid = shown(engine, p.sprites);
     let rows: Vec<Value> = (rect.y..rect.bottom())
         .map(|row| {
             let cells: Vec<&Cell> = (rect.x..rect.right()).map(|c| grid.cell(c, row)).collect();

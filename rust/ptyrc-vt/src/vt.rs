@@ -36,6 +36,10 @@ pub struct Modes {
     pub app_keypad: bool,
     /// Any mouse reporting mode is on.
     pub mouse: bool,
+    /// Only presses are reported (mode 9 alone).
+    pub mouse_press_only: bool,
+    /// Mouse reports in SGR form (1006).
+    pub mouse_sgr: bool,
     pub focus_events: bool,
     /// DECSCUSR parameter, 0 for the default.
     pub cursor_shape: u8,
@@ -58,6 +62,8 @@ impl Default for Modes {
             app_cursor: false,
             app_keypad: false,
             mouse: false,
+            mouse_press_only: false,
+            mouse_sgr: false,
             focus_events: false,
             cursor_shape: 0,
             g0: Charset::Ascii,
@@ -1042,7 +1048,9 @@ impl Vt {
                             self.mouse_bits &= !bit;
                         }
                         self.modes.mouse = self.mouse_bits != 0;
+                        self.modes.mouse_press_only = self.mouse_bits == 1;
                     }
+                    1006 => self.modes.mouse_sgr = on,
                     1004 => self.modes.focus_events = on,
                     47 | 1047 => self.set_alt(on, false),
                     1048 => {

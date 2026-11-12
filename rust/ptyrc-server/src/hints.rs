@@ -8,7 +8,7 @@ use crate::screen::ScreenEngine;
 use ptyrc_proto::{ErrorCode, RpcError, suggest};
 
 /// Every method of the protocol, for the nearest-name hint.
-const METHODS: [&str; 25] = [
+const METHODS: [&str; 34] = [
     "session.info",
     "session.resize",
     "screen.text",
@@ -17,6 +17,15 @@ const METHODS: [&str; 25] = [
     "screen.cursor",
     "screen.wait",
     "input.send",
+    "input.click",
+    "input.grab",
+    "input.release",
+    "tape.status",
+    "tape.step",
+    "tape.seek",
+    "tape.play",
+    "tape.pause",
+    "tape.quit",
     "frame.list",
     "frame.text",
     "frame.heat",

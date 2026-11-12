@@ -163,6 +163,11 @@ pub trait Engine {
         false
     }
 
+    /// What the app asked of the mouse.
+    fn mouse_mode(&self) -> crate::mouse::MouseMode {
+        crate::mouse::MouseMode::default()
+    }
+
     /// The default colours of the host: at start, then when the host
     /// tells others.
     fn on_host_colors(&mut self, _colors: ptyrc_core::scene::HostColors, _ctx: &mut Ctx) {}
