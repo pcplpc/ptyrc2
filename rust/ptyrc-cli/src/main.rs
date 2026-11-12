@@ -2,6 +2,8 @@
 //! `ptyrc <verb>`.
 
 mod plugins;
+mod replay;
+mod tools;
 mod verbs;
 
 use clap::{Args, Parser, Subcommand};
@@ -84,13 +86,34 @@ enum Verb {
     Draw(verbs::Draw),
     /// Mirror the remote screen here (^C to leave)
     Show,
+    /// The remote screen here and this keyboard there (ctrl+] to leave)
+    Attach(tools::Attach),
+    /// Take keys from the session's keyboard before the app; print them
+    Grab(tools::Grab),
+    /// Click on a cell, or on text, as the app's mouse mode wants it
+    Click(tools::Click),
+    /// A picture of the screen: SVG, HTML, or text with escapes
+    Shot(tools::Shot),
+    /// What the session shows and its frames, as JSON
+    Snap,
+    /// Replay a tape as a session: every client verb works on it
+    Replay(replay::Replay),
+    /// The clock of a replay: status, step, seek, play, pause, quit
+    Tape {
+        #[command(subcommand)]
+        verb: Option<replay::TapeVerb>,
+    },
     /// Debug tools
     #[command(subcommand)]
     Debug(verbs::Debug),
     /// Print events, one JSON object per line
     Events {
-        /// screen, cursor, frames, input, size, exit [default: all]
+        /// screen, cursor, frames, text, idle, draw, input, size, exit
+        /// [default: all]
         topics: Vec<String>,
+        /// The state now as the first events (cursor, frames, idle, size)
+        #[arg(long)]
+        snapshot: bool,
     },
 }
 
@@ -125,6 +148,12 @@ struct Run {
     /// Quiet time that ends a burst of app output, in milliseconds
     #[arg(long, default_value_t = 1)]
     coalesce_ms: u64,
+    /// Write the session to a tape: `ptyrc replay FILE` plays it again
+    #[arg(long, value_name = "FILE")]
+    record: Option<PathBuf>,
+    /// Record what is typed too (passwords included)
+    #[arg(long, requires = "record")]
+    record_input: bool,
     /// The program and its arguments [default: $SHELL]
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     command: Vec<String>,
@@ -230,7 +259,7 @@ pub fn json_arg(what: &str, text: &str) -> Result<Value, Fail> {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    if !matches!(cli.verb, Verb::Run(_)) {
+    if !matches!(cli.verb, Verb::Run(_) | Verb::Replay(_)) {
         // A client verb piped into `head` ends quietly.
         ptyrc_server::host::default_sigpipe();
     }
@@ -281,8 +310,15 @@ fn run(cli: Cli) -> Result<ExitCode, Fail> {
         Verb::Idle { frame } => verbs::idle(&common, &frame),
         Verb::Draw(verb) => verbs::draw(&common, verb),
         Verb::Show => verbs::show(&common),
+        Verb::Attach(args) => tools::attach(&common, args),
+        Verb::Grab(args) => tools::grab(&common, args),
+        Verb::Click(args) => tools::click(&common, args),
+        Verb::Shot(args) => tools::shot(&common, args),
+        Verb::Snap => replay::snap(&common),
+        Verb::Replay(args) => replay::replay(args),
+        Verb::Tape { verb } => replay::tape(&common, verb),
         Verb::Debug(verb) => verbs::debug(&common, verb),
-        Verb::Events { topics } => verb_events(&common, topics),
+        Verb::Events { topics, snapshot } => verb_events(&common, topics, snapshot),
     }
 }
 
@@ -331,6 +367,8 @@ fn verb_run(args: Run) -> Result<ExitCode, Fail> {
         host_bg: args.host_bg,
         // A transparent stream is not touched: nothing is asked.
         ask_host_colors: !args.transparent,
+        record: args.record,
+        record_input: args.record_input,
     };
     let status = ptyrc_server::run(config, plugins::engine(args.transparent, !args.no_presets))?;
     Ok(ExitCode::from(status.clamp(0, 255) as u8))
@@ -379,14 +417,14 @@ fn verb_ls(common: &Common) -> Result<ExitCode, Fail> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn verb_events(common: &Common, topics: Vec<String>) -> Result<ExitCode, Fail> {
+fn verb_events(common: &Common, topics: Vec<String>, snapshot: bool) -> Result<ExitCode, Fail> {
     let mut client = connect(common)?;
     let topics: Vec<&str> = if topics.is_empty() {
         TOPICS.to_vec()
     } else {
         topics.iter().map(String::as_str).collect()
     };
-    client.subscribe(&topics)?;
+    client.call("subscribe", json!({"topics": topics, "snapshot": snapshot}))?;
     loop {
         match client.next_event(None) {
             Ok(Some(event)) => {

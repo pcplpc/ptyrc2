@@ -3,10 +3,14 @@
 
 use crate::conn::Conn;
 use crate::engine::{ConnId, Ctx, Effects, Engine, Reply, SessionInfo, Token};
+use crate::grab::{self, Grab};
 use crate::host::Host;
 use crate::hostcolors::{Known, QUERY_BG, QUERY_FG, Replies};
 use crate::keys;
+use crate::mouse;
+use crate::player::{Player, Replay, Step};
 use crate::pty::{self, Pty};
+use crate::record::{Record, Recorder};
 use crate::start::{self, RunError, RunErrorKind};
 use ptyrc_proto::envelope::{event, response};
 use ptyrc_proto::session::{self, ENV_SESSION, ENV_SOCKET};
@@ -62,6 +66,10 @@ pub struct Config {
     pub host_fg: Option<ptyrc_vt::Rgb>,
     pub host_bg: Option<ptyrc_vt::Rgb>,
     pub ask_host_colors: bool,
+    /// Write the session to this tape (`record.rs`).
+    pub record: Option<PathBuf>,
+    /// Record what is typed into the app too.
+    pub record_input: bool,
 }
 
 impl Default for Config {
@@ -76,6 +84,8 @@ impl Default for Config {
             host_fg: None,
             host_bg: None,
             ask_host_colors: true,
+            record: None,
+            record_input: false,
         }
     }
 }
@@ -127,7 +137,13 @@ struct Driver {
     cfg: Config,
     info: SessionInfo,
     start: Instant,
-    pty: Pty,
+    /// The app; `None` in a replay.
+    pty: Option<Pty>,
+    recorder: Option<Recorder>,
+    /// The tape of a replay, in place of an app.
+    player: Option<Player>,
+    /// A client holds keys of the host keyboard.
+    grab: Option<Grab>,
     /// The pty returned end of file or EIO.
     pty_eof: bool,
     /// Bytes waiting to be typed into the app.
@@ -152,10 +168,68 @@ struct Driver {
     replies_until: Option<Duration>,
 }
 
+/// Name the session and listen on its socket.
+fn bind_session(cfg: &Config) -> Result<(String, PathBuf, UnixListener), RunError> {
+    let name = cfg
+        .name
+        .clone()
+        .unwrap_or_else(|| std::process::id().to_string());
+    if !session::valid_name(&name) {
+        return Err(
+            RunError::new(RunErrorKind::Usage, format!("bad session name: {name}")).with_hint(
+                "a name is made of letters, digits, `.`, `_`, `-`, and does not start with `.`",
+            ),
+        );
+    }
+    let dir = session::ensure_runtime_dir().map_err(|e| {
+        RunError::new(
+            RunErrorKind::Session,
+            format!(
+                "no socket directory {}: {}",
+                session::runtime_dir().display(),
+                start::describe(&e)
+            ),
+        )
+        .with_hint("XDG_RUNTIME_DIR must be a directory of yours, closed to others")
+    })?;
+    let socket = session::socket_path(&name);
+    if socket.exists() {
+        if session::is_live(&socket) {
+            return Err(RunError::new(
+                RunErrorKind::Session,
+                format!("session {name} is already running"),
+            )
+            .with_hint(format!(
+                "choose another --name, or pilot it: ptyrc -s {name} text"
+            )));
+        }
+        fs::remove_file(&socket)?;
+    }
+    let bind = |e: io::Error| {
+        RunError::new(
+            RunErrorKind::Session,
+            format!("no socket in {}: {}", dir.display(), start::describe(&e)),
+        )
+    };
+    let listener = UnixListener::bind(&socket).map_err(bind)?;
+    fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))?;
+    listener.set_nonblocking(true)?;
+    Ok((name, socket, listener))
+}
+
 /// Run a session to its end: spawn the app, serve, return its exit status
 /// (128 + signal when killed).
 pub fn run(cfg: Config, mut engine: Box<dyn Engine>) -> Result<i32, RunError> {
     let mut driver = Driver::start(cfg)?;
+    let result = driver.serve(engine.as_mut());
+    let status = driver.finish(engine.as_mut(), result.as_ref().ok().copied());
+    result.and(Ok(status)).map_err(RunError::from)
+}
+
+/// Replay a tape in place of an app: a headless session whose clock is
+/// the tape's. Returns the status the tape ended with.
+pub fn replay(cfg: Config, replay: Replay, mut engine: Box<dyn Engine>) -> Result<i32, RunError> {
+    let mut driver = Driver::start_replay(cfg, replay)?;
     let result = driver.serve(engine.as_mut());
     let status = driver.finish(engine.as_mut(), result.as_ref().ok().copied());
     result.and(Ok(status)).map_err(RunError::from)
@@ -187,50 +261,7 @@ impl Driver {
                 .with_hint("ptyrc run -- CMD [ARG...]"));
         };
         start::check_command(program)?;
-        let name = cfg
-            .name
-            .clone()
-            .unwrap_or_else(|| std::process::id().to_string());
-        if !session::valid_name(&name) {
-            return Err(
-                RunError::new(RunErrorKind::Usage, format!("bad session name: {name}")).with_hint(
-                    "a name is made of letters, digits, `.`, `_`, `-`, and does not start with `.`",
-                ),
-            );
-        }
-        let dir = session::ensure_runtime_dir().map_err(|e| {
-            RunError::new(
-                RunErrorKind::Session,
-                format!(
-                    "no socket directory {}: {}",
-                    session::runtime_dir().display(),
-                    start::describe(&e)
-                ),
-            )
-            .with_hint("XDG_RUNTIME_DIR must be a directory of yours, closed to others")
-        })?;
-        let socket = session::socket_path(&name);
-        if socket.exists() {
-            if session::is_live(&socket) {
-                return Err(RunError::new(
-                    RunErrorKind::Session,
-                    format!("session {name} is already running"),
-                )
-                .with_hint(format!(
-                    "choose another --name, or pilot it: ptyrc -s {name} text"
-                )));
-            }
-            fs::remove_file(&socket)?;
-        }
-        let bind = |e: io::Error| {
-            RunError::new(
-                RunErrorKind::Session,
-                format!("no socket in {}: {}", dir.display(), start::describe(&e)),
-            )
-        };
-        let listener = UnixListener::bind(&socket).map_err(bind)?;
-        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))?;
-        listener.set_nonblocking(true)?;
+        let (name, socket, listener) = bind_session(&cfg)?;
 
         // From here the socket file exists: remove it on any failure.
         let built = (|| {
@@ -258,11 +289,24 @@ impl Driver {
             if std::env::var_os("TERM").is_none() {
                 env.push(("TERM".to_string(), "xterm-256color".to_string()));
             }
+            let recorder = match &cfg.record {
+                Some(path) => Some(
+                    Recorder::create(path, (cols, rows), &cfg.argv, cfg.record_input).map_err(
+                        |e| {
+                            RunError::new(
+                                RunErrorKind::Usage,
+                                format!("no tape {}: {}", path.display(), start::describe(&e)),
+                            )
+                        },
+                    )?,
+                ),
+                None => None,
+            };
             let pty = pty::spawn(&cfg.argv, &env, cols, rows)
                 .map_err(|e| start::exec_error(program, &e))?;
-            Ok::<_, RunError>((signals, host, pty, cols, rows))
+            Ok::<_, RunError>((signals, host, pty, cols, rows, recorder))
         })();
-        let (signals, host, pty, cols, rows) = match built {
+        let (signals, host, pty, cols, rows, recorder) = match built {
             Ok(parts) => parts,
             Err(e) => {
                 let _ = fs::remove_file(&socket);
@@ -285,7 +329,10 @@ impl Driver {
             cfg,
             info,
             start: Instant::now(),
-            pty,
+            pty: Some(pty),
+            recorder,
+            player: None,
+            grab: None,
             pty_eof: false,
             pty_queue: Vec::new(),
             host,
@@ -305,8 +352,92 @@ impl Driver {
         })
     }
 
+    fn start_replay(cfg: Config, replay: Replay) -> Result<Driver, RunError> {
+        let (name, socket, listener) = bind_session(&cfg)?;
+        let signals = match Signals::install() {
+            Ok(signals) => signals,
+            Err(e) => {
+                let _ = fs::remove_file(&socket);
+                return Err(e.into());
+            }
+        };
+        let (cols, rows) = replay.tape.size;
+        let info = SessionInfo {
+            name,
+            socket,
+            argv: replay.tape.argv.clone(),
+            pid: 0,
+            cols,
+            rows,
+            headless: true,
+        };
+        let colors = Known::new(cfg.host_fg, cfg.host_bg);
+        Ok(Driver {
+            stdin_open: false,
+            cfg,
+            info,
+            start: Instant::now(),
+            after: Vec::new(),
+            pty: None,
+            recorder: None,
+            player: Some(Player::new(replay)),
+            grab: None,
+            pty_eof: true,
+            pty_queue: Vec::new(),
+            host: Host::headless(None),
+            signals,
+            listener,
+            conns: BTreeMap::new(),
+            topics: HashSet::new(),
+            pending: HashMap::new(),
+            next_conn: 1,
+            next_token: 1,
+            repaint: false,
+            exit_status: None,
+            colors,
+            replies: Replies::default(),
+            replies_until: None,
+        })
+    }
+
+    /// Monotonic time: since the start, or the tape's in a replay.
     fn now(&self) -> Duration {
-        self.start.elapsed()
+        match &self.player {
+            Some(player) => player.now(),
+            None => self.start.elapsed(),
+        }
+    }
+
+    /// Feed what the tape holds up to its present time.
+    fn play_tape(&mut self, engine: &mut dyn Engine) -> io::Result<()> {
+        loop {
+            let Some(player) = &mut self.player else {
+                return Ok(());
+            };
+            match player.step() {
+                Step::Feed(Record::Output(burst)) => {
+                    let now = self.now();
+                    let mut out = Vec::with_capacity(burst.len() + 256);
+                    hook!(self, now, |ctx| engine.on_burst(&burst, now, &mut out, ctx));
+                }
+                Step::Feed(Record::Resize(cols, rows)) => self.resize(engine, cols, rows)?,
+                Step::Feed(_) => {}
+                Step::Paused => {
+                    let status = player.status_json();
+                    for token in std::mem::take(&mut player.waiters) {
+                        if let Some((conn, id)) = self.pending.remove(&token) {
+                            self.respond(conn, &id, Ok(status.clone()));
+                        }
+                    }
+                    return Ok(());
+                }
+                Step::Done => {
+                    self.exit_status = Some(player.status);
+                    return Ok(());
+                }
+                Step::Wait => return Ok(()),
+            }
+        }
     }
 
     fn hello(&self) -> Value {
@@ -330,6 +461,7 @@ impl Driver {
         hook!(self, self.now(), |ctx| engine.on_host_colors(colors, ctx));
         self.ask_host_colors()?;
         loop {
+            self.play_tape(engine)?;
             // Tick: deadline passed, or repaint asked.
             let now = self.now();
             let wake = engine.next_wake(now);
@@ -355,6 +487,19 @@ impl Driver {
             }
             let timeout = if self.repaint {
                 Some(Duration::ZERO)
+            } else if let Some(player) = &mut self.player {
+                // Tape time: nothing is due while paused; a tape run
+                // without waiting moves its clock in place of sleeping.
+                let wake = match (engine.next_wake(now), player.due()) {
+                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (a, b) => a.or(b),
+                };
+                match wake {
+                    Some(at) if !player.paused() => {
+                        Some(player.sleep_until(at).unwrap_or(Duration::ZERO))
+                    }
+                    _ => None,
+                }
             } else {
                 let wake = engine.next_wake(now);
                 let wake = match (wake, self.replies_until) {
@@ -414,13 +559,13 @@ impl Driver {
         let stdin = rustix::stdio::stdin();
         let mut srcs = Vec::new();
         let mut fds = Vec::new();
-        if !self.pty_eof {
+        if let Some(pty) = self.pty.as_ref().filter(|_| !self.pty_eof) {
             let mut flags = PollFlags::IN;
             if !self.pty_queue.is_empty() {
                 flags |= PollFlags::OUT;
             }
             srcs.push(Src::Pty);
-            fds.push(PollFd::new(&self.pty.master, flags));
+            fds.push(PollFd::new(&pty.master, flags));
         }
         if self.stdin_open && self.pty_queue.len() < PTY_QUEUE_HIGH {
             srcs.push(Src::Stdin);
@@ -483,8 +628,11 @@ impl Driver {
         let quiet = Duration::from_millis(self.cfg.coalesce_ms);
         let mut burst = Vec::new();
         let mut buf = [0u8; 65536];
+        let Some(pty) = &self.pty else {
+            return burst;
+        };
         while burst.len() < BURST_MAX_BYTES {
-            match rustix::io::read(&self.pty.master, &mut buf) {
+            match rustix::io::read(&pty.master, &mut buf) {
                 Ok(0) => {
                     self.pty_eof = true;
                     break;
@@ -506,7 +654,7 @@ impl Driver {
                         tv_sec: 0,
                         tv_nsec: left.subsec_nanos() as _,
                     };
-                    let mut fds = [PollFd::new(&self.pty.master, PollFlags::IN)];
+                    let mut fds = [PollFd::new(&pty.master, PollFlags::IN)];
                     match poll(&mut fds, Some(&wait)) {
                         Ok(n) if n > 0 => {}
                         Err(Errno::INTR) => {}
@@ -529,6 +677,9 @@ impl Driver {
             return Ok(false);
         }
         let now = self.now();
+        if let Some(recorder) = &mut self.recorder {
+            recorder.output(now, &burst);
+        }
         let mut out = Vec::with_capacity(burst.len() + 256);
         hook!(self, now, |ctx| engine.on_burst(&burst, now, &mut out, ctx));
         self.host.write(&out)?;
@@ -578,6 +729,25 @@ impl Driver {
 
     /// Keyboard bytes on their way to the app.
     fn forward_input(&mut self, bytes: &[u8], engine: &mut dyn Engine) {
+        let held;
+        let bytes = match &self.grab {
+            Some(grab) => {
+                let sorted = grab.sort(bytes);
+                let conn = grab.conn;
+                for (name, key) in sorted.taken {
+                    let data = json!({"key": name, "bytes": keys::base64_encode(&key),
+                                      "grabbed": true});
+                    self.send_event(conn, "input", data);
+                }
+                if sorted.released {
+                    self.grab = None;
+                    self.send_event(conn, "input", json!({"released": "escape"}));
+                }
+                held = sorted.forward;
+                &held[..]
+            }
+            None => bytes,
+        };
         if bytes.is_empty() {
             return;
         }
@@ -619,8 +789,13 @@ impl Driver {
     /// Type queued bytes into the app, as much as the pty takes.
     fn flush_pty(&mut self) {
         let mut sent = 0;
+        let Some(pty) = &self.pty else {
+            // A tape reads nothing.
+            self.pty_queue.clear();
+            return;
+        };
         while sent < self.pty_queue.len() {
-            match rustix::io::write(&self.pty.master, &self.pty_queue[sent..]) {
+            match rustix::io::write(&pty.master, &self.pty_queue[sent..]) {
                 Ok(0) => break,
                 Ok(n) => sent += n,
                 Err(Errno::INTR) => {}
@@ -631,12 +806,16 @@ impl Driver {
                 }
             }
         }
+        if let Some(recorder) = &mut self.recorder {
+            recorder.input(self.start.elapsed(), &self.pty_queue[..sent]);
+        }
         self.pty_queue.drain(..sent);
     }
 
     fn reap(&mut self) -> io::Result<()> {
         if self.exit_status.is_none()
-            && let Some(status) = self.pty.child.try_wait()?
+            && let Some(pty) = &mut self.pty
+            && let Some(status) = pty.child.try_wait()?
         {
             self.exit_status = Some(
                 status
@@ -649,15 +828,17 @@ impl Driver {
 
     /// A fatal signal reached the driver: hang up the app.
     fn terminate(&mut self, signal: i32) -> i32 {
-        if let Some(pid) = Pid::from_raw(self.info.pid as i32) {
+        if let Some(pty) = &mut self.pty
+            && let Some(pid) = Pid::from_raw(self.info.pid as i32)
+        {
             let _ = kill_process_group(pid, Signal::HUP);
             let deadline = Instant::now() + Duration::from_millis(300);
-            while Instant::now() < deadline && matches!(self.pty.child.try_wait(), Ok(None)) {
+            while Instant::now() < deadline && matches!(pty.child.try_wait(), Ok(None)) {
                 std::thread::sleep(Duration::from_millis(10));
             }
-            if matches!(self.pty.child.try_wait(), Ok(None)) {
+            if matches!(pty.child.try_wait(), Ok(None)) {
                 let _ = kill_process_group(pid, Signal::KILL);
-                let _ = self.pty.child.wait();
+                let _ = pty.child.wait();
             }
         }
         128 + signal
@@ -676,9 +857,14 @@ impl Driver {
         }
         self.info.cols = cols;
         self.info.rows = rows;
-        // Also signals SIGWINCH to the app.
-        pty::set_winsize(self.pty.master.as_fd(), cols, rows)?;
         let now = self.now();
+        if let Some(pty) = &self.pty {
+            // Also signals SIGWINCH to the app.
+            pty::set_winsize(pty.master.as_fd(), cols, rows)?;
+        }
+        if let Some(recorder) = &mut self.recorder {
+            recorder.resize(now, cols, rows);
+        }
         let mut out = Vec::new();
         hook!(self, now, |ctx| {
             engine.on_resize(cols, rows, now, &mut out, ctx);
@@ -758,6 +944,13 @@ impl Driver {
             "session.resize" => self.session_resize(&params, engine),
             "subscribe" => self.subscribe(conn, &params, engine),
             "input.send" => self.input_send(&params, engine),
+            "input.click" => self.input_click(&params, engine),
+            "input.grab" => self.input_grab(conn, &params),
+            "input.release" => {
+                self.grab.take_if(|g| g.conn == conn);
+                Ok(json!({}))
+            }
+            _ if method.starts_with("tape.") => self.tape(method, &params, in_batch)?,
             "batch" if in_batch => Err(RpcError::new(ErrorCode::BadRequest, "batch inside batch")),
             "batch" => self.batch(conn, params, engine),
             _ => {
@@ -783,8 +976,12 @@ impl Driver {
         let mut info = self.hello();
         let object = info.as_object_mut().expect("hello is an object");
         object.insert("exited".into(), json!(self.exit_status.is_some()));
+        object.insert("grabbed".into(), json!(self.grab.is_some()));
         if let Value::Object(extras) = engine.session_extras() {
             object.extend(extras);
+        }
+        if let Some(player) = &self.player {
+            object.insert("tape".into(), player.status_json());
         }
         info
     }
@@ -917,11 +1114,170 @@ impl Driver {
         if !given {
             return Err(RpcError::bad_params("one of text, keys, bytes"));
         }
+        self.type_in(bytes)
+    }
+
+    /// Queue bytes for the app, on behalf of a client.
+    fn type_in(&mut self, bytes: Vec<u8>) -> Result<Value, RpcError> {
+        if self.player.is_some() {
+            return Err(RpcError::new(
+                ErrorCode::BadRequest,
+                "a replay takes no input",
+            ));
+        }
         if self.exit_status.is_some() {
             return Err(RpcError::new(ErrorCode::Gone, "the app exited"));
         }
         self.pty_queue.extend(bytes);
         Ok(json!({}))
+    }
+
+    /// A click at a screen cell, in the form the app asked for.
+    fn input_click(&mut self, params: &Value, engine: &dyn Engine) -> Result<Value, RpcError> {
+        let cell = |key: &str| {
+            params
+                .get(key)
+                .and_then(Value::as_u64)
+                .and_then(|n| u16::try_from(n).ok())
+        };
+        let (Some(x), Some(y)) = (cell("x"), cell("y")) else {
+            return Err(RpcError::bad_params("x, y: a screen cell"));
+        };
+        if x >= self.info.cols || y >= self.info.rows {
+            return Err(RpcError::bad_params(format!(
+                "{x},{y} is off the screen ({}x{})",
+                self.info.cols, self.info.rows
+            )));
+        }
+        let button = params
+            .get("button")
+            .map_or(Some("left"), Value::as_str)
+            .filter(|b| mouse::BUTTONS.contains(b))
+            .ok_or_else(|| {
+                RpcError::bad_params("button: no such button")
+                    .with_hint(format!("buttons: {}", mouse::BUTTONS.join(", ")))
+            })?;
+        let mode = engine.mouse_mode();
+        if !mode.on {
+            return Err(RpcError::new(
+                ErrorCode::NotUsable,
+                "the app does not listen to the mouse",
+            )
+            .with_hint("it asked for no mouse reports (modes 9, 1000, 1002, 1003)"));
+        }
+        let bytes = mouse::click(mode, button, x, y).ok_or_else(|| {
+            RpcError::new(
+                ErrorCode::NotUsable,
+                "the app's mouse mode (X10) cannot tell a cell past 222",
+            )
+        })?;
+        self.type_in(bytes)
+    }
+
+    fn input_grab(&mut self, conn: ConnId, params: &Value) -> Result<Value, RpcError> {
+        if self.grab.as_ref().is_some_and(|g| g.conn != conn) {
+            return Err(RpcError::new(
+                ErrorCode::NotUsable,
+                "another client holds the keys",
+            ));
+        }
+        let keys = match params.get("keys") {
+            None | Some(Value::Null) => None,
+            Some(list) => Some(
+                list.as_array()
+                    .and_then(|a| {
+                        a.iter()
+                            .map(|k| k.as_str().map(str::to_string))
+                            .collect::<Option<Vec<_>>>()
+                    })
+                    .ok_or_else(|| RpcError::bad_params("keys: array of key names"))?,
+            ),
+        };
+        for key in keys.iter().flatten() {
+            let known = keys::encode_key(key, false)
+                .is_ok_and(|b| grab::name(&b).as_deref() == Some(key.as_str()));
+            if !known {
+                return Err(RpcError::bad_params(format!("not a key: {key}"))
+                    .with_hint(format!("keys: {}", keys::KEY_NAMES)));
+            }
+        }
+        let escape = match params.get("escape") {
+            None | Some(Value::Null) => grab::ESCAPE,
+            Some(key) => key
+                .as_str()
+                .ok_or_else(|| RpcError::bad_params("escape: a key name"))?,
+        };
+        let grab = Grab::new(conn, keys, escape).map_err(|e| {
+            RpcError::bad_params(e)
+                .with_hint("a named key, as ctrl+] or f12: it never reaches the app")
+        })?;
+        self.grab = Some(grab);
+        Ok(json!({"escape": escape}))
+    }
+
+    /// `tape.*`: the clock of a replay. `None`: answered at the next
+    /// pause.
+    fn tape(
+        &mut self,
+        method: &str,
+        params: &Value,
+        in_batch: bool,
+    ) -> Option<Result<Value, RpcError>> {
+        let Some(player) = &mut self.player else {
+            return Some(Err(RpcError::new(
+                ErrorCode::BadRequest,
+                format!("{method}: this session is not a replay"),
+            )
+            .with_hint("ptyrc run --record FILE -- CMD, then ptyrc replay FILE")));
+        };
+        let seconds = |key: &str| {
+            params
+                .get(key)
+                .and_then(Value::as_f64)
+                .filter(|s| s.is_finite() && *s >= 0.0)
+        };
+        let moved = match method {
+            "tape.status" => return Some(Ok(player.status_json())),
+            "tape.quit" => {
+                self.exit_status = Some(player.status);
+                return Some(Ok(json!({})));
+            }
+            "tape.pause" => {
+                player.pause();
+                return Some(Ok(player.status_json()));
+            }
+            "tape.play" => {
+                if params.get("speed").is_some() && seconds("speed").is_none() {
+                    return Some(Err(RpcError::bad_params("speed: a number, 0 or more")));
+                }
+                player.play(seconds("speed"));
+                return Some(Ok(player.status_json()));
+            }
+            "tape.seek" => match seconds("t") {
+                Some(t) => player.seek(Duration::from_secs_f64(t)),
+                None => Err("t: seconds of tape time".to_string()),
+            },
+            "tape.step" => {
+                let records = params.get("records").map_or(Some(1), Value::as_u64);
+                match records.filter(|n| *n > 0) {
+                    Some(n) => player.step_records(n as usize),
+                    None => Err("records: a count, 1 or more".to_string()),
+                }
+            }
+            _ => return Some(Err(RpcError::unknown_method(method).with_hint(
+                "tape methods: tape.status, tape.step, tape.seek, tape.play, tape.pause, tape.quit",
+            ))),
+        };
+        if let Err(message) = moved {
+            return Some(Err(RpcError::bad_params(message)));
+        }
+        if in_batch {
+            return Some(Ok(json!({})));
+        }
+        let token = Token(self.next_token);
+        self.next_token += 1;
+        player.waiters.push(token);
+        None
     }
 
     fn batch(
@@ -965,6 +1321,13 @@ impl Driver {
         }
     }
 
+    /// An event for one client, subscribed or not.
+    fn send_event(&mut self, conn: ConnId, topic: &str, data: Value) {
+        if let Some(conn) = self.conns.get_mut(&conn) {
+            conn.send(&event(topic, data));
+        }
+    }
+
     fn emit(&mut self, topic: &str, data: Value) {
         if !self.topics.contains(topic) {
             return;
@@ -988,6 +1351,7 @@ impl Driver {
         }
         for id in dead {
             self.conns.remove(&id);
+            self.grab.take_if(|g| g.conn == id);
             self.pending.retain(|_, (conn, _)| *conn != id);
             self.refresh_topics();
             hook!(self, self.now(), |ctx| engine.on_disconnect(id, ctx));
@@ -998,6 +1362,9 @@ impl Driver {
     /// `status`: the app's exit status, or `None` after a driver error.
     fn finish(&mut self, engine: &mut dyn Engine, status: Option<i32>) -> i32 {
         let status = status.unwrap_or(1);
+        if let Some(recorder) = &mut self.recorder {
+            recorder.exit(self.start.elapsed(), status);
+        }
         let mut out = Vec::new();
         hook!(self, self.now(), |ctx| engine.on_exit(&mut out, ctx));
         let _ = self.host.write(&out);

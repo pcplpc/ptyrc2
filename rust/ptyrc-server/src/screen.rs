@@ -669,6 +669,15 @@ impl Engine for ScreenEngine {
         self.app.modes().app_cursor
     }
 
+    fn mouse_mode(&self) -> crate::mouse::MouseMode {
+        let modes = self.app.modes();
+        crate::mouse::MouseMode {
+            on: modes.mouse,
+            press_only: modes.mouse_press_only,
+            sgr: modes.mouse_sgr,
+        }
+    }
+
     fn bracketed_paste(&self) -> bool {
         self.app.modes().bracketed_paste
     }

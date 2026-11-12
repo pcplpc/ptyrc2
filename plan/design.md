@@ -657,6 +657,99 @@ extensions: `shapes` (line, rect, circle, ellipse), `bigtext` (block
 letters), `sand`, `rain` (effects). A draw extension refuses a parameter
 of the wrong type.
 
+## Tools
+
+Debug tools for terminals: a session on tape, hands on a session, a
+picture of it.
+
+### Tapes
+
+`ptyrc run --record FILE` writes the session as it is fed to the engine
+(`ptyrc-server/src/record.rs`). UTF-8 JSON, one object per line; the
+header, then records, `t` in microseconds since the driver started,
+never decreasing:
+
+```
+{"ptyrc":"tape","version":1,"size":[80,24],"argv":["less","f"]}
+{"t":1520,"o":"text"}       a burst of app output, valid UTF-8
+{"t":1520,"ob":"base64"}    a burst that is not
+{"t":9000,"i":"j"}          bytes typed into the app (`ib`); --record-input
+{"t":9100,"size":[100,30]}  a resize
+{"t":9900,"exit":0}         the app exited
+```
+
+A burst is recorded with the time the engine was given. A reader skips
+unknown members and records; another `version` is refused. A write that
+fails ends the recording, not the session.
+
+`ptyrc replay FILE` is a headless session with no app: the tape is fed
+to the same engine, behind the same socket, and the clock of the driver
+is the tape's (`player.rs`). Every method answers as on a live session;
+`input.send` and `input.click` are refused (`bad-request`); sprites are
+drawn; `session.info` has `"tape"`: the status.
+
+- Played: tape time runs at `--speed` tape seconds per second (1).
+- Not waiting (`--speed 0`, a seek): the clock jumps to the next record
+  or to the engine's next deadline, whichever is first. Ticks happen at
+  their deadlines, bursts at their recorded times: the same tape gives
+  the same frames, on any machine.
+- Paused (`--step`, `--until T` reached, `--hold` at the end): the clock
+  stands still, and with it every timer of the driver: nothing settles,
+  no wait times out. A seek past the end of the tape lets time pass
+  with nothing fed.
+- At the end of the tape, not held: the session ends with the status of
+  the tape's `exit` record.
+
+A tape goes forward only. `ptyrc tape` moves a replay: `status`, `step
+[N]`, `seek T`, `play [SPEED]`, `pause`, `quit`. A tape time is seconds,
+`end` or `end+N`.
+
+Snapshot (`ptyrc snap`, `Pilot.snapshot()`): what a session shows and
+how it is segmented, without ids nor times: `{"size","alt_screen",
+"title","cursor":[x,y,visible],"text":[...],"frames":[{"kind","state",
+"usable","rect","origin","extent","key","support"}]}`.
+
+Regression: `ptyrc replay FILE --snap [--at T,...]` prints the snapshots
+at those tape times (default `end+3`), each with its `t`; `--check SNAPS`
+compares with a file written so, at the times it holds, and names each
+difference (`[1].frames[2].origin: expected [0,18], got [0,30]`), status
+1. `rust/ptyrc-cli/tests/tapes/`: `less` (pages, lines, a page back,
+`G`, `g`) and `tmux` (a split, a second window, back), recorded and
+snapped by `scripts/record-tapes.sh`, held by `tests/tapes.rs`. A change
+of the frames that moves a snapshot is read in the diff of the `.snap`.
+
+### Hands
+
+- `ptyrc attach`: the remote screen here (as `show`, with the cursor)
+  and the keys of this terminal there, as bytes. `--detach KEY`
+  (`ctrl+]`) leaves; it is not sent, nor what was typed after it in the
+  same read. The remote size is not changed: a larger remote screen is
+  cut at this terminal's size; `--resize` gives a headless session this
+  terminal's size, once. `--sprites`: what the host shows, looked at
+  every 50 ms.
+- `input.grab`: one client takes keys of the host keyboard before the
+  app: those named, or all. Each key taken is an `input` event for that
+  client alone, subscribed or not: `{"key","bytes","grabbed":true}`,
+  `key` its name as `input.send` takes it, a printable character
+  itself, null for what has no name (a mouse report). Keys not taken go
+  to the app. The escape key (`ctrl+]`, or `escape`: a named key that
+  is not text) always releases: it reaches neither, the client gets
+  `{"released":"escape"}`. A grab ends with `input.release` or with its
+  connection. Keys typed by clients (`input.send`) are never grabbed.
+  One grab at a time (`not-usable` for another client).
+  `scripts/grab-sprite.py`: the arrows move a sprite in vim's pane; vim
+  does not see them.
+- `input.click`: a click at a screen cell, written as the app asked:
+  SGR (1006) or X10 bytes, press and release, press alone under mode 9
+  or for the wheel. `not-usable` when the app asked for no mouse
+  report, or for a cell X10 cannot tell (past 222).
+- `ptyrc shot`: a picture of the screen or of a frame's view: `--svg`
+  (default; one `<text>` per run with its length fixed, wide glyphs
+  alone), `--html` (one `<pre>`), `--ansi`. The app alone, or with
+  `--sprites` what the host shows; default colours are the host's.
+- `screen.text` and `screen.cells` take `"sprites": true`: the composed
+  grid in place of the app's.
+
 ## Protocol
 
 Unix stream socket `$XDG_RUNTIME_DIR/ptyrc/<session>.sock` (directory 0700,
@@ -688,14 +781,22 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 
 | method | params | result |
 |---|---|---|
-| `session.info` | | hello data, `alt_screen`, `title`, `driver_pid`, `headless`, `"host_colors":{"fg","bg","from":{"fg","bg"}}` (`from`: `host`, `option`, `default`) |
+| `session.info` | | hello data, `alt_screen`, `title`, `driver_pid`, `headless`, `grabbed`, `tape` (a replay), `"host_colors":{"fg","bg","from":{"fg","bg"}}` (`from`: `host`, `option`, `default`) |
 | `session.resize` | `size`: `[c, r]` | `{}`; headless only |
-| `screen.text` | `frame`, `rect`, `ansi` | `{"lines":[...],"size":[c,r],"rect":[x,y,w,h]}` |
-| `screen.cells` | `frame`, `rect` | `{"rows":[[run,...],...]}` |
+| `screen.text` | `frame`, `rect`, `ansi`, `sprites` | `{"lines":[...],"size":[c,r],"rect":[x,y,w,h]}` |
+| `screen.cells` | `frame`, `rect`, `sprites` | `{"rows":[[run,...],...]}` |
 | `screen.find` | `pattern`, `regex`, `ignore_case`, `frame`, `known` | `{"matches":[{"frame","x","y","len","text","screen":[c,r]\|null}]}` |
 | `screen.cursor` | `trail` | `{"x","y","visible","frame","pos":[x,y],"trail":[[ms,x,y],...]}`; `frame`: the innermost frame showing it, `pos`: its cell there |
 | `screen.wait` | `pattern` or `stable_ms` or `idle` (or `gone`), `timeout_ms`, `frame` | `{"matched":bool,"match":...}`; with `idle`: `{"matched":true,"match":null,"frame":id,"idle":{"score","idle","free"}}`, the frame name resolved at each look |
 | `input.send` | `text` or `keys` or `bytes` (base64), `paste` | `{}` |
+| `input.click` | `x`, `y` (screen cell), `button`: `left`, `middle`, `right`, `wheel-up`, `wheel-down` | `{}` |
+| `input.grab` | `keys`: names (absent: all), `escape` (`ctrl+]`) | `{"escape":name}` |
+| `input.release` | | `{}` |
+| `tape.status` | | `{"t","end","records","next","paused","speed","done"}`, seconds; a replay only |
+| `tape.step` | `records` (1) | status, once paused there |
+| `tape.seek` | `t`: tape seconds, not before now | status, once paused there |
+| `tape.play`, `tape.pause` | `speed` | status |
+| `tape.quit` | | `{}`; the replay ends |
 | `frame.list` | | `{"frames":[info,...],"layout":id}` |
 | `frame.text` | `frame`, `y0`, `y1` | `{"lines":[...],"y0":n}` remembered buffer; default: the island on screen |
 | `frame.heat` | `frame` | `{"rows":["0123...",...],"classes":["ht.p...",...]}` |
@@ -756,7 +857,12 @@ form exists.
 ```
 ptyrc run [--name N] [--headless --size CxR] [--host-log F]
           [--transparent] [--no-presets] [--coalesce-ms N]
-          [--host-fg COLOR] [--host-bg COLOR] [--] CMD...
+          [--host-fg COLOR] [--host-bg COLOR]
+          [--record FILE [--record-input]] [--] CMD...
+ptyrc replay FILE [--name N] [--speed X] [--until T] [--step] [--hold]
+          [--no-presets] [--snap | --check SNAPS] [--at T,...]
+ptyrc tape [status | step [N] | seek T | play [SPEED] | pause | quit]
+ptyrc snap                        what is shown and the frames, JSON
 ptyrc ls                          sessions
 ptyrc text [-f FRAME] [--ansi]    screen as plain text
 ptyrc find [-E] [-i] PATTERN      matches with coordinates
@@ -771,7 +877,11 @@ ptyrc draw text|ext|effect|exts|rm|ls|clear ...   (sprites persist)
       [--layer back|front|N] [--blend normal|tint] [-z N]
       draw ext --id SPRITE NAME FUNCTION [JSON]   redraw in place
 ptyrc show                        live mirror of the remote screen
-ptyrc events [TOPIC...]           JSON events, one per line
+ptyrc attach [--detach KEY] [--resize] [--sprites]
+ptyrc grab [KEY...] [--escape KEY]   grabbed keys, one JSON line each
+ptyrc click X,Y | --text [-E] [--nth N] PATTERN  [-b BUTTON]
+ptyrc shot [--svg|--html|--ansi] [-f FRAME] [--sprites] [-o FILE]
+ptyrc events [TOPIC...] [--snapshot]   JSON events, one per line
 ptyrc debug overlay frames|heat|off ; ptyrc debug dump
 ptyrc call METHOD [JSON]          raw request
 ```
@@ -795,7 +905,7 @@ Exit status:
 | status | meaning |
 |---|---|
 | 0 | done |
-| 1 | a negative answer: `find` without a match (silent), `wait` timed out (says what was waited for) |
+| 1 | a negative answer: `find` without a match (silent), `wait` timed out (says what was waited for), `click --text` without a match, `replay --check` with a difference (names each) |
 | 2 | usage, or a request that is wrong: a bad key, colour, anchor, position, JSON, method, topic, session name for `run` |
 | 3 | no session to talk to: none, not found, several and none chosen, dead (stale socket, removed), bad name; `run`: the name is taken, no socket directory |
 | 4 | the request names what is not there or not usable: frame, sprite |
@@ -821,7 +931,17 @@ and `Frame.wait_idle(timeout)`: one `screen.wait {idle}`, no polling.
 None on silence; both raise `PtyrcError` (`gone`) on a closed
 connection. Inside `batch()`, `text`, `find`, `sprites` and
 `Sprite.info` return a container filled when the batch is sent.
-`Cursor.pos`. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
+`Cursor.pos`. Tools (`ptyrc/tools.py`):
+`Pilot.locator(pattern)` and `Frame.locator(pattern)` give a `Locator`,
+a place named by the text there and looked up at each use: `.nth(n)`,
+`.right(n)` (from the last cell of the match), `.left(n)` (from the
+first), `.above(n)`, `.below(n)`, then `.wait()`, `.read(width)`,
+`.click()`, `.draw(rows)` (in frame cells), `.pos()`, `.screen()`.
+`Pilot.click`, `Pilot.grab`, `Pilot.release`, `Pilot.shown` (text with
+the sprites), `Pilot.snapshot`; `Pilot.spawn(record=FILE)`,
+`Pilot.replay(FILE)` (paused at the start) and `pilot.tape` (`step`,
+`seek`, `play`, `pause`, `status`, `end`).
+`plugins/client-apps/python`: `ptyrc-apps`, one module per app,
 `python -m ptyrc_apps.<name>` and `ptyrc-app <name>`. Every app takes
 `-s SESSION` and `-f FRAME` and runs until interrupted or the session
 ends (no time limit option; tests pass `main(argv, seconds=...)`); its
@@ -892,6 +1012,8 @@ windows under the driver, one drawing per pane, sand in the idle one.
   for the host.
 - `ptyrc-cli/tests/errors.rs`: every error case of the CLI, message, hint
   and exit status.
+- `ptyrc-cli/tests/tapes.rs`: tapes of real programs replayed against
+  their snapshots; `tests/tools.rs`: grab, click, shot, attach on a pty.
 - Python: `uv run pytest`, against a headless driver.
 - `scripts/e2e-tmux.sh`: the driver inside a detached tmux, `tmux
   capture-pane` is the host's verdict.
