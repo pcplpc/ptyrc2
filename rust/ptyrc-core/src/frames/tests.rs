@@ -13,6 +13,8 @@ struct Sim {
     cursor: (u16, u16),
     alt: bool,
     title: String,
+    /// The app hides the cursor.
+    hidden: bool,
 }
 
 impl Sim {
@@ -27,6 +29,7 @@ impl Sim {
             cursor: (0, 0),
             alt: false,
             title: String::new(),
+            hidden: false,
         }
     }
 
@@ -40,7 +43,7 @@ impl Sim {
         let cursor = Cursor {
             col: self.cursor.0,
             row: self.cursor.1,
-            visible: true,
+            visible: !self.hidden,
             pending_wrap: false,
         };
         let input = ScreenInput {
@@ -1320,6 +1323,7 @@ impl TuiSupport for Fake {
         crate::plugin::Tuning {
             settle_ms: Some(1000),
             commit_ms: None,
+            monitor: false,
         }
     }
 }
@@ -1791,6 +1795,225 @@ fn a_monitor_is_rewritten_in_place() {
     bg(&mut g, Rect::new(0, 23, COLS, 1), 2);
     s.feed(&g, 10);
     assert_ne!(s.pane().id, id);
+}
+
+/// A process monitor: meters, a header bar, a table sorted anew at each
+/// refresh `n`, shown from row `first` of its list.
+fn monitor(n: usize, first: usize) -> Grid {
+    let mut lines: Vec<String> = (0..4)
+        .map(|i| {
+            let load = (n * 37 + i * 11) % 100;
+            format!("  {i}[{:<20}{load:5}.{}%]", "|".repeat(load / 5), n % 10)
+        })
+        .collect();
+    lines.push(format!("  Tasks: {}, {} running", 400 + n, n % 7));
+    lines.push("    PID USER   PRI  VIRT   RES  CPU%  TIME+  Command".into());
+    for k in first..first + 14 {
+        let p = (k * 7 + n * 5) % 23;
+        lines.push(format!(
+            "{:7} user    20 {:5}M {:4}M {:3}.{} 0:{:02}.{:02} proc-{}",
+            1000 + p * 131,
+            100 + p * 17,
+            10 + p * 3,
+            (p * 9 + n) % 100,
+            (p + n) % 10,
+            (p + n) % 60,
+            (p * 3 + n * 7) % 100,
+            p % 9
+        ));
+    }
+    let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+    let mut g = Grid::from_lines(COLS, &refs);
+    bg(&mut g, Rect::new(0, 5, COLS, 1), 2);
+    g
+}
+
+#[test]
+fn a_monitor_keeps_its_frames_from_the_first_refresh() {
+    // No cursor, cells rewritten where they are, the same shape with
+    // other values: the panes are repainted, not replaced.
+    let mut s = Sim::new();
+    s.hidden = true;
+    s.feed(&monitor(0, 0), 10);
+    let ids: Vec<FrameId> = s.panes().iter().map(|p| p.id).collect();
+    let rects = s.rects();
+    assert_eq!(rects, vec![[0, 0, COLS, 5], [0, 6, COLS, 14]]);
+    for n in 1..8 {
+        let ev = s.feed(&monitor(n, 0), 1500);
+        assert!(
+            !ev.iter().any(|e| matches!(
+                e,
+                FrameEvent::Added { .. } | FrameEvent::Jump { .. } | FrameEvent::Scroll { .. }
+            )),
+            "refresh {n}: {ev:?}"
+        );
+        assert_eq!(s.panes().iter().map(|p| p.id).collect::<Vec<_>>(), ids);
+        assert_eq!(s.rects(), rects);
+        assert!(s.panes().iter().all(|p| p.usable && p.origin == [0, 0]));
+    }
+    // What it shows is what is remembered.
+    s.idle(500);
+    let text = s.f.text(ids[1], 0, 1);
+    assert_eq!(text[0], s.f.text(RAW, 6, 7)[0]);
+    // Another document in its place is still another frame.
+    let d = doc(100);
+    s.feed(&view(&d, 0, 20, &[]), 4000);
+    s.idle(300);
+    assert!(s.panes().iter().all(|p| !ids.contains(&p.id)));
+}
+
+#[test]
+fn a_monitor_that_scrolls_its_list_keeps_its_rows() {
+    // The list follows the selection: a scroll of the table by the
+    // emulator, and the rows sorted anew. Rows that did not move are not
+    // chrome.
+    let mut s = Sim::new();
+    s.hidden = true;
+    s.feed(&monitor(0, 0), 10);
+    let rects = s.rects();
+    let table = Rect::new(0, 6, COLS, 14);
+    s.feed(&monitor(1, 0), 1500);
+    let mut first = 0;
+    for n in 2..9 {
+        first += 3;
+        let ev = [VtEvent::Scroll {
+            region: table,
+            dy: -3,
+            scrollback: false,
+        }];
+        s.feed_ev(&monitor(n, first), 1500, &ev);
+        assert_eq!(s.rects(), rects, "refresh {n}");
+        assert!(s.panes().iter().all(|p| p.usable));
+    }
+}
+
+#[test]
+fn rows_the_emulator_scrolled_are_not_chrome() {
+    // A scroll by the emulator over the whole pane; the first rows are
+    // repainted with what they showed (a sticky header would be outside
+    // the region).
+    let mut s = Sim::new();
+    let d = doc(200);
+    let screen = |top: usize| {
+        let mut lines: Vec<&str> = vec![&d[0], &d[1]];
+        lines.extend(d.iter().skip(top + 2).take(18).map(String::as_str));
+        Grid::from_lines(COLS, &lines)
+    };
+    s.settle(&screen(0));
+    let all = Rect::new(0, 0, COLS, 20);
+    for top in 1..6 {
+        let ev = [VtEvent::Scroll {
+            region: all,
+            dy: -1,
+            scrollback: false,
+        }];
+        s.feed_ev(&screen(top), 300, &ev);
+    }
+    assert_eq!(s.pane().rect, [0, 0, COLS, 20]);
+    // Without the emulator's word the same rows are chrome.
+    let mut s = Sim::new();
+    s.settle(&screen(0));
+    for top in 1..6 {
+        s.feed(&screen(top), 300);
+    }
+    assert_eq!(s.pane().rect, [0, 2, COLS, 18]);
+}
+
+struct Declared;
+
+impl TuiSupport for Declared {
+    fn name(&self) -> &'static str {
+        "declared"
+    }
+
+    fn detect(&self, _pane: &PaneView) -> f32 {
+        1.0
+    }
+
+    fn tuning(&self) -> crate::plugin::Tuning {
+        crate::plugin::Tuning {
+            monitor: true,
+            ..Default::default()
+        }
+    }
+}
+
+#[test]
+fn a_preset_declares_a_pane_rewritten_in_place() {
+    // Whole rewrites of other shapes, under a cursor, some of them
+    // shifted: nothing but edits.
+    let mut s = Sim::with(FrameConfig::default(), vec![Box::new(Declared)]);
+    let d = doc(400);
+    s.settle(&view(&d, 0, 20, &[]));
+    let id = s.pane().id;
+    for top in [200, 3, 120, 121, 123, 300] {
+        let ev = s.feed(&view(&d, top, 20, &[]), 700);
+        assert!(
+            !ev.iter().any(|e| matches!(
+                e,
+                FrameEvent::Added { .. }
+                    | FrameEvent::Jump { .. }
+                    | FrameEvent::Scroll { .. }
+                    | FrameEvent::Rect { .. }
+            )),
+            "top {top}: {ev:?}"
+        );
+        let p = s.pane();
+        assert_eq!((p.id, p.origin, p.usable), (id, [0, 0], true));
+    }
+    s.idle(500);
+    assert_eq!(s.f.text(id, 0, 1), vec![d[300].clone()]);
+}
+
+#[test]
+fn rows_under_an_overlay_do_not_vote() {
+    // A palette opens over the only rows that hold text: the pane under
+    // it does not jump, and finds its rows again when it closes.
+    let mut s = Sim::new();
+    let d = doc(40);
+    let home = || {
+        let mut g = Grid::new(COLS, 24);
+        for (i, l) in d.iter().take(6).enumerate() {
+            put(&mut g, 4, 8 + i as u16, l);
+        }
+        g
+    };
+    let palette = || {
+        let mut g = home();
+        let r = Rect::new(10, 6, 40, 12);
+        for y in r.y..r.bottom() {
+            put(&mut g, r.x, y, &" ".repeat(r.w as usize));
+            put(&mut g, r.x + 2, y, &format!("command {y}"));
+        }
+        bg(&mut g, r, 8);
+        g
+    };
+    s.settle(&home());
+    let under = s.pane();
+    let mut ev = s.feed(&palette(), 1000);
+    ev.extend(s.idle(2000));
+    assert!(
+        !ev.iter().any(|e| matches!(e, FrameEvent::Jump { .. })),
+        "{ev:?}"
+    );
+    let panes = s.panes();
+    assert_eq!(panes.len(), 2, "{panes:#?}");
+    let still = panes.iter().find(|p| p.id == under.id).expect("kept");
+    assert_eq!((still.origin, still.extent), (under.origin, under.extent));
+    assert!(panes.iter().any(|p| p.rect == [10, 6, 40, 12]));
+    // What the palette hides is still known.
+    assert_eq!(s.f.text(under.id, 8, 9)[0].trim(), d[0]);
+    let mut ev = s.feed(&home(), 1000);
+    ev.extend(s.idle(2000));
+    assert!(
+        !ev.iter().any(|e| matches!(e, FrameEvent::Jump { .. })),
+        "{ev:?}"
+    );
+    let back = s.pane();
+    assert_eq!(
+        (back.id, back.origin, back.usable),
+        (under.id, under.origin, true)
+    );
 }
 
 #[test]

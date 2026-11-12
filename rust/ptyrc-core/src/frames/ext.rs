@@ -81,6 +81,8 @@ pub(crate) struct Obs<'a> {
     /// the region it moved, and no clear in the burst. Every line that
     /// went through the region is on screen before or after.
     pub seed_tape: bool,
+    /// Pane rows `[a, b)` those events moved: no top chrome among them.
+    pub seed_rows: Option<(usize, usize)>,
     /// Cursor row inside the pane.
     pub cursor_row: Option<usize>,
     /// Absolute frame row of pane row 0, when the app shows it.
@@ -716,6 +718,26 @@ impl Ext {
         Outcome::Edit
     }
 
+    /// Take the screen as an edit of the rows in view, whatever moved: the
+    /// pane repaints itself.
+    pub fn rewrite(&mut self, o: &Obs) -> Outcome {
+        let h = o.hashes.len();
+        self.width = o.width;
+        self.rect_changed = false;
+        if self.rows.len() != h {
+            self.rows = (0..h).map(|i| self.fresh(o, i)).collect();
+            return Outcome::Edit;
+        }
+        let mut out = Outcome::Same;
+        for i in 0..h {
+            if o.hashes[i] != self.rows[i].hash {
+                self.rows[i] = self.fresh(o, i);
+                out = Outcome::Edit;
+            }
+        }
+        out
+    }
+
     /// View rows equal to what is remembered at their place need no
     /// commit.
     fn mark_known(&mut self, a: usize, b: usize) {
@@ -788,6 +810,12 @@ impl Ext {
         let bottom = (tail_start.min(h)..h)
             .find(|i| nh[*i as usize] != BLANK)
             .map_or(0, |i| h - i);
+        // The first rows the emulator scrolled are content, moved or
+        // repainted. The last may be a prompt written over.
+        let top = match o.seed_rows {
+            Some((a, _)) if dy == o.seed => top.min(a as i64),
+            _ => top,
+        };
         self.chrome_vote(top as u16, bottom as u16);
     }
 

@@ -274,7 +274,7 @@ a_glances() {
     same_text glances
     check "glances: the title is chrome, the rules cut panes" \
         'len(P) >= 2 and C and C[0]["rect"] == [0, 0, W, 1] and all(f["rect"][2] == W for f in P)'
-    known "glances: panes usable 3 s after the start (frames re-allocated at each refresh)" \
+    check "glances: panes usable 3 s after the start" \
         'all(f["usable"] for f in P)'
     steady glances 5
     sprite glances
@@ -312,7 +312,7 @@ a_opencode() {
     same_text opencode
     check "opencode: the palette is one pane, its selection is not a separator" \
         'any(f["rect"][2] >= 40 and f["rect"][3] >= 10 and f["rect"][0] > 0 for f in P)'
-    known "opencode: the pane under the palette keeps its origin (an overlay is read as a jump)" \
+    check "opencode: the pane under the palette keeps its origin" \
         'P[0]["origin"] == [0, 0]'
     e2e_keys esc; sleep 2
     check "opencode: the palette closed, the first layout is back" \

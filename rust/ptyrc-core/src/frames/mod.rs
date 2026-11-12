@@ -17,7 +17,7 @@ pub use heat::{HeatClass, HeatView, IDLE_SECS, IDLE_SHARE, Idle};
 
 use crate::plugin::{Chrome, PaneView, TuiSupport, ViewHint};
 use crate::types::*;
-use ext::{Ext, Obs, Outcome};
+use ext::{Ext, Obs, Outcome, Row};
 use heat::Heat;
 use ptyrc_vt::{Cursor, Grid, Rect, VtEvent};
 use screen::{Line, Screen, fnv};
@@ -188,6 +188,14 @@ struct Pane {
     /// Replacements in a row over whole-pane changes that led to this
     /// frame, and the time of the last.
     churn: Option<(Duration, u8)>,
+    /// Repaints itself: every change is an edit of the rows in view,
+    /// until one that is neither in place nor of the same shape.
+    monitor: bool,
+    /// Its preset says so: `monitor` without a way out.
+    declared: bool,
+    /// Pane rows `[a, b)` under a smaller pane of the last segmentation
+    /// (a palette, a modal): not read while they are.
+    covered: Vec<(u16, u16)>,
     left: u16,
     right: u16,
     gutter_cand: (u16, u8),
@@ -301,6 +309,12 @@ const DETECT_EVERY: Duration = Duration::from_secs(1);
 /// A repaint that follows a clear may come in several bursts, this long.
 const REPAINT: Duration = Duration::from_millis(100);
 
+/// A pane replaced whole is the same one repainted when, on average over
+/// its rows, this share of the cells kept their glyph and this share kept
+/// their class. Two views of a listing pass too: see `repainted`'s caller.
+const REPAINT_SAME: f32 = 0.3;
+const REPAINT_ALIKE: f32 = 0.7;
+
 /// How long a preset outlives its last detection.
 const SUPPORT_HOLD: Duration = Duration::from_secs(4);
 
@@ -344,6 +358,46 @@ fn status_line(text: &str) -> Option<i64> {
         return (n >= 1).then_some(n - 1);
     }
     None
+}
+
+/// Is the new content of a pane the old one repainted: the same shape
+/// with other values, as a monitor refreshes a table or a meter. Row by
+/// row, cell by cell: the share of equal glyphs, and of glyphs of the same
+/// class (digit, letter, or the same sign).
+fn repainted(old: &[Row], new: &dyn Fn(usize) -> Line) -> bool {
+    fn class(c: char) -> char {
+        if c.is_ascii_digit() {
+            '0'
+        } else if c.is_alphabetic() {
+            'a'
+        } else {
+            c
+        }
+    }
+    let (mut rows, mut same, mut alike) = (0usize, 0f32, 0f32);
+    for (i, row) in old.iter().enumerate() {
+        let was = row.line.text.trim_end_matches(' ');
+        let line = new(i);
+        let is = line.text.trim_end_matches(' ');
+        if was.is_empty() && is.is_empty() {
+            continue;
+        }
+        rows += 1;
+        let (mut n, mut eq, mut cl) = (0usize, 0usize, 0usize);
+        let (mut a, mut b) = (was.chars(), is.chars());
+        loop {
+            let (x, y) = match (a.next(), b.next()) {
+                (None, None) => break,
+                (x, y) => (x.unwrap_or(' '), y.unwrap_or(' ')),
+            };
+            n += 1;
+            eq += (x == y) as usize;
+            cl += (class(x) == class(y)) as usize;
+        }
+        same += eq as f32 / n as f32;
+        alike += cl as f32 / n as f32;
+    }
+    rows >= 2 && same >= REPAINT_SAME * rows as f32 && alike >= REPAINT_ALIKE * rows as f32
 }
 
 fn ms(v: u32) -> Duration {
@@ -1054,6 +1108,9 @@ impl Frames {
                 cursor_seen: Duration::ZERO,
                 alt: self.alt,
                 churn: None,
+                monitor: false,
+                declared: false,
+                covered: Vec::new(),
                 left: 0,
                 right: 0,
                 gutter_cand: (0, 0),
@@ -1371,6 +1428,23 @@ impl Frames {
         if p.rect.contains(self.cursor.col, self.cursor.row) {
             p.cursor_seen = now;
         }
+        if p.kind == FrameKind::Pane {
+            let area = |r: Rect| r.w as u32 * r.h as u32;
+            let covered: Vec<(u16, u16)> = self
+                .seg
+                .iter()
+                .flatten()
+                .map(|l| l.rect())
+                .filter(|r| *r != p.rect && area(*r) < area(p.rect))
+                .map(|r| r.intersect(&p.rect))
+                .filter(|x| !x.is_empty())
+                .map(|x| (x.y - p.rect.y, x.bottom() - p.rect.y))
+                .collect();
+            if covered != p.covered {
+                p.covered = covered;
+                p.hashes_valid = false;
+            }
+        }
         let dirty = !p.hashes_valid
             || (p.rect.y..p.rect.bottom()).any(|r| self.screen.row_dirty[r as usize]);
         if p.kind != FrameKind::Pane {
@@ -1420,6 +1494,9 @@ impl Frames {
                 p.settle = ms(t.settle_ms.unwrap_or(self.cfg.settle_ms));
                 p.commit = ms(t.commit_ms.unwrap_or(self.cfg.commit_ms));
             }
+            p.declared = advice
+                .support
+                .is_some_and(|s| self.supports[s].tuning().monitor);
             p.support = advice.support;
             p.fixed_tb = advice.chrome.map(|c| (c.top, c.bottom));
             let (l, r) = advice.chrome.map_or((0, 0), |c| (c.left, c.right));
@@ -1505,6 +1582,16 @@ impl Frames {
             }
         }
 
+        // Rows under an overlay keep what they showed: they do not vote
+        // for a scroll or a jump, and are not rewritten.
+        if p.ext.rows.len() == p.hashes.len() {
+            for (a, b) in &p.covered {
+                for i in *a as usize..*b as usize {
+                    p.hashes[i] = p.ext.rows[i].hash;
+                }
+            }
+        }
+
         let screen = &self.screen;
         let rect = p.rect;
         let line = move |i: usize| {
@@ -1515,6 +1602,7 @@ impl Frames {
         let mut seed = 0i64;
         let mut seed_real = true;
         let (mut travel, mut room, mut cleared) = (0i64, i64::MAX, false);
+        let mut seed_rows: Option<(usize, usize)> = None;
         if let Some(inp) = input {
             for e in inp.events {
                 if let VtEvent::Scroll {
@@ -1529,6 +1617,8 @@ impl Frames {
                         seed_real &= *scrollback;
                         travel += (*dy as i64).abs();
                         room = room.min(x.h as i64);
+                        let (a, b) = ((x.y - rect.y) as usize, (x.bottom() - rect.y) as usize);
+                        seed_rows = Some(seed_rows.map_or((a, b), |(c, d)| (a.min(c), b.max(d))));
                     }
                 } else if matches!(e, VtEvent::Clear | VtEvent::AltScreen(_)) {
                     cleared = true;
@@ -1561,6 +1651,7 @@ impl Frames {
             seed_tape: p.cleared.is_none_or(|t| now >= t + REPAINT)
                 && travel == seed.abs()
                 && seed.abs() < room,
+            seed_rows,
             cursor_row: rect
                 .contains(cur.0, cur.1)
                 .then(|| (cur.1 - rect.y) as usize),
@@ -1577,7 +1668,42 @@ impl Frames {
             p.reattach = false;
         }
         let key_changed = p.key.is_some() && new_key.is_some() && p.key != new_key && !p.fresh;
-        let out = if p.fresh || dirty || consult || p.ext.rows.is_empty() {
+        // A monitor is told by a repaint where the cells are: no clear, no
+        // scroll. A pager or an editor showing another part of a listing
+        // does one or the other, or is placed by a hint.
+        // Nor does it show a cursor in the pane: nothing is read or edited
+        // there.
+        let in_place = !cleared
+            && travel == 0
+            && p.cleared.is_none_or(|t| now >= t + REPAINT)
+            && !(self.cursor.visible && p.rect.contains(self.cursor.col, self.cursor.row));
+        if p.monitor && dirty && p.ext.rows.len() == p.hashes.len() {
+            let (mut inked, mut changed) = (0usize, 0usize);
+            for (row, hash) in p.ext.rows.iter().zip(&p.hashes) {
+                inked += (row.hash != screen::BLANK || *hash != screen::BLANK) as usize;
+                changed += (row.hash != *hash) as usize;
+            }
+            if cleared || (changed * 2 >= inked && !repainted(&p.ext.rows, &line)) {
+                p.monitor = false;
+            }
+        }
+        // A monitor that scrolls its list says so, and the rows agree.
+        let scrolled = p.monitor && seed != 0 && travel == seed.abs() && {
+            let h = p.hashes.len() as i64;
+            let (mut all, mut moved) = (0usize, 0usize);
+            for i in 0..h {
+                let j = i + seed;
+                if (0..h).contains(&j) && p.hashes[i as usize] != screen::BLANK {
+                    all += 1;
+                    moved += (p.ext.rows.get(j as usize).map(|r| r.hash)
+                        == Some(p.hashes[i as usize])) as usize;
+                }
+            }
+            all >= 2 && moved * 10 >= all * 9
+        };
+        let out = if (p.declared || p.monitor && !scrolled) && !p.fresh {
+            p.ext.rewrite(&obs)
+        } else if p.fresh || dirty || consult || p.ext.rows.is_empty() {
             p.ext.observe(&obs)
         } else {
             Outcome::Same
@@ -1606,6 +1732,8 @@ impl Frames {
         }
 
         let other_doc = out == Outcome::Other;
+        let repaint =
+            out == Outcome::Lost && !key_changed && in_place && repainted(&p.ext.rows, &line);
         if !matches!(out, Outcome::Lost | Outcome::Other) && !key_changed {
             p.key = new_key;
             self.panes.insert(id, p);
@@ -1630,15 +1758,17 @@ impl Frames {
             Some(other)
         } else if !key_changed
             && !other_doc
-            && self.panes[&id]
-                .churn
-                .is_some_and(|(t, n)| n >= 2 && now < t + CHURN)
+            && (repaint
+                || self.panes[&id]
+                    .churn
+                    .is_some_and(|(t, n)| n >= 2 && now < t + CHURN))
         {
-            // Replaced twice in a row and whole again: a pane that repaints
-            // itself (a monitor), not documents taking turns. Rewritten in
-            // place from now on.
+            // The same shape with other values, or replaced twice in a row
+            // and whole again: a pane that repaints itself (a monitor), not
+            // documents taking turns. Rewritten in place.
             let p = self.panes.get_mut(&id).unwrap();
             p.churn = Some((now, 2));
+            p.monitor = true;
             p.ext.reset_view();
             p.fresh = true;
             None

@@ -445,11 +445,13 @@ sys.exit(0 if steps == [f"● step {i:03d}: reading file_{i}.rs and thinking abo
 s_monitor() {
     have htop || { echo "SKIP  monitor"; return; }
     e2e_start fr-monitor 100x30 htop || return
-    settle 6
+    settle 1
     local before; before=$(e2e_p frames --json | python3 -c '
 import json, sys
 print(sorted(f["id"] for f in json.load(sys.stdin)["frames"] if f["state"] != "inactive"))')
-    check "monitor: a screen repainted every second settles" 'len(P) >= 1 and all(f["usable"] for f in P)'
+    settle 2
+    check "monitor: usable once settled, with the frames of the first layout" \
+        "len(P) >= 1 and all(f['usable'] for f in P) and sorted(F) == $before"
     settle 4
     check "monitor: and keeps its frames" "sorted(F) == $before"
     e2e_stop
