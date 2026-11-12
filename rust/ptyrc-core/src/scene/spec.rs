@@ -2,7 +2,7 @@
 //! Wire form of sprites. See `plan/design.md`, "ptyrc-core: scene".
 
 use crate::types::{FrameId, FrameSel, OwnerId, Prefer, SpriteId};
-use ptyrc_vt::{Attrs, Color};
+use ptyrc_vt::{Attrs, Color, Rgb};
 use serde::{Deserialize, Serialize};
 
 /// A colour on the wire: a name (`red`, `bright-red`, `default`), an index
@@ -93,6 +93,28 @@ fn is_true(b: &bool) -> bool {
 
 fn yes() -> bool {
     true
+}
+
+fn one() -> f32 {
+    1.0
+}
+
+/// The default colours of the host terminal: what `Color::Default`
+/// shows. Used to blend a sprite with `alpha`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HostColors {
+    pub fg: Rgb,
+    pub bg: Rgb,
+}
+
+impl Default for HostColors {
+    /// Light grey on black.
+    fn default() -> HostColors {
+        HostColors {
+            fg: [0xe5, 0xe5, 0xe5],
+            bg: [0, 0, 0],
+        }
+    }
 }
 
 /// Style of sprite cells. An absent colour inherits the cell below.
@@ -349,6 +371,19 @@ pub struct Layer(pub i32);
 impl Layer {
     pub const BACK: Layer = Layer(-1);
     pub const FRONT: Layer = Layer(1);
+    /// Behind every drawing of `back`: a static background.
+    pub const WALLPAPER: Layer = Layer(-100);
+    /// In front of every drawing of `front`: displays.
+    pub const HUD: Layer = Layer(100);
+
+    /// The named layers, back to front. Integers between two names are
+    /// layers between them.
+    pub const NAMES: [(&'static str, Layer); 4] = [
+        ("wallpaper", Layer::WALLPAPER),
+        ("back", Layer::BACK),
+        ("front", Layer::FRONT),
+        ("hud", Layer::HUD),
+    ];
 }
 
 #[derive(Deserialize)]
@@ -362,14 +397,17 @@ impl std::str::FromStr for Layer {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Layer, String> {
-        match s.trim() {
-            "back" => Ok(Layer::BACK),
-            "front" => Ok(Layer::FRONT),
+        let s = s.trim();
+        if let Some((_, layer)) = Layer::NAMES.iter().find(|(name, _)| *name == s) {
+            return Ok(*layer);
+        }
+        match s {
+            "app" => Err("the layer app is the app's: use a layer behind it or in front".into()),
             other => match other.parse::<i32>() {
                 Ok(0) => Err("layer 0 is the app: use a negative or a positive layer".into()),
                 Ok(n) => Ok(Layer(n)),
                 Err(_) => Err(format!(
-                    "bad layer: {s} (back, front, or an integer other than 0)"
+                    "bad layer: {s} (wallpaper, back, front, hud, or an integer other than 0)"
                 )),
             },
         }
@@ -435,6 +473,9 @@ pub struct SpriteSpec {
     pub layer: Option<Layer>,
     #[serde(default)]
     pub blend: Blend,
+    /// Opacity, `0..=1`. Absent: opaque, colours are written as given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alpha: Option<f32>,
     #[serde(default)]
     pub z: i32,
     #[serde(default)]
@@ -470,6 +511,8 @@ pub struct SpritePatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend: Option<Blend>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alpha: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub z: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttl_ms: Option<u64>,
@@ -492,6 +535,8 @@ pub struct SpriteInfo {
     pub size: [u16; 2],
     pub layer: i32,
     pub blend: Blend,
+    #[serde(default = "one")]
+    pub alpha: f32,
     pub z: i32,
     pub persist: bool,
     pub screen: Option<[i64; 2]>,

@@ -17,6 +17,7 @@ pub use spec::*;
 use crate::types::{
     FrameId, FramePos, FrameSel, OwnerId, RAW, SpriteId, SurfaceInfo, Surfaces, TextQuery,
 };
+use ptyrc_vt::palette::{self, Rgb};
 use ptyrc_vt::{Attrs, Cell, Color, Grid, Rect, Style};
 use raster::Slot;
 use std::collections::BTreeMap;
@@ -84,6 +85,8 @@ struct Sprite {
     /// Given by the client; otherwise the layer follows the blend.
     layer_set: bool,
     blend: Blend,
+    /// Opacity, `0..=1`; 1: colours as given.
+    alpha: f32,
     z: i32,
     persist: bool,
     /// Drawn at least once. Until then the clocks of an animation and of
@@ -212,6 +215,7 @@ pub struct Scene {
     effects: BTreeMap<String, EffectFactory>,
     dirty: bool,
     last_tick: Duration,
+    host: HostColors,
 }
 
 impl Default for Scene {
@@ -229,10 +233,32 @@ impl Scene {
             effects: BTreeMap::new(),
             dirty: false,
             last_tick: Duration::ZERO,
+            host: HostColors::default(),
         };
         scene.register_effect("confetti", Box::new(confetti));
         scene.register_effect("sparkle", Box::new(sparkle));
         scene
+    }
+
+    /// The default colours of the host: what a sprite with `alpha` is
+    /// blended with where the app set no colour.
+    pub fn set_host_colors(&mut self, host: HostColors) {
+        if self.host != host {
+            self.host = host;
+            self.dirty = true;
+        }
+    }
+
+    pub fn host_colors(&self) -> HostColors {
+        self.host
+    }
+
+    fn check_alpha(alpha: Option<f32>) -> Result<f32, SceneError> {
+        match alpha {
+            None => Ok(1.0),
+            Some(a) if (0.0..=1.0).contains(&a) => Ok(a),
+            Some(a) => Err(SceneError::BadParams(format!("alpha: 0 to 1, not {a}"))),
+        }
     }
 
     pub fn register_effect(&mut self, name: &str, make: EffectFactory) {
@@ -335,6 +361,7 @@ impl Scene {
         if let Some(motion) = &spec.motion {
             Scene::check_motion(motion)?;
         }
+        let alpha = Scene::check_alpha(spec.alpha)?;
         let body = match &spec.effect {
             Some(fx) => {
                 if spec.content.is_some() || spec.frames.is_some() {
@@ -374,6 +401,7 @@ impl Scene {
             layer: spec.layer.map_or(spec.blend.default_layer(), |l| l.0),
             layer_set: spec.layer.is_some(),
             blend: spec.blend.canonical(),
+            alpha,
             z: spec.z,
             persist: spec.persist,
             shown: false,
@@ -416,6 +444,10 @@ impl Scene {
         if let Some(motion) = &patch.motion {
             Scene::check_motion(motion)?;
         }
+        let alpha = patch
+            .alpha
+            .map(|a| Scene::check_alpha(Some(a)))
+            .transpose()?;
         let body = if patch.content.is_some() || patch.frames.is_some() {
             let looping = patch.looping.unwrap_or_default();
             let mut anim = self.body(&patch.content, &patch.frames, looping)?;
@@ -459,6 +491,9 @@ impl Scene {
             order |= sprite.layer != layer.0;
             sprite.layer = layer.0;
             sprite.layer_set = true;
+        }
+        if let Some(alpha) = alpha {
+            sprite.alpha = alpha;
         }
         if let Some(persist) = patch.persist {
             sprite.persist = persist;
@@ -580,6 +615,7 @@ impl Scene {
                     size: [w, h],
                     layer: s.layer,
                     blend: s.blend,
+                    alpha: s.alpha,
                     z: s.z,
                     persist: s.persist,
                     screen: s.screen.map(|(x, y)| [x, y]),
@@ -880,18 +916,22 @@ impl Scene {
         }
         let cursor = surfaces.cursor();
         let front = self.sprites.partition_point(|s| s.layer < 0);
-        let mut back = Back::new(base);
+        let mut back = Back::new(base, self.host);
         for sprite in &self.sprites[..front] {
             let tint = sprite.blend == Blend::Tint;
             each_glyph(sprite, base, surfaces, cursor, |x, y, glyph| {
-                back.paint(x, y, glyph, tint)
+                back.paint(x, y, glyph, tint, sprite.alpha)
             });
         }
         back.resolve(base, &mut out);
         for sprite in &self.sprites[front..] {
             let tint = sprite.blend == Blend::Tint;
             each_glyph(sprite, base, surfaces, cursor, |x, y, glyph| {
-                paint(&mut out, x, y, glyph, tint)
+                if sprite.alpha < 1.0 {
+                    paint_alpha(&mut out, x, y, glyph, tint, sprite.alpha, &self.host)
+                } else {
+                    paint(&mut out, x, y, glyph, tint)
+                }
             });
         }
         out
@@ -948,8 +988,39 @@ struct BackCell {
     /// Right half of the wide glyph before it.
     spacer: bool,
     fg: Option<Color>,
+    /// Opacity of `fg`, when the sprite has an `alpha`.
+    fade: Option<f32>,
+    /// Opaque colour.
     bg: Option<Color>,
+    /// Translucent colours laid over `bg`: their sum, premultiplied, and
+    /// its opacity.
+    glaze: Option<([f32; 3], f32)>,
     attrs: Attrs,
+}
+
+impl BackCell {
+    /// Lay the colour `bg` at opacity `alpha` over what is there.
+    fn lay(&mut self, bg: Color, alpha: f32, host: &HostColors) {
+        if alpha >= 1.0 {
+            self.bg = Some(bg);
+            self.glaze = None;
+            return;
+        }
+        let over = palette::rgb(bg, host.bg);
+        let (sum, opacity) = self.glaze.unwrap_or(([0.0; 3], 0.0));
+        let rest = 1.0 - alpha;
+        self.glaze = Some((
+            [0, 1, 2].map(|i| over[i] as f32 * alpha + sum[i] * rest),
+            alpha + opacity * rest,
+        ));
+    }
+
+    /// The glaze seen on `under`.
+    fn glazed(&self, under: Rgb) -> Option<Color> {
+        let (sum, opacity) = self.glaze?;
+        let ch = |i: usize| (under[i] as f32 * (1.0 - opacity) + sum[i]).round() as u8;
+        Some(Color::Rgb(ch(0), ch(1), ch(2)))
+    }
 }
 
 /// The back layers, flattened. Allocated at the first glyph.
@@ -957,14 +1028,16 @@ struct Back {
     cols: u16,
     rows: u16,
     cells: Vec<Option<BackCell>>,
+    host: HostColors,
 }
 
 impl Back {
-    fn new(base: &Grid) -> Back {
+    fn new(base: &Grid, host: HostColors) -> Back {
         Back {
             cols: base.cols(),
             rows: base.rows(),
             cells: Vec::new(),
+            host,
         }
     }
 
@@ -991,31 +1064,31 @@ impl Back {
             cell.glyph = None;
             cell.spacer = false;
             cell.fg = None;
+            cell.fade = None;
             cell.attrs = Attrs::default();
         }
     }
 
-    fn paint(&mut self, x: u16, y: u16, glyph: &raster::Glyph, tint: bool) {
+    fn paint(&mut self, x: u16, y: u16, glyph: &raster::Glyph, tint: bool, alpha: f32) {
         let wide = glyph.cell.width == 2;
-        if tint {
-            // Behind the app a tint is a colour of background.
-            for x in x..=x + wide as u16 {
-                let cell = self.at(x, y);
-                cell.bg = glyph.bg.or(cell.bg);
+        let host = self.host;
+        if !tint {
+            self.cut(x, y);
+            let cell = self.at(x, y);
+            cell.glyph = Some(glyph.cell.clone());
+            cell.fg = glyph.fg;
+            cell.fade = (alpha < 1.0).then_some(alpha);
+            cell.attrs = glyph.attrs;
+            if wide {
+                self.cut(x + 1, y);
+                self.at(x + 1, y).spacer = true;
             }
-            return;
         }
-        self.cut(x, y);
-        let cell = self.at(x, y);
-        cell.glyph = Some(glyph.cell.clone());
-        cell.fg = glyph.fg;
-        cell.bg = glyph.bg.or(cell.bg);
-        cell.attrs = glyph.attrs;
-        if wide {
-            self.cut(x + 1, y);
-            let cell = self.at(x + 1, y);
-            cell.spacer = true;
-            cell.bg = glyph.bg.or(cell.bg);
+        // Behind the app a tint is a colour of background.
+        if let Some(bg) = glyph.bg {
+            for x in x..=x + wide as u16 {
+                self.at(x, y).lay(bg, alpha, &host);
+            }
         }
     }
 
@@ -1030,10 +1103,14 @@ impl Back {
     /// - An app cell with ink keeps its glyph and its style; only its
     ///   default background gives way to a back colour. A wide glyph
     ///   takes the colour behind its head.
+    /// - A back colour with an `alpha` is mixed with the backdrop the
+    ///   app chose, or with the opaque back colour or the host's default
+    ///   where it chose none. Inverse cells stay the app's.
     fn resolve(&self, base: &Grid, out: &mut Grid) {
         if self.cells.is_empty() {
             return;
         }
+        let host = self.host;
         let no_ink = |x: u16, y: u16| !base.cell(x, y).has_ink();
         for y in 0..self.rows {
             for x in 0..self.cols {
@@ -1041,20 +1118,44 @@ impl Back {
                 let Some(back) = &self.cells[i] else {
                     continue;
                 };
+                // Background the back layers give the cell `(x, y)`;
+                // `None`: the app's.
+                let ground = |x: u16| -> Option<Color> {
+                    let own = self.cells[y as usize * self.cols as usize + x as usize].as_ref()?;
+                    let app = base.cell(x, y);
+                    if app.style.attrs.contains(Attrs::INVERSE) {
+                        return None;
+                    }
+                    if app.style.bg == Color::Default {
+                        let under = palette::rgb(own.bg.unwrap_or(Color::Default), host.bg);
+                        own.glazed(under).or(own.bg)
+                    } else {
+                        own.glazed(palette::rgb(app.style.bg, host.bg))
+                    }
+                };
                 // Style of the back glyph `ink` seen in the cell `(x, y)`.
                 let seen = |x: u16, ink: &BackCell| {
                     let app = base.cell(x, y);
-                    if is_open(app) {
-                        let own = &self.cells[y as usize * self.cols as usize + x as usize];
+                    let mut style = if is_open(app) {
                         Style {
                             fg: ink.fg.unwrap_or(app.style.fg),
-                            bg: own.as_ref().and_then(|c| c.bg).unwrap_or(Color::Default),
+                            bg: ground(x).unwrap_or(Color::Default),
                             attrs: ink.attrs,
                             ..Style::default()
                         }
                     } else {
-                        on_backdrop(app.style, ink.fg, None, ink.attrs)
+                        let below = Style {
+                            bg: ground(x).unwrap_or(app.style.bg),
+                            ..app.style
+                        };
+                        on_backdrop(below, ink.fg, None, ink.attrs)
+                    };
+                    if let (Some(alpha), Some(fg)) = (ink.fade, ink.fg)
+                        && !style.attrs.contains(Attrs::INVERSE)
+                    {
+                        style.fg = faded(style.bg, fg, alpha, &host);
                     }
+                    style
                 };
                 // A wide glyph needs two cells without ink, and one
                 // style: both halves on the same backdrop.
@@ -1084,7 +1185,7 @@ impl Back {
                     // style: its head decides for both halves.
                     None => {
                         let app = base.cell(x, y);
-                        if let (true, Some(bg)) = (is_open(app) && app.width != 0, back.bg) {
+                        if let (true, Some(bg)) = (app.width != 0, ground(x)) {
                             out.cell_mut(x, y).style.bg = bg;
                             if app.width == 2 && x + 1 < self.cols {
                                 out.cell_mut(x + 1, y).style.bg = bg;
@@ -1144,6 +1245,103 @@ fn paint(out: &mut Grid, x: u16, y: u16, glyph: &raster::Glyph, tint_only: bool)
         return;
     }
     let style = on_backdrop(out.cell(x, y).style, glyph.fg, glyph.bg, glyph.attrs);
+    out.put(
+        x,
+        y,
+        Cell {
+            text: glyph.cell.text.clone(),
+            width: glyph.cell.width,
+            style,
+        },
+    );
+}
+
+/// The colour `fg` at opacity `alpha` on the background `bg`.
+fn faded(bg: Color, fg: Color, alpha: f32, host: &HostColors) -> Color {
+    let [r, g, b] = palette::mix(palette::rgb(bg, host.bg), palette::rgb(fg, host.fg), alpha);
+    Color::Rgb(r, g, b)
+}
+
+/// `style` with the colours it shows as RGB, not inverse.
+fn flat(style: Style, host: &HostColors) -> (Rgb, Rgb) {
+    let fg = palette::rgb(style.fg, host.fg);
+    let bg = palette::rgb(style.bg, host.bg);
+    if style.attrs.contains(Attrs::INVERSE) {
+        (bg, fg)
+    } else {
+        (fg, bg)
+    }
+}
+
+/// A front layer with an `alpha` under 1: its colours are mixed with the
+/// colours below.
+///
+/// - A glyph replaces the glyph below; its `fg` is mixed with the
+///   background it stands on, its `bg` with the background below.
+/// - A blank with a `bg` is glass: the glyph below stays, both its
+///   colours mixed with the `bg`.
+/// - A tint mixes `fg` with the foreground below, `bg` with the
+///   background below.
+fn paint_alpha(
+    out: &mut Grid,
+    x: u16,
+    y: u16,
+    glyph: &raster::Glyph,
+    tint_only: bool,
+    alpha: f32,
+    host: &HostColors,
+) {
+    let color = |[r, g, b]: Rgb| Color::Rgb(r, g, b);
+    // Mix the colours of the cell `(x, y)` with `fg` and `bg`.
+    let mut veil = |x: u16, fg: Option<Rgb>, bg: Option<Rgb>, attrs: Attrs| {
+        let style = &mut out.cell_mut(x, y).style;
+        let (below_fg, below_bg) = flat(*style, host);
+        if style.attrs.contains(Attrs::INVERSE) {
+            style.attrs.remove(Attrs::INVERSE);
+            style.fg = color(below_fg);
+            style.bg = color(below_bg);
+        }
+        if let Some(fg) = fg {
+            style.fg = color(palette::mix(below_fg, fg, alpha));
+        }
+        if let Some(bg) = bg {
+            style.bg = color(palette::mix(below_bg, bg, alpha));
+        }
+        style.attrs.insert(attrs.0);
+    };
+    let fg = glyph.fg.map(|c| palette::rgb(c, host.fg));
+    let bg = glyph.bg.map(|c| palette::rgb(c, host.bg));
+    if tint_only {
+        for x in x..x + glyph.cell.width as u16 {
+            veil(x, fg, bg, glyph.attrs);
+        }
+        return;
+    }
+    if glyph.cell.is_blank() {
+        match bg {
+            Some(bg) => veil(x, Some(bg), Some(bg), Attrs::default()),
+            None => paint(out, x, y, glyph, false),
+        }
+        return;
+    }
+    let below = out.cell(x, y).style;
+    let (below_fg, below_bg) = flat(below, host);
+    let ground = bg.map_or(below_bg, |bg| palette::mix(below_bg, bg, alpha));
+    // Colours unchanged stay as the app wrote them.
+    let keep = !below.attrs.contains(Attrs::INVERSE);
+    let style = Style {
+        fg: match fg {
+            Some(fg) => color(palette::mix(ground, fg, alpha)),
+            None if keep => below.fg,
+            None => color(below_fg),
+        },
+        bg: match bg {
+            None if keep => below.bg,
+            _ => color(ground),
+        },
+        attrs: glyph.attrs,
+        ..Style::default()
+    };
     out.put(
         x,
         y,

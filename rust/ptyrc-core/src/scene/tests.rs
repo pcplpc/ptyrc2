@@ -1715,3 +1715,257 @@ fn forgotten_rows_and_frames_take_their_sprites() {
     assert_eq!(scene.drop_frame(PANE), vec![here, hud]);
     assert_eq!(ids(&scene), vec![other]);
 }
+
+fn rgb(r: u8, g: u8, b: u8) -> Color {
+    Color::Rgb(r, g, b)
+}
+
+fn host() -> HostColors {
+    HostColors {
+        fg: [200, 200, 200],
+        bg: [20, 20, 40],
+    }
+}
+
+#[test]
+fn named_layers_are_ordered() {
+    let order: Vec<i32> = ["wallpaper", "back", "front", "hud"]
+        .iter()
+        .map(|n| n.parse::<Layer>().unwrap().0)
+        .collect();
+    assert_eq!(order, vec![-100, -1, 1, 100]);
+    assert!(order.is_sorted());
+    assert_eq!(
+        serde_json::from_value::<Layer>(json!("hud")).unwrap(),
+        Layer::HUD
+    );
+    assert!("app".parse::<Layer>().unwrap_err().contains("the app's"));
+    assert!(
+        "sky"
+            .parse::<Layer>()
+            .unwrap_err()
+            .contains("wallpaper, back, front, hud")
+    );
+
+    // A wallpaper is behind a back sprite added before it; a hud in
+    // front of a front sprite added after it.
+    let mock = Mock::new();
+    let mut scene = Scene::new();
+    for (layer, text) in [
+        ("hud", "H"),
+        ("front", "f"),
+        ("back", "b"),
+        ("wallpaper", "w"),
+    ] {
+        scene
+            .add(
+                1,
+                spec(json!({"content": {"rows": [text]}, "layer": layer})),
+                ms(0),
+            )
+            .unwrap();
+    }
+    assert_eq!(show(&mut scene, &mock, &base(), 0)[0], "H");
+    let layers: Vec<i32> = scene.list().iter().map(|s| s.layer).collect();
+    assert_eq!(layers, vec![-100, -1, 1, 100]);
+}
+
+#[test]
+fn alpha_is_checked_and_listed() {
+    let mut scene = Scene::new();
+    for bad in [json!(-0.1), json!(1.5)] {
+        let err = scene
+            .add(
+                1,
+                spec(json!({"content": {"rows": ["x"]}, "alpha": bad})),
+                ms(0),
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), "bad-params");
+    }
+    let id = scene
+        .add(
+            1,
+            spec(json!({"content": {"rows": ["x"]}, "alpha": 0.25})),
+            ms(0),
+        )
+        .unwrap();
+    let plain = scene
+        .add(1, spec(json!({"content": {"rows": ["x"]}})), ms(0))
+        .unwrap();
+    let alpha = |scene: &Scene, id| scene.list().iter().find(|s| s.id == id).unwrap().alpha;
+    assert_eq!(alpha(&scene, id), 0.25);
+    assert_eq!(alpha(&scene, plain), 1.0);
+    let patch = |v| serde_json::from_value::<SpritePatch>(v).unwrap();
+    assert!(scene.update(id, patch(json!({"alpha": 2})), ms(0)).is_err());
+    assert_eq!(alpha(&scene, id), 0.25);
+    scene.update(id, patch(json!({"alpha": 1})), ms(0)).unwrap();
+    assert_eq!(alpha(&scene, id), 1.0);
+    // The host colours repaint.
+    scene.take_dirty();
+    scene.set_host_colors(scene.host_colors());
+    assert!(!scene.take_dirty());
+    scene.set_host_colors(host());
+    assert!(scene.take_dirty());
+}
+
+#[test]
+fn back_alpha_mixes_with_the_backdrop() {
+    let mock = Mock::new();
+    let panel = rgb(100, 100, 100);
+    let inverse = Style {
+        attrs: Attrs(Attrs::INVERSE),
+        ..Style::default()
+    };
+    let mut grid = Grid::from_lines(20, &["ab    z ", "", "", "", "", ""]);
+    for x in 4..6 {
+        grid.cell_mut(x, 0).style.bg = panel;
+    }
+    grid.cell_mut(6, 0).style = inverse;
+    let mut scene = Scene::new();
+    scene.set_host_colors(host());
+    scene
+        .add(
+            1,
+            spec(json!({"content": {"rows": ["       *"], "style": {"fg": "#ffffff", "bg": "#ff0000"}, "opaque": true}, "alpha": 0.5})),
+            ms(0),
+        )
+        .unwrap();
+    scene.tick(ms(0), &mock);
+    let out = scene.compose(&grid, &mock);
+    assert_eq!(out.text()[0], "ab    z*");
+    // Under text and on an empty cell: half red on the host's default.
+    let on_host = rgb(138, 10, 20);
+    assert_eq!(out.cell(0, 0).style.bg, on_host);
+    assert_eq!(out.cell(0, 0).style.fg, Color::Default);
+    assert_eq!(out.cell(2, 0).style.bg, on_host);
+    // On a panel of the app: half red on the panel.
+    assert_eq!(out.cell(4, 0).style.bg, rgb(178, 50, 50));
+    // Inverse video stays the app's.
+    assert_eq!(out.cell(6, 0).style, inverse);
+    // The glyph fades into what it stands on.
+    assert_eq!(out.cell(7, 0).style.fg, rgb(197, 133, 138));
+    assert_eq!(out.cell(7, 0).style.bg, on_host);
+
+    // Two glazes stack; an opaque colour behind is their ground on open
+    // cells and stays hidden under a panel.
+    let mut scene = Scene::new();
+    scene.set_host_colors(host());
+    for (layer, bg, alpha) in [
+        (-3, "#0000ff", json!(null)),
+        (-2, "#ff0000", json!(0.5)),
+        (-1, "#00ff00", json!(0.5)),
+    ] {
+        let mut v = json!({"content": {"rows": ["      "], "style": {"bg": bg}, "opaque": true}, "layer": layer});
+        if !alpha.is_null() {
+            v["alpha"] = alpha;
+        }
+        scene.add(1, spec(v), ms(0)).unwrap();
+    }
+    scene.tick(ms(0), &mock);
+    let out = scene.compose(&grid, &mock);
+    assert_eq!(out.cell(2, 0).style.bg, rgb(64, 128, 64));
+    assert_eq!(out.cell(4, 0).style.bg, rgb(89, 153, 25));
+
+    // A palette colour goes through the xterm table; a tint behind is a
+    // glaze too.
+    let mut scene = Scene::new();
+    scene.set_host_colors(host());
+    scene
+        .add(
+            1,
+            spec(json!({"content": {"rows": ["##"], "style": {"bg": 196}}, "blend": "tint", "layer": "back", "alpha": 0.5})),
+            ms(0),
+        )
+        .unwrap();
+    scene.tick(ms(0), &mock);
+    let out = scene.compose(&grid, &mock);
+    assert_eq!(out.text()[0], "ab    z");
+    assert_eq!(out.cell(1, 0).style.bg, on_host);
+}
+
+#[test]
+fn front_alpha_is_glass_fade_and_tint() {
+    let mock = Mock::new();
+    let mut grid = Grid::from_lines(20, &["abcd", "", "", "", "", ""]);
+    grid.cell_mut(1, 0).style = Style {
+        fg: Color::Indexed(1),
+        bg: Color::Indexed(4),
+        attrs: Attrs(Attrs::INVERSE),
+        ..Style::default()
+    };
+    let mut scene = Scene::new();
+    scene.set_host_colors(host());
+    // Glass: blanks with a colour, over the text.
+    let glass = scene
+        .add(
+            1,
+            spec(json!({"content": {"rows": ["  "], "style": {"bg": "#ffffff"}, "opaque": true}, "layer": "front", "alpha": 0.5})),
+            ms(0),
+        )
+        .unwrap();
+    scene.tick(ms(0), &mock);
+    let out = scene.compose(&grid, &mock);
+    assert_eq!(out.text()[0], "abcd");
+    assert_eq!(out.cell(0, 0).style.bg, rgb(138, 138, 148));
+    assert_eq!(out.cell(0, 0).style.fg, rgb(228, 228, 228));
+    // An inverse cell: its colours as shown, then mixed; not inverse.
+    let b = out.cell(1, 0).style;
+    assert!(!b.attrs.contains(Attrs::INVERSE));
+    assert_eq!(b.bg, rgb(230, 128, 128));
+    assert_eq!(b.fg, rgb(128, 128, 247));
+    assert_eq!(out.cell(2, 0).style, Style::default());
+    scene.remove(glass);
+
+    // A glyph replaces the text; its colour fades into the ground, and a
+    // colour it does not set stays as the app wrote it.
+    let id = scene
+        .add(
+            1,
+            spec(json!({"content": {"rows": ["X"], "style": {"fg": "#ffffff"}}, "layer": "front", "alpha": 0.25})),
+            ms(0),
+        )
+        .unwrap();
+    scene.tick(ms(0), &mock);
+    let out = scene.compose(&grid, &mock);
+    assert_eq!(out.text()[0], "Xbcd");
+    assert_eq!(out.cell(0, 0).style.fg, rgb(79, 79, 94));
+    assert_eq!(out.cell(0, 0).style.bg, Color::Default);
+    scene.remove(id);
+
+    // A tint: each colour mixed with the one it replaces.
+    scene
+        .add(
+            1,
+            spec(json!({"content": {"rows": ["#"], "style": {"fg": "#000000", "bold": true}}, "blend": "tint", "alpha": 0.5})),
+            ms(0),
+        )
+        .unwrap();
+    scene.tick(ms(0), &mock);
+    let out = scene.compose(&grid, &mock);
+    assert_eq!(out.text()[0], "abcd");
+    let a = out.cell(0, 0).style;
+    assert_eq!(a.fg, rgb(100, 100, 100));
+    assert_eq!(a.bg, Color::Default);
+    assert!(a.attrs.contains(Attrs::BOLD));
+}
+
+#[test]
+fn alpha_one_changes_nothing() {
+    let mock = Mock::new();
+    let grid = Grid::from_lines(20, &["ab  cd", "", "", "", "", ""]);
+    let compose = |alpha: serde_json::Value| {
+        let mut scene = Scene::new();
+        for layer in ["back", "front"] {
+            let mut v = json!({"anchor": {"at": [1, 0]}, "content": {"rows": ["* *"], "style": {"fg": "red", "bg": 17}, "opaque": true}, "layer": layer, "z": 1});
+            if !alpha.is_null() {
+                v["alpha"] = alpha.clone();
+            }
+            scene.add(1, spec(v), ms(0)).unwrap();
+        }
+        scene.tick(ms(0), &mock);
+        scene.compose(&grid, &mock)
+    };
+    assert_eq!(compose(json!(1.0)), compose(json!(null)));
+    assert_ne!(compose(json!(0.5)), compose(json!(null)));
+}
