@@ -13,6 +13,7 @@ path = "src/main.rs"
 ptyrc-server.workspace = true
 ptyrc-proto.workspace = true
 ptyrc-core.workspace = true
+ptyrc-vt.workspace = true
 serde_json.workspace = true
 ptyrc-tui-vim = { path = "../../plugins/tui-support/vim" }
 ptyrc-tui-tmux = { path = "../../plugins/tui-support/tmux" }
@@ -26,5 +27,4 @@ ptyrc-draw-sand = { path = "../../plugins/draw-ext/sand" }
 clap = { version = "4", features = ["derive"] }
 
 [dev-dependencies]
-ptyrc-vt.workspace = true
 rustix = { version = "1", features = ["termios"] }

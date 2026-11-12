@@ -1,0 +1,681 @@
+[
+  {
+    "alt_screen": true,
+    "cursor": [
+      11,
+      15,
+      true
+    ],
+    "frames": [
+      {
+        "extent": [
+          0,
+          15
+        ],
+        "key": null,
+        "kind": "raw",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          15
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          15
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      }
+    ],
+    "size": [
+      60,
+      16
+    ],
+    "t": 2.46,
+    "text": [
+      "line number 1",
+      "line number 2",
+      "line number 3",
+      "line number 4",
+      "line number 5",
+      "line number 6",
+      "line number 7",
+      "line number 8",
+      "line number 9",
+      "line number 10",
+      "line number 11",
+      "line number 12",
+      "line number 13",
+      "line number 14",
+      "line number 15",
+      "numbers.txt"
+    ],
+    "title": ""
+  },
+  {
+    "alt_screen": true,
+    "cursor": [
+      1,
+      15,
+      true
+    ],
+    "frames": [
+      {
+        "extent": [
+          0,
+          15
+        ],
+        "key": null,
+        "kind": "raw",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          15
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          30
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          15
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      }
+    ],
+    "size": [
+      60,
+      16
+    ],
+    "t": 4.966,
+    "text": [
+      "line number 16",
+      "line number 17",
+      "line number 18",
+      "line number 19",
+      "line number 20",
+      "line number 21",
+      "line number 22",
+      "line number 23",
+      "line number 24",
+      "line number 25",
+      "line number 26",
+      "line number 27",
+      "line number 28",
+      "line number 29",
+      "line number 30",
+      ":"
+    ],
+    "title": ""
+  },
+  {
+    "alt_screen": true,
+    "cursor": [
+      1,
+      15,
+      true
+    ],
+    "frames": [
+      {
+        "extent": [
+          0,
+          15
+        ],
+        "key": null,
+        "kind": "raw",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          15
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          45
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          30
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      }
+    ],
+    "size": [
+      60,
+      16
+    ],
+    "t": 7.471,
+    "text": [
+      "line number 31",
+      "line number 32",
+      "line number 33",
+      "line number 34",
+      "line number 35",
+      "line number 36",
+      "line number 37",
+      "line number 38",
+      "line number 39",
+      "line number 40",
+      "line number 41",
+      "line number 42",
+      "line number 43",
+      "line number 44",
+      "line number 45",
+      ":"
+    ],
+    "title": ""
+  },
+  {
+    "alt_screen": true,
+    "cursor": [
+      1,
+      15,
+      true
+    ],
+    "frames": [
+      {
+        "extent": [
+          0,
+          15
+        ],
+        "key": null,
+        "kind": "raw",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          15
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          48
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          33
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      }
+    ],
+    "size": [
+      60,
+      16
+    ],
+    "t": 9.977,
+    "text": [
+      "line number 34",
+      "line number 35",
+      "line number 36",
+      "line number 37",
+      "line number 38",
+      "line number 39",
+      "line number 40",
+      "line number 41",
+      "line number 42",
+      "line number 43",
+      "line number 44",
+      "line number 45",
+      "line number 46",
+      "line number 47",
+      "line number 48",
+      ":"
+    ],
+    "title": ""
+  },
+  {
+    "alt_screen": true,
+    "cursor": [
+      1,
+      15,
+      true
+    ],
+    "frames": [
+      {
+        "extent": [
+          0,
+          15
+        ],
+        "key": null,
+        "kind": "raw",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          15
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          48
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          18
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      }
+    ],
+    "size": [
+      60,
+      16
+    ],
+    "t": 12.483,
+    "text": [
+      "line number 19",
+      "line number 20",
+      "line number 21",
+      "line number 22",
+      "line number 23",
+      "line number 24",
+      "line number 25",
+      "line number 26",
+      "line number 27",
+      "line number 28",
+      "line number 29",
+      "line number 30",
+      "line number 31",
+      "line number 32",
+      "line number 33",
+      ":"
+    ],
+    "title": ""
+  },
+  {
+    "alt_screen": true,
+    "cursor": [
+      5,
+      15,
+      true
+    ],
+    "frames": [
+      {
+        "extent": [
+          0,
+          15
+        ],
+        "key": null,
+        "kind": "raw",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          15
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          200000,
+          200015
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          200000
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      }
+    ],
+    "size": [
+      60,
+      16
+    ],
+    "t": 14.989,
+    "text": [
+      "line number 186",
+      "line number 187",
+      "line number 188",
+      "line number 189",
+      "line number 190",
+      "line number 191",
+      "line number 192",
+      "line number 193",
+      "line number 194",
+      "line number 195",
+      "line number 196",
+      "line number 197",
+      "line number 198",
+      "line number 199",
+      "line number 200",
+      "(END)"
+    ],
+    "title": ""
+  },
+  {
+    "alt_screen": true,
+    "cursor": [
+      1,
+      15,
+      true
+    ],
+    "frames": [
+      {
+        "extent": [
+          0,
+          15
+        ],
+        "key": null,
+        "kind": "raw",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      },
+      {
+        "extent": [
+          0,
+          15
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "inactive",
+        "support": null,
+        "usable": false
+      },
+      {
+        "extent": [
+          0,
+          48
+        ],
+        "key": null,
+        "kind": "pane",
+        "origin": [
+          0,
+          0
+        ],
+        "rect": [
+          0,
+          0,
+          60,
+          16
+        ],
+        "state": "stable",
+        "support": null,
+        "usable": true
+      }
+    ],
+    "size": [
+      60,
+      16
+    ],
+    "t": 17.489,
+    "text": [
+      "line number 1",
+      "line number 2",
+      "line number 3",
+      "line number 4",
+      "line number 5",
+      "line number 6",
+      "line number 7",
+      "line number 8",
+      "line number 9",
+      "line number 10",
+      "line number 11",
+      "line number 12",
+      "line number 13",
+      "line number 14",
+      "line number 15",
+      ":"
+    ],
+    "title": ""
+  }
+]
