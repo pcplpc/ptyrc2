@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Cost of the driver: throughput of a flood and latency of a key echo,
 # for no driver, `--transparent`, the screen engine, the engine without
-# presets (`--no-presets`), and the engine with sprites up.
+# presets (`--no-presets`), and the engine with sprites up. Then the cost
+# of one `Frames::update` at 200x60: screen scan, heat, whole update, tick.
 #
 #   BENCH_ONLY=latency scripts/bench.sh     skip the flood
+#   BENCH_ONLY=frames scripts/bench.sh      the update only
 #
 #   scripts/bench.sh [MEGABYTES]      default 50
 #
@@ -12,6 +14,15 @@
 
 set -eu
 cd "$(dirname "$0")/.."
+frames() {
+    echo "frames, one update at 200x60, best of five rounds"
+    cargo test --release -q -p ptyrc-core cost_200x60 -- --ignored --nocapture 2>/dev/null |
+        grep '^  '
+}
+if [ "${BENCH_ONLY:-}" = frames ]; then
+    frames
+    exit
+fi
 BIN=${PTYRC_BIN:-$PWD/target/release/ptyrc}
 [ -x "$BIN" ] || { echo "no release binary: cargo build --release -p ptyrc-cli" >&2; exit 2; }
 MB=${1:-50}
@@ -19,7 +30,7 @@ WORK=$PWD/temp/bench.$$
 mkdir -p "$WORK"
 trap 'rm -rf "$WORK"' EXIT
 
-exec python3 - "$BIN" "$MB" "$WORK" <<'PY'
+python3 - "$BIN" "$MB" "$WORK" <<'PY'
 import fcntl, json, os, pty, random, select, socket, statistics, struct, subprocess, sys
 import termios, time
 
@@ -155,3 +166,4 @@ if os.environ.get("BENCH_ONLY") != "latency":
     throughput(flood, size)
 latency()
 PY
+frames
