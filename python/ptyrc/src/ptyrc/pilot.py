@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Self
 
-from ._wire import Connection, PtyrcError, runtime_dir, socket_path
+from ._wire import Connection, PtyrcError, live_sessions, runtime_dir, socket_path
 
 __all__ = ["Cursor", "Frame", "Match", "Pilot", "Sprite", "find_binary", "sprite_spec"]
 
@@ -350,6 +350,12 @@ class Pilot:
         """Start `ptyrc run --headless` on `argv` and connect to it. The
         driver is killed by `close()`."""
         name = name or f"py-{os.getpid()}-{time.monotonic_ns() % 10**9}"
+        if name in live_sessions():
+            raise PtyrcError(
+                "bad-request",
+                f"session {name} is already running",
+                "choose another name, or connect to it: Pilot(name)",
+            )
         cmd = [binary or find_binary(), "run", "--headless", "--name", name]
         cmd += ["--size", f"{size[0]}x{size[1]}"]
         if host_log is not None:
@@ -367,7 +373,13 @@ class Pilot:
         while True:
             if proc.poll() is not None:
                 err = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
-                raise PtyrcError("gone", f"driver exited {proc.returncode}: {err}")
+                # The driver's own words: `ptyrc: <message>`, then a hint.
+                message, _, hint = err.removeprefix("ptyrc: ").strip().partition("\n")
+                raise PtyrcError(
+                    "gone",
+                    f"driver exited {proc.returncode}: {message}",
+                    hint.strip() or None,
+                )
             if path.exists():
                 try:
                     pilot = cls(path=path, timeout=timeout)
@@ -543,7 +555,8 @@ class Pilot:
 
     def keys(self, *keys: str) -> None:
         """Press keys: `enter`, `esc`, `ctrl+c`, `up`... Other strings are
-        typed as text."""
+        typed as text; a near miss of a key name (`Enter`, `return`,
+        `ctrl+xx`) is refused, with the name that was meant."""
         self.call("input.send", keys=list(keys))
 
     def paste(self, text: str) -> None:
@@ -695,10 +708,7 @@ class _Batch:
         reply = self._pilot._conn.call("batch", {"calls": self._calls})
         for entry, then in zip(reply["results"], self._then, strict=True):
             if "error" in entry:
-                err = entry["error"] or {}
-                self.results.append(
-                    PtyrcError(err.get("code", "internal"), err.get("message", ""))
-                )
+                self.results.append(PtyrcError.from_wire(entry["error"]))
             else:
                 self.results.append(entry.get("result"))
                 if then is not None:

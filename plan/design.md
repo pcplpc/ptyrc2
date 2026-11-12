@@ -442,6 +442,11 @@ server -> {"event":"frames","data":{...}}          after subscribe
 Error codes: `bad-request`, `unknown-method`, `bad-params`, `no-frame`,
 `no-sprite`, `not-usable`, `timeout`, `gone`, `internal`.
 
+An error may carry `"hint"`: what to try, in one line. The valid values
+(frames, sprites, key names, colours, anchors, topics, extensions,
+effects) and the nearest one (`did you mean active?`). The driver writes
+it (`ptyrc-server/src/hints.rs`), so every client reads the same words.
+
 Methods (`frame` is a frame id or name, default `"raw"`):
 
 | method | params | result |
@@ -477,8 +482,13 @@ Frame info: `{"id","kind":"raw"|"pane"|"chrome","state":"candidate"|
 
 Keys for `input.send`: `enter`, `tab`, `esc`, `space`, `backspace`,
 `delete`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`,
-`pagedown`, `f1`..`f12`, `ctrl+<x>`, `alt+<x>`, `shift+tab`; any other
-string is sent as text. Arrow keys follow the app's cursor-key mode.
+`pagedown`, `insert`, `f1`..`f12`, `ctrl+<x>`, `alt+<x>`, `shift+tab`; any
+other string is sent as text. Arrow keys follow the app's cursor-key mode.
+A string plainly meant as a key and that is not one is refused
+(`bad-params`, nothing of the list is sent): a modifier prefix (`ctrl+xx`,
+`shift+up`), `f13`, a key name in another case (`Enter`), a common alias
+(`return`, `escape`, `pgdn`, `ctrl-c`). The hint names the key meant.
+`subscribe` refuses an unknown topic.
 
 ## CLI
 
@@ -504,6 +514,37 @@ ptyrc debug overlay frames|heat|off ; ptyrc debug dump
 ptyrc call METHOD [JSON]          raw request
 ```
 
+### Errors
+
+On stderr: `ptyrc: <what failed>`, then one indented line saying what to
+try. No panic, no errno number.
+
+```
+$ ptyrc run -- hto
+ptyrc: hto: command not found in PATH
+  did you mean htop?
+$ ptyrc text -f activ
+ptyrc: no-frame: no such frame: activ
+  did you mean active? frames: 0, 1; names: raw, active, largest, quietest
+```
+
+Exit status:
+
+| status | meaning |
+|---|---|
+| 0 | done |
+| 1 | a negative answer: `find` without a match (silent), `wait` timed out (says what was waited for) |
+| 2 | usage, or a request that is wrong: a bad key, colour, anchor, position, JSON, method, topic, session name for `run` |
+| 3 | no session to talk to: none, not found, several and none chosen, dead (stale socket, removed), bad name; `run`: the name is taken, no socket directory |
+| 4 | the request names what is not there or not usable: frame, sprite |
+| 5 | the connection or the system: closed by the driver, I/O |
+| 126 | `run`: the command is there and cannot run: a directory, not executable, no interpreter |
+| 127 | `run`: the command is not there |
+
+Otherwise the status of `ptyrc run` is the app's (128 + signal when
+killed). The Python pilot raises `PtyrcError` with the same `code`,
+`message` and `hint`.
+
 ## Python
 
 `python/ptyrc`: `Pilot` (blocking, stdlib sockets, one reader thread for
@@ -526,6 +567,8 @@ tests. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
 - `ptyrc-vt`: the repair property above; recorded streams of real programs.
 - `ptyrc-server`: headless end-to-end, a `Vt` fed with the host log stands
   for the host.
+- `ptyrc-cli/tests/errors.rs`: every error case of the CLI, message, hint
+  and exit status.
 - Python: `uv run pytest`, against a headless driver.
 - `scripts/e2e-tmux.sh`: the driver inside a detached tmux, `tmux
   capture-pane` is the host's verdict.
