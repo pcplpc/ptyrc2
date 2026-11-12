@@ -23,7 +23,7 @@ from typing import Any
 
 from ptyrc import Frame, Pilot, Sprite
 
-from ._arcade import burst, spark
+from ._arcade import Board, burst, spark
 
 __all__ = [
     "LABEL",
@@ -157,7 +157,7 @@ class Stage:
         self.effects = effects
         self.bricks: dict[int, tuple[Sprite, int]] = {}  # by serial: sprite, lives
         self.moving: dict[int, tuple[Sprite, Any]] = {}  # sprite, what is shown
-        self.board: tuple[Sprite, Any] | None = None
+        self.board = Board(pilot, frame)
 
     def draw(self, at: Cell, **kw: Any) -> Sprite:
         return self.pilot.draw(frame=self.frame.id, at=at, space="frame", **kw)
@@ -208,19 +208,7 @@ class Stage:
                 sprite.move(*at, space="frame")
             self.moving[n] = (sprite, (at, key))
 
-        now = (tuple(game.score), tuple(game.best) if self.effects else None)
-        if self.board is None or self.board[1] != now:
-            cells = board(list(now[0]), list(now[1]) if now[1] else None)
-            width = sum(len(run["t"]) for run in cells[0])
-            anchor = {"at": [-width - 1, 0], "space": "view"}
-            if self.board is None:
-                sprite = self.pilot.draw(
-                    cells=cells, frame=self.frame.id, at=anchor["at"], space="view", z=5
-                )
-            else:
-                sprite = self.board[0]
-                sprite.update(anchor=anchor, content={"cells": cells})
-            self.board = (sprite, now)
+        self.board.show(board(game.score, game.best if self.effects else None))
 
         for it in game.balls:
             if it.fire:  # flames behind a ball on fire

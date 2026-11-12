@@ -24,6 +24,7 @@ from ptyrc import Frame, Pilot, Sprite
 
 __all__ = [
     "BODY",
+    "Board",
     "Stage",
     "apple",
     "beam",
@@ -155,6 +156,34 @@ def tally(length: int, best: int) -> list[list[dict[str, Any]]]:
     ]
 
 
+class Board:
+    """A score: one sprite, top right in view cells, over the game.
+    Its blanks are opaque: what passes under does not show through.
+    Sent when it changes."""
+
+    def __init__(self, pilot: Pilot, frame: Frame) -> None:
+        self.pilot = pilot
+        self.frame = frame
+        self.sprite: Sprite | None = None
+        self.shown: list[list[dict[str, Any]]] | None = None
+
+    def show(self, cells: list[list[dict[str, Any]]]) -> None:
+        """`cells`: one row of runs. Inside a batch."""
+        if cells == self.shown:
+            return
+        at = [-sum(len(run["t"]) for run in cells[0]) - 1, 0]
+        if self.sprite is None:
+            self.sprite = self.pilot.draw(
+                cells=cells, frame=self.frame.id, at=at, space="view", z=5, opaque=True
+            )
+        else:
+            self.sprite.update(
+                anchor={"at": at, "space": "view"},
+                content={"cells": cells, "opaque": True},
+            )
+        self.shown = cells
+
+
 class Stage:
     """The sprites of a game's foes and beams; when `effects`, its
     particles and its score. `game`: a `snake.Game`."""
@@ -168,7 +197,7 @@ class Stage:
         self.effects = effects
         self.foes: dict[int, tuple[Sprite, Cell]] = {}
         self.beams: dict[int, tuple[Sprite, bool]] = {}
-        self.board: tuple[Sprite, tuple[int, int]] | None = None
+        self.board = Board(pilot, frame)
         self.best = 0
 
     def draw(self, at: Cell, **kw: Any) -> Sprite:
@@ -199,24 +228,8 @@ class Stage:
         if self.effects:
             for event in game.events:
                 self.play(*event)
-            self.score(len(game.body))
-
-    def score(self, length: int) -> None:
-        """The score, top right in view cells: redrawn when it changes."""
-        self.best = max(self.best, length)
-        now = (length, self.best)
-        if self.board is not None and self.board[1] == now:
-            return
-        cells = tally(*now)
-        at = [-sum(len(run["t"]) for run in cells[0]) - 1, 0]
-        if self.board is None:
-            sprite = self.pilot.draw(
-                cells=cells, frame=self.frame.id, at=at, space="view", z=5
-            )
-        else:
-            sprite = self.board[0]
-            sprite.update(anchor={"at": at, "space": "view"}, content={"cells": cells})
-        self.board = (sprite, now)
+            self.best = max(self.best, len(game.body))
+            self.board.show(tally(len(game.body), self.best))
 
     def play(self, what: str, *data: Any) -> None:
         """An event of the game, as particles."""

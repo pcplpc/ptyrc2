@@ -18,7 +18,7 @@ from typing import Any
 
 from ptyrc import Frame, Pilot, Sprite
 
-from ._arcade import spark
+from ._arcade import Board, spark
 
 __all__ = ["CRUMBS", "Stage", "board", "crumb"]
 
@@ -61,7 +61,7 @@ class Stage:
         self.heap: Sprite | None = None
         self.rev: int | None = None
         self.pieces: dict[int, tuple[Sprite, Any]] = {}  # sprite, what is shown
-        self.board: tuple[Sprite, int] | None = None
+        self.board = Board(pilot, frame)
 
     def draw(self, at: Cell, **kw: Any) -> Sprite:
         return self.pilot.draw(frame=self.frame.id, at=at, space="frame", **kw)
@@ -93,19 +93,8 @@ class Stage:
             sprite, shown = self.pieces.get(n, (None, None))
             if shown != look:
                 self.pieces[n] = (self._put(sprite, look, 1), look)
-        if self.score and (self.board is None or self.board[1] != game.score):
-            cells = board(game.score)
-            at = [-len(cells[0][0]["t"]) - 1, 0]
-            if self.board is None:
-                sprite = self.pilot.draw(
-                    cells=cells, frame=self.frame.id, at=at, space="view", z=5
-                )
-            else:
-                sprite = self.board[0]
-                sprite.update(
-                    anchor={"at": at, "space": "view"}, content={"cells": cells}
-                )
-            self.board = (sprite, game.score)
+        if self.score:
+            self.board.show(board(game.score))
         if self.effects:
             self.play(game.events)
 

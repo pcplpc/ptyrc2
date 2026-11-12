@@ -723,6 +723,27 @@ def test_snake_over_its_particles(session: Pilot) -> None:
     assert session.dump()["host"] == session.text()
 
 
+def test_board_hides_what_passes_under(session: Pilot) -> None:
+    """A score has gaps; a racket under them does not show through."""
+    frame = session.frame("raw")
+    session.draw(["[=================]"], at=(-20, 0), layer="back", z=2)
+    board = _arcade.Board(session, frame)
+    with session.batch():
+        board.show(_arcade.tally(7, 12))
+
+    def top() -> str:
+        return session.dump()["host"][0]
+
+    assert until(lambda: top().endswith("=◆ 7  best 12"), 2), top()
+    sent = board.shown
+    with session.batch():
+        board.show(_arcade.tally(7, 12))  # the same: nothing sent
+        assert board.shown is sent
+        board.show(_arcade.tally(8, 12))
+    assert until(lambda: top().endswith("=◆ 8  best 12"), 2), top()
+    assert len(session.sprites()) == 2
+
+
 def test_snake_rules() -> None:
     rows = ["", "  wall of words  ", "", "   another   one", "", "", ""]
     walls = snake.walls_of(rows, 10, 100)
