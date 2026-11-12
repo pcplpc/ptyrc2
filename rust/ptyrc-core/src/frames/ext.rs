@@ -143,6 +143,9 @@ pub(crate) struct Ext {
     /// Rows of the document, estimated where rows and a share were both
     /// known, and that share: the largest tells best.
     total: Option<(f32, i64)>,
+    /// The last row as it was before it alone was erased, in the last
+    /// observation: a prompt taken away before a feed.
+    erased: Option<u64>,
 }
 
 fn need(nb: usize, percent: usize, floor: usize) -> usize {
@@ -658,6 +661,7 @@ impl Ext {
             (c, w)
         };
         let (c0, w0) = score(0);
+        let erased = self.erased.take();
 
         // A jump fed in pieces: the rows are looked up, or lost. A status
         // row places it below.
@@ -710,7 +714,11 @@ impl Ext {
         // of these is a tape feed.
         if o.seed != 0 && (o.seed_real || o.seed_tape) && nb >= 1 && c0 * 5 < nb * 2 {
             if o.seed_tape {
-                self.learn_tape_chrome(o, &ph);
+                let mut was = ph.clone();
+                if o.seed > 0 && was[h - 1] == BLANK {
+                    was[h - 1] = erased.unwrap_or(BLANK);
+                }
+                self.learn_tape_chrome(o, &was);
             }
             let (a, b) = self.band(h);
             self.flush(o.now.saturating_sub(FEED_GAP) + Duration::from_nanos(1));
@@ -814,6 +822,9 @@ impl Ext {
         }
 
         // 5. Edit.
+        if nh[h - 1] == BLANK && ph[h - 1] != BLANK && nh[..h - 1] == ph[..h - 1] {
+            self.erased = Some(ph[h - 1]);
+        }
         for i in 0..h {
             if nh[i] != ph[i] {
                 self.rows[i] = self.fresh(o, i);

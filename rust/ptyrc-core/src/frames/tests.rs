@@ -2866,6 +2866,13 @@ fn the_first_page_tells_the_prompt_row() {
     assert_eq!(info.rect, [0, 0, COLS, 19]);
     assert_eq!(info.extent, [0, 37]);
     assert_eq!(p.s.f.text(id, 0, 38), p.doc[..38].to_vec());
+    // The prompt erased in a burst of its own, as a key does: the row
+    // that was erased did not travel.
+    let mut p = Pager::open(doc(300), 20, false);
+    p.down_late(19);
+    p.s.idle(300);
+    let info = p.s.pane();
+    assert_eq!((info.rect, info.extent), ([0, 0, COLS, 19], [0, 37]));
 }
 
 #[test]
