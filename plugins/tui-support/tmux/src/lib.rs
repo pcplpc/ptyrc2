@@ -69,6 +69,7 @@ mod tests {
         let pane = |rect| PaneView {
             grid: &grid,
             rect,
+            area: rect,
             cursor: None,
             title: "",
             alt_screen: true,
@@ -84,6 +85,7 @@ mod tests {
         let p = PaneView {
             grid: &grid,
             rect: grid.rect(),
+            area: grid.rect(),
             cursor: None,
             title: "",
             alt_screen: false,

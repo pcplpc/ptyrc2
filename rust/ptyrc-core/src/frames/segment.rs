@@ -66,6 +66,9 @@ pub(crate) struct Segmenter<'a> {
     pub now: Duration,
     pub leaves: Vec<Leaf>,
     pub seps: Vec<Sep>,
+    /// Asked of every rectangle reached below the whole screen: the
+    /// panes a preset makes of it, final.
+    pub ask: Option<&'a dyn Fn(Rect) -> Option<Vec<Leaf>>>,
 }
 
 fn contains(outer: &Rect, inner: &Rect) -> bool {
@@ -210,10 +213,21 @@ impl Segmenter<'_> {
             self.leaf(r);
             return;
         }
-        // Horizontal cuts.
-        let cuts: Vec<(u16, bool)> = (r.y..r.bottom())
+        if depth > 0
+            && let Some(ask) = self.ask
+            && let Some(leaves) = ask(r)
+        {
+            self.leaves.extend(leaves);
+            return;
+        }
+        // Horizontal cuts. Rules first, alone: what lies between two
+        // rules is one app's, bars included, and is asked of the presets.
+        let mut cuts: Vec<(u16, bool)> = (r.y..r.bottom())
             .filter_map(|row| self.hsep(&r, row).map(|bar| (row, bar)))
             .collect();
+        if self.ask.is_some() && cuts.iter().any(|c| !c.1) && cuts.len() < r.h as usize {
+            cuts.retain(|c| !c.1);
+        }
         if !cuts.is_empty() && cuts.len() < r.h as usize {
             let mut top = r.y;
             for (row, bar) in cuts {
@@ -535,6 +549,7 @@ mod tests {
             now: Duration::ZERO,
             leaves: Vec::new(),
             seps: Vec::new(),
+            ask: None,
         }
         .run();
         (leaves.iter().map(|l| (l.rect(), l.kind)).collect(), seps)

@@ -20,6 +20,7 @@ fn pane(grid: &Grid, rect: Rect) -> PaneView<'_> {
     PaneView {
         grid,
         rect,
+        area: grid.rect(),
         cursor: None,
         title: "",
         alt_screen: true,

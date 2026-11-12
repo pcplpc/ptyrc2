@@ -1319,7 +1319,7 @@ impl TuiSupport for Fake {
             .map(str::to_string)
     }
 
-    fn tuning(&self) -> crate::plugin::Tuning {
+    fn tuning(&self, _pane: &PaneView) -> crate::plugin::Tuning {
         crate::plugin::Tuning {
             settle_ms: Some(1000),
             commit_ms: None,
@@ -1930,7 +1930,7 @@ impl TuiSupport for Declared {
         1.0
     }
 
-    fn tuning(&self) -> crate::plugin::Tuning {
+    fn tuning(&self, _pane: &PaneView) -> crate::plugin::Tuning {
         crate::plugin::Tuning {
             monitor: true,
             ..Default::default()
@@ -2414,4 +2414,113 @@ fn plugin_segmentation_replaces_the_generic_one() {
     // Panes born on a tick meet the plugins at the next burst.
     s.feed(&g2, 10);
     assert_eq!(s.panes()[0].support.as_deref(), Some("halves"));
+}
+
+/// An app told by `MILLER` on its first row: a title row, a list and a
+/// preview, side by side with no rule.
+struct Miller;
+
+impl Miller {
+    fn area(pane: &PaneView) -> Option<Rect> {
+        [pane.rect, pane.area].into_iter().find(|a| {
+            let row: String = (a.x..a.right())
+                .map(|x| pane.grid.cell(x, a.y).text.as_str())
+                .collect();
+            row.starts_with("MILLER")
+        })
+    }
+
+    fn parts(a: Rect) -> [Rect; 3] {
+        let w = a.w / 2;
+        [
+            Rect::new(a.x, a.y, a.w, 1),
+            Rect::new(a.x, a.y + 1, w, a.h - 1),
+            Rect::new(a.x + w, a.y + 1, a.w - w, a.h - 1),
+        ]
+    }
+}
+
+impl TuiSupport for Miller {
+    fn name(&self) -> &'static str {
+        "miller"
+    }
+
+    fn detect(&self, pane: &PaneView) -> f32 {
+        if Miller::area(pane).is_some() {
+            1.0
+        } else {
+            0.0
+        }
+    }
+
+    fn frame_key(&self, pane: &PaneView) -> Option<String> {
+        let a = Miller::area(pane)?;
+        (pane.rect == Miller::parts(a)[1]).then(|| "miller:list".into())
+    }
+
+    fn segment(&self, area: &PaneView) -> Option<Vec<Rect>> {
+        let a = Miller::area(area).filter(|a| *a == area.rect)?;
+        Some(Miller::parts(a).to_vec())
+    }
+
+    fn tuning(&self, pane: &PaneView) -> crate::plugin::Tuning {
+        crate::plugin::Tuning {
+            monitor: Miller::area(pane).is_some_and(|a| pane.rect == Miller::parts(a)[2]),
+            ..Default::default()
+        }
+    }
+}
+
+/// A rule down column 30; `MILLER` right of it, showing `list` and
+/// `preview` from their tops.
+fn beside(d: &[String], list: usize, preview: usize) -> Grid {
+    let mut g = view(d, 0, 20, &[]);
+    for y in 0..20 {
+        put(&mut g, 29, y, " │");
+        put(&mut g, 31, y, &" ".repeat(29));
+    }
+    put(&mut g, 31, 0, "MILLER");
+    for y in 1..20usize {
+        put(&mut g, 31, y as u16, &format!("entry {:03}", list + y));
+        put(&mut g, 45, y as u16, &format!("word {:03} x", preview + y));
+    }
+    g
+}
+
+#[test]
+fn a_preset_splits_a_pane_of_another_app() {
+    let mut s = Sim::with(FrameConfig::default(), vec![Box::new(Miller)]);
+    let d = doc(400);
+    s.settle(&beside(&d, 0, 0));
+    assert_eq!(
+        s.rects(),
+        vec![[0, 0, 30, 20], [31, 1, 14, 19], [45, 1, 15, 19]]
+    );
+    let p = s.panes();
+    assert_eq!(p[0].support, None);
+    assert_eq!(p[1].support.as_deref(), Some("miller"));
+    assert_eq!(p[1].key.as_deref(), Some("miller:list"));
+    assert_eq!(p[2].key, None);
+    // The title row is chrome: one row is below a pane.
+    assert!(s.f.list().iter().any(|f| {
+        f.kind == FrameKind::Chrome && f.state != FrameState::Inactive && f.rect == [31, 0, 29, 1]
+    }));
+    // The tuning is the pane's: the preview is rewritten in place, the
+    // list scrolls.
+    let (list, preview) = (p[1].id, p[2].id);
+    for (top, shown) in [(1, 150), (2, 7), (3, 300)] {
+        s.feed(&beside(&d, top, shown), 700);
+        let p = s.panes();
+        assert_eq!((p[1].id, p[1].origin), (list, [0, top as i64]));
+        assert_eq!((p[2].id, p[2].origin), (preview, [0, 0]));
+    }
+    // The app leaves: the pane is whole again.
+    let mut g = view(&d, 0, 20, &[]);
+    for y in 0..20 {
+        put(&mut g, 29, y, " │");
+        put(&mut g, 31, y, &" ".repeat(29));
+        put(&mut g, 31, y, "$");
+    }
+    s.settle(&g);
+    assert_eq!(s.rects(), vec![[0, 0, 30, 20], [31, 0, 29, 20]]);
 }
