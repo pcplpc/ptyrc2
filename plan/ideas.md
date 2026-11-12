@@ -201,12 +201,6 @@ Gaps met while writing the apps; none fixed in the core.
   on column 0: the spout of a sand without `--cursor`. Left: the pile
   does not scroll with the text; at `--rate` 400 the pile under the
   spout is a column, the stream outruns the slides.
-- A pane with little text gets a new frame at a resize (identity is
-  by content): its sprites stay on the inactive frame. Reproduce: `sh`
-  with an empty screen, 60x14, a sprite on the pane, resize to 40x10.
-  Expected: same frame id. Observed: frame 1 inactive, frame 2 new, the
-  sprite hidden. `sand` moves its sprite itself (`heir`); the core
-  could fall back to the overlap alone when nothing else claims it.
 
 ## Events, third session
 
@@ -271,3 +265,27 @@ Built: host colours (OSC 10, 11), `alpha`, `wallpaper` and `hud` (see
   time.
 - Draw extensions and effects take `alpha` only through the sprite
   fields. Mixes are linear in sRGB.
+
+## Client apps, third session
+
+Built: `cat`, `marks`, `rain` (see `design.md`). Gaps met:
+
+- An effect cannot read the heat: `Under` has rows and cursor only.
+  `rain` keeps a stillness per column from text diffs and misses
+  changes of style.
+- `Under.rows` are strings: a wide glyph or a tab shifts the columns
+  after it (`ls /` with a tab: the drops are one cell off). `rain` and
+  `sand` index by char.
+- No snapshot when subscribing: `cat` asks `frame.idle` and
+  `screen.cursor` once at start. `subscribe {snapshot: true}`.
+- The `cursor` event is in screen cells, with no frame; `frame` and
+  `pos`, as `frame.at` gives, would spare a stale origin.
+- `Pilot.events(timeout=)` ends the same on silence and on a closed
+  connection; the apps test `pilot.connected`.
+- `Pilot.find` and `Sprite.info` do not work inside `batch()`; `marks`
+  calls `screen.find` and reads `batch.results` itself.
+- `draw.list` has no style: two tints are told apart by size only.
+- `auto` placement on a full screen lands on text; `covered` is 0 for
+  front sprites.
+- `_cli.parse` uses `parse_args`; `marks ERROR -i WARN` needs
+  `parse_intermixed_args`.
