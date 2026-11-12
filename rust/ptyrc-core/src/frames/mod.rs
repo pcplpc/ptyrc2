@@ -13,7 +13,7 @@ mod tests;
 
 pub use heat::HeatView;
 
-use crate::plugin::{PaneView, TuiSupport};
+use crate::plugin::{Chrome, PaneView, TuiSupport, ViewHint};
 use crate::types::*;
 use ext::{Ext, Obs, Outcome};
 use heat::Heat;
@@ -213,6 +213,15 @@ impl Pane {
     }
 }
 
+/// What a preset said of a pane.
+#[derive(Clone, Default)]
+struct Advice {
+    support: Option<usize>,
+    chrome: Option<Chrome>,
+    hint: Option<ViewHint>,
+    key: Option<String>,
+}
+
 struct Placed {
     pos: (u16, u16),
     better_since: Option<Duration>,
@@ -249,6 +258,8 @@ pub struct Frames {
     /// Identity of what fills the whole screen, from a plugin: prefixes
     /// the key of every pane.
     screen_key: Option<String>,
+    /// Preset answers for the leaves of the pending layout.
+    advice: HashMap<segment::Rect4, Advice>,
     placed: RefCell<PlaceCache>,
 }
 
@@ -285,6 +296,7 @@ impl Frames {
             alt: false,
             started: false,
             screen_key: None,
+            advice: HashMap::new(),
             placed: RefCell::new(HashMap::new()),
         }
     }
@@ -620,7 +632,9 @@ impl Frames {
             .map_err(|e| e.to_string())?;
         let mut out = Vec::new();
         let mut scan = |line: &Line, x0: i64, y: i64, info: &SurfaceInfo| {
-            for m in re.find_iter(&line.text) {
+            // Trailing blanks are not text: `$` is the end of what is
+            // written.
+            for m in re.find_iter(line.text.trim_end_matches(' ')) {
                 if m.is_empty() || out.len() >= 10_000 {
                     continue;
                 }
@@ -732,6 +746,22 @@ impl Frames {
         best.map(|b| b.0)
     }
 
+    /// What the preset `support` says of a pane.
+    fn advise(&self, pv: &PaneView, support: Option<usize>) -> Advice {
+        match support {
+            Some(s) => {
+                let sup = &self.supports[s];
+                Advice {
+                    support,
+                    chrome: sup.chrome(pv),
+                    hint: sup.view_hint(pv),
+                    key: sup.frame_key(pv),
+                }
+            }
+            None => Advice::default(),
+        }
+    }
+
     /// Key of a pane: what fills the screen first (a tmux window), then
     /// what the pane shows (a file).
     fn full_key(&self, pane_key: Option<String>) -> Option<String> {
@@ -810,6 +840,16 @@ impl Frames {
                     self.resume(id);
                 } else {
                     self.panes.get_mut(&id).unwrap().suspended = true;
+                }
+            }
+            // The layout will be committed on a tick, without the screen:
+            // ask the presets now, for the rectangles to come.
+            self.advice.clear();
+            if let Some(inp) = input {
+                for leaf in seg.iter().filter(|l| l.kind == 0) {
+                    let pv = self.pane_view(inp, leaf.rect());
+                    let advice = self.advise(&pv, self.detect(&pv));
+                    self.advice.insert(leaf.rect, advice);
                 }
             }
             self.pending = Some((seg, start));
@@ -1116,56 +1156,53 @@ impl Frames {
         let old_content = p.content();
         let mut new_key = p.key.clone();
 
-        // Plugin knowledge.
+        // Plugin knowledge: asked on a burst; on a tick, what was asked
+        // for this rectangle while its layout was pending.
         let consult = input.is_some() && (dirty || p.fresh || p.support_at.is_none());
-        if let Some(inp) = input
+        let advice = if let Some(inp) = input
             && consult
         {
             let pv = self.pane_view(inp, p.rect);
             // Looked for on every change; once found, a preset is kept
             // through `SUPPORT_HOLD` of not being seen (a command line
             // hides the ruler vim is known by).
-            match self.detect(&pv) {
-                Some(s) => {
-                    if p.support != Some(s) {
-                        let t = self.supports[s].tuning();
-                        p.settle = ms(t.settle_ms.unwrap_or(self.cfg.settle_ms));
-                        p.commit = ms(t.commit_ms.unwrap_or(self.cfg.commit_ms));
-                    }
-                    p.support = Some(s);
-                    p.support_at = Some(now);
-                }
-                None => {
-                    if p.support.is_none() || p.support_at.is_none_or(|t| now >= t + SUPPORT_HOLD) {
-                        p.support = None;
-                        p.support_at = Some(now);
-                    }
-                }
+            let found = self.detect(&pv);
+            let held = p.support.is_some() && p.support_at.is_some_and(|t| now < t + SUPPORT_HOLD);
+            let support = found.or(if held { p.support } else { None });
+            if found.is_some() || !held {
+                p.support_at = Some(now);
             }
-            match p.support {
-                Some(s) => {
-                    let sup = &self.supports[s];
-                    let chrome = sup.chrome(&pv);
-                    p.fixed_tb = chrome.map(|c| (c.top, c.bottom));
-                    let (l, r) = chrome.map_or((0, 0), |c| (c.left, c.right));
-                    p.plugin_left = l;
-                    if r != p.right {
-                        p.right = r;
-                        p.ext.reset_view();
-                        p.hashes_valid = false;
-                    }
-                    p.hint = sup.view_hint(&pv);
-                    new_key = sup.frame_key(&pv);
-                }
-                None => {
-                    p.fixed_tb = None;
-                    p.hint = None;
-                    p.plugin_left = 0;
-                    new_key = None;
-                }
+            Some(self.advise(&pv, support))
+        } else if input.is_none() && p.fresh {
+            let advice = self.advice.get(&r4(p.rect)).cloned();
+            if advice.is_some() {
+                p.support_at = Some(now);
             }
-            new_key = self.full_key(new_key);
+            advice
+        } else {
+            None
+        };
+        if let Some(advice) = advice {
+            if let Some(s) = advice.support
+                && p.support != Some(s)
+            {
+                let t = self.supports[s].tuning();
+                p.settle = ms(t.settle_ms.unwrap_or(self.cfg.settle_ms));
+                p.commit = ms(t.commit_ms.unwrap_or(self.cfg.commit_ms));
+            }
+            p.support = advice.support;
+            p.fixed_tb = advice.chrome.map(|c| (c.top, c.bottom));
+            let (l, r) = advice.chrome.map_or((0, 0), |c| (c.left, c.right));
+            p.plugin_left = l;
+            if r != p.right {
+                p.right = r;
+                p.ext.reset_view();
+                p.hashes_valid = false;
+            }
+            p.hint = advice.hint;
+            new_key = self.full_key(advice.key);
         }
+        let consult = consult || (input.is_none() && p.fresh);
 
         // Generic gutter: a number column is left chrome, with or without
         // a plugin. The plugin's own left chrome is a minimum.

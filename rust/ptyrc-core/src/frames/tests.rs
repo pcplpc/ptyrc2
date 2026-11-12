@@ -1225,6 +1225,25 @@ fn hinted_view_of_another_document_is_another_frame() {
 }
 
 #[test]
+fn regex_anchors_are_the_ends_of_the_text() {
+    let d = doc(40);
+    let mut s = Sim::new();
+    s.settle(&view(&d, 0, 19, &["  indented foo"]));
+    let re = |p: &str| TextQuery {
+        pattern: p.into(),
+        regex: true,
+        ignore_case: false,
+    };
+    for id in [RAW, s.pane().id] {
+        let m = s.f.find(id, &re("foo$"), false);
+        assert_eq!(m.len(), 1, "frame {id}");
+        assert_eq!((m[0].x, m[0].y), (11, 19));
+        assert_eq!(s.f.find(id, &re("^line 0005"), false).len(), 1);
+        assert_eq!(s.f.find(id, &re("^indented"), false).len(), 0);
+    }
+}
+
+#[test]
 fn wire_forms() {
     let mut s = Sim::new();
     s.settle(&view(&doc(30), 0, 20, &[]));
