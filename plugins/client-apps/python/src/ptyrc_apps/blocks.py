@@ -9,9 +9,10 @@
 
 What it shows:
 
-- The screen read as a map: every glyph of the pane is a wall. A line
-  is a run of free cells between two walls or sides of the view; full
-  of blocks, it goes and what stands on it comes down.
+- The screen read as a map: every glyph of the pane is a wall, and so
+  is the blank between two words. A line is a run of free cells
+  between two walls or sides of the view; full of blocks, it goes and
+  what stands on it comes down.
 - Braille as sub-cells: a block is a cell, `⣿`; a piece falls a dot at
   a time, four dots a row (two a column with `--sideways`).
 - Frame coordinates: the heap belongs to the text and scrolls with it.
@@ -275,6 +276,9 @@ class Game:
         if box == self.box and walls == self._text:
             return
         self._text = walls
+        # The blank between two words is no place for a line: the words
+        # of a sentence are one wall.
+        walls = walls | {(x + 1, y) for x, y in walls if (x + 2, y) in walls}
         self.walls = {(y, -x) for x, y in walls} if self.sideways else walls
         self.box = box
         self._runs = {}

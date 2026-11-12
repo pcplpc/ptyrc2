@@ -118,8 +118,11 @@ def test_lines() -> None:
     # What stood on the line came down; the other run is not full.
     assert game.blocks == {(1, 5): "green", (4, 5): "red", (5, 5): "red", (6, 5): "red"}
     # Text written on a block: gone.
+    game.step(box, walls | {(6, 5)})
+    assert (6, 5) not in game.blocks and len(game.blocks) == 3
+    # And so is one in the blank between two words.
     game.step(box, walls | {(5, 5)})
-    assert (5, 5) not in game.blocks and len(game.blocks) == 3
+    assert set(game.blocks) == {(1, 5)}
 
 
 def test_lines_sideways() -> None:
@@ -309,3 +312,13 @@ def test_blocks_usage(capsys: pytest.CaptureFixture[str]) -> None:
         with pytest.raises(SystemExit):
             blocks.main(bad)
     capsys.readouterr()
+
+
+def test_the_blank_between_two_words_is_a_wall() -> None:
+    """One cell between two words is not a line of one block."""
+    for sideways in (False, True):
+        game = blocks.Game(random.Random(1), sideways=sideways)
+        walls = blocks.walls_of(["", "ab cd  ef"], 0, 0)
+        game.step((0, 0, 12, 6), walls)
+        solid = {game._out(c) for c in game.walls}
+        assert (2, 1) in solid and (5, 1) not in solid and (6, 1) not in solid
