@@ -7,8 +7,9 @@
 
 What it shows:
 
-- `Frame.is_idle`: the driver knows which panes have been still for a
-  while. A big animation starts there, not where someone is typing.
+- `Pilot.wait_idle`: the driver knows which panes have been still for
+  a while, and answers when one is. A big animation starts there, not
+  where someone is typing. Nothing is polled.
 - A native effect from a draw extension (`plugins/draw-ext/sand`): the
   simulation runs in the driver, 80 steps a second, with nothing on the
   socket. One request starts it; the app then only stays connected.
@@ -29,13 +30,13 @@ import random
 import time
 from collections.abc import Sequence
 
-from ptyrc import Frame, Pilot, Sprite
+from ptyrc import Frame, Pilot, PtyrcError, Sprite
 
 from . import _cli
 
-__all__ = ["heir", "main", "pour"]
+__all__ = ["heir", "main", "pour", "still"]
 
-POLL = 0.5  # seconds between two looks at the pane
+POLL = 0.5  # seconds between two looks at a frame replaced
 
 
 def pour(pilot: Pilot, frame: Frame, rate: float, cursor: bool = False) -> Sprite:
@@ -68,17 +69,38 @@ def heir(pilot: Pilot, frame: Frame) -> Frame | None:
     return max(panes, key=shared, default=None)
 
 
+def still(pilot: Pilot, sel: int | str, timeout: float) -> Frame | None:
+    """The frame `sel` once it is idle; None after `timeout` seconds.
+    One request: the driver answers when it is so. It resolves a name
+    at each look: the most idle pane now may not be the one of a moment
+    ago. A name that finds no pane (a plain shell) is the raw frame."""
+    try:
+        return pilot.wait_idle(sel, timeout=timeout)
+    except TimeoutError:
+        return None
+    except PtyrcError as exc:
+        if exc.code != "no-frame" or isinstance(sel, int):
+            raise
+    try:
+        return pilot.wait_idle("raw", timeout=min(timeout, 1.0))
+    except TimeoutError:
+        return None
+
+
 def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
     end = None if seconds is None else time.monotonic() + seconds
     while True:
-        # A name is asked again until the sand falls: the most idle pane
-        # now may not be the one of a moment ago.
-        frame = _cli.pick(pilot, args.frame)
-        if _cli.on_screen(frame) and (args.now or frame.is_idle):
-            break
-        if end is not None and time.monotonic() >= end:
+        left = 30.0 if end is None else end - time.monotonic()
+        if left <= 0:
             return
-        time.sleep(POLL)
+        if args.now:
+            frame: Frame | None = _cli.pick(pilot, args.frame)
+        else:
+            frame = still(pilot, args.frame, left)
+        if frame is not None and frame.usable:
+            break
+        if args.now or frame is not None:
+            time.sleep(POLL)  # a layout still settling
     sand = pour(pilot, frame, args.rate, args.cursor)
     while end is None or time.monotonic() < end:
         time.sleep(POLL)
