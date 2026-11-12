@@ -1149,19 +1149,25 @@ impl Frames {
     fn segment(&self, input: &ScreenInput, now: Duration) -> (Vec<Leaf>, Vec<Sep>, Areas) {
         let all = Rect::new(0, 0, self.screen.cols, self.screen.rows);
         let pv = self.pane_view(input, all);
+        // The whole screen is cut by the preset surest of it, and no
+        // other: an app at the top left of a tmux looks like the screen.
+        let mut best: Option<(usize, f32)> = None;
         for (i, s) in self.supports.iter().enumerate() {
             let conf = match self.screen_conf.get(i) {
                 Some(c) if self.screen_conf_at.is_some() => *c,
                 _ => s.detect(&pv),
             };
-            if conf >= 0.5
-                && let Some(rects) = s.segment(&pv)
-            {
-                let leaves = self.preset_leaves(rects, all);
-                let mut areas = Areas::new();
-                let leaves = self.nest(input, leaves, all, i, &mut areas, now);
-                return (leaves, Vec::new(), areas);
+            if conf >= 0.5 && best.is_none_or(|b| conf > b.1) {
+                best = Some((i, conf));
             }
+        }
+        if let Some((i, _)) = best
+            && let Some(rects) = self.supports[i].segment(&pv)
+        {
+            let leaves = self.preset_leaves(rects, all);
+            let mut areas = Areas::new();
+            let leaves = self.nest(input, leaves, all, i, &mut areas, now);
+            return (leaves, Vec::new(), areas);
         }
         let areas = RefCell::new(Areas::new());
         let ask = |rect: Rect| {

@@ -3007,3 +3007,57 @@ fn a_preset_inside_a_pane_of_a_preset() {
     s.settle(&g);
     assert_eq!(rects(&s), [[0, 0, 30, 20], [30, 0, 30, 20]]);
 }
+
+/// Knows the screen by its title, cuts nothing.
+struct Host;
+
+impl TuiSupport for Host {
+    fn name(&self) -> &'static str {
+        "host"
+    }
+
+    fn detect(&self, pane: &PaneView) -> f32 {
+        if pane.title == "host" { 1.0 } else { 0.0 }
+    }
+}
+
+#[test]
+fn the_screen_is_cut_by_the_surest_preset_only() {
+    // An app at the top left of a host that fills the screen: the app's
+    // preset takes the screen for its own, the host's is surer or first.
+    let mut s = Sim::with(
+        FrameConfig::default(),
+        vec![Box::new(Host), Box::new(Stack)],
+    );
+    let d = doc(40);
+    let mut g = view(&d, 0, 20, &[]);
+    put(&mut g, 0, 0, "STACK of two          ");
+    s.settle(&g);
+    assert_eq!(s.panes().len(), 2);
+    s.title = "host".into();
+    put(&mut g, 0, 1, "another row           ");
+    s.settle(&g);
+    assert_eq!(s.panes().len(), 1);
+    assert_eq!(s.pane().support.as_deref(), Some("host"));
+}
+
+#[test]
+fn a_rule_from_top_to_bottom_cuts_before_a_preset_is_asked() {
+    // An app left of a rule, above a status bar: its preset is asked of
+    // its side, not of the two.
+    let mut s = Sim::with(
+        FrameConfig::default(),
+        vec![Box::new(Host), Box::new(Stack)],
+    );
+    s.title = "host".into();
+    let d = doc(40);
+    let mut g = view(&d, 0, 19, &["status"]);
+    inverse(&mut g, Rect::new(0, 19, COLS, 1));
+    for y in 0..19 {
+        put(&mut g, 30, y, "│");
+    }
+    put(&mut g, 0, 0, "STACK of two");
+    s.settle(&g);
+    let rects: Vec<_> = s.panes().iter().map(|p| p.rect).collect();
+    assert_eq!(rects, [[0, 0, 30, 4], [31, 0, 29, 19], [0, 4, 30, 15]]);
+}
