@@ -448,3 +448,57 @@ on the heat; `snow` (see `design.md`, "Effects"). Left:
   `snow.py` repeats the loop of `sand.follow` to send its gusts between
   two events. `Sprite.tune(params)` in the Python pilot
   would spare `update(effect={"name": ..., "params": ...})`.
+
+## Apps, fifth session, second round
+
+Built (see `design.md`, "Python"):
+
+- `Sprite.tune(**params)`; `tune` for `confetti` (`duration_ms`,
+  `origin`) and `sparkle` (`count`, `colors`, `life_ms`,
+  `duration_ms`). `_cli.follow(..., beats)`: one loop for `sand`,
+  `rain` and `snow`; the gusts of the snow are its beats.
+- `_cli.Sight`: `snake`, `brick`, `blocks`, `fishes`, `flower` on the
+  topics `text`, `frames`, `cursor`. The text of the view is read when
+  the driver says it changed or scrolled; the game ticks stay. On a
+  quiet screen an app asks nothing: before, per second, the snake made
+  24 requests besides its drawing, the fishes 30.
+- `sand.heir` is needed, and was wrong. Two stacked tmux panes with
+  little text, the host resized from 100x30 to 100x20: both frames are
+  replaced, every time; a sprite left on an old frame stays out of
+  sight. The lower pane's new place overlapped its old rectangle by 4
+  rows of 9: under the half asked, so the sand was not moved. `heir`
+  now scales the old rectangle by the growth of the screen
+  (`test_sand_follows_two_panes_resized`, on a real tmux). Side by
+  side, 100x30 to 70x30 keeps both frames; to 40x12 one of the two is
+  replaced.
+- Snake: with `-e` a score (length, longest); the snake's sprite is
+  over its particles. Brick, blocks, snake: one `_arcade.Board`, its
+  blanks opaque: the racket no longer shows through the score.
+- Blocks: the blank between two words is a wall: a gap of one cell is
+  no longer a line.
+- Audit of the app tests: each one that compares the host after an
+  app's thread ends waits for `sprites() == []` first; none changed.
+
+Left:
+
+- The driver takes the base of the topic `text` at the tick after the
+  first `subscribe`: a `Sight` relies on that tick coming before its
+  first read is answered (it does: `subscribe` asks for one).
+- A `Sight` whose frame is replaced (the resize above) waits for ever:
+  the games draw in frame cells of the old frame. `heir` would give the
+  new one; the sprites would have to be made again there.
+- While its frame is not usable a `Sight` asks `frame.get` at each
+  tick: the raw frame alone becomes usable with no `frames` event.
+- `flower` still reads `frame.heat` twice a second while it has a
+  flower to plant and no cold place for it: the heat is not a topic.
+- `follow` notes the size of the screen when its frame and the raw
+  frame are both stable; a resize in two steps closer than the settle
+  time is scaled from the first size.
+- Brick: on a blank view a ball is juggled from edge to edge; capsules
+  sink only down; the two rackets do not fight for a ball; the terrain
+  dies with the app. Blocks: pieces cross each other; a piece whose
+  way is cut by another is lost; the cursor gives a place, not a turn;
+  the heap dies with the app. Snake: it does not fight back. Not
+  reached in this round.
+- `tune` of `confetti` cannot change `count`, `colors`, `spread`: the
+  pieces are thrown at the start.
