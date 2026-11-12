@@ -2,6 +2,7 @@
 //! `ptyrc <verb>`.
 
 mod plugins;
+mod verbs;
 
 use clap::{Args, Parser, Subcommand};
 use ptyrc_proto::{Client, ClientError, session};
@@ -19,16 +20,17 @@ struct Cli {
 }
 
 #[derive(Args)]
-struct Common {
+pub struct Common {
     /// Session to talk to [default: $PTYRC_SESSION, else the only one]
     #[arg(short, long, global = true)]
-    session: Option<String>,
+    pub session: Option<String>,
     /// Machine-readable output
     #[arg(long, global = true)]
-    json: bool,
+    pub json: bool,
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum Verb {
     /// Wrap a program: it runs as before, and can be piloted
     Run(Run),
@@ -54,6 +56,29 @@ enum Verb {
         #[arg(required = true)]
         keys: Vec<String>,
     },
+    /// Print the screen as text
+    Text(verbs::Text),
+    /// Find text on screen: where it is, in frame and screen coordinates
+    Find(verbs::Find),
+    /// Print the cursor position
+    Cursor,
+    /// Wait for text, or for the screen to settle
+    Wait(verbs::Wait),
+    /// List frames: the raw screen and the panes found on it
+    Frames(verbs::Frames),
+    /// Print the safety heatmap of a frame: 9 free and still, 0 busy
+    Heat {
+        #[arg(short, long, default_value = "raw")]
+        frame: String,
+    },
+    /// Draw on the screen
+    #[command(subcommand)]
+    Draw(verbs::Draw),
+    /// Mirror the remote screen here (^C to leave)
+    Show,
+    /// Debug tools
+    #[command(subcommand)]
+    Debug(verbs::Debug),
     /// Print events, one JSON object per line
     Events {
         /// screen, cursor, frames, input, size, exit [default: all]
@@ -75,6 +100,9 @@ struct Run {
     /// Headless: append what the host would receive to this file
     #[arg(long, requires = "headless")]
     host_log: Option<PathBuf>,
+    /// Plain pass-through: no screen model, no drawing
+    #[arg(long)]
+    transparent: bool,
     /// Quiet time that ends a burst of app output, in milliseconds
     #[arg(long, default_value_t = 1)]
     coalesce_ms: u64,
@@ -97,6 +125,10 @@ const TOPICS: [&str; 6] = ["screen", "cursor", "frames", "input", "size", "exit"
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if !matches!(cli.verb, Verb::Run(_)) {
+        // A client verb piped into `head` ends quietly.
+        ptyrc_server::host::default_sigpipe();
+    }
     match run(cli) {
         Ok(code) => code,
         Err(message) => {
@@ -132,22 +164,31 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             call(&common, "input.send", json!({"keys": keys}))?;
             Ok(ExitCode::SUCCESS)
         }
+        Verb::Text(args) => verbs::text(&common, args),
+        Verb::Find(args) => verbs::find(&common, args),
+        Verb::Cursor => verbs::cursor(&common),
+        Verb::Wait(args) => verbs::wait(&common, args),
+        Verb::Frames(args) => verbs::frames(&common, args),
+        Verb::Heat { frame } => verbs::heat(&common, &frame),
+        Verb::Draw(verb) => verbs::draw(&common, verb),
+        Verb::Show => verbs::show(&common),
+        Verb::Debug(verb) => verbs::debug(&common, verb),
         Verb::Events { topics } => verb_events(&common, topics),
     }
 }
 
-fn connect(common: &Common) -> Result<Client, String> {
+pub fn connect(common: &Common) -> Result<Client, String> {
     Client::connect_session(common.session.as_deref()).map_err(|e| e.to_string())
 }
 
 /// One request on a fresh connection.
-fn call(common: &Common, method: &str, params: Value) -> Result<Value, String> {
+pub fn call(common: &Common, method: &str, params: Value) -> Result<Value, String> {
     connect(common)?
         .call(method, params)
         .map_err(|e| e.to_string())
 }
 
-fn print_json(value: &Value, pretty: bool) {
+pub fn print_json(value: &Value, pretty: bool) {
     let text = if pretty {
         serde_json::to_string_pretty(value)
     } else {
@@ -175,7 +216,8 @@ fn verb_run(args: Run) -> Result<ExitCode, String> {
         host_log: args.host_log,
         coalesce_ms: args.coalesce_ms,
     };
-    let status = ptyrc_server::run(config, plugins::engine()).map_err(|e| e.to_string())?;
+    let status =
+        ptyrc_server::run(config, plugins::engine(args.transparent)).map_err(|e| e.to_string())?;
     Ok(ExitCode::from(status.clamp(0, 255) as u8))
 }
 

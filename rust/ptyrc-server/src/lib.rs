@@ -11,6 +11,9 @@ pub mod engine;
 pub mod host;
 pub mod keys;
 pub mod pty;
+mod rpc;
+pub mod screen;
 
 pub use driver::{Config, run};
 pub use engine::{ConnId, Ctx, Engine, PassThrough, Reply, SessionInfo, Token};
+pub use screen::ScreenEngine;

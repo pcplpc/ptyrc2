@@ -115,3 +115,12 @@ impl Drop for Host {
         }
     }
 }
+
+/// Restore the default SIGPIPE disposition: a client whose output pipe
+/// closes dies quietly. Call before any thread is started.
+pub fn default_sigpipe() {
+    // SAFETY: sets a disposition to its default; no handler is installed.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+}

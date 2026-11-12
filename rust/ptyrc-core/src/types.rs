@@ -146,8 +146,14 @@ pub trait Surfaces {
 
     /// Best `w x h` spot of the frame's view, as a cell relative to the
     /// view's top-left, not overlapping `taken` (view-relative rects).
-    fn place(&self, id: FrameId, w: u16, h: u16, prefer: Prefer, taken: &[Rect])
-    -> Option<(u16, u16)>;
+    fn place(
+        &self,
+        id: FrameId,
+        w: u16,
+        h: u16,
+        prefer: Prefer,
+        taken: &[Rect],
+    ) -> Option<(u16, u16)>;
 
     /// Current cursor, screen coordinates.
     fn cursor(&self) -> (u16, u16);
