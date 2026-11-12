@@ -363,7 +363,8 @@ impl Blend {
 
 /// Place in the stack. The app is layer 0: negative layers are behind its
 /// text, positive ones in front. On the wire an integer other than 0, or
-/// `"back"` (-1) or `"front"` (1).
+/// a name: `"wallpaper"` (-100), `"back"` (-1), `"front"` (1), `"hud"`
+/// (100).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(try_from = "LayerRepr", into = "i32")]
 pub struct Layer(pub i32);

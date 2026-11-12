@@ -327,13 +327,17 @@ pub struct Place {
     /// Follow the cursor at offset DX,DY
     #[arg(long, value_name = "DX,DY", allow_hyphen_values = true)]
     cursor: Option<String>,
-    /// back (behind the app's text), front, or an integer: the app is
-    /// 0, negative layers are behind it [default: back; front for a tint]
+    /// wallpaper, back (behind the app's text), front, hud, or an
+    /// integer: the app is 0, negative layers are behind it, back is
+    /// -1, front 1 [default: back; front for a tint]
     #[arg(long, value_name = "LAYER", allow_hyphen_values = true)]
     layer: Option<String>,
     /// normal, or tint: keep the glyph below and apply the style
     #[arg(long, default_value = "normal")]
     blend: String,
+    /// Opacity, 0 to 1: colours are mixed with those below
+    #[arg(long, value_name = "ALPHA")]
+    alpha: Option<f32>,
     /// Order inside a layer
     #[arg(short, default_value_t = 0, allow_hyphen_values = true)]
     z: i32,
@@ -377,6 +381,9 @@ impl Place {
             fields.insert("layer".into(), layer);
         }
         fields.insert("blend".into(), json!(self.blend));
+        if let Some(alpha) = self.alpha {
+            fields.insert("alpha".into(), json!(alpha));
+        }
         fields.insert("z".into(), json!(self.z));
         fields.insert("persist".into(), json!(true));
         if let Some(ttl) = self.ttl {

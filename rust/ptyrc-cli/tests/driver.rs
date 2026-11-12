@@ -525,11 +525,32 @@ fn draw_layers_from_the_cli() {
     let sprites: Value = serde_json::from_str(&out).unwrap();
     let sprites = sprites["sprites"].as_array().unwrap();
     assert_eq!(sprites.len(), 4);
+    assert_eq!(sprites[0]["alpha"], json!(1.0));
     let big = sprites
         .iter()
         .find(|s| s["id"].as_u64() == id.parse().ok())
         .unwrap();
     assert_eq!((&big["layer"], &big["size"][0]), (&json!(1), &json!(7)));
+
+    // Named layers and an opacity.
+    let (ok, id, err) = run(&[
+        "draw", "text", "--layer", "hud", "--alpha", "0.5", "--bg", "#ff0000", "--at", "0,5", "x",
+    ]);
+    assert!(ok, "{err}");
+    let (_, out, _) = run(&["--json", "draw", "ls"]);
+    let sprites: Value = serde_json::from_str(&out).unwrap();
+    let glass = sprites["sprites"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"].as_u64() == id.parse().ok())
+        .unwrap();
+    assert_eq!(
+        (&glass["layer"], &glass["alpha"]),
+        (&json!(100), &json!(0.5))
+    );
+    let (ok, _, err) = run(&["draw", "text", "--alpha", "2", "x"]);
+    assert!(!ok && err.contains("alpha: 0 to 1"), "{err}");
 
     // Layer 0 is the app's.
     let (ok, _, err) = run(&["draw", "text", "--layer", "0", "x"]);
