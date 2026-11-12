@@ -41,3 +41,14 @@
 - A good demo of the dynamic frames is wanted.
 - TUIs to try: htop, less, man, tmux, ranger, glances, opencode.
 - Sessions are kept around 200k tokens between handoffs.
+
+## Opening the second session
+
+- The session agent pilots a team: forked siblings, each on its own
+  topic and paths, each free to delegate bounded pieces to sub-agents.
+- Notes on background against foreground, static against hot, idle
+  frames and pagers: `plan/ideas.md`, "opening the second session".
+- Siblings work in git worktrees, `temp/wt-<topic>` on `fork/<topic>`,
+  merged into `main` by the pilot. The post-commit timestamp hook stashes
+  unstaged files while it runs: a shared tree would lose a sibling's
+  edits.
