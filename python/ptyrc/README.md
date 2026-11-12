@@ -36,7 +36,17 @@ with Pilot.spawn(["vim", "notes.md"], size=(100, 30)) as pilot:
 | type | `send`, `keys`, `paste`, `write` |
 | frames | `frames`, `panes`, `frame`, `frame_at`; `Frame.text`, `known`, `find`, `heat`, `heat_classes`, `idle`, `check_idle`, `is_idle`, `to_screen`, `to_frame`, `draw` |
 | draw | `draw`, `put`, `effect`, `ext`, `sprites`, `clear`; `Sprite.set`, `ext`, `move`, `update`, `info`, `remove` |
-| other | `batch`, `events`, `subscribe`, `resize`, `debug_overlay`, `dump`, `call` |
+| other | `batch`, `events`, `event`, `subscribe`, `resize`, `debug_overlay`, `dump`, `call` |
+
+Events: `pilot.subscribe("idle", "cursor", snapshot=True)` sends the
+state now as the first events. `pilot.events(*topics, timeout=)` yields
+`(topic, data)` and ends after `timeout` seconds of silence;
+`pilot.event(timeout)` is one event, or None. Both raise `PtyrcError`
+(`gone`) when the connection is closed.
+
+Inside `with pilot.batch():`, the calls that read (`text`, `find`,
+`sprites`, `Sprite.info`) return a list or a dict that is filled when
+the batch is sent; the others return None.
 
 Sprites are drawn behind the app's text unless `layer="front"`; the app
 is layer 0, negative layers are behind it.

@@ -373,8 +373,14 @@ class Cat:
             elif self.idle and self.act in ("sit", "groom"):
                 self.due = min(self.due, now + self.rng.uniform(0.5, 2.0))
         elif topic == "cursor":
-            at = (data["x"], data["y"]) if data.get("visible", True) else None
-            self.cursor = self.frame.to_frame(*at) if at else None
+            # In frame cells when the cursor is in the cat's frame: no
+            # origin to keep up to date.
+            if not data.get("visible", True):
+                self.cursor = None
+            elif data.get("frame") == self.frame.id:
+                self.cursor = tuple(data["pos"])
+            else:
+                self.cursor = self.frame.to_frame(data["x"], data["y"])
             if near(self.x, self.g, self.cursor):
                 self.flee(now)
         elif topic in ("screen", "frames"):
@@ -385,15 +391,14 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     rng = random.Random(args.seed)
     frame = _cli.pick(pilot, args.frame)
     cat = Cat(pilot, frame, rng, args.front)
-    pilot.subscribe("idle", "cursor", "screen", "frames")
-    # No event tells what already is: ask once.
-    cat.idle = frame.is_idle
-    at = pilot.cursor()
-    cat.cursor = frame.to_frame(at.x, at.y) if at.visible else None
+    # With a snapshot the first events tell what already is: whether
+    # the frame is idle, where the cursor is. Nothing is asked.
+    pilot.subscribe("idle", "cursor", "screen", "frames", snapshot=True)
     start = time.monotonic()
     end = None if seconds is None else start + seconds
     lost = 0.0  # since when the frame is out of sight
-    while pilot.connected:
+    # Until the session ends: a closed connection raises out of `events`.
+    while True:
         now = time.monotonic()
         if end is not None and now >= end:
             return

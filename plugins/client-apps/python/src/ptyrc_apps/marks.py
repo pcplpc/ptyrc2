@@ -14,7 +14,8 @@ What it shows:
   marks with the text, at once; nothing waits for the client.
 - Topics `screen` and `frames`: the app looks again when the text or
   the layout changed, and only then. All the searches of a look go in
-  one batch, all its changes in another: one repaint.
+  one batch (`find` inside `batch()`), all its changes in another:
+  one repaint.
 - Topic `draw`: the driver says which sprites went with the rows it
   forgot; the app forgets them too.
 - `auto=`, the front layer: a small display of the counts, in view and
@@ -118,22 +119,21 @@ class Marks:
     def search(self, frames: Sequence[int]) -> list[tuple[int, int, list[Match]]]:
         """Every pattern on every frame, in one request."""
         asked = [(f, p) for f in frames for p in range(len(self.patterns))]
+        # Inside a batch `find` returns a list, filled when it is sent.
         with self.pilot.batch() as batch:
-            for frame, p in asked:
-                self.pilot.call(
-                    "screen.find",
-                    pattern=self.patterns[p],
-                    frame=frame,
-                    known=True,
-                    **self.query,
-                )
+            found = [
+                self.pilot.find(self.patterns[p], frame=frame, known=True, **self.query)
+                for frame, p in asked
+            ]
         out = []
-        for (frame, p), result in zip(asked, batch.results, strict=True):
+        for (frame, p), matches, result in zip(
+            asked, found, batch.results, strict=True
+        ):
             if isinstance(result, PtyrcError):
                 if result.code in ("no-frame", "not-usable"):
                     continue  # the layout changed meanwhile: next look
                 raise result
-            out.append((frame, p, [Match.from_wire(m) for m in result["matches"]]))
+            out.append((frame, p, matches))
         return out
 
     def look(self) -> None:
@@ -181,7 +181,8 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     pilot.subscribe("screen", "frames", "draw")
     end = None if seconds is None else time.monotonic() + seconds
     marks.look()
-    while pilot.connected:
+    # Until the session ends: a closed connection raises out of `events`.
+    while True:
         left = None if end is None else end - time.monotonic()
         if left is not None and left <= 0:
             return
@@ -214,10 +215,9 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
     out.add_argument(
         "--no-hud", dest="hud", action="store_false", help="no display of the counts"
     )
-    # Intermixed: `marks ERROR -i WARN` reads both patterns.
-    args = out.parse_intermixed_args(argv)
-    args.frame = _cli.frame_arg(args.frame)
-    return _cli.run(lambda pilot, args: app(pilot, args, seconds), args)
+    return _cli.run(
+        lambda pilot, args: app(pilot, args, seconds), _cli.parse(out, argv)
+    )
 
 
 if __name__ == "__main__":

@@ -14,10 +14,11 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from ptyrc import Match, Pilot
+from ptyrc import Frame, Match, Pilot, Sprite
 from ptyrc_apps import (
     APPS,
     _arcade,
+    _cli,
     cat,
     clock,
     confetti,
@@ -1023,3 +1024,72 @@ def test_no_time_limit(name: str, capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exc:
         main([name, "--sec", "1"])
     assert exc.value.code == 2
+
+
+def pane_info(ident: int, rect: list[int], state: str = "stable") -> dict[str, object]:
+    usable = state == "stable"
+    return {"id": ident, "kind": "pane", "state": state, "usable": usable} | {
+        "rect": rect,
+        "origin": [0, 0],
+        "key": "tmux:0",
+    }
+
+
+class Wire:
+    """A pilot that only tells events and notes the sprite updates."""
+
+    def __init__(self, events: list[tuple[str, object]]) -> None:
+        self.todo = deque(events)
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def subscribe(self, *topics: str) -> None:
+        self.calls.append(("subscribe", {"topics": list(topics)}))
+
+    def event(self, timeout: float | None = None) -> tuple[str, object] | None:
+        return self.todo.popleft() if self.todo else None
+
+    def call(self, method: str, **params: object) -> None:
+        self.calls.append((method, params))
+
+
+def test_sand_heir() -> None:
+    frame = Frame(None, pane_info(3, [0, 0, 40, 24], "inactive"))
+    left = Frame(None, pane_info(7, [0, 0, 30, 24]))
+    right = Frame(None, pane_info(8, [31, 0, 49, 24]))
+    assert sand.heir(frame, [frame, left, right]) is left
+    # Not while it settles, not another window, not a sliver.
+    settling = Frame(None, pane_info(7, [0, 0, 30, 24], "candidate"))
+    assert sand.heir(frame, [settling, right]) is None
+    other = Frame(None, pane_info(7, [0, 0, 30, 24]) | {"key": "tmux:1"})
+    assert sand.heir(frame, [other]) is None
+
+
+def test_sand_follows_its_frame() -> None:
+    # Two empty panes resized: new frames. Told by `frames`, the app
+    # moves its sprite once the heir is usable; nothing is asked.
+    old = pane_info(3, [0, 0, 40, 24])
+    gone = pane_info(3, [0, 0, 40, 24], "inactive")
+    wire = Wire(
+        [
+            ("frames", {"frames": [old]}),
+            ("frames", {"frames": [gone, pane_info(7, [0, 0, 30, 24], "candidate")]}),
+            ("frames", {"frames": [gone, pane_info(7, [0, 0, 30, 24])]}),
+            ("frames", {"frames": [gone, pane_info(7, [0, 0, 30, 24])]}),
+            ("exit", {"status": 0}),
+            ("frames", {"frames": [pane_info(9, [0, 0, 30, 24])]}),
+        ]
+    )
+    sand.follow(wire, Frame(wire, old), Sprite(wire, 5))
+    assert wire.calls == [
+        ("subscribe", {"topics": ["frames", "exit"]}),
+        ("draw.update", {"id": 5, "frame": 7}),
+    ]
+
+
+def test_options_between_the_words() -> None:
+    out = _cli.parser("marks", "")
+    out.add_argument("patterns", nargs="+")
+    out.add_argument("-i", "--ignore-case", action="store_true")
+    args = _cli.parse(out, ["ERROR", "-i", "WARN", "-f", "3"])
+    assert args.patterns == ["ERROR", "WARN"] and args.ignore_case
+    assert args.frame == 3
