@@ -8,13 +8,14 @@ import random
 import re
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 from ptyrc import Pilot
-from ptyrc_apps import APPS, clock, confetti, fishes, flower, sand, snake
+from ptyrc_apps import APPS, _arcade, clock, confetti, fishes, flower, sand, snake
 from ptyrc_apps.__main__ import main
 
 
@@ -605,6 +606,126 @@ def test_snake_game() -> None:
     # Scrolled out of sight: it starts again in the new view.
     game.step((10, 200, 30, 205), set())
     assert len(game.body) <= 2 and 200 <= game.body[0][1] < 205
+
+
+def test_snake_arcade(session: Pilot) -> None:
+    page(session, "", "", "words in the way", "", "   more words here")
+    settle(session)
+    args = ["-s", session.session, "--seed", "4", "--speed", "60", "-a"]
+    seen: set[str] = set()
+
+    def look(host: str) -> bool:
+        seen.update(host)
+        # The snake, an apple, a foe, a beam announced, a beam firing.
+        return (
+            "@" in seen
+            and "●" in seen
+            and bool(seen & {"x", "+"})
+            and (bool(seen & {"╌", "╎"}) and bool(seen & {"━", "┃"}))
+        )
+
+    watch(session, lambda: snake.main(args, seconds=4), look)
+
+
+def test_snake_rules() -> None:
+    rows = ["", "  wall of words  ", "", "   another   one", "", "", ""]
+    walls = snake.walls_of(rows, 10, 100)
+    box = (10, 100, 40, 107)
+
+    def inside(c: tuple[int, int]) -> bool:
+        return 10 <= c[0] < 40 and 100 <= c[1] < 107
+
+    game = snake.Game(random.Random(5), golden=True, enemies=True, lasers=True)
+    seen: dict[str, int] = {}
+    golden = 0
+    for _ in range(3000):
+        size = len(game.body)
+        game.step(box, walls)
+        cells = list(game.body)
+        assert len(set(cells)) == len(cells)
+        assert not walls & set(cells) and all(map(inside, cells))
+        steps = itertools.pairwise(cells)
+        assert all(abs(a[0] - b[0]) + abs(a[1] - b[1]) == 1 for a, b in steps)
+        foes = [f.at for f in game.foes]
+        assert len(set(foes)) == len(foes) <= snake.FOES
+        assert not set(foes) & (walls | set(cells)) and all(map(inside, foes))
+        assert len(game.beams) <= snake.BEAMS
+        for beam in game.beams:
+            assert len(beam.cells) >= 5 and not walls & set(beam.cells)
+            line = {c[1] if beam.across else c[0] for c in beam.cells}
+            assert len(line) == 1 and all(map(inside, beam.cells))
+            if beam.firing:  # nothing stands in a beam that fires
+                assert not set(beam.cells) & (set(cells) | set(foes))
+        assert all(0 <= i < max(1, len(cells)) for i in game.lumps)
+        for what, *data in game.events:
+            seen[what] = seen.get(what, 0) + 1
+            if what == "eat":
+                assert data[0] == cells[0]
+                golden += data[1]
+            elif what == "lost":
+                assert data[0] and len(cells) < size + 1
+            elif what == "zap":
+                assert data[0].firing and data[0].left == snake.FIRE
+    assert seen.keys() == {"eat", "lost", "pop", "zap"}
+    assert game.eaten == seen["eat"] >= 20 and 0 < golden < seen["eat"]
+    # Same seed, same game; the flags off, the plain game.
+    a, b = (snake.Game(random.Random(9), lasers=True) for _ in range(2))
+    plain, old = snake.Game(random.Random(9)), snake.Game(random.Random(9))
+    for _ in range(300):
+        for one in (a, b, plain, old):
+            one.step(box, walls)
+        assert a.body == b.body and [x.cells for x in a.beams] == [
+            x.cells for x in b.beams
+        ]
+        assert plain.body == old.body and not plain.foes and not plain.beams
+        assert {e[0] for e in plain.events} <= {"eat", "lost"}
+
+
+def test_snake_beam_and_bite() -> None:
+    box = (0, 0, 20, 6)
+    game = snake.Game(random.Random(1), lasers=True)
+    game.body = deque([(x, 2) for x in range(8, 2, -1)])
+    game.apple, game.beam_due = (19, 5), 10**9
+    game.beams = [snake.Beam(1, tuple((5, y) for y in range(6)), False, fuse=1)]
+    game.step(box, set())
+    # The beam fires on the fourth segment: the tail is lost from there.
+    assert [e[0] for e in game.events] == ["zap", "lost"]
+    assert game.events[1][1][0] == (5, 2) and (5, 2) not in game.body
+    assert list(game.body) == [(9, 2), (8, 2), (7, 2), (6, 2)]
+    # Announced beams are walls to the snake when there is a way around.
+    game = snake.Game(random.Random(1), lasers=True)
+    game.body, game.apple, game.beam_due = deque([(2, 2)]), (8, 2), 10**9
+    game.beams = [snake.Beam(1, tuple((5, y) for y in range(1, 6)), False)]
+    for _ in range(snake.FUSE - 1):
+        game.step(box, set())
+        assert game.body[0][0] != 5 or game.body[0][1] == 0
+    # A foe reaches the middle of the body and bites it off.
+    game = snake.Game(random.Random(1), enemies=True)
+    game.body = deque([(x, 2) for x in range(12, 4, -1)])
+    game.apple, game.foe_due, game.steps = (19, 5), 10**9, 1
+    game.foes = [snake.Foe(1, (9, 3))]
+    game.step(box, set())
+    assert [e[0] for e in game.events] == ["lost", "pop"] and not game.foes
+    assert len(game.body) < 8
+
+
+def test_snake_arcade_art() -> None:
+    rng = random.Random(2)
+    one = _arcade.spark(rng, (1, 2))
+    assert one["loop"] is False and one["motion"]["ay"] > 0
+    assert one["ttl"] * 1000 > sum(f["ms"] for f in one["frames"])
+    assert len(_arcade.burst(7, rng, (1,))) == 7
+    for across, firing in itertools.product((True, False), repeat=2):
+        look = _arcade.beam(6, across, firing)
+        for frame in look["frames"]:
+            rows = ["".join(run["t"] for run in row) for row in frame["cells"]]
+            assert (len(rows), len(rows[0])) == ((1, 6) if across else (6, 1))
+    game = snake.Game(random.Random(1), golden=True)
+    game.body, game.lumps = deque([(x, 0) for x in range(9, -1, -1)]), [4]
+    _, cells = game.picture(fancy=True)
+    row = cells[0][::-1]  # head first
+    assert "".join(run["t"] for run in row) == "@oooOOoooo"
+    assert row[1]["fg"] == _arcade.BODY[0] and row[-1]["fg"] == _arcade.BODY[-1]
 
 
 def test_clock(session: Pilot) -> None:
