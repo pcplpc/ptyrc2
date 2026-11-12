@@ -1,0 +1,12 @@
+[package]
+name = "ptyrc-draw-sand"
+description = "ptyrc: draw extension: falling sand"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ptyrc-core.workspace = true
+ptyrc-vt.workspace = true
+serde.workspace = true
+serde_json.workspace = true
