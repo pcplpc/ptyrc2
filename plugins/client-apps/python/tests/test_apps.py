@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import itertools
+import random
 import re
 import threading
 import time
@@ -11,7 +13,7 @@ from datetime import datetime
 
 import pytest
 from ptyrc import Pilot
-from ptyrc_apps import APPS, clock, confetti
+from ptyrc_apps import APPS, clock, confetti, fishes, flower, sand, snake
 from ptyrc_apps.__main__ import main
 
 
@@ -74,6 +76,158 @@ def test_confetti_stays_behind_busy_text(session: Pilot) -> None:
     thread.join()
     assert status == [0] and samples > 5
     assert pieces > 0, "the confetti never showed between the words"
+
+
+def test_confetti_party(session: Pilot) -> None:
+    # 240 a minute: four bursts a second, each its own sprite.
+    args = ["-s", session.session, "--spawn", "--rate", "240", "--seconds", "1.2"]
+    ids: set[int] = set()
+
+    def seen(host: str) -> bool:
+        ids.update(s["id"] for s in session.sprites())
+        return len(ids) >= 3 and any(c in host for c in "❋✦*·")
+
+    watch(
+        session,
+        lambda: confetti.main([*args, "--duration", "0.5", "--seed", "1"]),
+        seen,
+    )
+    with pytest.raises(SystemExit):
+        confetti.main(["--spawn", "--rate", "0"])
+
+
+def page(pilot: Pilot, *lines: str) -> None:
+    """Fill the screen of the shell with `lines`."""
+    text = "\\n".join(lines)
+    pilot.send(f"clear; printf '{text}\\n'\n")
+    pilot.wait_for(max(lines, key=len).strip(), frame="raw")
+    time.sleep(0.3)
+
+
+def test_flower(session: Pilot) -> None:
+    page(session, "", "", "", "", "", "a flower", "", "", "")
+    args = ["-s", session.session, "--seconds", "1.6"]
+    stages: set[str] = set()
+
+    def seen(host: str) -> bool:
+        rows = host.split("\n")
+        # Right of the word, one cell away, centred on its row.
+        if rows[5].startswith("a flower  ( o )"):
+            stages.add("bud")
+        if rows[4].startswith("          ) o (") and rows[5].startswith("a flower ( /"):
+            stages.add("open")
+        return stages == {"bud", "open"}
+
+    watch(session, lambda: flower.main(args), seen)
+
+
+def test_flower_paint() -> None:
+    rows = flower.paint(flower.SWAY[1], "red")
+    assert len(rows) == 7 and all(len(row) == 7 for row in rows)
+    assert rows[2][3] == {"t": "o", "fg": "bright-yellow", "bold": True}
+    assert rows[0][1]["fg"] == "red" and rows[6][3]["fg"] == "green"
+    assert all(len(set(map(len, frame))) == 1 for frame in flower.SWAY)
+
+
+def settle(pilot: Pilot) -> None:
+    """Wait for a pane: a new layout is a candidate for 1.5 s, and
+    nothing is drawn on it before."""
+    deadline = time.monotonic() + 4
+    while not pilot.panes() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert pilot.panes()
+
+
+def test_fishes(session: Pilot) -> None:
+    settle(session)
+    args = ["-s", session.session, "--seconds", "1.0", "--seed", "2", "--count", "4"]
+    watch(
+        session,
+        lambda: fishes.main(args),
+        lambda host: host.count(fishes.LEFT) + host.count(fishes.RIGHT) >= 2,
+    )
+
+
+def test_fish_flees_the_cursor() -> None:
+    rng = random.Random(1)
+    box = (0, 0, 80, 24)
+    fish = fishes.Fish(x=30.0, y=10.0, vx=-fishes.CALM, color="cyan")
+    # Swimming left, towards a cursor at its nose: it turns and bolts.
+    fishes.swim(fish, 0.1, box, (28, 10), False, rng)
+    assert fish.vx == fishes.FEAR and fish.cell[2] == fishes.RIGHT
+    for _ in range(20):
+        fishes.swim(fish, 0.1, box, (28, 10), False, rng)
+    assert fish.scared <= 0 and 0 < fish.vx <= fishes.CALM  # calm again, away
+    # A far cursor frightens only when it moves.
+    far = fishes.Fish(x=40.0, y=10.0, vx=-1.0, color="cyan")
+    fishes.swim(far, 0.1, box, (28, 10), False, rng)
+    assert far.vx == -1.0
+    fishes.swim(far, 0.1, box, (28, 10), True, rng)
+    assert far.vx == fishes.FEAR
+    # Walls turn it around.
+    edge = fishes.Fish(x=0.2, y=0.0, vx=-5.0, color="cyan")
+    fishes.swim(edge, 0.1, box, None, False, rng)
+    assert edge.x == 0 and edge.vx == 5.0
+
+
+def test_sand(session: Pilot) -> None:
+    page(session, "", "", "", "", "", "", "", "", "      a shelf of words")
+    args = ["-s", session.session, "--now", "--rate", "400", "--seconds", "4"]
+    status: list[int] = []
+    thread = threading.Thread(target=lambda: status.append(sand.main(args)))
+    thread.start()
+    piled = swept = False
+    typed = 0.0
+    while thread.is_alive():
+        dump = session.dump()
+        for app, host in zip(dump["app"], dump["host"], strict=True):
+            for a, h in zip(app, host.ljust(len(app)), strict=False):
+                assert a == " " or a == h, (app, host)  # never on the text
+        if not piled and "▒" in dump["host"][7][6:22]:
+            piled = True  # grains rest on the words
+            session.send("echo busy\n")
+            typed = time.monotonic()
+        if piled and time.monotonic() - typed > 0.2 and not session.sprites():
+            swept = True  # the pane is used: the sand is gone
+        time.sleep(0.02)
+    thread.join()
+    assert status == [0] and piled and swept
+    assert session.dump()["host"] == session.text()
+
+
+def test_snake(session: Pilot) -> None:
+    page(session, "", "", "words in the way", "", "   more words here")
+    settle(session)
+    args = ["-s", session.session, "--seconds", "1.5", "--seed", "4", "--speed", "30"]
+    watch(session, lambda: snake.main(args), lambda host: "@" in host and "●" in host)
+
+
+def test_snake_game() -> None:
+    rows = ["", "  wall of words  ", "", "   another   one", ""]
+    walls = snake.walls_of(rows, 10, 100)
+    assert (12, 101) in walls and (10, 101) not in walls and (16, 101) not in walls
+    assert snake.walls_of(["a世b"]) == {(0, 0), (1, 0), (2, 0), (3, 0)}
+    # Around a wall: the first step of a shortest path.
+    blocked = {(1, 0), (1, 1)}
+    step = snake.route((0, 0), (2, 0), lambda c: c not in blocked and 0 <= c[1] < 3)
+    assert step == (0, 1)
+    assert snake.route((0, 0), (2, 0), lambda c: False) is None
+    game = snake.Game(random.Random(3))
+    box = (10, 100, 30, 105)
+    for _ in range(400):
+        game.step(box, walls)
+        cells = list(game.body)
+        assert len(set(cells)) == len(cells)  # never over itself
+        assert not walls & set(cells)  # never over a word
+        assert all(10 <= x < 30 and 100 <= y < 105 for x, y in cells)
+        steps = itertools.pairwise(cells)
+        assert all(abs(a[0] - b[0]) + abs(a[1] - b[1]) == 1 for a, b in steps)
+    assert game.eaten >= 5
+    at, cells = game.picture()
+    assert at == (min(x for x, _ in game.body), min(y for _, y in game.body))
+    # Scrolled out of sight: it starts again in the new view.
+    game.step((10, 200, 30, 205), set())
+    assert len(game.body) <= 2 and 200 <= game.body[0][1] < 205
 
 
 def test_clock(session: Pilot) -> None:
