@@ -693,11 +693,12 @@ events), `Frame`, `Sprite` handles; mirrors the protocol one to one, plus
 tests. `Frame.check_idle()` is the idle score, `Frame.is_idle` the
 boolean; both ask the driver when read. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
 `python -m ptyrc_apps.<name>` and `ptyrc-app <name>`. Every app takes
-`-s SESSION` and `-f FRAME`; its sprites die with its connection.
+`-s SESSION` and `-f FRAME`; its sprites die with its connection, but for
+the bursts of a confetti round.
 
 | app | default frame | what runs where |
 |---|---|---|
-| `confetti` | `raw` | native effect. `--spawn [--rate N]`: N bursts a minute (20), until interrupted; each burst reads `frame.heat` once and starts at a random cell weighted by the share of non-hot cells within 3 of it, hot cells excluded unless all are, never within 3 of the previous origin (`--anywhere`: uniform); back layer unless `--front` |
+| `confetti` | `raw` | native effect. A round: `--bursts N` bursts (1, at most 10), each at its own offset in [0, 3 s), one sorted list of start times in one thread. Each burst reads `frame.heat` once and starts at a random cell weighted by the share of non-hot cells within 3 of it, hot cells excluded unless all are, never within 3 of the last N origins (the oldest forgotten first when the view is too small). Alone: one round of `persist` bursts, the app exits after the last is sent; `--party`: a round every 3 s until interrupted, bursts tied to the connection. `--size` pieces per burst; back layer unless `--front` |
 | `clock` | `raw` | one `draw.update` a second; front layer |
 | `flower` | `raw` | text anchor and sway animation native; three requests in all |
 | `fishes` | `largest` | positions in frame coordinates, computed by the client, one batch every 100 ms; flee the cursor |

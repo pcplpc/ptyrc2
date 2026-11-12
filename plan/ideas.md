@@ -28,7 +28,8 @@ Backlog. Not a commitment; moved to `design.md` when taken.
   Missing: `behind` as the default, a named layer order where the app text
   has a place, per-cell alpha.
 - Showcase apps: sprite handling and scrollable frames, on vim, less, more.
-- Confetti `--spawn --rate N` (per minute; default 20).
+- Built, then superseded by `--party`: confetti `--spawn --rate N` (per
+  minute; default 20).
 - Fishtank living in an extended frame: fishes keep frame coordinates and
   scroll with the content.
 - A demo of the dynamic frames (tmux panes and windows, vim splits).
@@ -112,8 +113,8 @@ Built: see "Heatmap" in `design.md`. Left:
 
 ## From the owner, during the second session
 
-- Confetti party mode (`--spawn`) likely flickers less with the confetti
-  and sparkles behind the text: use the back layer.
+- Built: confetti party mode (`--spawn`, now `--party`) likely flickers
+  less with the confetti and sparkles behind the text: use the back layer.
 
 ## From the scrolling work, second session
 
@@ -222,5 +223,8 @@ Gaps met while writing the apps; none fixed in the core.
 ## From the owner, late in the second session
 
 - Built: confetti bursts spawn at random places on the screen, cold
-  areas of the heatmap first (`confetti.spot`; `--anywhere` turns it
-  off).
+  areas of the heatmap first (`confetti.spot`; always, `--anywhere` is
+  gone).
+- Built: confetti flags. `--bursts N` (at most 10) at random offsets in
+  3 s on distinct cold spots; `--party` repeats the round every 3 s;
+  `--count` is `--size`; `--seconds`, `--seed`, `--rate` gone.

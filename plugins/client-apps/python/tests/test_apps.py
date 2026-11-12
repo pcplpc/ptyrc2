@@ -23,7 +23,8 @@ def shown(pilot: Pilot) -> str:
 
 def watch(pilot: Pilot, run: Callable[[], int], seen: Callable[[str], bool]) -> None:
     """Run an app in a thread; `seen` must hold on the host at some point,
-    and the host must be clean once the app has returned."""
+    while the app runs or its persistent sprites play, and the host must
+    be clean once they are gone."""
     status: list[int] = []
     thread = threading.Thread(target=lambda: status.append(run()))
     thread.start()
@@ -33,21 +34,71 @@ def watch(pilot: Pilot, run: Callable[[], int], seen: Callable[[str], bool]) -> 
         time.sleep(0.02)
     thread.join()
     assert status == [0]
-    assert ok, "the app never showed"
     deadline = time.monotonic() + 3
     while pilot.sprites() and time.monotonic() < deadline:
+        ok = ok or seen(shown(pilot))
         time.sleep(0.02)
+    assert ok, "the app never showed"
     assert pilot.sprites() == []
     assert pilot.dump()["host"] == pilot.text()
+
+
+class Clock:
+    """Stands for `time` in `confetti`: a sleep moves the clock at once."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += max(0.0, seconds)
+
+
+def record(
+    monkeypatch: pytest.MonkeyPatch, clock: Clock, stop: int | None = None
+) -> list[tuple[float, tuple[int, int]]]:
+    """Patch `confetti.burst` to log `(time, origin)`; ^C after `stop`."""
+    log: list[tuple[float, tuple[int, int]]] = []
+    real = confetti.burst
+
+    def burst(*args: object, origin: tuple[int, int], **kw: object) -> object:
+        log.append((clock.now, origin))
+        if stop is not None and len(log) > stop:
+            raise KeyboardInterrupt
+        return real(*args, origin=origin, **kw)
+
+    monkeypatch.setattr(confetti, "time", clock)
+    monkeypatch.setattr(confetti, "burst", burst)
+    return log
+
+
+def apart(origins: list[tuple[int, int]]) -> bool:
+    return all(
+        max(abs(a[0] - b[0]), abs(a[1] - b[1])) > 3
+        for a, b in itertools.combinations(origins, 2)
+    )
 
 
 def test_confetti(session: Pilot) -> None:
     args = ["-s", session.session, "--duration", "0.6", "--bursts", "2", "--sparkle"]
     watch(
         session,
-        lambda: confetti.main([*args, "--seed", "3"]),
+        lambda: confetti.main(args, random.Random(3)),
         lambda host: sum(host.count(c) for c in "❋✦*·") >= 10,
     )
+
+
+def test_confetti_bursts(session: Pilot, monkeypatch: pytest.MonkeyPatch) -> None:
+    log = record(monkeypatch, Clock())
+    args = ["-s", session.session, "--bursts", "3", "--duration", "0.3"]
+    assert confetti.main(args, random.Random(1)) == 0
+    times = [t for t, _ in log]
+    assert len(set(times)) == 3 and all(0 <= t < confetti.PERIOD for t in times)
+    assert apart([o for _, o in log]), log
+    with pytest.raises(SystemExit):
+        confetti.main(["--bursts", "11"])
 
 
 def test_confetti_stays_behind_busy_text(session: Pilot) -> None:
@@ -57,14 +108,14 @@ def test_confetti_stays_behind_busy_text(session: Pilot) -> None:
     )
     session.wait_for("st", frame="raw")
     time.sleep(0.3)
-    args = ["-s", session.session, "--duration", "0.8", "--count", "200", "--sparkle"]
+    args = ["-s", session.session, "--duration", "0.8", "--size", "200", "--sparkle"]
     status: list[int] = []
     thread = threading.Thread(
-        target=lambda: status.append(confetti.main([*args, "--seed", "5"]))
+        target=lambda: status.append(confetti.main(args, random.Random(5)))
     )
     thread.start()
     pieces = samples = 0
-    while thread.is_alive():
+    while thread.is_alive() or session.sprites():
         # One call: the app screen and what the host shows, together.
         dump = session.dump()
         for app, host in zip(dump["app"], dump["host"], strict=True):
@@ -78,37 +129,33 @@ def test_confetti_stays_behind_busy_text(session: Pilot) -> None:
     assert pieces > 0, "the confetti never showed between the words"
 
 
-def test_confetti_party(session: Pilot) -> None:
-    # 240 a minute: four bursts a second, each its own sprite.
-    args = ["-s", session.session, "--spawn", "--rate", "240", "--seconds", "1.2"]
-    ids: set[int] = set()
-
-    def seen(host: str) -> bool:
-        ids.update(s["id"] for s in session.sprites())
-        return len(ids) >= 3 and any(c in host for c in "❋✦*·")
-
-    watch(
-        session,
-        lambda: confetti.main([*args, "--duration", "0.5", "--seed", "1"]),
-        seen,
-    )
-    with pytest.raises(SystemExit):
-        confetti.main(["--spawn", "--rate", "0"])
+def test_confetti_party(session: Pilot, monkeypatch: pytest.MonkeyPatch) -> None:
+    log = record(monkeypatch, Clock(), stop=9)
+    args = ["-s", session.session, "--party", "--bursts", "3", "--sparkle"]
+    assert confetti.main(args, random.Random(2)) == 0
+    # Three rounds of three, one round per period; then ^C.
+    rounds = [int(t // confetti.PERIOD) for t, _ in log[:9]]
+    assert rounds == [0, 0, 0, 1, 1, 1, 2, 2, 2], log
+    assert all(apart([o for _, o in log[i : i + 3]]) for i in range(7)), log
+    # Party bursts die with the connection, at once: none has played out.
+    deadline = time.monotonic() + 1
+    while session.sprites() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert session.sprites() == []
 
 
 def test_confetti_spot() -> None:
     rng = random.Random(7)
     # Left half hot, right half static text and free cells.
     classes = ["h" * 20 + "t." * 10] * 10
-    last = None
+    avoid: list[tuple[int, int]] = []
     for _ in range(2000):
-        x, y = confetti.spot(classes, rng, last)
+        x, y = confetti.spot(classes, rng, avoid)
         assert 20 <= x < 40 and 0 <= y < 10  # never on the hot side
-        if last:
-            assert max(abs(x - last[0]), abs(y - last[1])) > 3  # moves on
-        last = x, y
-    # All hot: still a cell. Smaller than the gap: still a cell.
-    x, y = confetti.spot(["hhh"] * 2, rng, (1, 1))
+        assert apart([*avoid, (x, y)])  # away from the last two
+        avoid = [*avoid, (x, y)][-2:]
+    # All hot: still a cell. Smaller than the gaps: still a cell.
+    x, y = confetti.spot(["hhh"] * 2, rng, [(0, 0), (1, 1)])
     assert 0 <= x < 3 and 0 <= y < 2
     assert confetti.spot([], rng) == (0, 0)
 
@@ -127,18 +174,11 @@ def test_confetti_party_avoids_hot(
     time.sleep(0.5)
     hot = session.frame("raw").heat_classes()
     assert all(set(row[:79]) == {"h"} for row in hot[:12]), hot
-    origins: list[tuple[float, float]] = []
-
-    def burst(*args: object, origin: tuple[float, float], **kw: object) -> object:
-        origins.append(origin)
-        return real(*args, origin=origin, **kw)
-
-    real = confetti.burst
-    monkeypatch.setattr(confetti, "burst", burst)
-    args = ["-s", session.session, "--spawn", "--rate", "600", "--seconds", "1.5"]
-    assert confetti.main([*args, "--duration", "0.3", "--seed", "2"]) == 0
-    assert len(origins) >= 8
-    assert all(y >= 12 for _, y in origins), origins
+    log = record(monkeypatch, Clock(), stop=12)
+    args = ["-s", session.session, "--party", "--bursts", "2", "--duration", "0.3"]
+    assert confetti.main(args, random.Random(2)) == 0
+    assert len(log) == 13
+    assert all(y >= 12 for _, (_, y) in log), log
 
 
 def page(pilot: Pilot, *lines: str) -> None:
@@ -307,7 +347,12 @@ def test_clock_face() -> None:
     assert "".join(run["t"] for run in row) == " 09:05:07 "
 
 
-def test_dispatch(session: Pilot, capsys: pytest.CaptureFixture[str]) -> None:
+def test_dispatch(
+    session: Pilot,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(confetti, "time", Clock())
     assert main([]) == 2
     out = capsys.readouterr().out
     assert all(name in out for name in APPS)

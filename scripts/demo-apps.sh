@@ -27,7 +27,7 @@ if [ "${1:-}" = snake ]; then
     demo_app snake
 else
     demo_app fishes --count 7
-    [ "${1:-}" = --check ] || demo_app confetti --spawn --rate 10 --sparkle
+    [ "${1:-}" = --check ] || demo_app confetti --party --sparkle
 fi
 
 if [ "${1:-}" != --check ]; then
