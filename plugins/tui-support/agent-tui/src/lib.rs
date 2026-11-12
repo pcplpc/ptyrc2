@@ -2,9 +2,10 @@
 //! Preset for coding-agent TUIs: a transcript that scrolls above a prompt
 //! box pinned at the bottom.
 //!
-//! Recognised from the prompt box alone: a rounded box (`╭─╮ │ ╰─╯`) or a
-//! prompt line between two horizontal rules, in the lower part of the
-//! pane. The box and what is below it are chrome.
+//! Recognised from the prompt box alone, in the lower part of the pane: a
+//! rounded box (`╭─╮ │ ╰─╯`), a prompt line between two horizontal rules,
+//! or a panel edged on its left by a heavy bar (`┃` rows closed by
+//! `╹▀▀▀`, as opentui draws it). The box and what is below it are chrome.
 
 use ptyrc_core::plugin::{Chrome, PaneView, TuiSupport};
 
@@ -30,6 +31,29 @@ fn is_prompt(text: &str) -> bool {
     t.starts_with(['>', '❯', '›'])
 }
 
+/// Column of the heavy bar that edges a panel row, when the row starts
+/// with one.
+fn edge(text: &str, glyph: char) -> Option<usize> {
+    let at = text.chars().position(|c| c != ' ')?;
+    (text.chars().nth(at) == Some(glyph)).then_some(at)
+}
+
+/// Top row of the lowest panel edged by `┃` and closed by `╹▀▀▀`.
+fn panel_top(rows: &[String], floor: usize) -> Option<usize> {
+    let close = (floor + 2..rows.len()).rev().find(|&r| {
+        edge(&rows[r], '╹').is_some_and(|at| {
+            let rest: Vec<char> = rows[r].trim_end().chars().skip(at + 1).collect();
+            rest.len() >= 8 && rest.iter().all(|&c| c == '▀')
+        })
+    })?;
+    let at = edge(&rows[close], '╹')?;
+    let mut top = close;
+    while top > floor && edge(&rows[top - 1], '┃') == Some(at) {
+        top -= 1;
+    }
+    (close - top >= 2).then_some(top)
+}
+
 /// Row (relative) where the prompt area starts: the top of the lowest
 /// prompt box.
 fn prompt_top(pane: &PaneView) -> Option<u16> {
@@ -41,6 +65,9 @@ fn prompt_top(pane: &PaneView) -> Option<u16> {
     let rows: Vec<String> = (0..h).map(|r| pane.row_text(r)).collect();
     // Searched upwards, within the lower two thirds.
     let floor = h / 3;
+    if let Some(top) = panel_top(&rows, floor as usize) {
+        return Some(top as u16);
+    }
     for top in (floor..h.saturating_sub(2)).rev() {
         let text = &rows[top as usize];
         let boxed = is_box_top(text, min);
@@ -131,6 +158,33 @@ mod tests {
             ],
         );
         assert_eq!(AgentTui.chrome(&pane(&grid)).unwrap().bottom, 4);
+    }
+
+    #[test]
+    fn heavy_edge_panel() {
+        let grid = Grid::from_lines(
+            40,
+            &[
+                "",
+                "   a transcript",
+                "",
+                "   ┃",
+                "   ┃  Ask anything",
+                "   ┃",
+                "   ┃  Build · some model",
+                "   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+                "   ~/project        ctrl+p commands",
+            ],
+        );
+        let p = pane(&grid);
+        assert!(AgentTui.detect(&p) >= 0.5);
+        assert_eq!(AgentTui.chrome(&p).unwrap().bottom, 6);
+        // A quoted block in the transcript is not closed by `╹▀▀▀`.
+        let grid = Grid::from_lines(
+            40,
+            &["", "text", "", "   ┃ quoted", "   ┃ quoted", "", "more", ""],
+        );
+        assert_eq!(AgentTui.detect(&pane(&grid)), 0.0);
     }
 
     #[test]
