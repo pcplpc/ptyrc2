@@ -61,7 +61,8 @@ pub(crate) enum Outcome {
 pub(crate) struct Shift {
     pub from: i64,
     pub to: i64,
-    pub dy: i64,
+    /// `None`: the rows are forgotten, not moved.
+    pub dy: Option<i64>,
 }
 
 /// One observation of the pane.
@@ -205,11 +206,10 @@ impl Ext {
             }
             self.islands.remove(old);
             // Not a move: what is drawn on these rows goes with them.
-            let gone = crate::scene::ROWS_GONE;
             self.shifts.push(Shift {
                 from: lo - 200,
                 to: hi + 200,
-                dy: gone,
+                dy: None,
             });
             if old < self.cur {
                 self.cur -= 1;
@@ -323,7 +323,11 @@ impl Ext {
             isl.lo = isl.lo.min(from.max(isl.lo) + dy);
             isl.hi = isl.hi.max(to.min(isl.hi) + dy);
         }
-        self.shifts.push(Shift { from, to, dy });
+        self.shifts.push(Shift {
+            from,
+            to,
+            dy: Some(dy),
+        });
     }
 
     fn commit_row(&mut self, i: usize) {

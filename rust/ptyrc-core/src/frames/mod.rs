@@ -128,6 +128,13 @@ pub enum FrameEvent {
         to: i64,
         dy: i64,
     },
+    /// The frame rows `[from, to]` are forgotten (an island collected).
+    /// Drawings fixed on those rows go with them.
+    Forgotten {
+        frame: FrameId,
+        from: i64,
+        to: i64,
+    },
     /// The view went elsewhere in the frame.
     Jump {
         frame: FrameId,
@@ -1714,11 +1721,18 @@ impl Frames {
             p.status_row = None;
         }
         for s in p.ext.shifts.drain(..) {
-            ev.push(FrameEvent::Shift {
-                frame: id,
-                from: s.from,
-                to: s.to,
-                dy: s.dy,
+            ev.push(match s.dy {
+                Some(dy) => FrameEvent::Shift {
+                    frame: id,
+                    from: s.from,
+                    to: s.to,
+                    dy,
+                },
+                None => FrameEvent::Forgotten {
+                    frame: id,
+                    from: s.from,
+                    to: s.to,
+                },
             });
         }
         match out {

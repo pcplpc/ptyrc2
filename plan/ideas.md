@@ -213,8 +213,6 @@ Gaps met while writing the apps; none fixed in the core.
 Built: `screen.wait {idle}`, topics `idle` and `draw`, `visible` and
 `covered` in `draw.list`, sliding text anchors (see `design.md`). Left:
 
-- A collected island travels as a `Shift` with `dy == ROWS_GONE`: a
-  `FrameEvent::Forgotten {frame, from, to}` should replace the sentinel.
 - The idle watch is a 250 ms poll in the driver, not a deadline.
 - No text-change event; `sand` still looks every 0.5 s for a replaced
   frame (`heir`).

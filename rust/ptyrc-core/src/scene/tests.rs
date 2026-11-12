@@ -1706,9 +1706,9 @@ fn forgotten_rows_and_frames_take_their_sprites() {
     scene.tick(ms(0), &mock);
     scene.take_dirty();
     // An island of the pane is forgotten: only what is fixed on its rows.
-    assert_eq!(scene.shift(PANE, 99_800, 100_220, ROWS_GONE), vec![far]);
+    assert_eq!(scene.forget_rows(PANE, 99_800, 100_220), vec![far]);
     assert!(scene.take_dirty());
-    assert!(scene.shift(PANE, 99_800, 100_220, ROWS_GONE).is_empty());
+    assert!(scene.forget_rows(PANE, 99_800, 100_220).is_empty());
     let ids = |scene: &Scene| scene.list().iter().map(|s| s.id).collect::<Vec<_>>();
     assert_eq!(ids(&scene), vec![here, other, hud]);
     // The frame itself: everything on it.

@@ -203,10 +203,6 @@ impl Sprite {
     }
 }
 
-/// `dy` of `Scene::shift` and of `FrameEvent::Shift` for rows that are
-/// forgotten (an island collected), not moved.
-pub const ROWS_GONE: i64 = i64::MIN;
-
 /// Every sprite, and what they add to the screen.
 pub struct Scene {
     /// Sorted by `(layer, z, id)`: paint order.
@@ -543,11 +539,8 @@ impl Scene {
 
     /// Rows `from..=to` of `frame` moved by `dy` in frame space (a splice,
     /// an island merge): sprites fixed on those rows move with them.
-    /// `dy` is `ROWS_GONE`: the rows are forgotten; the sprites fixed on
-    /// them are removed, their ids returned.
-    pub fn shift(&mut self, frame: FrameId, from: i64, to: i64, dy: i64) -> Vec<SpriteId> {
+    pub fn shift(&mut self, frame: FrameId, from: i64, to: i64, dy: i64) {
         let rows = from..=to;
-        let mut gone = Vec::new();
         for sprite in self.sprites.iter_mut().filter(|s| s.frame == Some(frame)) {
             if let Anchor::At {
                 at,
@@ -555,21 +548,38 @@ impl Scene {
             } = &mut sprite.anchor
                 && rows.contains(&at[1])
             {
-                if dy == ROWS_GONE {
-                    gone.push(sprite.id);
-                } else {
-                    at[1] += dy;
-                }
+                at[1] += dy;
                 self.dirty = true;
             }
             if let Some((pos, _)) = &mut sprite.text_at
                 && rows.contains(&pos.y)
             {
-                if dy == ROWS_GONE {
-                    sprite.text_at = None;
-                } else {
-                    pos.y += dy;
-                }
+                pos.y += dy;
+                self.dirty = true;
+            }
+        }
+    }
+
+    /// Rows `from..=to` of `frame` are forgotten: the sprites fixed on
+    /// them are removed, their ids returned; a text anchor held there
+    /// loses its match.
+    pub fn forget_rows(&mut self, frame: FrameId, from: i64, to: i64) -> Vec<SpriteId> {
+        let rows = from..=to;
+        let mut gone = Vec::new();
+        for sprite in self.sprites.iter_mut().filter(|s| s.frame == Some(frame)) {
+            if let Anchor::At {
+                at,
+                space: Space::Frame,
+            } = &sprite.anchor
+                && rows.contains(&at[1])
+            {
+                gone.push(sprite.id);
+                self.dirty = true;
+            }
+            if let Some((pos, _)) = &sprite.text_at
+                && rows.contains(&pos.y)
+            {
+                sprite.text_at = None;
                 self.dirty = true;
             }
         }

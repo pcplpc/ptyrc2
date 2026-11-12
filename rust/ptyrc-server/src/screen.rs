@@ -162,9 +162,13 @@ impl ScreenEngine {
                     from,
                     to,
                     dy,
-                } => (
+                } => {
+                    self.scene.shift(frame, from, to, dy);
+                    continue;
+                }
+                FrameEvent::Forgotten { frame, from, to } => (
                     frame,
-                    self.scene.shift(frame, from, to, dy),
+                    self.scene.forget_rows(frame, from, to),
                     Some([from, to]),
                 ),
                 FrameEvent::Dropped { frame } => (frame, self.scene.drop_frame(frame), None),

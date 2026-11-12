@@ -525,7 +525,7 @@ Sprites are clipped to the view rect of their frame. `compose` goes through
 `Scene::list_on(base, surfaces)`: `list` plus `visible` (a glyph inside
 the view of a usable frame) and `covered` (back layers: share of the
 glyphs in view under app cells with ink; 0 in front).
-`Scene::shift(.., dy = ROWS_GONE)` and `Scene::drop_frame` remove the
+`Scene::forget_rows` (`FrameEvent::Forgotten`) and `Scene::drop_frame` remove the
 sprites fixed on forgotten rows or on a forgotten frame and return their
 ids; a text anchor on those rows only loses its held match.
 
