@@ -307,6 +307,61 @@ Left:
   whose cursor moves, makes an island per refresh; an editor paging
   through a table at an even pace, cursor still, is taken for one.
 
+## Frames, fifth session, second round
+
+Built (see `design.md`, "Extended frame", "Further rules", "Plugins"):
+
+- The `tmux: vim preset` flake. Not reproduced in 55 looped runs under
+  load; the mechanism was, with a paint cut in two (`sleep` between
+  the rows and the ruler): the ruler alone is a one-row change, less
+  than a second after the detection the rows asked, and nothing
+  changes after. A lone row other than the last lone row asks at once.
+  Still open: the sign on the same row twice within a second (a ruler
+  painted in two pieces), then silence. A tick has no screen to ask
+  the presets of: `Frames::tick` would need the grid.
+- A share on the prompt (`45%`, `--More--(20%)`, `(END)`) orders the
+  islands and places them near their rows; `pages-share` (`less -m`).
+- Pieces of a write are told by the prompt row, not by 10 ms, once
+  bottom chrome is known: a page then part of the next and a wheel
+  flick are feeds; pieces up to 100 ms apart are one jump.
+- The prompt row is chrome from the first page on the alternate
+  screen, the prompt erased when the key comes included.
+- A preset inside a pane of a preset, two deep. No real pair among the
+  presets today (none of ranger, htop, glances hosts an app): unit
+  tests only.
+- ranger left of a shell in one tmux window took both panes: the rect
+  above the status bar was asked whole. The surest preset cuts the
+  screen; a rule from top to bottom cuts before presets are asked.
+- `scripts/demo-frames.sh`: window 2, ranger beside a shell, a mark
+  fixed on a row of the list.
+- A page with two rows of overlap (vim `ctrl+f`) is a scroll.
+
+Left:
+
+- Plain `less` shows no percentage: only `(END)` is placed (last, at
+  row 0 of its slot when no share was seen before). An island is not
+  moved once it holds rows; islands without a share are not ordered.
+  The length is estimated on the rows that start at 0 only. The share
+  is not in the frame info.
+- Estimated rows are kept a slot apart from the known ones: an island
+  placed in the numbering of the first rows would collide with them
+  when the estimate is short and the view walks up. It needs an island
+  pushed away when it runs into rows it does not match.
+- A page fed while the first prompt was never seen erased nor whole
+  (a key before the first paint settles) still needs two votes.
+- The key of a pane two presets deep does not hold the key of the
+  pane between.
+- A highlight among names of unequal lengths cannot be told from a bar
+  at once: a vim status line between two windows is the same thing on
+  screen (one backdrop, text above and below, no rule, no cursor).
+  Left as it is: a bar until it moves.
+- Not started, for lack of budget: glances other layouts, ranger
+  (an inverse run in a preview, `draw_borders`), the htop function bar
+  without its preset.
+- A rule from top to bottom drawn by an app inside its own rectangle
+  keeps its preset from being asked of the whole (none of the presets
+  that segment draws one; a ranger with `draw_borders` is a box).
+
 ## Layers, third session
 
 Built: host colours (OSC 10, 11), `alpha`, `wallpaper` and `hud` (see

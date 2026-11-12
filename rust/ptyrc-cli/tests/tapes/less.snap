@@ -149,7 +149,7 @@
       {
         "extent": [
           0,
-          30
+          29
         ],
         "key": null,
         "kind": "pane",
@@ -161,7 +161,7 @@
           0,
           0,
           60,
-          16
+          15
         ],
         "state": "stable",
         "support": null,
@@ -246,7 +246,7 @@
       {
         "extent": [
           0,
-          45
+          44
         ],
         "key": null,
         "kind": "pane",
@@ -258,7 +258,7 @@
           0,
           0,
           60,
-          16
+          15
         ],
         "state": "stable",
         "support": null,

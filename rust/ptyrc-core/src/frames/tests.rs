@@ -1506,6 +1506,8 @@ struct Pager {
     rows: usize,
     /// Standout `line N` prompt, as `man` shows; else `:`.
     status: bool,
+    /// The prompt, when not `:`.
+    says: Option<&'static str>,
 }
 
 impl Pager {
@@ -1517,6 +1519,7 @@ impl Pager {
             top: 0,
             rows,
             status,
+            says: None,
         };
         let mut out = format!("\x1b[?1049h\x1b[{rows};1H\r");
         out += &p.lines(0, rows - 1);
@@ -1539,7 +1542,7 @@ impl Pager {
                 self.top + 1
             )
         } else {
-            ":\x1b[K".to_string()
+            format!("{}\x1b[K", self.says.unwrap_or(":"))
         }
     }
 
@@ -1781,7 +1784,16 @@ fn a_pager_jump_is_not_a_scroll() {
 fn a_pager_jump_fed_in_pieces_is_not_a_scroll() {
     // The feed of a whole screen cut in two or three bursts: each piece
     // is shorter than the screen, their sum is not.
-    for cuts in [vec![1], vec![7], vec![19], vec![5, 12]] {
+    // The pieces do not end on the prompt: they are told from feeds
+    // however far apart, within 100 ms.
+    for (cuts, gap) in [
+        (vec![1], 2),
+        (vec![7], 2),
+        (vec![19], 2),
+        (vec![5, 12], 2),
+        (vec![7], 40),
+        (vec![5, 12], 40),
+    ] {
         let mut p = Pager::open(doc(300), 20, false);
         let id = p.s.pane().id;
         p.down(19);
@@ -1800,7 +1812,7 @@ fn a_pager_jump_fed_in_pieces_is_not_a_scroll() {
                 out += &p.prompt();
             }
             from = *cut;
-            p.step_after(&out, if k == 0 { 300 } else { 2 });
+            p.step_after(&out, if k == 0 { 300 } else { gap });
         }
         assert_eq!(p.s.pane().id, id);
         assert!(
@@ -2810,6 +2822,246 @@ fn a_preset_splits_a_pane_of_another_app() {
     assert_eq!(s.rects(), vec![[0, 0, 30, 20], [31, 0, 29, 20]]);
 }
 
+/// A paint cut in two bursts: the rows, then the one row a preset is
+/// known by (a ruler), and nothing after.
+#[test]
+fn preset_sign_alone_in_a_second_burst() {
+    let mut s = Sim::with(FrameConfig::default(), vec![Box::new(Fake)]);
+    let d = doc(100);
+    s.settle(&view(&d, 0, 0, &[""; 20]));
+    assert_eq!(s.pane().support, None);
+    s.feed(&view(&d, 0, 20, &[]), 50);
+    assert_eq!(s.pane().support, None);
+    s.feed(&view(&d, 0, 19, &["FAKE a.txt 0"]), 20);
+    assert_eq!(s.pane().support.as_deref(), Some("fake"));
+    assert_eq!(s.pane().key.as_deref(), Some("a.txt"));
+    s.idle(3000);
+    assert_eq!(s.pane().support.as_deref(), Some("fake"));
+}
+
+/// The same in three: a row alone, then the sign alone on another.
+#[test]
+fn preset_sign_after_another_lone_row() {
+    let mut s = Sim::with(FrameConfig::default(), vec![Box::new(Fake)]);
+    let d = doc(100);
+    s.settle(&view(&d, 0, 0, &[""; 20]));
+    s.feed(&view(&d, 0, 18, &["", ""]), 50);
+    let mut g = view(&d, 0, 18, &["", ""]);
+    put(&mut g, 0, 18, "a row alone");
+    s.feed(&g, 20);
+    put(&mut g, 0, 19, "FAKE a.txt 0");
+    s.feed(&g, 20);
+    assert_eq!(s.pane().support.as_deref(), Some("fake"));
+}
+
+#[test]
+fn the_first_page_tells_the_prompt_row() {
+    // On the alternate screen one page is enough: the prompt is not
+    // remembered between the first page and the second.
+    let mut p = Pager::open(doc(300), 20, false);
+    let id = p.s.pane().id;
+    p.down(19);
+    p.s.idle(300);
+    let info = p.s.pane();
+    assert_eq!(info.rect, [0, 0, COLS, 19]);
+    assert_eq!(info.extent, [0, 37]);
+    assert_eq!(p.s.f.text(id, 0, 38), p.doc[..38].to_vec());
+    // The prompt erased in a burst of its own, as a key does: the row
+    // that was erased did not travel.
+    let mut p = Pager::open(doc(300), 20, false);
+    p.down_late(19);
+    p.s.idle(300);
+    let info = p.s.pane();
+    assert_eq!((info.rect, info.extent), ([0, 0, COLS, 19], [0, 37]));
+}
+
+#[test]
+fn feeds_that_end_on_the_prompt_are_not_pieces() {
+    // A page and part of the next, 2 ms apart.
+    let mut p = Pager::open(doc(300), 20, false);
+    let id = p.s.pane().id;
+    p.down(19);
+    p.down(19);
+    let out = format!("\r\x1b[K{}{}", p.lines(p.top + 19, 5), p.prompt());
+    p.step_after(&out, 2);
+    p.top += 5;
+    assert_eq!(p.origin(), 43);
+    // A wheel flick: three lines at a time, a millisecond apart, two
+    // screens in all.
+    for n in 1..=14 {
+        let out = format!("\r\x1b[K{}{}", p.lines(p.top + 19, 3), p.prompt());
+        p.step_after(&out, 1);
+        p.top += 3;
+        assert_eq!(p.origin(), 43 + 3 * n);
+    }
+    p.s.idle(300);
+    let info = p.s.pane();
+    assert_eq!(info.extent, [0, 103], "no island: {info:?}");
+    // Rows that went through in less than 10 ms are not remembered.
+    assert_eq!(p.s.f.text(id, 0, 38), p.doc[..38].to_vec());
+    assert_eq!(p.s.f.text(id, 85, 104), p.doc[85..104].to_vec());
+}
+
+#[test]
+fn a_share_on_the_prompt_orders_the_islands() {
+    let slot = |oy: i64| oy / ext::ISLAND_GAP;
+    let mut p = Pager::open(doc(300), 20, false);
+    let id = p.s.pane().id;
+    p.says = Some("12%");
+    p.down(19);
+    // The end, then the top again, then the middle: the middle island
+    // is put between the two, each near its rows (38 rows are 12 %).
+    p.says = Some("(END)");
+    p.skip_to(281);
+    let end = p.origin();
+    assert_eq!((slot(end), end % ext::ISLAND_GAP), (2, 316 - 19));
+    p.says = None;
+    p.jump_top();
+    assert_eq!(p.origin(), 0);
+    p.says = Some("50%");
+    p.skip_to(140);
+    let mid = p.origin();
+    assert_eq!((slot(mid), mid % ext::ISLAND_GAP), (1, 158 - 19));
+    // No share: below everything, as before.
+    p.says = None;
+    p.jump_top();
+    p.skip_to(200);
+    assert_eq!(slot(p.origin()), 4);
+    // Walked into, the middle island is merged exactly.
+    p.jump_top();
+    p.down(19);
+    p.says = Some("50%");
+    p.skip_to(140);
+    assert_eq!(p.origin(), mid);
+    p.says = None;
+    while p.top > 19 {
+        let n = (p.top - 19).min(19);
+        p.up(n);
+    }
+    assert_eq!(p.origin(), 19);
+    p.s.idle(300);
+    assert_eq!(p.s.f.text(id, 0, 159), p.doc[..159].to_vec());
+}
+
+#[test]
+fn shares_read_on_a_prompt() {
+    assert_eq!(progress_of("(END)"), Some(1.0));
+    assert_eq!(progress_of("long.txt (END)  "), Some(1.0));
+    assert_eq!(progress_of("--More--(20%)"), Some(0.2));
+    assert_eq!(progress_of("long.txt lines 1-28/300 9%"), Some(0.09));
+    assert_eq!(progress_of("50%"), Some(0.5));
+    assert_eq!(progress_of(":"), None);
+    assert_eq!(progress_of("load 250%"), None);
+    assert_eq!(progress_of("100% done"), None);
+    assert_eq!(progress_of("%"), None);
+}
+
+/// Knows a rectangle by `STACK` on its first row: four rows, then the
+/// rest.
+struct Stack;
+
+impl TuiSupport for Stack {
+    fn name(&self) -> &'static str {
+        "stack"
+    }
+
+    fn detect(&self, pane: &PaneView) -> f32 {
+        if pane.row_text(0).starts_with("STACK") {
+            1.0
+        } else {
+            0.0
+        }
+    }
+
+    fn segment(&self, area: &PaneView) -> Option<Vec<Rect>> {
+        let r = area.rect;
+        Some(vec![
+            Rect::new(r.x, r.y, r.w, 4),
+            Rect::new(r.x, r.y + 4, r.w, r.h - 4),
+        ])
+    }
+}
+
+#[test]
+fn a_preset_inside_a_pane_of_a_preset() {
+    let mut s = Sim::with(
+        FrameConfig::default(),
+        vec![Box::new(Halves), Box::new(Stack)],
+    );
+    s.title = "halves".into();
+    let d = doc(40);
+    let mut g = view(&d, 0, 20, &[]);
+    s.settle(&g);
+    let rects = |s: &Sim| s.panes().iter().map(|p| p.rect).collect::<Vec<_>>();
+    assert_eq!(rects(&s), [[0, 0, 30, 20], [30, 0, 30, 20]]);
+    // An app the second preset knows starts in the left pane: cut once
+    // more, and no further (its first pane starts with `STACK` too).
+    put(&mut g, 0, 0, "STACK of two          ");
+    put(&mut g, 0, 1, "another row           ");
+    s.settle(&g);
+    assert_eq!(rects(&s), [[0, 0, 30, 4], [30, 0, 30, 20], [0, 4, 30, 16]]);
+    assert!(s.panes().iter().all(|p| p.usable));
+    // It leaves: the pane of the first preset again.
+    put(&mut g, 0, 0, "line 0000 abcdefghij  ");
+    put(&mut g, 0, 1, "line 0001 abcdefghij  ");
+    s.settle(&g);
+    assert_eq!(rects(&s), [[0, 0, 30, 20], [30, 0, 30, 20]]);
+}
+
+/// Knows the screen by its title, cuts nothing.
+struct Host;
+
+impl TuiSupport for Host {
+    fn name(&self) -> &'static str {
+        "host"
+    }
+
+    fn detect(&self, pane: &PaneView) -> f32 {
+        if pane.title == "host" { 1.0 } else { 0.0 }
+    }
+}
+
+#[test]
+fn the_screen_is_cut_by_the_surest_preset_only() {
+    // An app at the top left of a host that fills the screen: the app's
+    // preset takes the screen for its own, the host's is surer or first.
+    let mut s = Sim::with(
+        FrameConfig::default(),
+        vec![Box::new(Host), Box::new(Stack)],
+    );
+    let d = doc(40);
+    let mut g = view(&d, 0, 20, &[]);
+    put(&mut g, 0, 0, "STACK of two          ");
+    s.settle(&g);
+    assert_eq!(s.panes().len(), 2);
+    s.title = "host".into();
+    put(&mut g, 0, 1, "another row           ");
+    s.settle(&g);
+    assert_eq!(s.panes().len(), 1);
+    assert_eq!(s.pane().support.as_deref(), Some("host"));
+}
+
+#[test]
+fn a_rule_from_top_to_bottom_cuts_before_a_preset_is_asked() {
+    // An app left of a rule, above a status bar: its preset is asked of
+    // its side, not of the two.
+    let mut s = Sim::with(
+        FrameConfig::default(),
+        vec![Box::new(Host), Box::new(Stack)],
+    );
+    s.title = "host".into();
+    let d = doc(40);
+    let mut g = view(&d, 0, 19, &["status"]);
+    inverse(&mut g, Rect::new(0, 19, COLS, 1));
+    for y in 0..19 {
+        put(&mut g, 30, y, "│");
+    }
+    put(&mut g, 0, 0, "STACK of two");
+    s.settle(&g);
+    let rects: Vec<_> = s.panes().iter().map(|p| p.rect).collect();
+    assert_eq!(rects, [[0, 0, 30, 4], [31, 0, 29, 19], [0, 4, 30, 15]]);
+}
+
 #[test]
 fn ink_of_a_row_out_of_the_view_is_remembered() {
     let d = doc(200);
@@ -2829,4 +3081,31 @@ fn ink_of_a_row_out_of_the_view_is_remembered() {
     assert!(ink.contains(&true));
     assert_eq!(s.f.ink_row(id, 60, 0, 12), None);
     assert_eq!(s.f.ink_row(RAW, 3, 0, 12), None);
+}
+
+#[test]
+fn a_page_with_two_rows_of_overlap_is_a_scroll() {
+    // An editor's page down keeps the last two rows at the top, and
+    // repaints: no scroll counted, two rows of twenty align.
+    let d = doc(200);
+    let mut s = Sim::new();
+    s.settle(&view(&d, 0, 20, &[]));
+    let id = s.pane().id;
+    for page in 1..=3 {
+        let ev = s.feed(&view(&d, 18 * page, 20, &[]), 300);
+        assert!(ev.contains(&FrameEvent::Scroll {
+            frame: id,
+            dx: 0,
+            dy: 18
+        }));
+        assert_eq!(s.pane().origin, [0, 18 * page as i64]);
+    }
+    s.feed(&view(&d, 36, 20, &[]), 300);
+    assert_eq!(s.pane().origin, [0, 36]);
+    s.idle(300);
+    assert_eq!(s.pane().extent, [0, 73]);
+    // One row in common is not enough.
+    s.feed(&view(&d, 150, 20, &[]), 300);
+    s.feed(&view(&d, 169, 20, &[]), 300);
+    assert_ne!(s.pane().origin, [0, 169]);
 }

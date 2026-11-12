@@ -183,6 +183,8 @@ struct Pane {
     /// Last answer of `detect`, and when it was asked.
     found: Option<usize>,
     found_at: Option<Duration>,
+    /// The only row that had changed then, if one.
+    found_row: Option<u16>,
     suspended: bool,
     /// New or attached again: not observed yet.
     fresh: bool,
@@ -203,9 +205,10 @@ struct Pane {
     /// Pane rows `[a, b)` under a smaller pane of the last segmentation
     /// (a palette, a modal): not read while they are.
     covered: Vec<(u16, u16)>,
-    /// Feeds that follow one another closely (`FEED_GAP`): when the last
-    /// came, and their sum.
-    fed: Option<(Duration, i64)>,
+    /// Feeds that are pieces of one write: when the last came, their
+    /// sum, and the last row before the first (`BLANK`: no bottom chrome
+    /// known, time alone tells).
+    fed: Option<(Duration, i64, u64)>,
     /// The pane was repainted in place around a cursor shown on this
     /// cell, at this time, this long after the repaint before; nothing
     /// moved since.
@@ -280,6 +283,10 @@ type PlaceCache = HashMap<(FrameId, u16, u16, u8), Vec<Placed>>;
 /// Pane of a preset, by rectangle: the area the preset segmented.
 type Areas = HashMap<segment::Rect4, segment::Rect4>;
 
+/// Presets found on a rectangle: when asked, the only row that had
+/// changed then, the presets.
+type Nested = (Duration, Option<u16>, Vec<usize>);
+
 /// How long a rectangle no longer reached keeps its presets.
 const NESTED_KEEP: Duration = Duration::from_secs(10);
 
@@ -313,6 +320,7 @@ pub struct Frames {
     /// Confidence of every preset on the whole screen, and when asked.
     screen_conf: Vec<f32>,
     screen_conf_at: Option<Duration>,
+    screen_conf_row: Option<u16>,
     title_changed: bool,
     /// Preset answers for the leaves of the pending layout.
     advice: HashMap<segment::Rect4, Advice>,
@@ -321,17 +329,22 @@ pub struct Frames {
     areas: Areas,
     /// Presets found on the rectangles the segmentation reached, and when
     /// asked.
-    nested: RefCell<HashMap<segment::Rect4, (Duration, Vec<usize>)>>,
+    nested: RefCell<HashMap<segment::Rect4, Nested>>,
     placed: RefCell<PlaceCache>,
 }
 
 /// Replacements closer than this are in a row.
 const CHURN: Duration = Duration::from_secs(3);
 
-/// A preset is looked for again on a change of one row only this long
-/// after the last time. A change of two rows or more, of the title or of
-/// the layout asks at once.
+/// A preset is looked for again on a change of the one row that had
+/// changed alone the last time only this long after. A change of two
+/// rows or more, of another row (a paint that comes in pieces), of the
+/// title or of the layout asks at once.
 const DETECT_EVERY: Duration = Duration::from_secs(1);
+
+/// Pieces of one write, the first of which did not end on the prompt,
+/// come within this long of one another.
+const PIECES: Duration = Duration::from_millis(100);
 
 /// A repaint that follows a clear may come in several bursts, this long.
 const REPAINT: Duration = Duration::from_millis(100);
@@ -354,6 +367,22 @@ fn is_wide(ch: char) -> bool {
 }
 
 /// `line N` or `lines N-M` in a status row: `N - 1`.
+/// `(END)` at the end of a prompt, or a percentage as its last word
+/// (`45%`, `(20%)`), as a share.
+fn progress_of(text: &str) -> Option<f32> {
+    let t = text.trim_end();
+    if t.ends_with("(END)") {
+        return Some(1.0);
+    }
+    let word = t.rsplit(|c: char| c.is_whitespace() || c == '(').next()?;
+    let digits = word.strip_suffix("%)").or_else(|| word.strip_suffix('%'))?;
+    if digits.is_empty() || digits.len() > 3 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let n: u32 = digits.parse().ok()?;
+    (n <= 100).then_some(n as f32 / 100.0)
+}
+
 fn status_line(text: &str) -> Option<i64> {
     let lower = text.to_ascii_lowercase();
     let bytes = lower.as_bytes();
@@ -459,6 +488,7 @@ impl Frames {
             screen_key: None,
             screen_conf: Vec::new(),
             screen_conf_at: None,
+            screen_conf_row: None,
             title_changed: false,
             advice: HashMap::new(),
             areas: HashMap::new(),
@@ -512,9 +542,11 @@ impl Frames {
         if !self.supports.is_empty() && (self.screen.any_change || title_changed) {
             let all = Rect::new(0, 0, self.screen.cols, self.screen.rows);
             let pv = self.pane_view(input, all);
-            if resized || alt_changed || self.detect_due(all, self.screen_conf_at, now) {
+            let last = (self.screen_conf_at, self.screen_conf_row);
+            if resized || alt_changed || self.detect_due(all, last, now) {
                 self.screen_conf = self.supports.iter().map(|s| s.detect(&pv)).collect();
                 self.screen_conf_at = Some(now);
+                self.screen_conf_row = self.lone_row(all);
             }
             screen_presets = self.screen_conf.iter().any(|c| *c >= 0.5);
             self.screen_key = self
@@ -960,15 +992,25 @@ impl Frames {
         }
     }
 
-    /// Is it time to look for presets again over `rect`, last asked at
-    /// `at`.
-    fn detect_due(&self, rect: Rect, at: Option<Duration>, now: Duration) -> bool {
+    /// The row of `rect` that changed, when it is the only one.
+    fn lone_row(&self, rect: Rect) -> Option<u16> {
+        let mut dirty = (rect.y..rect.bottom()).filter(|r| self.screen.row_dirty[*r as usize]);
+        let first = dirty.next()?;
+        dirty.next().is_none().then_some(first)
+    }
+
+    /// Is it time to look for presets again over `rect`: `last` is when
+    /// they were, and the row that had changed alone then. The same row
+    /// alone again waits (typing); another row is a paint that goes on.
+    fn detect_due(&self, rect: Rect, last: (Option<Duration>, Option<u16>), now: Duration) -> bool {
+        let mut dirty = (rect.y..rect.bottom()).filter(|r| self.screen.row_dirty[*r as usize]);
         self.title_changed
-            || at.is_none_or(|t| now >= t + DETECT_EVERY)
-            || (rect.y..rect.bottom())
-                .filter(|r| self.screen.row_dirty[*r as usize])
-                .nth(1)
-                .is_some()
+            || last.0.is_none_or(|t| now >= t + DETECT_EVERY)
+            || match (dirty.next(), dirty.next()) {
+                (Some(_), Some(_)) => true,
+                (Some(row), None) => last.1 != Some(row),
+                _ => false,
+            }
     }
 
     fn detect(&self, pv: &PaneView) -> Option<usize> {
@@ -1034,8 +1076,15 @@ impl Frames {
 
     /// The panes a preset makes of `rect`, a rectangle below the whole
     /// screen. Presets are looked for as on a pane (`detect_due`); those
-    /// found are asked at every segmentation.
-    fn segment_nested(&self, input: &ScreenInput, rect: Rect, now: Duration) -> Option<Vec<Leaf>> {
+    /// found are asked at every segmentation, `not` excepted: the preset
+    /// that made `rect`. Returns the preset that answered.
+    fn segment_nested(
+        &self,
+        input: &ScreenInput,
+        rect: Rect,
+        not: Option<usize>,
+        now: Duration,
+    ) -> Option<(usize, Vec<Leaf>)> {
         if rect.h < self.cfg.min_pane_rows || rect.w < self.cfg.min_pane_cols {
             return None;
         }
@@ -1044,46 +1093,86 @@ impl Frames {
             ..self.pane_view(input, rect)
         };
         let mut nested = self.nested.borrow_mut();
-        let at = nested.get(&r4(rect)).map(|n| n.0);
-        if self.detect_due(rect, at, now) {
+        let last = nested
+            .get(&r4(rect))
+            .map_or((None, None), |n| (Some(n.0), n.1));
+        if self.detect_due(rect, last, now) {
             let found = (0..self.supports.len())
                 .filter(|i| self.supports[*i].detect(&pv) >= 0.5)
                 .collect();
             if nested.len() >= 64 {
                 nested.retain(|_, n| now < n.0 + NESTED_KEEP);
             }
-            nested.insert(r4(rect), (now, found));
+            nested.insert(r4(rect), (now, self.lone_row(rect), found));
         }
         nested[&r4(rect)]
-            .1
+            .2
             .iter()
-            .find_map(|i| self.supports[*i].segment(&pv))
-            .map(|rects| self.preset_leaves(rects, rect))
+            .filter(|i| Some(**i) != not)
+            .find_map(|i| Some((*i, self.supports[*i].segment(&pv)?)))
+            .map(|(i, rects)| (i, self.preset_leaves(rects, rect)))
+    }
+
+    /// The panes of the preset `by`, each cut once more by another
+    /// preset that knows it (an app in a pane of an app): two presets
+    /// deep, no further. `areas` gets the area of every pane.
+    fn nest(
+        &self,
+        input: &ScreenInput,
+        leaves: Vec<Leaf>,
+        area: Rect,
+        by: usize,
+        areas: &mut Areas,
+        now: Duration,
+    ) -> Vec<Leaf> {
+        let mut out = Vec::with_capacity(leaves.len());
+        for leaf in leaves {
+            let inner = (leaf.kind == 0)
+                .then(|| self.segment_nested(input, leaf.rect(), Some(by), now))
+                .flatten();
+            match inner {
+                Some((_, inner)) => {
+                    areas.extend(inner.iter().map(|l| (l.rect, leaf.rect)));
+                    out.extend(inner);
+                }
+                None => {
+                    areas.insert(leaf.rect, r4(area));
+                    out.push(leaf);
+                }
+            }
+        }
+        out.sort();
+        out.dedup();
+        out
     }
 
     fn segment(&self, input: &ScreenInput, now: Duration) -> (Vec<Leaf>, Vec<Sep>, Areas) {
         let all = Rect::new(0, 0, self.screen.cols, self.screen.rows);
         let pv = self.pane_view(input, all);
+        // The whole screen is cut by the preset surest of it, and no
+        // other: an app at the top left of a tmux looks like the screen.
+        let mut best: Option<(usize, f32)> = None;
         for (i, s) in self.supports.iter().enumerate() {
             let conf = match self.screen_conf.get(i) {
                 Some(c) if self.screen_conf_at.is_some() => *c,
                 _ => s.detect(&pv),
             };
-            if conf >= 0.5
-                && let Some(rects) = s.segment(&pv)
-            {
-                let leaves = self.preset_leaves(rects, all);
-                let areas = leaves.iter().map(|l| (l.rect, r4(all))).collect();
-                return (leaves, Vec::new(), areas);
+            if conf >= 0.5 && best.is_none_or(|b| conf > b.1) {
+                best = Some((i, conf));
             }
+        }
+        if let Some((i, _)) = best
+            && let Some(rects) = self.supports[i].segment(&pv)
+        {
+            let leaves = self.preset_leaves(rects, all);
+            let mut areas = Areas::new();
+            let leaves = self.nest(input, leaves, all, i, &mut areas, now);
+            return (leaves, Vec::new(), areas);
         }
         let areas = RefCell::new(Areas::new());
         let ask = |rect: Rect| {
-            let leaves = self.segment_nested(input, rect, now)?;
-            areas
-                .borrow_mut()
-                .extend(leaves.iter().map(|l| (l.rect, r4(rect))));
-            Some(leaves)
+            let (by, leaves) = self.segment_nested(input, rect, None, now)?;
+            Some(self.nest(input, leaves, rect, by, &mut areas.borrow_mut(), now))
         };
         let (leaves, seps) = Segmenter {
             screen: &self.screen,
@@ -1179,6 +1268,7 @@ impl Frames {
                 cleared: None,
                 found: None,
                 found_at: None,
+                found_row: None,
                 suspended: false,
                 fresh: true,
                 reattach: false,
@@ -1491,6 +1581,18 @@ impl Frames {
         Some((end + 1, n0 - 1 - first as i64))
     }
 
+    /// Share of the document above the last row shown, as a prompt
+    /// tells it: `45%`, `--More--(20%)`, `(END)`. The row is the last of
+    /// the pane and holds the cursor.
+    fn progress(&self, input: &ScreenInput, rect: Rect) -> Option<f32> {
+        let (col, row) = (input.cursor.col, input.cursor.row);
+        if rect.h < 2 || row + 1 != rect.bottom() || col < rect.x || col >= rect.right() {
+            return None;
+        }
+        let line = self.screen.lines[row as usize].slice(rect.x, rect.right());
+        progress_of(&line.text)
+    }
+
     /// Position shown by a status row, as pagers print it: `line 30`,
     /// `lines 30-58/300`. The row is the last of the pane or the one
     /// below it, holds the cursor, starts in standout, on the alternate
@@ -1579,9 +1681,11 @@ impl Frames {
             // Looked for on every change; once found, a preset is kept
             // through `SUPPORT_HOLD` of not being seen (a command line
             // hides the ruler vim is known by).
-            if p.fresh || !p.hashes_valid || self.detect_due(p.rect, p.found_at, now) {
+            let last = (p.found_at, p.found_row);
+            if p.fresh || !p.hashes_valid || self.detect_due(p.rect, last, now) {
                 p.found = self.detect(&pv);
                 p.found_at = Some(now);
+                p.found_row = self.lone_row(p.rect);
             }
             let found = p.found;
             let held = p.support.is_some() && p.support_at.is_some_and(|t| now < t + SUPPORT_HOLD);
@@ -1773,16 +1877,35 @@ impl Frames {
         let pages = seed.abs() >= room && paged(seed);
         // A feed of a screen or more that came in pieces is a jump as
         // well: no piece tells, their sum does.
+        // A piece ends where the write was cut. A feed that is whole
+        // ends on the prompt as it was: the bottom chrome, once learned,
+        // tells a piece from a feed, and time does not (a page and part
+        // of the next, a wheel flick). Without it, pieces are feeds less
+        // than `FEED_GAP` apart.
         let mut overfed = false;
         if seed != 0 && travel == seed.abs() {
-            let sum = match p.fed {
-                Some((t, sum)) if now <= t + ext::FEED_GAP && sum.signum() == seed.signum() => {
-                    sum + seed
+            let last = p.hashes.last().copied().unwrap_or(screen::BLANK);
+            let before = match p.ext.rows.last() {
+                Some(r) if p.ext.rows.len() == p.hashes.len() && p.ext.bottom > 0 => r.hash,
+                _ => screen::BLANK,
+            };
+            let (sum, prompt) = match p.fed {
+                Some((t, sum, prompt))
+                    if sum.signum() == seed.signum()
+                        && now
+                            <= t + if prompt == screen::BLANK {
+                                ext::FEED_GAP
+                            } else {
+                                PIECES
+                            } =>
+                {
+                    (sum + seed, prompt)
                 }
-                _ => seed,
+                _ => (seed, before),
             };
             overfed = sum != seed && sum.abs() >= room && !paged(sum);
-            p.fed = (!overfed).then_some((now, sum));
+            let whole = prompt != screen::BLANK && last == prompt;
+            p.fed = (!overfed && !whole).then_some((now, sum, prompt));
         } else if dirty {
             p.fed = None;
         }
@@ -1806,6 +1929,8 @@ impl Frames {
             bottom_floor: (hint_soft && self.cursor.row + 1 == rect.bottom()) as u16,
             side_pending: p.gutter_cand.1 > 0,
             fixed_tb: p.fixed_tb,
+            alt: p.alt,
+            progress: input.and_then(|inp| self.progress(inp, rect)),
             now,
         };
         if p.reattach {

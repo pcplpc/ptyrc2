@@ -274,7 +274,12 @@ impl Segmenter<'_> {
             self.leaf(r);
             return;
         }
+        // A rule from top to bottom inside the rectangle parts two apps:
+        // it cuts before a preset is asked (an app left of another
+        // looks like the whole to its preset).
+        let parted = r.w > 2 && (r.x + 1..r.right() - 1).any(|c| self.vsep(&r, c));
         if depth > 0
+            && !parted
             && let Some(ask) = self.ask
             && let Some(leaves) = ask(r)
         {

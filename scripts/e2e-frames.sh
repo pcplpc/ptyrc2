@@ -6,8 +6,8 @@
 #
 #   scripts/e2e-frames.sh [SCENARIO...]     default: all
 #   scenarios: vim vim-nu vim-nowrap vim-splits tmux shell pager pages
-#              pages-status man more agent monitor monitor-generic
-#              monitor-slow resize
+#              pages-status pages-share man more agent monitor
+#              monitor-generic monitor-slow resize
 
 cd "$(dirname "$0")/.." || exit 2
 . scripts/lib-e2e.sh
@@ -128,6 +128,10 @@ s_vim() {
         || { echo "FAIL  vim: the opened line is spliced in"; FAILED=1; }
     e2e_send 'dd'; quiet 0.5
     known "vim: deleted again, the buffer is the file" "$id" "$WORK/long.txt"
+    e2e_send 'gg'; quiet
+    e2e_keys ctrl+f; quiet; e2e_keys ctrl+f; quiet; e2e_keys ctrl+f; quiet
+    check "vim: ctrl+f, a page with two rows of overlap, is a scroll" \
+        "ids() == [$id] and pane()['origin'][1] == 81 and pane()['extent'][0] == 0 and pane()['extent'][1] < 300"
     e2e_stop
 }
 
@@ -341,6 +345,33 @@ print([f["origin"][1] for f in json.load(sys.stdin)["frames"] if f["kind"] == "p
 }
 
 # A prompt that tells the line (`less -M`, `man`): rows are absolute.
+# A percentage on the prompt (`less -m`): islands in the order of the
+# file, near their rows.
+s_pages_share() {
+    have less || { echo "SKIP  pages-share"; return; }
+    e2e_start fr-share 100x30 env LESS= less -m "$WORK/long.txt" || return
+    settle
+    local id; id=$(pane_id)
+    e2e_keys space; quiet
+    check "pages-share: one page, the prompt row is chrome at once" \
+        "pane()['origin'][1] == 29 and pane()['rect'] == [0, 0, 100, 29] and pane()['extent'] == [0, 57]"
+    e2e_keys G; quiet
+    check "pages-share: G: (END), an island near the last rows" \
+        "ids() == [$id] and 200250 <= pane()['origin'][1] <= 200290"
+    e2e_keys g; quiet
+    e2e_send '50%'; quiet
+    check "pages-share: 50%: an island between the two, near the middle" \
+        "ids() == [$id] and 100100 <= pane()['origin'][1] <= 100150"
+    e2e_keys g; quiet
+    check "pages-share: g: the top again" "ids() == [$id] and pane()['origin'][1] == 0"
+    e2e_send '50%'; quiet
+    local i; for i in 1 2 3 4; do e2e_keys b; quiet; done
+    check "pages-share: walked into the first rows: merged, exact" \
+        "ids() == [$id] and pane()['origin'][1] < 60 and pane()['extent'][0] == 0 and pane()['extent'][1] < 300"
+    known "pages-share: the remembered buffer is the file" "$id" "$WORK/long.txt"
+    e2e_stop
+}
+
 s_pages_status() {
     have less || { echo "SKIP  pages-status"; return; }
     e2e_start fr-pstat 100x30 env LESS= less -M "$WORK/long.txt" || return
@@ -527,7 +558,7 @@ s_resize() {
 [ -x "$PTYRC" ] || { echo "no binary at $PTYRC: cargo build -p ptyrc-cli" >&2; exit 2; }
 have tmux || { echo "tmux is required as the host" >&2; exit 2; }
 
-for scenario in "${@:-vim vim-nu vim-nowrap vim-splits tmux shell pager pages pages-status man more agent monitor monitor-generic monitor-slow resize}"; do
+for scenario in "${@:-vim vim-nu vim-nowrap vim-splits tmux shell pager pages pages-status pages-share man more agent monitor monitor-generic monitor-slow resize}"; do
     for one in $scenario; do
         case $one in
             vim) s_vim ;;
@@ -539,6 +570,7 @@ for scenario in "${@:-vim vim-nu vim-nowrap vim-splits tmux shell pager pages pa
             pager) s_pager ;;
             pages) s_pages ;;
             pages-status) s_pages_status ;;
+            pages-share) s_pages_share ;;
             man) s_man ;;
             more) s_more ;;
             agent) s_agent ;;
