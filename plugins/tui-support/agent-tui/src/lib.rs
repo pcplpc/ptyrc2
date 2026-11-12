@@ -119,6 +119,7 @@ mod tests {
         PaneView {
             grid,
             rect: grid.rect(),
+            area: grid.rect(),
             cursor: None,
             title: "",
             alt_screen: false,

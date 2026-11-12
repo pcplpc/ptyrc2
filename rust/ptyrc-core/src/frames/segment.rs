@@ -57,6 +57,9 @@ pub(crate) struct Distrust {
     pub until: Duration,
 }
 
+/// Fewest word edges two rows share to be rows of one table.
+const ENTRY_EDGES: u32 = 6;
+
 pub(crate) struct Segmenter<'a> {
     pub screen: &'a Screen,
     pub cursor_row: Option<u16>,
@@ -66,6 +69,9 @@ pub(crate) struct Segmenter<'a> {
     pub now: Duration,
     pub leaves: Vec<Leaf>,
     pub seps: Vec<Sep>,
+    /// Asked of every rectangle reached below the whole screen: the
+    /// panes a preset makes of it, final.
+    pub ask: Option<&'a dyn Fn(Rect) -> Option<Vec<Leaf>>>,
 }
 
 fn contains(outer: &Rect, inner: &Rect) -> bool {
@@ -125,6 +131,64 @@ impl Segmenter<'_> {
         (key != 0 && count as u32 * 10 >= r.w as u32 * 9).then_some(key)
     }
 
+    /// Is a row of one backdrop an entry of a table: its words start and
+    /// end in the columns of a row next to it that is no bar, digits
+    /// under digits, letters under letters. The highlight of a list, told
+    /// before it moves; a header of letters over figures is not one.
+    fn entry(&self, r: &Rect, row: u16) -> bool {
+        fn class(c: char) -> char {
+            if c.is_ascii_digit() {
+                '0'
+            } else if c.is_alphabetic() {
+                'a'
+            } else {
+                c
+            }
+        }
+        // Per cell: the class of a glyph that starts a word, and of one
+        // that ends a word.
+        let edges = |y: u16| -> Vec<(Option<char>, Option<char>)> {
+            let text: Vec<char> = self.screen.lines[y as usize]
+                .text
+                .chars()
+                .chain(std::iter::repeat(' '))
+                .skip(r.x as usize)
+                .take(r.w as usize)
+                .collect();
+            (0..text.len())
+                .map(|i| {
+                    let ink = |j: usize| text.get(j).is_some_and(|c| *c != ' ');
+                    let c = ink(i).then(|| class(text[i]));
+                    (
+                        c.filter(|_| i == 0 || !ink(i - 1)),
+                        c.filter(|_| !ink(i + 1)),
+                    )
+                })
+                .collect()
+        };
+        let mine = edges(row);
+        let count = |e: &[(Option<char>, Option<char>)]| {
+            e.iter()
+                .map(|(a, b)| a.is_some() as u32 + b.is_some() as u32)
+                .sum::<u32>()
+        };
+        let alike = |other: u16| {
+            if self.is_bar_row(r, other).is_some() {
+                return false;
+            }
+            let theirs = edges(other);
+            let same: u32 = mine
+                .iter()
+                .zip(&theirs)
+                .map(|(a, b)| {
+                    (a.0.is_some() && a.0 == b.0) as u32 + (a.1.is_some() && a.1 == b.1) as u32
+                })
+                .sum();
+            same >= ENTRY_EDGES && same * 10 >= count(&mine).min(count(&theirs)) * 6
+        };
+        (row > r.y && alike(row - 1)) || (row + 1 < r.bottom() && alike(row + 1))
+    }
+
     /// Kind of horizontal separator at `row` of `r`: `Some(bar)`.
     fn hsep(&self, r: &Rect, row: u16) -> Option<bool> {
         if r.w >= 4 && !self.distrusted(false, r) {
@@ -148,7 +212,7 @@ impl Segmenter<'_> {
             let same = |other: u16| self.is_bar_row(r, other) == Some(key);
             let above = row > r.y && same(row - 1);
             let below = row + 1 < r.bottom() && same(row + 1);
-            if !above && !below {
+            if !above && !below && !self.entry(r, row) {
                 return Some(true);
             }
         }
@@ -210,10 +274,21 @@ impl Segmenter<'_> {
             self.leaf(r);
             return;
         }
-        // Horizontal cuts.
-        let cuts: Vec<(u16, bool)> = (r.y..r.bottom())
+        if depth > 0
+            && let Some(ask) = self.ask
+            && let Some(leaves) = ask(r)
+        {
+            self.leaves.extend(leaves);
+            return;
+        }
+        // Horizontal cuts. Rules first, alone: what lies between two
+        // rules is one app's, bars included, and is asked of the presets.
+        let mut cuts: Vec<(u16, bool)> = (r.y..r.bottom())
             .filter_map(|row| self.hsep(&r, row).map(|bar| (row, bar)))
             .collect();
+        if self.ask.is_some() && cuts.iter().any(|c| !c.1) && cuts.len() < r.h as usize {
+            cuts.retain(|c| !c.1);
+        }
         if !cuts.is_empty() && cuts.len() < r.h as usize {
             let mut top = r.y;
             for (row, bar) in cuts {
@@ -535,6 +610,7 @@ mod tests {
             now: Duration::ZERO,
             leaves: Vec::new(),
             seps: Vec::new(),
+            ask: None,
         }
         .run();
         (leaves.iter().map(|l| (l.rect(), l.kind)).collect(), seps)
@@ -629,6 +705,40 @@ mod tests {
         let (l, seps) = leaves(&b, &distrust);
         assert_eq!(l, vec![(Rect::new(0, 0, 60, 20), 0), (panel, 0)]);
         assert!(seps.is_empty());
+    }
+
+    #[test]
+    fn an_entry_of_a_table_is_not_a_bar() {
+        // A header and, under it, the selected row of a table.
+        let table = |g: &mut Grid| {
+            fill(g, Rect::new(0, 4, 60, 1), PANEL);
+            text(g, 0, 4, "    PID USER       CPU%  MEM%  Command");
+            for (i, pid) in [101, 2202, 33, 4404, 55].iter().enumerate() {
+                let row = format!("{pid:>7} user{i}      {i}.3   0.{i}  /usr/bin/cmd{i}");
+                text(g, 0, 5 + i as u16, &row);
+            }
+        };
+        let mut g = Grid::new(60, 20);
+        table(&mut g);
+        fill(&mut g, Rect::new(0, 5, 60, 1), PICK);
+        table(&mut g);
+        let (l, _) = leaves(&g, &[]);
+        assert_eq!(
+            l,
+            vec![
+                (Rect::new(0, 0, 60, 4), 0),
+                (Rect::new(0, 4, 60, 1), 1),
+                (Rect::new(0, 5, 60, 15), 0)
+            ]
+        );
+        // A status line over text of another shape is a bar.
+        let mut g = Grid::new(60, 20);
+        text(&mut g, 0, 9, "fn main() { let total = 12345; }");
+        fill(&mut g, Rect::new(0, 10, 60, 1), PICK);
+        text(&mut g, 0, 10, "src/main.rs                    12,1   Top");
+        text(&mut g, 0, 11, ":wq");
+        let (l, _) = leaves(&g, &[]);
+        assert!(l.contains(&(Rect::new(0, 10, 60, 1), 1)), "{l:?}");
     }
 
     #[test]

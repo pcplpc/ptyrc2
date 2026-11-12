@@ -301,7 +301,12 @@ Segments the screen into panes, each with an extended frame.
   whose background or inverse attribute is uniform across the rect: status
   lines, tab bars).
   A bar is a row that one backdrop, not the default, covers (nine cells
-  in ten) while the rows above and below show another. A bar that moves
+  in ten) while the rows above and below show another. Such a row is an
+  entry of a table, not a bar, when a row next to it that is no bar has
+  its shape: 6 word edges or more (starts and ends) in the same cells
+  with the same class (digit, letter, same sign), six in ten of those of
+  the row that has fewer. A header of letters over figures stays a bar.
+  A bar that moves
   without taking its text along is the highlight of a list: bars are not
   believed in that list for `distrust_ms`.
 - **Boxes**: closed rectangles of border glyphs with corners; the interior
@@ -608,8 +613,8 @@ pub trait TuiSupport: Send {
     fn chrome(&self, pane: &PaneView) -> Option<Chrome> { None }
     fn view_hint(&self, pane: &PaneView) -> Option<ViewHint> { None }
     fn frame_key(&self, pane: &PaneView) -> Option<String> { None }
-    fn segment(&self, screen: &PaneView) -> Option<Vec<Rect>> { None }
-    fn tuning(&self) -> Tuning { Tuning::default() }
+    fn segment(&self, area: &PaneView) -> Option<Vec<Rect>> { None }
+    fn tuning(&self, pane: &PaneView) -> Tuning { Tuning::default() }
 }
 pub trait DrawExt: Send {
     fn name(&self) -> &'static str;
@@ -621,16 +626,33 @@ pub trait DrawExt: Send {
 ```
 
 A `TuiSupport` is consulted for a pane (and for the whole screen) when its
-`detect` is at least 0.5. Presets: `tmux`, `vim`, `ranger`, `htop`, `agent-tui` (the
+`detect` is at least 0.5. `PaneView`: `grid`, `rect`, `area` (the area
+a preset segmented to make the pane; `rect` otherwise), `cursor`,
+`title`, `alt_screen`. Chrome, hint, key and `Tuning` are asked per
+pane: one preset may declare a pane a monitor and let another scroll.
+
+`segment` is asked of the whole screen, then of every rectangle the
+generic segmentation reaches on its way down (a tmux pane, the inside
+of a box, a panel), before it is cut further. Rules cut before bars:
+what lies between two rules is one app's, bars included. The panes a
+preset returns are final; their keys follow the key of the screen
+(`tmux:in:0/htop:processes`). Presets are looked for on a rectangle as
+on a pane (two rows changed, the title, else once a second); those
+found are asked at every segmentation.
+
+Presets: `tmux`, `vim`, `ranger`, `htop`, `glances`, `agent-tui` (the
 family of coding-agent TUIs: a prompt box, rounded, between rules or a
 panel edged by `┃`, under a streaming transcript). `ranger`: columns
 from the selected entries (inverse runs), a column without one takes
 what is left; title and status rows chrome; main column keyed
-`ranger:<dir>`, hinted by the selected index. `htop`: main screen only
+`ranger:<dir>`, hinted by the selected index; the preview, right of
+it, a monitor. `htop`: main screen only
 (`F1Help F2Setup`); meters `htop:meters` and table `htop:processes`
-around the header row, function bar chrome; no learned chrome in the
-table. A preset segments only the whole screen; inside another app's
-pane it is detected and keyed, not split. First draw
+around the header row, function bar chrome, both monitors; no learned
+chrome in the table. `glances`: a full-width rule over the `TASKS n (n
+thr)` row; title and rules chrome; `glances:summary` between the last
+two rules, under them `glances:sidebar` left of the column of `TASKS`
+(8 cells or more) and `glances:processes`; all monitors. First draw
 extensions: `shapes` (line, rect, circle, ellipse), `bigtext` (block
 letters), `sand`, `rain` (effects). A draw extension refuses a parameter
 of the wrong type.
@@ -834,8 +856,9 @@ windows under the driver, one drawing per pane, sand in the idle one.
 
 - `scripts/e2e-frames.sh`: frames on real vim, tmux, less, man, more,
   htop, a shell and a stand-in agent TUI, in a detached tmux.
-- `scripts/e2e-tuis.sh`: htop, less, man, tmux, ranger, glances and
-  opencode in a detached tmux: the screen read against the host, the
+- `scripts/e2e-tuis.sh`: htop, less, man, tmux, ranger, glances,
+  opencode, and `nested` (htop and ranger in the panes of a tmux), in a
+  detached tmux: the screen read against the host, the
   layout found and its steadiness, a sprite drawn and removed, the exit.
   `KNOWN` marks a defect recorded in `plan/ideas.md`.
 - `scripts/e2e-render.sh`: the driver in a detached tmux; what tmux shows
