@@ -65,3 +65,9 @@ Supersedes `--spawn --rate` above.
   `--bursts` bursts in parallel, same random offsets.
 - `--count` becomes `--size`.
 - `--help` stays simple.
+
+## Apps, end of the second session
+
+- No `--seconds` ("stop after this many seconds") in any default app.
+- Fishes: 8 by default. Those left out of the screen by a scroll despawn
+  slowly, and respawn behind the text.
