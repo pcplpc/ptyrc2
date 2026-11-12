@@ -9,7 +9,7 @@ import queue
 import shutil
 import subprocess
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Self
@@ -92,8 +92,9 @@ def sprite_spec(
     near: str | None = None,
     regex: bool = False,
     nth: int = 0,
+    ignore_case: bool = False,
     side: str = "right",
-    gap: int = 1,
+    gap: int | None = None,
     auto: str | bool | None = None,
     cursor: tuple[int, int] | None = None,
     style: dict[str, Any] | None = None,
@@ -108,17 +109,29 @@ def sprite_spec(
     persist: bool = False,
     motion: dict[str, Any] | None = None,
     effect: str | dict[str, Any] | None = None,
+    size: tuple[int, int] | None = None,
     **style_kw: Any,
 ) -> dict[str, Any]:
     """Build the wire form of a sprite.
 
-    Anchor, one of: `at` with `space` (`view` or `frame`), `near` (text, with
-    `side`, `gap`, `nth`, `regex`), `auto` (a preference such as
-    `"top-right"`, or True), `cursor` (`(dx, dy)`). Default: `at=(0, 0)`.
+    Anchor, one of:
 
-    Content, one of: `rows`, `cells`, `frames` (each a list of rows, or a
-    dict with `rows` / `cells` and `ms`), `effect`. Style keywords (`fg`,
-    `bg`, `bold`...) extend `style`. `ttl` is in seconds.
+    - `at=(x, y)` with `space`: `"view"` is fixed on the pane (negative
+      counts from the right and bottom), `"frame"` moves with scrolling;
+    - `near="word"`: next to a text match (`side`, `gap`, `nth`, `regex`,
+      `ignore_case`), following it;
+    - `auto="top-right"` (or True): a quiet spot chosen by the driver;
+    - `cursor=(dx, dy)`: follows the cursor.
+
+    Content, one of: `rows` (a space is transparent unless `opaque`),
+    `cells` (rows of runs `{"t": "ab", "fg": ...}`), `frames` (an
+    animation: each a list of rows, or a dict with `rows` / `cells` and
+    `ms`; `loop` True, False or a count), `effect` (a native generator,
+    drawing on `size` cells or on the whole view).
+
+    Style keywords (`fg`, `bg`, `bold`...) extend `style`. `blend`: `over`,
+    `behind` (text stays on top), `tint`. `ttl` is in seconds. A sprite
+    dies with its connection unless `persist`.
     """
     unknown = set(style_kw) - set(_STYLE_KEYS)
     if unknown:
@@ -144,7 +157,11 @@ def sprite_spec(
         spec["frame"] = frame
 
     if near is not None:
-        anchor: dict[str, Any] = {"text": near, "side": side, "gap": gap}
+        anchor: dict[str, Any] = {"text": near, "side": side}
+        if gap is not None:
+            anchor["gap"] = gap
+        if ignore_case:
+            anchor["ignore_case"] = True
         if nth:
             anchor["nth"] = nth
         if regex:
@@ -187,13 +204,16 @@ def sprite_spec(
         spec["persist"] = True
     if motion is not None:
         spec["motion"] = motion
+    if size is not None:
+        spec["size"] = list(size)
     return spec
 
 
 class Sprite:
-    """Handle of a sprite on the driver."""
+    """Handle of a sprite on the driver. Made inside `batch()`, its `id` is
+    known when the batch is sent."""
 
-    def __init__(self, pilot: Pilot, sprite_id: int) -> None:
+    def __init__(self, pilot: Pilot, sprite_id: int | None) -> None:
         self._pilot = pilot
         self.id = sprite_id
 
@@ -201,16 +221,21 @@ class Sprite:
         """Patch wire fields: `anchor`, `content`, `frames`, `z`, `blend`..."""
         self._pilot.call("draw.update", id=self.id, **patch)
 
-    def set_rows(self, rows: Sequence[str] | str, **style: Any) -> None:
-        self.update(content=sprite_spec(rows, **style)["content"])
-
-    def set_cells(self, cells: Sequence[Sequence[dict[str, Any]]]) -> None:
-        self.update(content={"cells": [list(r) for r in cells]})
+    def set(self, rows: Any = None, **kw: Any) -> None:
+        """New content, with the arguments of `sprite_spec`."""
+        spec = sprite_spec(rows, **kw)
+        keys = ("content", "frames", "loop")
+        self.update(**{k: spec[k] for k in keys if k in spec})
 
     def move(self, x: int, y: int, space: str = "view") -> None:
         self.update(anchor={"at": [x, y], "space": space})
 
+    def info(self) -> dict[str, Any] | None:
+        """Its entry in `draw.list`; `screen` is where it shows, or None."""
+        return next((s for s in self._pilot.sprites() if s["id"] == self.id), None)
+
     def remove(self) -> None:
+        """Remove it; fine if it is already gone."""
         try:
             self._pilot.call("draw.remove", id=self.id)
         except PtyrcError as exc:
@@ -242,6 +267,20 @@ class Frame:
     @property
     def size(self) -> tuple[int, int]:
         return (self.info["rect"][2], self.info["rect"][3])
+
+    def to_screen(self, x: int, y: int) -> tuple[int, int] | None:
+        """Screen cell of a frame position, None when not shown."""
+        rx, ry, w, h = self.info["rect"]
+        dx, dy = x - self.info["origin"][0], y - self.info["origin"][1]
+        return (rx + dx, ry + dy) if 0 <= dx < w and 0 <= dy < h else None
+
+    def to_frame(self, col: int, row: int) -> tuple[int, int] | None:
+        """Frame position of a screen cell, None outside the view."""
+        rx, ry, w, h = self.info["rect"]
+        dx, dy = col - rx, row - ry
+        if not (0 <= dx < w and 0 <= dy < h):
+            return None
+        return (self.info["origin"][0] + dx, self.info["origin"][1] + dy)
 
     def refresh(self) -> Frame:
         for info in self._pilot.call("frame.list")["frames"]:
@@ -293,7 +332,7 @@ class Pilot:
     ) -> None:
         self._conn = Connection(path or socket_path(session), timeout=timeout)
         self._proc: subprocess.Popen[bytes] | None = None
-        self._batch: list[dict[str, Any]] | None = None
+        self._batch: _Batch | None = None
         self.hello: dict[str, Any] = self._conn.hello
 
     @classmethod
@@ -345,15 +384,34 @@ class Pilot:
     # -- plumbing ---------------------------------------------------------
 
     def call(self, method: str, **params: Any) -> Any:
-        """Raw request. Inside `batch()`, queued and answered with None."""
+        """Raw request: `pilot.call("screen.text", frame=1)`. Inside
+        `batch()` it is queued and returns None."""
+        return self._request(method, params)
+
+    def _request(
+        self,
+        method: str,
+        params: dict[str, Any],
+        then: Callable[[Any], None] | None = None,
+        timeout: float = 30.0,
+    ) -> Any:
         if self._batch is not None:
-            self._batch.append({"method": method, "params": params})
+            self._batch.add(method, params, then)
             return None
-        return self._conn.call(method, params)
+        result = self._conn.call(method, params, timeout=timeout)
+        if then is not None:
+            then(result)
+        return result
 
     def batch(self) -> _Batch:
-        """Context manager: calls made inside are sent as one `batch`,
-        applied in one repaint. Their results are not returned."""
+        """Context manager: the calls made inside go out as one request and
+        show in one repaint.
+
+            with pilot.batch() as batch:
+                head.move(x, y)
+                tail.set(["~"])
+            batch.results      # one result, or PtyrcError, per call
+        """
         return _Batch(self)
 
     @property
@@ -397,6 +455,11 @@ class Pilot:
         """`(cols, rows)` now."""
         cols, rows = self.info()["size"]
         return (cols, rows)
+
+    def resize(self, cols: int, rows: int) -> None:
+        """Resize the screen. Headless sessions only: elsewhere the host
+        terminal decides."""
+        self.call("session.resize", size=[cols, rows])
 
     # -- reading ----------------------------------------------------------
 
@@ -464,12 +527,9 @@ class Pilot:
         if stable is not None:
             params["stable_ms"] = int(stable * 1000)
         params["timeout_ms"] = int(timeout * 1000)
-        try:
-            res = self._conn.call("screen.wait", params, timeout=timeout + 5.0)
-        except PtyrcError as exc:
-            if exc.code == "timeout":
-                raise TimeoutError(f"wait_for({pattern!r})") from None
-            raise
+        if self._batch is not None:
+            raise RuntimeError("wait_for inside a batch")
+        res = self._conn.call("screen.wait", params, timeout=timeout + 5.0)
         if not res.get("matched", False):
             raise TimeoutError(f"wait_for({pattern!r})")
         match = res.get("match")
@@ -510,12 +570,16 @@ class Pilot:
         ]
 
     def frame(self, sel: int | str = "raw") -> Frame:
-        """A frame by id or name (`raw`, `active`, `largest`, `quietest`)."""
+        """A frame by id or name: `raw`, `active` (the pane holding the
+        cursor), `largest`, `quietest`."""
         frames = self.frames(inactive=True)
-        if isinstance(sel, str) and not sel.isdigit():
-            fid = self.call("frame.at", name=sel).get("frame")
-        else:
+        if isinstance(sel, int) or sel.isdigit():
             fid = int(sel)
+        elif sel == "raw":
+            fid = 0
+        else:
+            # The driver resolves names; `frame.at` answers for one too.
+            fid = self.call("frame.at", name=sel)["frame"]
         for f in frames:
             if f.id == fid:
                 return f
@@ -534,19 +598,20 @@ class Pilot:
 
     def put(self, spec: dict[str, Any]) -> Sprite:
         """Add a sprite from its wire form."""
-        res = self._conn.call("draw.put", spec)
-        return Sprite(self, res["id"])
+        return self._sprite("draw.put", spec)
 
     def ext(
         self, name: str, function: str, params: Any = None, **sprite: Any
     ) -> Sprite:
         """Draw with an extension: `pilot.ext("shapes", "circle", {"r": 4})`.
         `sprite` takes wire sprite fields (`frame`, `anchor`, `z`...)."""
-        res = self._conn.call(
-            "draw.ext",
-            {"name": name, "function": function, "params": params or {}, **sprite},
-        )
-        return Sprite(self, res["id"])
+        request = {"name": name, "function": function, "params": params or {}}
+        return self._sprite("draw.ext", {**request, **sprite})
+
+    def _sprite(self, method: str, params: dict[str, Any]) -> Sprite:
+        sprite = Sprite(self, None)
+        self._request(method, params, lambda res: setattr(sprite, "id", res["id"]))
+        return sprite
 
     def exts(self) -> dict[str, Any]:
         return self.call("draw.exts")
@@ -568,11 +633,22 @@ class Pilot:
     # -- events and debug -------------------------------------------------
 
     def subscribe(self, *topics: str) -> None:
+        """Ask for events: `screen`, `cursor`, `frames`, `input`, `size`,
+        `exit`."""
         self.call("subscribe", topics=list(topics))
 
-    def events(self, timeout: float | None = None) -> Iterator[dict[str, Any]]:
-        """Events as `{"event": topic, "data": ...}`. Ends when the driver
-        goes away, or after `timeout` seconds without one."""
+    def events(
+        self, *topics: str, timeout: float | None = None
+    ) -> Iterator[tuple[str, Any]]:
+        """Subscribe to `topics` and yield `(topic, data)` as they come.
+        Ends when the driver goes away, or after `timeout` seconds of
+        silence.
+
+            for topic, data in pilot.events("cursor"):
+                print(data["x"], data["y"])
+        """
+        if topics:
+            self.subscribe(*topics)
         while True:
             try:
                 msg = self._conn.events.get(timeout=timeout)
@@ -580,7 +656,7 @@ class Pilot:
                 return
             if msg is None:
                 return
-            yield msg
+            yield msg["event"], msg.get("data")
 
     def debug_overlay(self, what: str = "frames") -> None:
         """Show `frames` or `heat` on the host; `off` hides it."""
@@ -591,19 +667,42 @@ class Pilot:
 
 
 class _Batch:
+    """Calls collected by `Pilot.batch()`. After the block, `results` holds
+    one entry per call: its result, or a `PtyrcError`."""
+
     def __init__(self, pilot: Pilot) -> None:
         self._pilot = pilot
+        self._calls: list[dict[str, Any]] = []
+        self._then: list[Callable[[Any], None] | None] = []
+        self.results: list[Any] = []
 
-    def __enter__(self) -> Pilot:
+    def add(
+        self, method: str, params: dict[str, Any], then: Callable[[Any], None] | None
+    ) -> None:
+        self._calls.append({"method": method, "params": params})
+        self._then.append(then)
+
+    def __enter__(self) -> Self:
         if self._pilot._batch is not None:
             raise RuntimeError("nested batch")
-        self._pilot._batch = []
-        return self._pilot
+        self._pilot._batch = self
+        return self
 
     def __exit__(self, exc_type: object, *exc: object) -> None:
-        calls, self._pilot._batch = self._pilot._batch, None
-        if exc_type is None and calls:
-            self._pilot._conn.call("batch", {"calls": calls})
+        self._pilot._batch = None
+        if exc_type is not None or not self._calls:
+            return
+        reply = self._pilot._conn.call("batch", {"calls": self._calls})
+        for entry, then in zip(reply["results"], self._then, strict=True):
+            if "error" in entry:
+                err = entry["error"] or {}
+                self.results.append(
+                    PtyrcError(err.get("code", "internal"), err.get("message", ""))
+                )
+            else:
+                self.results.append(entry.get("result"))
+                if then is not None:
+                    then(entry.get("result"))
 
 
 def _opt(**kw: Any) -> dict[str, Any]:
