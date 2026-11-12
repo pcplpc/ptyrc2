@@ -559,7 +559,8 @@ pub fn draw(common: &Common, verb: Draw) -> Done {
             }
             for s in result["sprites"].as_array().into_iter().flatten() {
                 let screen = match s["screen"].as_array() {
-                    Some(p) => format!("{},{}", p[0], p[1]),
+                    Some(p) if s["visible"] == true => format!("{},{}", p[0], p[1]),
+                    Some(_) => "out".into(),
                     None => "hidden".into(),
                 };
                 println!(

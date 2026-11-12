@@ -87,6 +87,14 @@ fn is_false(b: &bool) -> bool {
     !*b
 }
 
+fn is_true(b: &bool) -> bool {
+    *b
+}
+
+fn yes() -> bool {
+    true
+}
+
 /// Style of sprite cells. An absent colour inherits the cell below.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StyleSpec {
@@ -262,7 +270,9 @@ pub enum Anchor {
     },
     /// Next to the `nth` match. `gap` defaults to 1 for `left` and `right`,
     /// 0 otherwise. `left` and `right` centre the sprite vertically on the
-    /// match, `above` and `below` horizontally.
+    /// match, `above` and `below` horizontally. `slide` (the default):
+    /// while the row of the match is in the view, the sprite moves along
+    /// that centred axis to stay whole inside the view.
     Text {
         text: String,
         #[serde(default, skip_serializing_if = "is_false")]
@@ -275,6 +285,8 @@ pub enum Anchor {
         side: Side,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         gap: Option<u16>,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        slide: bool,
     },
     Auto {
         auto: AutoAnchor,
@@ -483,6 +495,14 @@ pub struct SpriteInfo {
     pub z: i32,
     pub persist: bool,
     pub screen: Option<[i64; 2]>,
+    /// A glyph of the sprite is inside the view of a usable frame.
+    /// Always false from `Scene::list`.
+    #[serde(default)]
+    pub visible: bool,
+    /// Back layers: of its glyphs inside the view, the share under app
+    /// cells with ink, where they do not show. 0 for a front layer.
+    #[serde(default)]
+    pub covered: f32,
 }
 
 /// Scene failure; `code` is the wire error code.

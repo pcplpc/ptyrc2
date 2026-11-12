@@ -704,7 +704,9 @@ pub(crate) fn handle(
             };
             Ok(json!({"removed": removed}))
         }
-        "draw.list" => Ok(json!({"sprites": engine.scene.list()})),
+        "draw.list" => Ok(json!({
+            "sprites": engine.scene.list_on(engine.app.grid(), &engine.frames)
+        })),
         "draw.ext" => draw_ext(engine, conn, params, now),
         "draw.exts" => draw_exts(engine),
         "debug.overlay" => set_overlay(engine, params, now),
