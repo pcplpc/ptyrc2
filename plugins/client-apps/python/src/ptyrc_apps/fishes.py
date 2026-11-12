@@ -4,6 +4,7 @@
     ptyrc run vim long-file.txt      # or less, man
     ptyrc-app fishes
     ptyrc-app fishes --count 12 --shy 2 -f active
+    ptyrc-app fishes -a              # the whole aquarium
 
 What it shows:
 
@@ -26,6 +27,18 @@ A fish left out of the view by a scroll stays where it was. After a
 random `WAIT` it goes, one fish a tick at most, and comes back in the
 view where the text hides most of it (`entry`): it swims out from
 behind the words. Back in view before its time, it carries on.
+
+More, each on its own flag; `-a` for all (see `_reef`):
+
+- `-d`: decorations that stand on the text: kelp, shells, corals, a
+  castle. Some behind the fishes, some in front, all behind the text.
+- `-b`: dim bubbles from the bottom of the view to its top.
+- `-r`: a fish that comes back is of a random `SPECIES`; now and then
+  an event: a creature crosses, an object sinks to the text and stays,
+  a hook comes down, a fish leaves. Fishes flee hooks and big mouths.
+
+What was populated is remembered in frame cells (`Reef`): scroll away
+and back, the same castle stands on the same line.
 """
 
 from __future__ import annotations
@@ -40,16 +53,22 @@ from dataclasses import dataclass
 from ptyrc import Frame, Pilot, Sprite
 
 from . import _cli
+from ._reef import Events, Reef, mirror, pad
 
 __all__ = [
+    "CLASSIC",
+    "SPECIES",
     "STAY",
     "WAIT",
     "Fish",
+    "Species",
     "cover",
+    "depart",
     "entry",
     "hideouts",
     "lure",
     "main",
+    "menace",
     "reach",
     "swim",
     "tide",
@@ -69,6 +88,38 @@ READ = 1.0  # seconds between two reads of the text
 Box = tuple[int, int, int, int]
 
 
+@dataclass(frozen=True)
+class Species:
+    """A kind of fish, one row: `right`, what it looks like swimming
+    right, one glyph per column it is on, in turn; `colors` to draw
+    from."""
+
+    name: str
+    right: tuple[str, ...]
+    colors: tuple[int | str, ...] = COLORS
+
+    @property
+    def length(self) -> int:
+        return len(self.right[0])
+
+    def glyph(self, right: bool, x: int) -> str:
+        glyph = self.right[x % len(self.right)]
+        return glyph if right else mirror([glyph])[0]
+
+
+CLASSIC = Species("classic", (RIGHT,))
+SPECIES = (
+    CLASSIC,
+    Species("minnow", ("><>",), (81, 117, 159, 229)),
+    Species("tetra", (">(°>",), (203, 208, 214, 51)),
+    Species("guppy", ("><{{°>",), (213, 141, 219, 177)),
+    Species("bream", ("><(((°>",), (220, 215, 150, 111)),
+    Species("sword", ("><(((°>--",), (75, 250, 153)),
+    # It slithers: the body shifts with each column.
+    Species("eel", ("~-~-~-~:>", "-~-~-~-:>"), (107, 143, 179)),
+)
+
+
 @dataclass
 class Fish:
     """Position in frame coordinates, speed in cells per second."""
@@ -82,19 +133,28 @@ class Fish:
     shy: bool = False
     home: tuple[int, int] | None = None  # where a shy fish hides
     stay: float = 0.0  # seconds left there
+    kind: Species = CLASSIC
+    leaving: bool = False  # the walls do not turn it
     sprite: Sprite | None = None
     shown: tuple[int, int, str] | None = None
 
     @property
+    def length(self) -> int:
+        return self.kind.length
+
+    @property
     def cell(self) -> tuple[int, int, str]:
         right = math.copysign(1.0, self.vx) > 0  # -0.0 still faces left
-        return (round(self.x), round(self.y), RIGHT if right else LEFT)
+        x = round(self.x)
+        return (x, round(self.y), self.kind.glyph(right, x))
 
 
-def reach(x: float, y: float, cursor: tuple[int, int]) -> float:
-    """Distance from a fish at (x, y) to the cursor, in columns: a row is
-    about two columns tall."""
-    return math.hypot(x + LENGTH / 2 - cursor[0], (y - cursor[1]) * 2)
+def reach(
+    x: float, y: float, cursor: tuple[float, float], length: int = LENGTH
+) -> float:
+    """Distance from a fish of `length` cells at (x, y) to the cursor, in
+    columns: a row is about two columns tall."""
+    return math.hypot(x + length / 2 - cursor[0], (y - cursor[1]) * 2)
 
 
 def approach(d: float, top: float) -> float:
@@ -106,16 +166,17 @@ def swim(
     fish: Fish,
     dt: float,
     box: Box,
-    cursor: tuple[int, int] | None,
+    cursor: tuple[float, float] | None,
     moving: bool,
     rng: random.Random,
 ) -> None:
     """One step of one fish inside `box` (x0, y0, x1, y1, frame cells)."""
     x0, y0, x1, y1 = box
+    length = fish.length
     if cursor is not None:
-        dx = fish.x + LENGTH / 2 - cursor[0]
+        dx = fish.x + length / 2 - cursor[0]
         dy = (fish.y - cursor[1]) * 2
-        if reach(fish.x, fish.y, cursor) < (NEAR_MOVING if moving else NEAR):
+        if reach(fish.x, fish.y, cursor, length) < (NEAR_MOVING if moving else NEAR):
             # Away from the cursor, fast, for a moment.
             fish.scared = 0.8
             fish.vx = math.copysign(FEAR, dx if dx else fish.vx)
@@ -134,10 +195,12 @@ def swim(
     fish.x += fish.vx * dt
     fish.y += fish.vy * dt
     # Turn at the walls.
-    if fish.x < x0:
+    if fish.leaving:
+        pass
+    elif fish.x < x0:
         fish.x, fish.vx = x0, abs(fish.vx)
-    elif fish.x > x1 - LENGTH:
-        fish.x, fish.vx = x1 - LENGTH, -abs(fish.vx)
+    elif fish.x > x1 - length:
+        fish.x, fish.vx = x1 - length, -abs(fish.vx)
     if not y0 <= fish.y <= y1:
         fish.y, fish.vy = min(max(fish.y, y0), y1), 0.0
 
@@ -149,9 +212,9 @@ def view(frame: Frame) -> Box:
     return (ox, oy, ox + w, oy + h - 1)
 
 
-def inside(cell: tuple[int, int], box: Box) -> bool:
+def inside(cell: tuple[int, int], box: Box, length: int = LENGTH) -> bool:
     x0, y0, x1, y1 = box
-    return x0 <= cell[0] <= x1 - LENGTH and y0 <= cell[1] <= y1
+    return x0 <= cell[0] <= x1 - length and y0 <= cell[1] <= y1
 
 
 def tide(
@@ -160,14 +223,17 @@ def tide(
     box: Box,
     now: float,
     rng: random.Random,
+    lengths: Sequence[int] | None = None,
 ) -> tuple[list[float | None], int | None]:
     """Who leaves, and when. `cells`: where the fishes are; `due`: when
-    each goes, None while in view. A fish out of view is given a time
-    `WAIT` from `now`; one in view, none. Returns the new times and the
-    fish that goes now, if any: the most overdue, one a call."""
+    each goes, None while in view; `lengths`: theirs, `LENGTH` each by
+    default. A fish out of view is given a time `WAIT` from `now`; one
+    in view, none. Returns the new times and the fish that goes now, if
+    any: the most overdue, one a call."""
+    lengths = lengths or [LENGTH] * len(cells)
     due = [
-        None if inside(c, box) else now + rng.uniform(*WAIT) if d is None else d
-        for c, d in zip(cells, due, strict=True)
+        None if inside(c, box, n) else now + rng.uniform(*WAIT) if d is None else d
+        for c, d, n in zip(cells, due, lengths, strict=True)
     ]
     late = [i for i, d in enumerate(due) if d is not None and d <= now]
     if not late:
@@ -177,20 +243,24 @@ def tide(
     return due, going
 
 
-def cover(rows: Sequence[str], box: Box) -> dict[tuple[int, int], int]:
-    """For each spot of the view, how many cells of a fish there `rows`,
-    the view's text, hides."""
+def cover(
+    rows: Sequence[str], box: Box, length: int = LENGTH
+) -> dict[tuple[int, int], int]:
+    """For each spot of the view, how many cells of a fish of `length`
+    cells there `rows`, the view's text, hides."""
     x0, y0, x1, y1 = box
     return {
-        (x, y): sum(not c.isspace() for c in row[x - x0 : x - x0 + LENGTH])
+        (x, y): sum(not c.isspace() for c in row[x - x0 : x - x0 + length])
         for y, row in zip(range(y0, y1 + 1), rows)
-        for x in range(x0, max(x0, x1 - LENGTH) + 1)
+        for x in range(x0, max(x0, x1 - length) + 1)
     }
 
 
-def hideouts(rows: Sequence[str], box: Box) -> list[tuple[int, int]]:
+def hideouts(
+    rows: Sequence[str], box: Box, length: int = LENGTH
+) -> list[tuple[int, int]]:
     """The spots where the text hides a fish but a cell at most."""
-    return [spot for spot, n in cover(rows, box).items() if n >= LENGTH - 1]
+    return [spot for spot, n in cover(rows, box, length).items() if n >= length - 1]
 
 
 def lure(
@@ -204,16 +274,18 @@ def lure(
     or when no spot is out of the cursor's reach. `spots`: `hideouts`.
     The nearest spot first; `STAY` there, then one drawn at random at
     least two lengths away."""
-    if not fish.shy:
+    if not fish.shy or fish.leaving:
+        fish.home = None
         return None
-    safe = [s for s in spots if cursor is None or reach(*s, cursor) >= NEAR_MOVING]
+    n = fish.length
+    safe = [s for s in spots if cursor is None or reach(*s, cursor, n) >= NEAR_MOVING]
     if fish.home not in safe:
         fish.home = None
     elif fish.cell[:2] == fish.home:
         fish.stay -= dt
         if fish.stay <= 0:
             hx, hy = fish.home
-            away = [s for s in safe if math.hypot(s[0] - hx, s[1] - hy) > 2 * LENGTH]
+            away = [s for s in safe if math.hypot(s[0] - hx, s[1] - hy) > 2 * n]
             fish.home, fish.stay = rng.choice(away or safe), rng.uniform(*STAY)
     if fish.home is None and safe:
         fish.home = min(
@@ -223,17 +295,52 @@ def lure(
     return fish.home
 
 
-def entry(rows: Sequence[str], box: Box, rng: random.Random) -> tuple[int, int]:
+def entry(
+    rows: Sequence[str], box: Box, rng: random.Random, length: int = LENGTH
+) -> tuple[int, int]:
     """Where a fish comes back: a spot of the view where `rows`, its
     text, hides most of the fish, drawn at random among the best. With
     no text at all, a side of the view."""
     x0, y0, x1, y1 = box
-    xs = range(x0, max(x0, x1 - LENGTH) + 1)
-    hidden = cover(rows, box)
+    xs = range(x0, max(x0, x1 - length) + 1)
+    hidden = cover(rows, box, length)
     best = max(hidden.values(), default=0)
     if not best:
         return rng.choice((xs[0], xs[-1])), rng.randint(y0, y1)
     return rng.choice([spot for spot, n in hidden.items() if n == best])
+
+
+def menace(
+    fish: Fish,
+    cursor: tuple[int, int] | None,
+    moving: bool,
+    threats: Sequence[tuple[float, float]],
+) -> tuple[tuple[float, float] | None, bool]:
+    """What `fish` flees: a threat within `NEAR`, the nearest; else the
+    cursor. As the `cursor` and `moving` of `swim`."""
+    near = min(
+        threats, key=lambda p: reach(fish.x, fish.y, p, fish.length), default=None
+    )
+    if near is not None and reach(fish.x, fish.y, near, fish.length) < NEAR:
+        return near, False
+    return cursor, moving
+
+
+def depart(school: Sequence[Fish], box: Box, rng: random.Random) -> Fish | None:
+    """A bold, calm fish of the view heads for the nearest side and
+    leaves; None if there is none."""
+    calm = [
+        f
+        for f in school
+        if not f.shy and f.scared <= 0 and inside(f.cell[:2], box, f.length)
+    ]
+    if not calm:
+        return None
+    fish = rng.choice(calm)
+    middle = (box[0] + box[2] - fish.length) / 2
+    fish.leaving = True
+    fish.vx = math.copysign(CALM, fish.x - middle)
+    return fish
 
 
 def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
@@ -255,8 +362,10 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     due: list[float | None] = [None] * len(school)
     before = None
     rows: list[str] = []
-    spots: list[tuple[int, int]] = []
+    spots: dict[int, list[tuple[int, int]]] = {}  # hideouts, by length
     read: tuple[Box, float] | None = None  # view and time of the last read
+    reef = Reef()
+    events = Events(reef, time.monotonic(), rng) if args.random else None
     for dt in _cli.ticks(TICK, seconds):
         # Refreshed each tick: the origin moves when the content scrolls.
         if not _cli.on_screen(frame):
@@ -267,24 +376,43 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
         moving, before = cursor != before, cursor
         cells = [fish.cell[:2] for fish in school]
         now = time.monotonic()
-        due, going = tide(cells, due, box, now, rng)
+        due, going = tide(cells, due, box, now, rng, [f.length for f in school])
         with _cli.in_sight():
             if read is None or read[0] != box or now - read[1] >= READ:
-                rows, read = frame.text(), (box, now)
-                spots = hideouts(rows, box)
+                still = read is not None and read[0] == box
+                rows, read = pad(frame.text(), box[2] - box[0]), (box, now)
+                spots = {}
+                with pilot.batch():
+                    reef.prune(rows, box)
+                    if args.decorate:
+                        reef.survey(rows, box, still, rng)
+                    reef.show(pilot, frame, box)
             if going is not None:
                 fish = school[going]
-                fish.x, fish.y = entry(rows, box, rng)
+                if args.random:
+                    fish.kind = rng.choice(SPECIES)
+                    fish.color = rng.choice(fish.kind.colors)
+                fish.x, fish.y = entry(rows, box, rng, fish.length)
                 # Calm, towards the middle of the view.
-                inward = (box[0] + box[2] - LENGTH) / 2 - fish.x
+                inward = (box[0] + box[2] - fish.length) / 2 - fish.x
                 fish.vx = math.copysign(rng.uniform(0.5, 1.0) * CALM, inward)
                 fish.vy = fish.scared = 0.0
-                fish.home = None
+                fish.home, fish.leaving = None, False
             with pilot.batch():
+                threats: list[tuple[float, float]] = []
+                if events is not None:
+                    threats, leave = events.step(pilot, frame, rows, box, now, dt)
+                    if leave:
+                        depart(school, box, rng)
+                if args.bubbles:
+                    reef.bubbles(pilot, frame, box, now, rng)
                 for fish in school:
-                    if inside(fish.cell[:2], box):  # out of view, it waits
-                        lure(fish, spots, cursor, dt, rng)
-                        swim(fish, dt, box, cursor, moving, rng)
+                    # Out of view, it waits; unless it is on its way out.
+                    if inside(fish.cell[:2], box, fish.length) or fish.leaving:
+                        if fish.shy and fish.length not in spots:
+                            spots[fish.length] = hideouts(rows, box, fish.length)
+                        lure(fish, spots.get(fish.length, ()), cursor, dt, rng)
+                        swim(fish, dt, box, *menace(fish, cursor, moving, threats), rng)
                     x, y, glyph = fish.cell
                     if fish.sprite is None:
                         fish.sprite = pilot.draw(
@@ -318,9 +446,20 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
         "--shy", type=int, metavar="N", help="fishes drawn to the text [default: half]"
     )
     out.add_argument("--seed", type=int, help="same seed, same school")
-    return _cli.run(
-        lambda pilot, args: app(pilot, args, seconds), _cli.parse(out, argv)
+    out.add_argument(
+        "-d", "--decorate", action="store_true", help="decorations on the text"
     )
+    out.add_argument(
+        "-b", "--bubbles", action="store_true", help="bubbles from the bottom"
+    )
+    out.add_argument(
+        "-r", "--random", action="store_true", help="random species, events"
+    )
+    out.add_argument("-a", "--all", action="store_true", help="-d -b -r")
+    args = _cli.parse(out, argv)
+    if args.all:
+        args.decorate = args.bubbles = args.random = True
+    return _cli.run(lambda pilot, args: app(pilot, args, seconds), args)
 
 
 if __name__ == "__main__":
