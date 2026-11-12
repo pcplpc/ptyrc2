@@ -121,6 +121,37 @@ impl Cell {
             && self.style.bg == Color::Default
             && !self.style.attrs.contains(Attrs::INVERSE)
     }
+
+    /// Foreground: the cell shows a glyph or a line. A blank is ink only
+    /// when underlined, struck or overlined; hidden text is not.
+    pub fn has_ink(&self) -> bool {
+        const LINES: u16 = Attrs::UNDERLINE | Attrs::STRIKE | Attrs::OVERLINE;
+        if self.is_blank() {
+            self.style.attrs.0 & LINES != 0
+        } else {
+            !self.style.attrs.contains(Attrs::HIDDEN)
+        }
+    }
+
+    /// Background: the colour that fills the cell. `bg`, or `fg` when
+    /// inverse.
+    pub fn backdrop(&self) -> Color {
+        if self.style.attrs.contains(Attrs::INVERSE) {
+            self.style.fg
+        } else {
+            self.style.bg
+        }
+    }
+
+    /// Same on screen. Two cells without ink look alike when their
+    /// backdrops are equal, whatever the rest of their style.
+    pub fn looks_like(&self, other: &Cell) -> bool {
+        match (self.has_ink(), other.has_ink()) {
+            (false, false) => self.backdrop() == other.backdrop(),
+            (true, true) => self == other,
+            _ => false,
+        }
+    }
 }
 
 /// Screen rectangle.
@@ -467,6 +498,35 @@ mod tests {
         assert_eq!(g.cell(4, 0).width, 1);
         // Wide on the last column is refused.
         assert!(!g.put(5, 0, Cell::wide("界", s)));
+    }
+
+    #[test]
+    fn ink_and_backdrop() {
+        let mut inv = Style::default();
+        inv.attrs.insert(Attrs::INVERSE);
+        inv.fg = Color::Indexed(4);
+        let mut grey = Style::default();
+        grey.bg = Color::Indexed(8);
+        let mut bold = grey;
+        bold.attrs.insert(Attrs::BOLD);
+        let mut ul = Style::default();
+        ul.attrs.insert(Attrs::UNDERLINE);
+        let mut hid = Style::default();
+        hid.attrs.insert(Attrs::HIDDEN);
+
+        assert!(!Cell::default().has_ink());
+        assert!(!Cell::blank(grey).has_ink());
+        assert!(Cell::blank(ul).has_ink());
+        assert!(Cell::narrow("a", grey).has_ink());
+        assert!(!Cell::narrow("a", hid).has_ink());
+        assert!(Cell::spacer(Style::default()).has_ink());
+        assert_eq!(Cell::blank(inv).backdrop(), Color::Indexed(4));
+        assert_eq!(Cell::blank(grey).backdrop(), Color::Indexed(8));
+        // A cleared cell redrawn with another pen is the same cell.
+        assert!(Cell::blank(grey).looks_like(&Cell::blank(bold)));
+        assert!(!Cell::blank(grey).looks_like(&Cell::default()));
+        assert!(!Cell::narrow("a", grey).looks_like(&Cell::blank(grey)));
+        assert!(Cell::narrow("a", grey).looks_like(&Cell::narrow("a", grey)));
     }
 
     #[test]
