@@ -253,14 +253,21 @@ origin. Each update compares the previous view content with the new one:
    cursor addressing, or by feeding a whole screen or more: not a feed.
    Two to four pages fed in one burst (a key held) are a feed: a page
    is the region less its bottom chrome, so their sum is not a jump's;
-   the rows that went through unseen stay unknown. Feeds that follow one
-   another within 10 ms and sum to the region or more, not to whole
-   pages, are one jump that came in pieces: the rows are looked up, else
-   an island.
+   the rows that went through unseen stay unknown. Feeds that are
+   pieces of one write and sum to the region or more, not to whole
+   pages, are one jump: the rows are looked up, else an island. A
+   piece is told by the last row once bottom chrome is known: a feed
+   that is whole ends on the prompt as it was before, a piece does not
+   and the next is waited for 100 ms (a page then part of the next, a
+   wheel flick: feeds, however close). Without bottom chrome, pieces
+   are feeds less than 10 ms apart.
    Under a feed, the last rows that did not travel are bottom chrome:
    those of the screen before when fed forward, of the screen after
-   when fed backward. A blank last row does not vote (a prompt erased
-   in a burst of its own, a page cut before its prompt).
+   when fed backward. A blank last row does not vote (a page cut before
+   its prompt); a last row erased alone in the observation before (a
+   prompt taken away when the key comes) votes as it was. On the
+   alternate screen the first such vote is believed: the prompt row is
+   chrome from the first page. Elsewhere two are needed.
 2. **Horizontal scroll**: same on columns when rows changed with `dy = 0`.
 3. **Splice**: the top aligns at one shift and the bottom at another. `k`
    lines were inserted or deleted at the seam; the buffer is spliced and
@@ -281,6 +288,16 @@ screen (`man`, `less -M`). It gives absolute rows and is bottom chrome.
 It is the weakest witness: after the gutter and the plugin. When it moves
 less than the rows did it counts file lines, not screen rows (wrapped
 lines): it is not read any more for that frame.
+
+Share: `(END)` at the end of the last row of the pane, or a percentage
+as its last word (`45%`, `--More--(20%)`), the cursor on that row. An
+estimate, never a hint. An island first shown with a share is put among
+the others in the order of their shares, when a slot (`ISLAND_GAP`) is
+free between them, else below as before; within its slot at the
+estimated row, when the length of the document is known: rows and a
+share seen together on the rows that start at 0, the largest share
+kept. Islands stay a slot apart whatever the estimate, and are merged
+exactly when walked into. Nothing is estimated under a hint.
 
 A hint that says further than a scroll moved, or the other way, makes the
 scroll a jump to the hinted row: a jump fed in two bursts looks like two
@@ -363,7 +380,9 @@ Further rules, from real apps:
   back when it is left.
 - A key given by a preset for the whole screen (a tmux window) prefixes
   the keys of its panes. Presets are looked for when two rows or more
-  changed, when the title or the layout changed, else once a second; a
+  changed, when one row changed that is not the row that had changed
+  alone the last time (a paint in pieces: the rows, then a ruler), when
+  the title or the layout changed, else once a second; a
   preset found is held 4 s and asked (chrome, hint, key) on every change.
   A preset that knows the whole screen may segment on any change.
 - A pane that leaves at a layout change and a new one that overlaps it,
@@ -691,10 +710,16 @@ pane: one preset may declare a pane a monitor and let another scroll.
 
 `segment` is asked of the whole screen, then of every rectangle the
 generic segmentation reaches on its way down (a tmux pane, the inside
-of a box, a panel), before it is cut further. Rules cut before bars:
-what lies between two rules is one app's, bars included. The panes a
-preset returns are final; their keys follow the key of the screen
-(`tmux:in:0/htop:processes`). Presets are looked for on a rectangle as
+of a box, a panel), before it is cut further. The whole screen is
+asked of the preset surest of it only (the first, when equal): an app
+at the top left of a tmux looks like the screen to its preset. A rule
+from top to bottom inside a rectangle cuts it before a preset is
+asked. Rules cut before bars:
+what lies between two rules is one app's, bars included. A pane a
+preset returns is asked once more of the other presets (an app in a
+pane of an app); the panes of the second are final: two presets deep.
+`PaneView::area` is then the pane of the first. Keys follow the key of
+the screen (`tmux:in:0/htop:processes`), not that of the pane between. Presets are looked for on a rectangle as
 on a pane (two rows changed, the title, else once a second); those
 found are asked at every segmentation.
 
