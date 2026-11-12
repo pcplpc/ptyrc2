@@ -1506,6 +1506,8 @@ struct Pager {
     rows: usize,
     /// Standout `line N` prompt, as `man` shows; else `:`.
     status: bool,
+    /// The prompt, when not `:`.
+    says: Option<&'static str>,
 }
 
 impl Pager {
@@ -1517,6 +1519,7 @@ impl Pager {
             top: 0,
             rows,
             status,
+            says: None,
         };
         let mut out = format!("\x1b[?1049h\x1b[{rows};1H\r");
         out += &p.lines(0, rows - 1);
@@ -1539,7 +1542,7 @@ impl Pager {
                 self.top + 1
             )
         } else {
-            ":\x1b[K".to_string()
+            format!("{}\x1b[K", self.says.unwrap_or(":"))
         }
     }
 
@@ -1781,7 +1784,16 @@ fn a_pager_jump_is_not_a_scroll() {
 fn a_pager_jump_fed_in_pieces_is_not_a_scroll() {
     // The feed of a whole screen cut in two or three bursts: each piece
     // is shorter than the screen, their sum is not.
-    for cuts in [vec![1], vec![7], vec![19], vec![5, 12]] {
+    // The pieces do not end on the prompt: they are told from feeds
+    // however far apart, within 100 ms.
+    for (cuts, gap) in [
+        (vec![1], 2),
+        (vec![7], 2),
+        (vec![19], 2),
+        (vec![5, 12], 2),
+        (vec![7], 40),
+        (vec![5, 12], 40),
+    ] {
         let mut p = Pager::open(doc(300), 20, false);
         let id = p.s.pane().id;
         p.down(19);
@@ -1800,7 +1812,7 @@ fn a_pager_jump_fed_in_pieces_is_not_a_scroll() {
                 out += &p.prompt();
             }
             from = *cut;
-            p.step_after(&out, if k == 0 { 300 } else { 2 });
+            p.step_after(&out, if k == 0 { 300 } else { gap });
         }
         assert_eq!(p.s.pane().id, id);
         assert!(
@@ -2840,4 +2852,99 @@ fn preset_sign_after_another_lone_row() {
     put(&mut g, 0, 19, "FAKE a.txt 0");
     s.feed(&g, 20);
     assert_eq!(s.pane().support.as_deref(), Some("fake"));
+}
+
+#[test]
+fn the_first_page_tells_the_prompt_row() {
+    // On the alternate screen one page is enough: the prompt is not
+    // remembered between the first page and the second.
+    let mut p = Pager::open(doc(300), 20, false);
+    let id = p.s.pane().id;
+    p.down(19);
+    p.s.idle(300);
+    let info = p.s.pane();
+    assert_eq!(info.rect, [0, 0, COLS, 19]);
+    assert_eq!(info.extent, [0, 37]);
+    assert_eq!(p.s.f.text(id, 0, 38), p.doc[..38].to_vec());
+}
+
+#[test]
+fn feeds_that_end_on_the_prompt_are_not_pieces() {
+    // A page and part of the next, 2 ms apart.
+    let mut p = Pager::open(doc(300), 20, false);
+    let id = p.s.pane().id;
+    p.down(19);
+    p.down(19);
+    let out = format!("\r\x1b[K{}{}", p.lines(p.top + 19, 5), p.prompt());
+    p.step_after(&out, 2);
+    p.top += 5;
+    assert_eq!(p.origin(), 43);
+    // A wheel flick: three lines at a time, a millisecond apart, two
+    // screens in all.
+    for n in 1..=14 {
+        let out = format!("\r\x1b[K{}{}", p.lines(p.top + 19, 3), p.prompt());
+        p.step_after(&out, 1);
+        p.top += 3;
+        assert_eq!(p.origin(), 43 + 3 * n);
+    }
+    p.s.idle(300);
+    let info = p.s.pane();
+    assert_eq!(info.extent, [0, 103], "no island: {info:?}");
+    // Rows that went through in less than 10 ms are not remembered.
+    assert_eq!(p.s.f.text(id, 0, 38), p.doc[..38].to_vec());
+    assert_eq!(p.s.f.text(id, 85, 104), p.doc[85..104].to_vec());
+}
+
+#[test]
+fn a_share_on_the_prompt_orders_the_islands() {
+    let slot = |oy: i64| oy / ext::ISLAND_GAP;
+    let mut p = Pager::open(doc(300), 20, false);
+    let id = p.s.pane().id;
+    p.says = Some("12%");
+    p.down(19);
+    // The end, then the top again, then the middle: the middle island
+    // is put between the two, each near its rows (38 rows are 12 %).
+    p.says = Some("(END)");
+    p.skip_to(281);
+    let end = p.origin();
+    assert_eq!((slot(end), end % ext::ISLAND_GAP), (2, 316 - 19));
+    p.says = None;
+    p.jump_top();
+    assert_eq!(p.origin(), 0);
+    p.says = Some("50%");
+    p.skip_to(140);
+    let mid = p.origin();
+    assert_eq!((slot(mid), mid % ext::ISLAND_GAP), (1, 158 - 19));
+    // No share: below everything, as before.
+    p.says = None;
+    p.jump_top();
+    p.skip_to(200);
+    assert_eq!(slot(p.origin()), 4);
+    // Walked into, the middle island is merged exactly.
+    p.jump_top();
+    p.down(19);
+    p.says = Some("50%");
+    p.skip_to(140);
+    assert_eq!(p.origin(), mid);
+    p.says = None;
+    while p.top > 19 {
+        let n = (p.top - 19).min(19);
+        p.up(n);
+    }
+    assert_eq!(p.origin(), 19);
+    p.s.idle(300);
+    assert_eq!(p.s.f.text(id, 0, 159), p.doc[..159].to_vec());
+}
+
+#[test]
+fn shares_read_on_a_prompt() {
+    assert_eq!(progress_of("(END)"), Some(1.0));
+    assert_eq!(progress_of("long.txt (END)  "), Some(1.0));
+    assert_eq!(progress_of("--More--(20%)"), Some(0.2));
+    assert_eq!(progress_of("long.txt lines 1-28/300 9%"), Some(0.09));
+    assert_eq!(progress_of("50%"), Some(0.5));
+    assert_eq!(progress_of(":"), None);
+    assert_eq!(progress_of("load 250%"), None);
+    assert_eq!(progress_of("100% done"), None);
+    assert_eq!(progress_of("%"), None);
 }

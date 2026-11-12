@@ -22,6 +22,8 @@ struct Island {
     hi: i64,
     /// When the view was last on it, on the frame's own counter.
     used: u64,
+    /// Where it is in the document, as last estimated (`Obs::progress`).
+    share: Option<f32>,
 }
 
 #[derive(Clone, Debug)]
@@ -107,6 +109,11 @@ pub(crate) struct Obs<'a> {
     pub side_pending: bool,
     /// Top and bottom chrome imposed by a plugin.
     pub fixed_tb: Option<(u16, u16)>,
+    /// The pane is on the alternate screen.
+    pub alt: bool,
+    /// Share of the document above the last row shown, `0..=1`, read on
+    /// a prompt: an estimate.
+    pub progress: Option<f32>,
     pub now: Duration,
 }
 
@@ -133,6 +140,9 @@ pub(crate) struct Ext {
     /// A soft hint contradicted the rows seen scrolling.
     pub hint_refused: bool,
     bottom_floor: u16,
+    /// Rows of the document, estimated where rows and a share were both
+    /// known, and that share: the largest tells best.
+    total: Option<(f32, i64)>,
 }
 
 fn need(nb: usize, percent: usize, floor: usize) -> usize {
@@ -424,6 +434,7 @@ impl Ext {
             lo: self.oy,
             hi: self.oy,
             used: 0,
+            share: None,
         });
         self.enter(self.islands.len() - 1);
         self.absolute = false;
@@ -458,6 +469,7 @@ impl Ext {
                     lo,
                     hi: lo,
                     used: 0,
+                    share: None,
                 });
                 self.enter(self.islands.len() - 1);
                 self.collect();
@@ -493,6 +505,68 @@ impl Ext {
         self.rows = (0..h).map(|i| self.fresh(o, i)).collect();
         self.mark_known(a, b);
         true
+    }
+
+    /// A share of the document read on screen. An island that holds
+    /// nothing yet is put by it when first shown (`place`): among the others in the order of their
+    /// shares when a slot is free between them, and at the estimated
+    /// row within its slot. An estimate: islands stay `ISLAND_GAP`
+    /// apart and are merged exactly when walked into. On the rows that
+    /// start at 0 it tells the length of the document.
+    fn estimate(&mut self, o: &Obs, place: bool) {
+        let Some(share) = o.progress else { return };
+        if o.hint_oy.is_some() || self.absolute {
+            return;
+        }
+        let h = o.hashes.len();
+        let (_, b) = self.band(h);
+        let slot = |y: i64| y.div_euclid(ISLAND_GAP);
+        let Island { lo, hi, .. } = self.islands[self.cur];
+        let empty = self.islands.len() > 1 && self.lines.range(lo..=hi).next().is_none();
+        if place && empty {
+            let others = || {
+                self.islands
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| *i != self.cur)
+                    .map(|(_, i)| i)
+            };
+            let before = others()
+                .filter(|i| i.share.is_some_and(|s| s <= share))
+                .map(|i| slot(i.hi))
+                .max();
+            let after = others()
+                .filter(|i| i.share.is_some_and(|s| s > share))
+                .map(|i| slot(i.lo))
+                .min();
+            let free = |s: i64| !others().any(|i| slot(i.lo) <= s && s <= slot(i.hi));
+            let mine = slot(self.oy);
+            let fits = |s: i64| before.is_none_or(|x| s > x) && after.is_none_or(|x| s < x);
+            let to = if fits(mine) {
+                Some(mine)
+            } else {
+                let from = before.map_or(0, |x| x + 1);
+                let end = after.unwrap_or(from + 1);
+                (from..end).find(|s| free(*s))
+            };
+            if let Some(to) = to {
+                let row = self
+                    .total
+                    .map_or(0, |(_, t)| (share as f64 * t as f64) as i64 - b as i64)
+                    .clamp(0, ISLAND_GAP / 2);
+                self.oy = to * ISLAND_GAP + row;
+                self.islands[self.cur].lo = self.oy;
+                self.islands[self.cur].hi = self.oy;
+            }
+        } else if slot(lo) == 0
+            && lo >= 0
+            && share >= 0.05
+            && self.total.is_none_or(|(s, _)| share >= s)
+        {
+            let seen = self.oy + b as i64;
+            self.total = Some((share, (seen as f64 / share as f64) as i64));
+        }
+        self.islands[self.cur].share = Some(share);
     }
 
     /// Attach to a screen again: find the origin in the buffer.
@@ -534,10 +608,12 @@ impl Ext {
             if self.rejoin(o) {
                 return Outcome::Jump;
             }
+            self.estimate(o, true);
             self.hint(o, true, 0);
             return Outcome::Edit;
         }
         if self.rows.iter().zip(o.hashes).all(|(r, h)| r.hash == *h) {
+            self.estimate(o, false);
             self.hint(o, false, 0);
             return Outcome::Same;
         }
@@ -545,6 +621,7 @@ impl Ext {
         if matches!(out, Outcome::Lost | Outcome::Other) {
             return out;
         }
+        self.estimate(o, false);
         let dy = match out {
             Outcome::Scroll { dy, .. } => dy,
             _ => 0,
@@ -878,6 +955,11 @@ impl Ext {
                 to >= self.top as i64 && was[*i] != BLANK && is[to as usize] != was[*i]
             })
             .count();
+        // On the alternate screen the first page tells: nothing is
+        // printed there that a prompt could be taken for.
+        if o.alt && self.chrome_obs.is_empty() && bottom > 0 {
+            self.chrome_vote(self.top, bottom as u16);
+        }
         self.chrome_vote(self.top, bottom as u16);
     }
 
@@ -953,6 +1035,7 @@ impl Ext {
                 lo: olo.min(lo + delta),
                 hi: ohi.max(hi + delta),
                 used: self.uses,
+                share: self.islands[self.cur].share,
             };
             self.islands.remove(self.cur);
             self.cur = if other > self.cur { other - 1 } else { other };
@@ -964,6 +1047,7 @@ impl Ext {
                 lo: lo.min(olo + delta),
                 hi: hi.max(ohi + delta),
                 used: self.uses,
+                share: self.islands[self.cur].share,
             };
             self.islands.remove(other);
             if other < self.cur {

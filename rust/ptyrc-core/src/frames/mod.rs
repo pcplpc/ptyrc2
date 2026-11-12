@@ -205,9 +205,10 @@ struct Pane {
     /// Pane rows `[a, b)` under a smaller pane of the last segmentation
     /// (a palette, a modal): not read while they are.
     covered: Vec<(u16, u16)>,
-    /// Feeds that follow one another closely (`FEED_GAP`): when the last
-    /// came, and their sum.
-    fed: Option<(Duration, i64)>,
+    /// Feeds that are pieces of one write: when the last came, their
+    /// sum, and the last row before the first (`BLANK`: no bottom chrome
+    /// known, time alone tells).
+    fed: Option<(Duration, i64, u64)>,
     /// The pane was repainted in place around a cursor shown on this
     /// cell, at this time, this long after the repaint before; nothing
     /// moved since.
@@ -341,6 +342,10 @@ const CHURN: Duration = Duration::from_secs(3);
 /// title or of the layout asks at once.
 const DETECT_EVERY: Duration = Duration::from_secs(1);
 
+/// Pieces of one write, the first of which did not end on the prompt,
+/// come within this long of one another.
+const PIECES: Duration = Duration::from_millis(100);
+
 /// A repaint that follows a clear may come in several bursts, this long.
 const REPAINT: Duration = Duration::from_millis(100);
 
@@ -362,6 +367,22 @@ fn is_wide(ch: char) -> bool {
 }
 
 /// `line N` or `lines N-M` in a status row: `N - 1`.
+/// `(END)` at the end of a prompt, or a percentage as its last word
+/// (`45%`, `(20%)`), as a share.
+fn progress_of(text: &str) -> Option<f32> {
+    let t = text.trim_end();
+    if t.ends_with("(END)") {
+        return Some(1.0);
+    }
+    let word = t.rsplit(|c: char| c.is_whitespace() || c == '(').next()?;
+    let digits = word.strip_suffix("%)").or_else(|| word.strip_suffix('%'))?;
+    if digits.is_empty() || digits.len() > 3 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let n: u32 = digits.parse().ok()?;
+    (n <= 100).then_some(n as f32 / 100.0)
+}
+
 fn status_line(text: &str) -> Option<i64> {
     let lower = text.to_ascii_lowercase();
     let bytes = lower.as_bytes();
@@ -1513,6 +1534,18 @@ impl Frames {
         Some((end + 1, n0 - 1 - first as i64))
     }
 
+    /// Share of the document above the last row shown, as a prompt
+    /// tells it: `45%`, `--More--(20%)`, `(END)`. The row is the last of
+    /// the pane and holds the cursor.
+    fn progress(&self, input: &ScreenInput, rect: Rect) -> Option<f32> {
+        let (col, row) = (input.cursor.col, input.cursor.row);
+        if rect.h < 2 || row + 1 != rect.bottom() || col < rect.x || col >= rect.right() {
+            return None;
+        }
+        let line = self.screen.lines[row as usize].slice(rect.x, rect.right());
+        progress_of(&line.text)
+    }
+
     /// Position shown by a status row, as pagers print it: `line 30`,
     /// `lines 30-58/300`. The row is the last of the pane or the one
     /// below it, holds the cursor, starts in standout, on the alternate
@@ -1797,16 +1830,35 @@ impl Frames {
         let pages = seed.abs() >= room && paged(seed);
         // A feed of a screen or more that came in pieces is a jump as
         // well: no piece tells, their sum does.
+        // A piece ends where the write was cut. A feed that is whole
+        // ends on the prompt as it was: the bottom chrome, once learned,
+        // tells a piece from a feed, and time does not (a page and part
+        // of the next, a wheel flick). Without it, pieces are feeds less
+        // than `FEED_GAP` apart.
         let mut overfed = false;
         if seed != 0 && travel == seed.abs() {
-            let sum = match p.fed {
-                Some((t, sum)) if now <= t + ext::FEED_GAP && sum.signum() == seed.signum() => {
-                    sum + seed
+            let last = p.hashes.last().copied().unwrap_or(screen::BLANK);
+            let before = match p.ext.rows.last() {
+                Some(r) if p.ext.rows.len() == p.hashes.len() && p.ext.bottom > 0 => r.hash,
+                _ => screen::BLANK,
+            };
+            let (sum, prompt) = match p.fed {
+                Some((t, sum, prompt))
+                    if sum.signum() == seed.signum()
+                        && now
+                            <= t + if prompt == screen::BLANK {
+                                ext::FEED_GAP
+                            } else {
+                                PIECES
+                            } =>
+                {
+                    (sum + seed, prompt)
                 }
-                _ => seed,
+                _ => (seed, before),
             };
             overfed = sum != seed && sum.abs() >= room && !paged(sum);
-            p.fed = (!overfed).then_some((now, sum));
+            let whole = prompt != screen::BLANK && last == prompt;
+            p.fed = (!overfed && !whole).then_some((now, sum, prompt));
         } else if dirty {
             p.fed = None;
         }
@@ -1830,6 +1882,8 @@ impl Frames {
             bottom_floor: (hint_soft && self.cursor.row + 1 == rect.bottom()) as u16,
             side_pending: p.gutter_cand.1 > 0,
             fixed_tb: p.fixed_tb,
+            alt: p.alt,
+            progress: input.and_then(|inp| self.progress(inp, rect)),
             now,
         };
         if p.reattach {
