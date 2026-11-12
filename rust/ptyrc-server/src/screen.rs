@@ -466,6 +466,28 @@ impl ScreenEngine {
     }
 }
 
+/// Rows at the top of the screen that a burst sends to the host
+/// scrollback, when all it moves is that: nothing else scrolled, was
+/// inserted, deleted or cleared. `None`: any row may leave.
+fn leaving(events: &[VtEvent], base: &Grid, host: &Grid) -> Option<u16> {
+    if (base.cols(), base.rows()) != (host.cols(), host.rows()) {
+        return None;
+    }
+    let mut rows = 0u16;
+    for event in events {
+        match event {
+            VtEvent::Scroll {
+                dy,
+                scrollback: true,
+                ..
+            } if *dy < 0 => rows = rows.saturating_add(dy.unsigned_abs()),
+            VtEvent::Title | VtEvent::Bell => {}
+            _ => return None,
+        }
+    }
+    (rows < base.rows()).then_some(rows)
+}
+
 impl Engine for ScreenEngine {
     fn on_start(&mut self, ctx: &mut Ctx) {
         let (cols, rows) = (ctx.info().cols, ctx.info().rows);
@@ -506,11 +528,24 @@ impl Engine for ScreenEngine {
                 self.inject(BSU, out);
             }
             if self.painted && to_scrollback && can_inject {
-                // Sprites never enter the host scrollback.
+                // Sprites never enter the host scrollback: the rows that
+                // leave are unpainted. The others scroll with their
+                // sprites; what is then misplaced is repaired after.
                 let before = out.len();
-                repair(&mut self.host, &self.base, out);
+                match leaving(&events, &self.base, self.host.grid()) {
+                    Some(rows) => {
+                        let mut kept = self.host.grid().clone();
+                        for row in 0..rows {
+                            kept.row_mut(row).clone_from_slice(self.base.row(row));
+                        }
+                        repair(&mut self.host, &kept, out);
+                    }
+                    None => {
+                        repair(&mut self.host, &self.base, out);
+                        self.painted = false;
+                    }
+                }
                 self.injected += (out.len() - before) as u64;
-                self.painted = false;
             }
             // An app that ends its own synchronized update with the burst:
             // the repair goes before that end, inside the app's update.

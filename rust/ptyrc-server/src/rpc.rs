@@ -437,7 +437,31 @@ fn scene_err(e: ptyrc_core::scene::SceneError) -> RpcError {
     RpcError::new(code, e.to_string())
 }
 
-fn draw_put(engine: &mut ScreenEngine, conn: ConnId, params: Value, now: Duration) -> Res {
+/// `layer.define {name, z}`: a layer name for every client.
+fn layer_define(engine: &mut ScreenEngine, params: Value) -> Res {
+    let name = params.get("name").and_then(Value::as_str);
+    let z = params.get("z").and_then(Value::as_i64);
+    let (Some(name), Some(z)) = (name, z.and_then(|z| i32::try_from(z).ok())) else {
+        return Err(RpcError::bad_params(
+            "name: a string, z: an integer, required",
+        ));
+    };
+    engine.scene.define_layer(name, z).map_err(scene_err)?;
+    layer_list(engine)
+}
+
+fn layer_list(engine: &ScreenEngine) -> Res {
+    let layers: Vec<Value> = engine
+        .scene
+        .layers()
+        .into_iter()
+        .map(|(name, z)| json!({"name": name, "z": z}))
+        .collect();
+    Ok(json!({"layers": layers}))
+}
+
+fn draw_put(engine: &mut ScreenEngine, conn: ConnId, mut params: Value, now: Duration) -> Res {
+    engine.scene.name_layer(&mut params);
     let spec: SpriteSpec = parse(params)?;
     check_frame(engine, &spec.frame)?;
     let id = engine.scene.add(conn.0, spec, now).map_err(scene_err)?;
@@ -450,6 +474,7 @@ fn draw_update(engine: &mut ScreenEngine, mut params: Value, now: Duration) -> R
         .and_then(|o| o.remove("id"))
         .and_then(|v| v.as_u64())
         .ok_or_else(|| RpcError::bad_params("id: required"))?;
+    engine.scene.name_layer(&mut params);
     let patch: SpritePatch = parse(params)?;
     if let Some(sel) = &patch.frame {
         check_frame(engine, sel)?;
@@ -716,6 +741,8 @@ pub(crate) fn handle(
         })),
         "draw.ext" => draw_ext(engine, conn, params, now),
         "draw.exts" => draw_exts(engine),
+        "layer.define" => layer_define(engine, params),
+        "layer.list" => layer_list(engine),
         "debug.overlay" => set_overlay(engine, params, now),
         "debug.dump" => debug_dump(engine),
         _ => return Reply::Err(crate::hints::unknown_method(method)),

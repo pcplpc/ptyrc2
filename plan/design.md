@@ -60,6 +60,14 @@ foreground and background (OSC 10, OSC 11), unless given (`--host-fg`,
 1 s is taken out of the keyboard stream; later replies are the app's
 and are read on the way. No answer: `#e5e5e5` on `#000000`.
 
+At run time: `session.colors {fg, bg, ask}`, all optional, answers the
+colours and where each comes from (`default`, `option`, `host`,
+`client`), and `asked`. `fg`, `bg`: a colour (`#rrggbb`, a name,
+`0..255`) to set. `ask`: the host is asked again for those not given;
+its reply comes later. Any change is an event of topic `colors` (the
+same object) and one repaint: every `alpha` mix is computed again.
+`ptyrc call session.colors '{"bg": "#fdf6e3"}'`.
+
 The driver holds two `Vt`:
 
 - `app`: fed with app bytes only. What the app means to show.
@@ -74,8 +82,11 @@ Per burst:
 
 1. `app.feed(burst)`; take its events.
 2. If the burst scrolled lines of the main screen into the host scrollback
-   and sprites are painted, first emit `repair(host, base)`, `base` being
-   the app grid before the burst: sprites never enter the scrollback.
+   and sprites are painted, first unpaint the rows that leave (`base`,
+   the app grid before the burst, in those rows): sprites never enter
+   the scrollback. The other rows scroll with their sprites and are
+   repaired after. A burst that also scrolls a region, inserts, deletes
+   or clears: `repair(host, base)`, everything is unpainted.
 3. Emit the burst; `host.feed(burst)`.
 4. `frames.update(...)`, `scene.tick(...)`,
    `desired = scene.compose(app.grid(), frames)`.
@@ -530,6 +541,9 @@ Sprite, as JSON (the wire form; serde on the core types):
   `inverse`, `strike`, `blink`.
 - `layer`: an integer other than 0, or `"back"` (-1), `"front"` (1). See
   Layers. Absent: `back`; `front` for a tint.
+- `panel`: a colour. The sprite is on the app's panel of that backdrop:
+  drawn only in the cells whose backdrop is that colour, in any layer.
+  See Layers.
 - `blend`: `normal`; `tint` (keeps the glyph below, applies the style).
   `over` and `behind`, names of the first draft, are read as `normal`
   with the layer `front` or `back` when none is given.
@@ -561,6 +575,7 @@ pub trait Effect: Send {
     fn looks(&self) -> Looks { Looks::No }        // No, Cells, Heat
     fn look(&mut self, under: &Under) {}
     fn tune(&mut self, params: &Value) -> Result<(), String>;
+    fn shift(&mut self, from: i64, to: i64, dy: i64) {}
     fn period(&self) -> Duration;                 // 50 ms
 }
 impl Under<'_> {
@@ -569,6 +584,7 @@ impl Under<'_> {
     pub fn cell(&self, x, y) -> Option<&Cell>;
     pub fn ink(&self, x, y) -> bool;  pub fn inked(&self) -> Vec<bool>;
     pub fn heat(&self, x, y) -> Option<Warmth>;   // class, still, activity
+    pub fn row(&self, y: i64) -> Option<Vec<bool>>;
 }
 ```
 
@@ -587,6 +603,13 @@ impl Under<'_> {
   on frame rows moves with the text in the burst that scrolls.
 - `Looks::Heat`: also the heat of those cells (`Surfaces::heat`), read
   again every 200 ms at most.
+- `row(y)`: ink of the canvas columns on a row above (negative) or
+  below the canvas and out of the view, as the frame remembers it
+  (`Surfaces::ink_row`: a remembered character other than a space);
+  `None` in the view or when not remembered.
+- `shift`: rows `from..=to` of the frame moved by `dy` (a splice, an
+  island merge; `Scene::shift`). The effect moves what it keeps on
+  them, and is shown and rendered at the next tick, off its period.
 - `tune`: new parameters for a running effect; its state is kept. An
   effect that does not implement it refuses.
 - `Canvas::put_faded(x, y, text, style, opacity)`: a glyph with its
@@ -608,6 +631,14 @@ drawn. Names: `wallpaper` (-100), `back` (-1), `front` (1), `hud` (100);
 an integer between two names is a layer between them; `app` and 0 are
 refused.
 
+`layer.define {name, z}` declares a name for the session, every client
+included, until the driver exits; `layer.list` and both answers:
+`{"layers": [{name, z}]}`, back to front. Refused: a fixed name, `app`,
+an integer, `z` 0, more than 64 names. Declared again a name moves; the
+sprites already there keep their place. A name is replaced by its `z`
+when a sprite is put or updated; an unknown name is `bad layer`, with
+the names as a hint.
+
 Background and foreground are those of `ptyrc-vt`: `Cell::has_ink()`,
 `Cell::backdrop()`.
 
@@ -626,16 +657,23 @@ layers behind it), then seen through the app, cell by cell:
 - Another backdrop is the app's and wins: a panel of another colour, a
   status bar, inverse video. A back glyph is still seen through its
   cells without ink, on the app's colour; a back `bg` is not seen there.
+- On a panel (`panel`: the backdrop named): the sprite is clipped to
+  the cells of that backdrop, inverse ones included. Its opaque `bg`
+  replaces the panel's colour in the cells that are not inverse; a
+  glaze is mixed with it. Without `panel` an opaque back colour never
+  shows under a panel.
 - A `tint` behind the app is a colour of background only.
 - With `alpha`, a back `bg` is a glaze: mixed with the opaque back
   colour or the host's default where the app left the background, with
   the app's backdrop where it chose one (a panel); inverse cells stay
   the app's. A back glyph's `fg` is mixed with the background it stands
-  on.
+  on; on an inverse cell that is the app's foreground, and the cell
+  stays inverse.
 
 With back layers alone, every app cell with ink keeps its glyph, its
-foreground and its attributes, and every backdrop the app chose is kept
-(tested as a property).
+foreground and its attributes, and every backdrop the app chose is
+kept, but the one a sprite names as its `panel`; inverse cells are
+kept in any case (tested as a property).
 
 Front layers go over whatever is below, app text included: a space is
 transparent unless `opaque`; a glyph without `bg` keeps the colour
@@ -840,8 +878,9 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 
 | method | params | result |
 |---|---|---|
-| `session.info` | | hello data, `alt_screen`, `title`, `driver_pid`, `headless`, `grabbed`, `tape` (a replay), `"host_colors":{"fg","bg","from":{"fg","bg"}}` (`from`: `host`, `option`, `default`) |
+| `session.info` | | hello data, `alt_screen`, `title`, `driver_pid`, `headless`, `grabbed`, `tape` (a replay), `"host_colors":{"fg","bg","from":{"fg","bg"}}` (`from`: `host`, `option`, `client`, `default`) |
 | `session.resize` | `size`: `[c, r]` | `{}`; headless only |
+| `session.colors` | `fg`, `bg`, `ask` | `host_colors`, and `asked`; see Rendering |
 | `screen.text` | `frame`, `rect`, `ansi`, `sprites` | `{"lines":[...],"size":[c,r],"rect":[x,y,w,h]}` |
 | `screen.cells` | `frame`, `rect`, `sprites` | `{"rows":[[run,...],...]}` |
 | `screen.find` | `pattern`, `regex`, `ignore_case`, `frame`, `known` | `{"matches":[{"frame","x","y","len","text","screen":[c,r]\|null}]}` |
@@ -869,8 +908,10 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `draw.list` | | `{"sprites":[{..., "style":{...}, "screen":[x,y]\|null, "visible":bool, "covered":0..1}]}`; `style`: that of the content, of the first frame, of the first run; absent when none or an effect |
 | `draw.ext` | `name`, `function`, `params`, sprite fields; with `id`: redraw that sprite in place (content or effect replaced, the rest kept unless given) | `{"id":n}` |
 | `draw.exts` | | `{"exts":[{"name","functions":[...]}],"effects":[...]}` |
+| `layer.define` | `name`, `z` | `{"layers":[{"name","z"}]}`; see Layers |
+| `layer.list` | | the same |
 | `batch` | `calls`: `[{"method","params"}]` | `{"results":[{"result"} or {"error"},...]}`, applied in one repaint |
-| `subscribe` | `topics`: `screen`, `cursor`, `frames`, `text`, `idle`, `draw`, `input`, `size`, `exit`; `snapshot` | `{}`; with `snapshot`, then the state now as events, to this client: `idle` per frame on screen, `cursor`, `frames`, `size` |
+| `subscribe` | `topics`: `screen`, `cursor`, `frames`, `text`, `idle`, `draw`, `input`, `size`, `colors`, `exit`; `snapshot` | `{}`; with `snapshot`, then the state now as events, to this client: `idle` per frame on screen, `cursor`, `frames`, `size` |
 | `debug.overlay` | `what`: `frames`, `heat`, `off` | `{}` |
 | `debug.dump` | | app grid, host grid, sprites, frames |
 
