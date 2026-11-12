@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Plugin traits. Implementations live in `plugins/`.
 
+use crate::scene::{EffectFactory, SpriteSpec};
 use ptyrc_vt::{Grid, Rect};
 
 /// A pane as a plugin sees it: a rectangle of the screen.
@@ -78,5 +79,29 @@ pub trait TuiSupport: Send {
 
     fn tuning(&self) -> Tuning {
         Tuning::default()
+    }
+}
+
+/// A function of a draw extension, for `draw.exts`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct FnDoc {
+    pub name: &'static str,
+    /// Parameters, as a one-line JSON sketch.
+    pub params: &'static str,
+    pub doc: &'static str,
+}
+
+/// Extra draw functions: each turns its `params` into a sprite, which the
+/// caller may then place (frame, anchor, z...).
+pub trait DrawExt: Send {
+    fn name(&self) -> &'static str;
+
+    fn functions(&self) -> Vec<FnDoc>;
+
+    fn draw(&self, function: &str, params: &serde_json::Value) -> Result<SpriteSpec, String>;
+
+    /// Native effects, registered in the scene under these names.
+    fn effects(&self) -> Vec<(&'static str, EffectFactory)> {
+        vec![]
     }
 }
