@@ -58,7 +58,8 @@ The driver holds two `Vt`:
 
 - `app`: fed with app bytes only. What the app means to show.
 - `host`: fed with every byte written to the host, ours included. What the
-  host shows.
+  host shows. It is kept only while sprites are up: copied from `app` when
+  the first sprite appears.
 
 Invariant at every injection point: `host` cursor, pen and modes equal
 `app`'s; `host.grid()` equals the desired grid (app grid + sprites).
@@ -82,20 +83,26 @@ A timer tick (animation, pool promotion) runs steps 4 to 6 alone.
 `repair` paints only cells where `host.grid() != desired`, then restores
 the state it found: cursor position, pending wrap (by reprinting the last
 column cell), pen, hyperlink, charset, insert mode, origin mode. It does
-not use DECSC/DECRC (one slot, the app may own it). It wraps its output in
-synchronized update (`CSI ? 2026 h/l`) unless the app has one open. It
-feeds its own output to `host`.
+not use DECSC/DECRC (one slot, the app may own it). It feeds its own
+output to `host`.
+
+A burst and its repair are one synchronized update (`CSI ? 2026 h/l`): the
+engine opens it before the burst and closes it after the repair. When the
+app closes its own update with the burst, the repair goes before the
+app's closing sequence.
 
 Coalescing: after a read the driver keeps reading while the pty is
 readable, then polls up to `coalesce_ms` (default 1) for more, bounded by
-8 ms and 1 MiB. A whole app redraw and the sprite motion it implies go out
-in one write.
+8 ms and 1 MiB. A burst under 32 bytes is written at once (key echo).
+`--transparent` does not coalesce. A whole app redraw and the sprite
+motion it implies go out in one write.
 
-Resize: both `Vt` are resized without reflow, sprites are forgotten as
-painted (`host.grid := app.grid`), every frame returns to the pool.
+Resize: both `Vt` are cropped or padded alike, without reflow; the host is
+repaired from there; every frame returns to the pool. A main screen the
+host reflows is out of reach of both models until the app redraws.
 
-Exit: sprites are unpainted, the host termios restored, the exit status is
-the app's.
+Exit: CAN, sprites unpainted, any open update closed, the host termios
+restored; the exit status is the app's.
 
 The driver is plumbing: a level-triggered `poll(2)` loop over the pty, the
 host, the signals, the socket and one deadline. What is drawn and what the
@@ -423,6 +430,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `frame.list` | | `{"frames":[info,...],"layout":id}` |
 | `frame.text` | `frame`, `y0`, `y1` | `{"lines":[...],"y0":n}` remembered buffer |
 | `frame.heat` | `frame` | `{"rows":["0123...",...]}` |
+| `frame.get` | `frame` | `{"frame":info}` |
 | `frame.at` | `x`, `y`, or `name` | `{"frame":id,"pos":[x,y]}` |
 | `draw.put` | sprite | `{"id":n}` |
 | `draw.update` | `id`, patch | `{}` |
@@ -452,7 +460,7 @@ form exists.
 
 ```
 ptyrc run [--name N] [--headless --size CxR] [--host-log F]
-          [--transparent] [--coalesce-ms N] [--] CMD...
+          [--transparent] [--no-presets] [--coalesce-ms N] [--] CMD...
 ptyrc ls                          sessions
 ptyrc text [-f FRAME] [--ansi]    screen as plain text
 ptyrc find [-E] [-i] PATTERN      matches with coordinates
@@ -479,6 +487,11 @@ tests. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
 `flower`, `clock`, `fishes`, `snake`, `sand`.
 
 ## Tests
+
+- `scripts/e2e-render.sh`: the driver in a detached tmux; what tmux shows
+  is compared, text and styles, with the driver's model of the host.
+- `scripts/bench.sh`: throughput and key-echo latency, bare, transparent,
+  engine, engine with sprites.
 
 - Rust unit tests per crate, `cargo test --workspace`.
 - `ptyrc-vt`: the repair property above; recorded streams of real programs.
