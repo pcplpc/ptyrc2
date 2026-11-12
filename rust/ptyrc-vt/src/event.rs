@@ -18,7 +18,11 @@ pub struct Cursor {
 pub enum VtEvent {
     /// Content of `region` moved by `dy` rows (negative: up). `scrollback`:
     /// rows left the top of the main screen, into the host scrollback.
-    Scroll { region: Rect, dy: i16, scrollback: bool },
+    Scroll {
+        region: Rect,
+        dy: i16,
+        scrollback: bool,
+    },
     /// Entered (`true`) or left the alternate screen.
     AltScreen(bool),
     /// The whole screen was erased.

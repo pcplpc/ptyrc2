@@ -4,6 +4,12 @@
 
 pub mod event;
 pub mod grid;
+pub mod repair;
+mod sgr;
+pub mod vt;
 
 pub use event::{Cursor, VtEvent};
 pub use grid::{Attrs, Cell, Color, Grid, Rect, Style};
+pub use repair::{render_ansi, repair};
+pub use sgr::write_sgr;
+pub use vt::{Charset, Link, Modes, Vt};
