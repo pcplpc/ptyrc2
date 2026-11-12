@@ -8,6 +8,17 @@ use std::time::Duration;
 
 /// Distance between islands, in rows.
 pub(crate) const ISLAND_GAP: i64 = 100_000;
+/// Islands kept per frame; the least recently shown goes first.
+const MAX_ISLANDS: usize = 8;
+
+/// A run of frame rows whose place relative to the others is unknown.
+#[derive(Clone, Copy, Debug, Default)]
+struct Island {
+    lo: i64,
+    hi: i64,
+    /// When the view was last on it, on the frame's own counter.
+    used: u64,
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct Row {
@@ -66,11 +77,20 @@ pub(crate) struct Obs<'a> {
     /// Every one of those events pushed rows into the host scrollback: a
     /// real scroll of the main screen, not a repaint by line feeds.
     pub seed_real: bool,
+    /// The scroll is a tape feed: one direction, less than the height of
+    /// the region it moved, and no clear in the burst. Every line that
+    /// went through the region is on screen before or after.
+    pub seed_tape: bool,
     /// Cursor row inside the pane.
     pub cursor_row: Option<usize>,
     /// Absolute frame row of pane row 0, when the app shows it.
     pub hint_oy: Option<i64>,
     pub hint_ox: Option<i64>,
+    /// `hint_oy` was read by a generic rule, not given by a plugin: it
+    /// places a jump, and is refused when it contradicts a scroll.
+    pub hint_soft: bool,
+    /// Rows at the bottom known as chrome (the status row read).
+    pub bottom_floor: u16,
     /// The side chrome is about to change: a horizontal move of the
     /// content is not a scroll.
     pub side_pending: bool,
@@ -91,13 +111,17 @@ pub(crate) struct Ext {
     pub bottom: u16,
     chrome_obs: VecDeque<(u16, u16)>,
     pub absolute: bool,
-    islands: Vec<(i64, i64)>,
+    islands: Vec<Island>,
     cur: usize,
+    uses: u64,
     width: u16,
     /// Set when `top` or `bottom` changed in the last observation.
     pub rect_changed: bool,
     pub shifts: Vec<Shift>,
     pub max_lines: usize,
+    /// A soft hint contradicted the rows seen scrolling.
+    pub hint_refused: bool,
+    bottom_floor: u16,
 }
 
 fn need(nb: usize, percent: usize, floor: usize) -> usize {
@@ -107,7 +131,7 @@ fn need(nb: usize, percent: usize, floor: usize) -> usize {
 impl Ext {
     pub fn new(max_lines: usize) -> Ext {
         Ext {
-            islands: vec![(0, 0)],
+            islands: vec![Island::default()],
             max_lines,
             ..Ext::default()
         }
@@ -118,10 +142,24 @@ impl Ext {
         if t + b >= h { (0, h) } else { (t, h - b) }
     }
 
-    /// Known rows: `(min, max)`.
-    pub fn extent(&self) -> (i64, i64) {
+    fn view_rows(&self) -> (i64, i64) {
         let (a, b) = self.band(self.rows.len());
-        let (mut lo, mut hi) = (self.oy + a as i64, self.oy + (b as i64 - 1).max(a as i64));
+        (self.oy + a as i64, self.oy + (b as i64 - 1).max(a as i64))
+    }
+
+    /// Known rows of the island the view is on: `(min, max)`.
+    pub fn extent(&self) -> (i64, i64) {
+        let (lo, hi) = self.view_rows();
+        let isl = &self.islands[self.cur];
+        let known = self.lines.range(isl.lo..=isl.hi);
+        let first = known.clone().next().map_or(lo, |(k, _)| *k);
+        let last = known.last().map_or(hi, |(k, _)| *k);
+        (lo.min(first), hi.max(last))
+    }
+
+    /// Known rows of every island.
+    fn extent_all(&self) -> (i64, i64) {
+        let (mut lo, mut hi) = self.view_rows();
         if let Some((k, _)) = self.lines.first_key_value() {
             lo = lo.min(*k);
         }
@@ -129,6 +167,45 @@ impl Ext {
             hi = hi.max(*k);
         }
         (lo, hi)
+    }
+
+    /// Last row that belongs to the current island: the row before the
+    /// next island.
+    fn island_limit(&self) -> i64 {
+        let hi = self.islands[self.cur].hi;
+        self.islands
+            .iter()
+            .filter(|i| i.lo > hi)
+            .map(|i| i.lo - 1)
+            .min()
+            .unwrap_or(i64::MAX - ISLAND_GAP)
+    }
+
+    fn enter(&mut self, i: usize) {
+        self.cur = i;
+        self.uses += 1;
+        self.islands[i].used = self.uses;
+    }
+
+    /// Forget the islands shown least recently.
+    fn collect(&mut self) {
+        while self.islands.len() > MAX_ISLANDS {
+            let Some(old) = (0..self.islands.len())
+                .filter(|i| *i != self.cur)
+                .min_by_key(|i| self.islands[*i].used)
+            else {
+                return;
+            };
+            let Island { lo, hi, .. } = self.islands[old];
+            let keys: Vec<i64> = self.lines.range(lo..=hi).map(|(k, _)| *k).collect();
+            for k in keys {
+                self.remove_line(k);
+            }
+            self.islands.remove(old);
+            if old < self.cur {
+                self.cur -= 1;
+            }
+        }
     }
 
     fn fresh(&self, o: &Obs, i: usize) -> Row {
@@ -203,8 +280,8 @@ impl Ext {
         };
         self.insert_line(y, stored);
         let isl = &mut self.islands[self.cur];
-        isl.0 = isl.0.min(y);
-        isl.1 = isl.1.max(y);
+        isl.lo = isl.lo.min(y);
+        isl.hi = isl.hi.max(y);
         if self.lines.len() > self.max_lines {
             let mid = self.oy;
             let first = *self.lines.first_key_value().unwrap().0;
@@ -231,6 +308,11 @@ impl Ext {
         }
         for (k, s) in moved {
             self.insert_line(k, s);
+        }
+        let isl = &mut self.islands[self.cur];
+        if from <= isl.hi && to >= isl.lo {
+            isl.lo = isl.lo.min(from.max(isl.lo) + dy);
+            isl.hi = isl.hi.max(to.min(isl.hi) + dy);
         }
         self.shifts.push(Shift { from, to, dy });
     }
@@ -315,23 +397,81 @@ impl Ext {
 
     /// Start a new island far below what is known.
     pub fn island(&mut self) {
-        let (_, hi) = self.extent();
-        self.oy = (hi.max(0) / ISLAND_GAP + 1) * ISLAND_GAP;
-        self.islands.push((self.oy, self.oy));
-        self.cur = self.islands.len() - 1;
+        let (_, hi) = self.extent_all();
+        self.oy = (hi.max(0) / ISLAND_GAP + 2) * ISLAND_GAP;
+        self.islands.push(Island {
+            lo: self.oy,
+            hi: self.oy,
+            used: 0,
+        });
+        self.enter(self.islands.len() - 1);
         self.absolute = false;
         self.rows.clear();
+        self.collect();
     }
 
+    /// The view was placed at `oy`: on the island that holds these rows,
+    /// or the one they are nearest to (rows given by the app are of one
+    /// numbering, known or not in between).
     fn enter_island(&mut self, h: usize) {
         let (lo, hi) = (self.oy, self.oy + h as i64);
-        match self.islands.iter().position(|(a, b)| lo <= *b && hi >= *a) {
-            Some(i) => self.cur = i,
+        let reach = ISLAND_GAP / 2;
+        let found = self
+            .islands
+            .iter()
+            .position(|i| lo <= i.hi && hi >= i.lo)
+            .or_else(|| {
+                self.islands
+                    .iter()
+                    .position(|i| lo <= i.hi + reach && hi >= i.lo - reach)
+            });
+        match found {
+            Some(i) => {
+                let isl = &mut self.islands[i];
+                isl.lo = isl.lo.min(lo);
+                isl.hi = isl.hi.max(lo);
+                self.enter(i);
+            }
             None => {
-                self.islands.push((lo, lo));
-                self.cur = self.islands.len() - 1;
+                self.islands.push(Island {
+                    lo,
+                    hi: lo,
+                    used: 0,
+                });
+                self.enter(self.islands.len() - 1);
+                self.collect();
             }
         }
+    }
+
+    /// First rows on an island that holds nothing yet (the pane was wiped,
+    /// then repainted): when they are remembered elsewhere the view is
+    /// there, and the island is given back.
+    fn rejoin(&mut self, o: &Obs) -> bool {
+        let Island { lo, hi, .. } = self.islands[self.cur];
+        if self.islands.len() < 2 || self.lines.range(lo..=hi).any(|(_, s)| s.hash != BLANK) {
+            return false;
+        }
+        let h = o.hashes.len();
+        let (a, b) = self.band(h);
+        let nb = o.hashes[a..b].iter().filter(|x| **x != BLANK).count();
+        let Some((oy, votes)) = self.lookup(o.hashes, None) else {
+            return false;
+        };
+        if votes < need(nb, 50, 3) {
+            return false;
+        }
+        let keys: Vec<i64> = self.lines.range(lo..=hi).map(|(k, _)| *k).collect();
+        for k in keys {
+            self.remove_line(k);
+        }
+        self.islands.remove(self.cur);
+        self.cur = 0;
+        self.oy = oy;
+        self.enter_island(h);
+        self.rows = (0..h).map(|i| self.fresh(o, i)).collect();
+        self.mark_known(a, b);
+        true
     }
 
     /// Attach to a screen again: find the origin in the buffer.
@@ -359,22 +499,37 @@ impl Ext {
             self.bottom = b;
             self.rect_changed = true;
         }
+        self.bottom_floor = o.bottom_floor;
+        if o.fixed_tb.is_none() && self.bottom < o.bottom_floor {
+            self.bottom = o.bottom_floor;
+            self.rect_changed = true;
+        }
         if o.side_pending && self.rows.len() == h {
             // The content columns are in doubt: this screen is not read.
             return Outcome::Same;
         }
         if self.rows.len() != h {
             self.rows = (0..h).map(|i| self.fresh(o, i)).collect();
-            self.hint(o, true);
+            if self.rejoin(o) {
+                return Outcome::Jump;
+            }
+            self.hint(o, true, 0);
             return Outcome::Edit;
         }
         if self.rows.iter().zip(o.hashes).all(|(r, h)| r.hash == *h) {
-            self.hint(o, false);
+            self.hint(o, false, 0);
             return Outcome::Same;
         }
         let out = self.classify(o);
-        if !matches!(out, Outcome::Lost | Outcome::Other) {
-            self.hint(o, matches!(out, Outcome::Jump));
+        if matches!(out, Outcome::Lost | Outcome::Other) {
+            return out;
+        }
+        let dy = match out {
+            Outcome::Scroll { dy, .. } => dy,
+            _ => 0,
+        };
+        if self.hint(o, matches!(out, Outcome::Jump), dy) {
+            return Outcome::Jump;
         }
         out
     }
@@ -434,14 +589,22 @@ impl Ext {
             self.apply_scroll(o, &ph, dy);
             return Outcome::Scroll { dx: 0, dy };
         }
-        // The main screen scrolled into the scrollback and no row is where
-        // it was: a page or more of output at once. Nothing to align, but
-        // the distance is known. (On the alternate screen a pager repaints
-        // a jump with the same line feeds as a page down: not trusted.)
-        if o.seed != 0 && o.seed_real && nb >= 1 && c0 * 5 < nb * 2 {
+        // No row is where it was, nothing to align, but the distance is
+        // known: the main screen scrolled into the scrollback (a page or
+        // more of output at once), or the screen was fed as a tape (a
+        // pager's page down or up). A pager paints a jump by a clear, by
+        // cursor addressing, or by feeding a whole screen or more: none
+        // of these is a tape feed.
+        if o.seed != 0 && (o.seed_real || o.seed_tape) && nb >= 1 && c0 * 5 < nb * 2 {
+            if o.seed_tape {
+                self.learn_tape_chrome(o, &ph);
+            }
+            let (a, b) = self.band(h);
             self.flush(o.now);
             self.oy += o.seed;
             self.rows = (0..h).map(|i| self.fresh(o, i)).collect();
+            self.mark_known(a, b);
+            self.merge_islands(o);
             return Outcome::Scroll { dx: 0, dy: o.seed };
         }
 
@@ -495,6 +658,9 @@ impl Ext {
             self.rows = (0..h).map(|i| self.fresh(o, i)).collect();
             return Outcome::Jump;
         }
+        if prev_nb <= 1 && nb >= 2 && self.rejoin(o) {
+            return Outcome::Jump;
+        }
         // A jump replaces what was there. Lines added to a pane that had
         // little (a command and its output) are an edit.
         let replaced = (a..b)
@@ -530,16 +696,7 @@ impl Ext {
                 return Outcome::Lost;
             }
             self.rows = (0..h).map(|i| self.fresh(o, i)).collect();
-            // What matched is already remembered.
-            for i in a..b {
-                if self
-                    .lines
-                    .get(&(self.oy + i as i64))
-                    .is_some_and(|s| s.hash == nh[i])
-                {
-                    self.rows[i].committed = true;
-                }
-            }
+            self.mark_known(a, b);
             return Outcome::Jump;
         }
 
@@ -550,6 +707,21 @@ impl Ext {
             }
         }
         Outcome::Edit
+    }
+
+    /// View rows equal to what is remembered at their place need no
+    /// commit.
+    fn mark_known(&mut self, a: usize, b: usize) {
+        for i in a..b {
+            let row = &self.rows[i];
+            if self
+                .lines
+                .get(&(self.oy + i as i64))
+                .is_some_and(|s| s.hash == row.hash && s.x0 == self.ox)
+            {
+                self.rows[i].committed = true;
+            }
+        }
     }
 
     #[allow(clippy::needless_range_loop)]
@@ -609,7 +781,30 @@ impl Ext {
         let bottom = (tail_start.min(h)..h)
             .find(|i| nh[*i as usize] != BLANK)
             .map_or(0, |i| h - i);
-        self.chrome_obs.push_back((top as u16, bottom as u16));
+        self.chrome_vote(top as u16, bottom as u16);
+    }
+
+    /// Chrome under a tape feed: the last rows did not travel with the
+    /// rest, they were written over (a prompt).
+    fn learn_tape_chrome(&mut self, o: &Obs, ph: &[u64]) {
+        if o.fixed_tb.is_some() || o.seed <= 0 {
+            return;
+        }
+        let nh = o.hashes;
+        let bottom = (0..ph.len())
+            .rev()
+            .take_while(|i| {
+                let to = *i as i64 - o.seed;
+                to >= self.top as i64 && ph[*i] != BLANK && nh[to as usize] != ph[*i]
+            })
+            .count();
+        self.chrome_vote(self.top, bottom as u16);
+    }
+
+    /// One observation of the chrome rows; the least seen lately holds.
+    fn chrome_vote(&mut self, top: u16, bottom: u16) {
+        let h = self.rows.len() as i64;
+        self.chrome_obs.push_back((top, bottom));
         if self.chrome_obs.len() > 4 {
             self.chrome_obs.pop_front();
         }
@@ -618,6 +813,7 @@ impl Ext {
         }
         let t = self.chrome_obs.iter().map(|x| x.0).min().unwrap();
         let bt = self.chrome_obs.iter().map(|x| x.1).min().unwrap();
+        let bt = bt.max(self.bottom_floor);
         if (t, bt) == (self.top, self.bottom) || (t + bt) as i64 >= h {
             return;
         }
@@ -643,7 +839,7 @@ impl Ext {
         if self.islands.len() < 2 || o.hint_oy.is_some() {
             return;
         }
-        let (lo, hi) = self.islands[self.cur];
+        let Island { lo, hi, .. } = self.islands[self.cur];
         let (a, b) = self.band(o.hashes.len());
         let nb = o.hashes[a..b].iter().filter(|x| **x != BLANK).count();
         let Some((oy, votes)) = self.lookup(o.hashes, Some((lo, hi))) else {
@@ -656,25 +852,39 @@ impl Ext {
         let Some(other) = self
             .islands
             .iter()
-            .position(|(x, y)| vlo <= *y && vhi >= *x)
+            .position(|i| vlo <= i.hi && vhi >= i.lo)
             .filter(|i| *i != self.cur)
         else {
             return;
         };
-        let (olo, ohi) = self.islands[other];
+        let Island {
+            lo: olo, hi: ohi, ..
+        } = self.islands[other];
+        self.uses += 1;
         if olo < lo {
-            // The current island joins the other.
+            // The current island joins the other. The rows on screen go
+            // too, remembered or not: drawings are fixed on them.
             let delta = oy - self.oy;
+            let (view_lo, view_hi) = self.view_rows();
+            let (lo, hi) = (lo.min(view_lo), hi.max(view_hi));
             self.shift_rows(lo, hi, delta);
             self.oy = oy;
-            self.islands[other] = (olo.min(lo + delta), ohi.max(hi + delta));
+            self.islands[other] = Island {
+                lo: olo.min(lo + delta),
+                hi: ohi.max(hi + delta),
+                used: self.uses,
+            };
             self.islands.remove(self.cur);
             self.cur = if other > self.cur { other - 1 } else { other };
         } else {
             // The other island joins the current one.
             let delta = self.oy - oy;
             self.shift_rows(olo, ohi, delta);
-            self.islands[self.cur] = (lo.min(olo + delta), hi.max(ohi + delta));
+            self.islands[self.cur] = Island {
+                lo: lo.min(olo + delta),
+                hi: hi.max(ohi + delta),
+                used: self.uses,
+            };
             self.islands.remove(other);
             if other < self.cur {
                 self.cur -= 1;
@@ -751,12 +961,12 @@ impl Ext {
                     self.commit_row(j as usize);
                 }
             }
-            self.shift_rows(seam, i64::MAX - ISLAND_GAP, count);
+            self.shift_rows(seam, self.island_limit(), count);
         } else {
             for y in seam..seam + count {
                 self.remove_line(y);
             }
-            self.shift_rows(seam + count, i64::MAX - ISLAND_GAP, -count);
+            self.shift_rows(seam + count, self.island_limit(), -count);
         }
         let old = std::mem::take(&mut self.rows);
         let mut rows = Vec::with_capacity(h);
@@ -892,24 +1102,50 @@ impl Ext {
         None
     }
 
-    /// Reconcile with the absolute position the app shows.
-    fn hint(&mut self, o: &Obs, jumped: bool) {
+    /// Reconcile with the absolute position the app shows, after a
+    /// scroll by `dy`. True when the scroll was in fact a jump.
+    fn hint(&mut self, o: &Obs, jumped: bool, dy: i64) -> bool {
         if let Some(ox) = o.hint_ox {
             self.ox = ox;
         }
-        let Some(oy) = o.hint_oy else { return };
+        let Some(oy) = o.hint_oy else { return false };
         if oy == self.oy {
             self.absolute = true;
-            return;
+            return false;
         }
         let delta = oy - self.oy;
+        if self.absolute && !jumped {
+            let said = delta + dy;
+            let short =
+                dy == 0 || said == 0 || (said.signum() == dy.signum() && said.abs() < dy.abs());
+            if short && o.hint_soft {
+                // The number does not count screen rows (wrapped lines).
+                self.hint_refused = true;
+                return false;
+            }
+            if !short {
+                // Further than the rows moved, or the other way: a jump
+                // painted as a feed, in more than one burst.
+                let h = self.rows.len();
+                let (a, b) = self.band(h);
+                self.oy = oy;
+                self.enter_island(h);
+                for row in &mut self.rows {
+                    row.committed = false;
+                }
+                self.mark_known(a, b);
+                return true;
+            }
+        }
         if !self.absolute {
             // First sight of absolute rows: the whole buffer is renumbered.
-            let (lo, hi) = self.extent();
+            let (lo, hi) = self.extent_all();
+            let cur = self.islands[self.cur];
             self.shift_rows(lo, hi, delta);
-            for isl in &mut self.islands {
-                isl.0 += delta;
-                isl.1 += delta;
+            for (i, isl) in self.islands.iter_mut().enumerate() {
+                let was = if i == self.cur { cur } else { *isl };
+                isl.lo = was.lo + delta;
+                isl.hi = was.hi + delta;
             }
         } else if !jumped {
             // Lines were added or removed above the view.
@@ -920,10 +1156,11 @@ impl Ext {
                     self.remove_line(y);
                 }
             }
-            self.shift_rows(from, i64::MAX - ISLAND_GAP, delta);
+            self.shift_rows(from, self.island_limit(), delta);
         }
         self.oy = oy;
         self.absolute = true;
+        false
     }
 }
 

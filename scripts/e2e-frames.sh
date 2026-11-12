@@ -5,7 +5,8 @@
 # SKIP per check; exit status 1 if a check failed.
 #
 #   scripts/e2e-frames.sh [SCENARIO...]     default: all
-#   scenarios: vim vim-nu vim-nowrap vim-splits tmux shell pager agent monitor resize
+#   scenarios: vim vim-nu vim-nowrap vim-splits tmux shell pager pages
+#              pages-status man more agent monitor resize
 
 cd "$(dirname "$0")/.." || exit 2
 . scripts/lib-e2e.sh
@@ -256,6 +257,15 @@ s_shell() {
         e2e_send ':q'; e2e_keys enter; settle
         check "shell: vim gone, the shell frame is back where it was" "ids() == [$id] and pane()['origin'][1] in (225, 226)"
     fi
+    local i; for i in $(seq 12); do e2e_send "clear; echo run $i"; e2e_keys enter; quiet 0.25; done
+    check "shell: cleared twelve times: same frame, the extent is the screen's island" \
+        "ids() == [$id] and pane()['extent'][1] - pane()['extent'][0] < 30"
+    e2e_p call frame.text "{\"frame\":$id}" --json 2>/dev/null | python3 -c '
+import json, sys
+lines = json.load(sys.stdin)["lines"]
+sys.exit(0 if len(lines) <= 30 and any("run 12" in l for l in lines) else 1)' \
+        && echo "PASS  shell: frame.text without a range is the screen's island" \
+        || { echo "FAIL  shell: frame.text without a range is the screen's island"; FAILED=1; }
     e2e_stop
 }
 
@@ -272,6 +282,117 @@ s_pager() {
     local i; for i in $(seq 12); do e2e_keys d; sleep 0.1; done; quiet
     check "pager: half pages to line 181" "pane()['origin'][1] == 180"
     known "pager: the remembered buffer is the file" "$id" "$WORK/long.txt"
+    e2e_stop
+}
+
+# mark_at NAME ROW: the host shows the mark `<MK` on screen row ROW, or
+# nowhere when ROW is `-`.
+mark_at() {
+    local name=$1 row=$2 got
+    got=$(e2e_host | grep -n '<MK' | cut -d: -f1 | tr '\n' ' ')
+    if [ "$row" = - ] && [ -z "$got" ] || [ "$got" = "$((row + 1)) " ]; then
+        echo "PASS  $name"
+    else
+        echo "FAIL  $name    [host rows with the mark: ${got:-none}]"
+        FAILED=1
+    fi
+}
+
+# Whole pages have no row in common with the page before: the distance
+# comes from how the screen was fed.
+s_pages() {
+    have less || { echo "SKIP  pages"; return; }
+    e2e_start fr-pages 100x30 env LESS= less "$WORK/long.txt" || return
+    settle
+    local id; id=$(pane_id)
+    e2e_p draw text -f "$id" --at 90,40 --space frame '<MK' >/dev/null
+    local i; for i in 1 2 3 4; do e2e_keys space; quiet; done
+    check "pages: four pages down, one frame, no island" \
+        "ids() == [$id] and pane()['origin'][1] == 116 and pane()['extent'] == [0, 144]"
+    for i in 1 2 3; do e2e_keys b; quiet; done
+    check "pages: three pages up" "pane()['origin'][1] == 29"
+    mark_at "pages: a drawing fixed on frame row 40 is back on screen row 11" 11
+    e2e_keys b; quiet
+    check "pages: back at the top" "ids() == [$id] and pane()['origin'][1] == 0"
+    mark_at "pages: and off screen at the top" -
+    known "pages: the remembered buffer is the file" "$id" "$WORK/long.txt"
+    e2e_keys G; quiet
+    check "pages: G feeds a whole screen: a jump, to an island" "ids() == [$id] and pane()['origin'][1] >= 100000"
+    e2e_p draw clear >/dev/null
+    local island; island=$(e2e_p frames --json | python3 -c '
+import json, sys
+print([f["origin"][1] for f in json.load(sys.stdin)["frames"] if f["kind"] == "pane" and f["state"] != "inactive"][0])')
+    e2e_p draw text -f "$id" --at 90,$((island + 5)) --space frame '<MK' >/dev/null
+    quiet; mark_at "pages: a drawing fixed on the island, row 5" 5
+    for i in 1 2 3 4 5; do e2e_keys b; quiet; done
+    check "pages: walking up into known rows merges the island" \
+        "ids() == [$id] and pane()['origin'][1] == 126 and pane()['extent'] == [0, 299]"
+    e2e_keys G; quiet
+    check "pages: G again: found in the buffer" "pane()['origin'][1] == 271"
+    mark_at "pages: the drawing moved with the island: row 5" 5
+    e2e_keys g; quiet
+    check "pages: g clears and repaints: found again at the top" "ids() == [$id] and pane()['origin'][1] == 0"
+    e2e_stop
+}
+
+# A prompt that tells the line (`less -M`, `man`): rows are absolute.
+s_pages_status() {
+    have less || { echo "SKIP  pages-status"; return; }
+    e2e_start fr-pstat 100x30 env LESS= less -M "$WORK/long.txt" || return
+    settle
+    local id; id=$(pane_id)
+    e2e_p draw text -f "$id" --at 90,160 --space frame '<MK' >/dev/null
+    e2e_keys space; quiet
+    check "pages-status: a page down" "pane()['origin'][1] == 29"
+    e2e_keys G; quiet
+    check "pages-status: G lands on its line, no island" \
+        "ids() == [$id] and pane()['origin'][1] == 271 and pane()['extent'][1] == 299"
+    e2e_send 150g; quiet
+    check "pages-status: 150g" "pane()['origin'][1] == 149"
+    mark_at "pages-status: a drawing on a row never seen before shows there" 11
+    e2e_keys g; quiet
+    check "pages-status: g" "ids() == [$id] and pane()['origin'][1] == 0 and pane()['extent'] == [0, 299]"
+    known "pages-status: the remembered buffer is the file" "$id" "$WORK/long.txt"
+    e2e_stop
+}
+
+s_man() {
+    have man && have less || { echo "SKIP  man"; return; }
+    e2e_start fr-man 100x30 env MANPAGER=less LESS= MANWIDTH=90 man bash || return
+    settle 3
+    local id; id=$(pane_id)
+    e2e_keys space; quiet; e2e_keys space; quiet
+    check "man: two pages down" "ids() == [$id] and pane()['origin'][1] == 58"
+    e2e_keys G; settle 1.5
+    check "man: G lands on its line, no island" \
+        "ids() == [$id] and 1000 < pane()['origin'][1] < 100000 and pane()['extent'][0] == 0"
+    e2e_keys g; quiet 0.8
+    check "man: g" "ids() == [$id] and pane()['origin'][1] == 0"
+    e2e_send '/^SIGNALS'; e2e_keys enter; quiet 0.8
+    check "man: a search lands on its line" "ids() == [$id] and 500 < pane()['origin'][1] < 100000"
+    e2e_p find -f "$id" SIGNALS >/dev/null \
+        && echo "PASS  man: the hit is on screen" \
+        || { echo "FAIL  man: the hit is on screen"; FAILED=1; }
+    e2e_keys b; quiet
+    e2e_keys space; quiet
+    check "man: a page up and down around the hit" "ids() == [$id] and 500 < pane()['origin'][1] < 100000"
+    e2e_stop
+}
+
+# `more` runs on the main screen: pages scroll into the scrollback.
+s_more() {
+    have more || { echo "SKIP  more"; return; }
+    e2e_start fr-more 100x30 more "$WORK/long.txt" || return
+    settle
+    local id; id=$(pane_id)
+    e2e_p draw text -f "$id" --at 90,70 --space frame '<MK' >/dev/null
+    local i; for i in 1 2 3; do e2e_keys space; quiet; done
+    check "more: three pages, one frame, no island" \
+        "ids() == [$id] and pane()['origin'][1] == 87 and pane()['extent'][0] == 0 and pane()['extent'][1] < 120"
+    mark_at "more: a drawing fixed on frame row 70 went up with the text" -
+    e2e_keys enter; quiet
+    check "more: one line" "pane()['origin'][1] == 88"
+    known "more: the remembered buffer is the file" "$id" "$WORK/long.txt"
     e2e_stop
 }
 
@@ -351,7 +472,7 @@ s_resize() {
 [ -x "$PTYRC" ] || { echo "no binary at $PTYRC: cargo build -p ptyrc-cli" >&2; exit 2; }
 have tmux || { echo "tmux is required as the host" >&2; exit 2; }
 
-for scenario in "${@:-vim vim-nu vim-nowrap vim-splits tmux shell pager agent monitor resize}"; do
+for scenario in "${@:-vim vim-nu vim-nowrap vim-splits tmux shell pager pages pages-status man more agent monitor resize}"; do
     for one in $scenario; do
         case $one in
             vim) s_vim ;;
@@ -361,6 +482,10 @@ for scenario in "${@:-vim vim-nu vim-nowrap vim-splits tmux shell pager agent mo
             tmux) s_tmux ;;
             shell) s_shell ;;
             pager) s_pager ;;
+            pages) s_pages ;;
+            pages-status) s_pages_status ;;
+            man) s_man ;;
+            more) s_more ;;
             agent) s_agent ;;
             monitor) s_monitor ;;
             resize) s_resize ;;

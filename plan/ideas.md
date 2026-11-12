@@ -115,6 +115,37 @@ Built: see "Heatmap" in `design.md`. Left:
 - Confetti party mode (`--spawn`) likely flickers less with the confetti
   and sparkles behind the text: use the back layer.
 
+## From the scrolling work, second session
+
+- `more` going back (`b`) feeds the earlier page below: on the main
+  screen that is new output on the tape, as the scrollback has it. The
+  page gets new frame rows; a drawing fixed on the first copy does not
+  show on the second. Same for `cat file` twice. Telling the two apart
+  needs more than the screen.
+- A percentage (`--More--(20%)`, `50%`) as a view hint: an estimate of
+  the row, good to order islands, not to place them.
+- Two pager pages in one burst (a key held, a slow host) feed more than a
+  screen: taken for a jump, an island, merged when walked into.
+- A jump fed in two bursts and caught by a hint: the first burst's rows
+  may have been remembered a few rows off; they are rewritten when shown
+  again. Forget what was committed since the last agreeing hint.
+- A forgotten island takes its lines; sprites fixed on its rows stay in
+  the scene, never shown. Emit an event and let the scene drop them.
+- `frames.update` at 200x60: 200 µs when every row changed, 80 µs when
+  nothing did. `Screen::scan` is 140 µs and 45 µs of these, the two
+  heatmaps (raw and pane) 35 µs in both; the trackers 25 µs. Hash rows
+  before cells in the scan; update heat lazily, on read or on a tick.
+- An empty main-screen frame stays inactive behind a full-screen app
+  started at once (`ptyrc run less file`).
+- Preset detection on a one-row change waits up to 1 s. A preset whose
+  only sign appears on one row and nothing else changes after is seen on
+  the next change.
+- A shell cleared and printing the same output again (`clear; ls`
+  twice) is placed on the rows of the first copy: the view is found in
+  the buffer. Right for drawings fixed on the text, wrong as a history.
+- `scripts/e2e-frames.sh monitor` (htop) fails about one run in two on a
+  loaded machine, before this work too: a pane stays candidate.
+
 ## Client apps, second session
 
 Gaps met while writing the apps; none fixed in the core.
