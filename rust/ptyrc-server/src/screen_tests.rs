@@ -699,3 +699,67 @@ fn draw_list_tells_the_style() {
     assert_eq!(of(blue)["style"], json!({"fg": "blue"}));
     assert!(of(plain).get("style").is_none());
 }
+
+#[test]
+fn host_colours_set_at_run_time_remix_in_one_repaint() {
+    let mut rig = Rig::new(40, 6);
+    rig.put(json!({
+        "anchor": {"at": [2, 1], "space": "view"}, "alpha": 0.5,
+        "content": {"rows": ["##"], "opaque": true, "style": {"bg": "#ffffff"}},
+    }));
+    let bg = |rig: &Rig| rig.host.grid().cell(2, 1).style.bg;
+    assert_eq!(bg(&rig), ptyrc_vt::Color::Rgb(128, 128, 128));
+    // A static sprite: nothing goes out until the colours change.
+    assert!(rig.advance(500).is_empty());
+    let colors = ptyrc_core::scene::HostColors {
+        fg: [0, 0, 0],
+        bg: [255, 255, 255],
+    };
+    rig.ctx(|e, ctx| e.on_host_colors(colors, ctx));
+    let out = rig.tick();
+    assert_eq!(count(&out, BSU), 1, "one synchronized update");
+    assert_eq!(bg(&rig), ptyrc_vt::Color::Rgb(255, 255, 255));
+    // Told the same again: nothing.
+    rig.ctx(|e, ctx| e.on_host_colors(colors, ctx));
+    assert!(rig.tick().is_empty());
+}
+
+#[test]
+fn a_declared_layer_name_is_used_and_hinted() {
+    let mut rig = Rig::new(40, 6);
+    let layers = rig.call("layer.define", json!({"name": "stage", "z": -50}));
+    assert_eq!(layers["layers"][1], json!({"name": "stage", "z": -50}));
+    assert_eq!(rig.call("layer.list", json!({})), layers);
+    let mut spec = text_at(1, 1, "x");
+    spec["layer"] = json!("stage");
+    let id = rig.put(spec.clone());
+    let sprites = rig.call("draw.list", json!({}));
+    assert_eq!(sprites["sprites"][0]["layer"], -50);
+    rig.call("draw.update", json!({"id": id, "layer": "hud"}));
+    rig.call("draw.update", json!({"id": id, "layer": "stage"}));
+
+    let mut fail = |method: &str, params: Value| {
+        let reply = rig.ctx(|e, ctx| e.handle(ConnId(7), Token(99), method, params, ctx));
+        match reply {
+            Reply::Err(e) => e,
+            other => panic!("{method}: {other:?}"),
+        }
+    };
+    spec["layer"] = json!("stagee");
+    let error = fail("draw.put", spec);
+    assert_eq!(error.message, "bad layer: stagee");
+    let hint = error.hint.unwrap();
+    assert!(hint.starts_with("did you mean stage?"), "{hint}");
+    assert!(
+        hint.contains("stage (-50)") && hint.contains("hud (100)"),
+        "{hint}"
+    );
+    for params in [
+        json!({"name": "app", "z": 3}),
+        json!({"name": "low", "z": 0}),
+        json!({"name": "back", "z": -3}),
+        json!({"name": "low"}),
+    ] {
+        fail("layer.define", params);
+    }
+}

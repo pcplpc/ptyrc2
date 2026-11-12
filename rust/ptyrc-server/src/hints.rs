@@ -8,9 +8,10 @@ use crate::screen::ScreenEngine;
 use ptyrc_proto::{ErrorCode, RpcError, suggest};
 
 /// Every method of the protocol, for the nearest-name hint.
-const METHODS: [&str; 34] = [
+const METHODS: [&str; 37] = [
     "session.info",
     "session.resize",
+    "session.colors",
     "screen.text",
     "screen.cells",
     "screen.find",
@@ -39,6 +40,8 @@ const METHODS: [&str; 34] = [
     "draw.list",
     "draw.ext",
     "draw.exts",
+    "layer.define",
+    "layer.list",
     "batch",
     "subscribe",
     "debug.overlay",
@@ -103,6 +106,20 @@ fn bad_params(engine: &ScreenEngine, error: &mut RpcError) -> Option<String> {
             "{}a colour is a name ({}, bright-<name>), 0..255, or #rrggbb",
             suggest::did_you_mean(word, COLOURS),
             COLOURS.join(", ")
+        ));
+    }
+    if let Some(rest) = message.strip_prefix("bad layer: ") {
+        let name = rest.split(" (").next().unwrap_or(rest);
+        let layers = engine.scene.layers();
+        error.message = format!("bad layer: {name}");
+        return Some(format!(
+            "{}layers: {}; or an integer other than 0; `layer.define` declares a name",
+            suggest::did_you_mean(name, layers.iter().map(|(n, _)| n.as_str())),
+            layers
+                .iter()
+                .map(|(n, z)| format!("{n} ({z})"))
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
     if message.contains("untagged enum Anchor") {
