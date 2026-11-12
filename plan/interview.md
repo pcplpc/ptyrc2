@@ -24,3 +24,20 @@
   elegant, fast, responsive; written as examples people learn from.
 - Order: frames, extended frames, dynamic frames, debug tools, tests
   against real apps and polish come first; the apps after.
+
+## Closing the first session
+
+- Layers, "as a sandwich", with proper transparency in frames. Default:
+  the app's text is in front of our drawings; we draw behind it, in the
+  background. Multi-layer scenes must be easy: a static background, in
+  front animations, in front again the app's text, and so on.
+- Client apps are a showcase of sprite handling and of scrollable frames.
+  Not only vim: `less` and `more` should mostly work out of the box, with
+  no preset.
+- Confetti app: `--spawn --rate <rate>` spawns `<rate>` confetti per
+  minute; `--spawn` alone is 20 per minute, one every 3 s.
+- Fishtank: inside a scrollable frame; fishes align to the extended
+  frame, not to the window.
+- A good demo of the dynamic frames is wanted.
+- TUIs to try: htop, less, man, tmux, ranger, glances, opencode.
+- Sessions are kept around 200k tokens between handoffs.

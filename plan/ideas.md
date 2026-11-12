@@ -19,3 +19,27 @@ Backlog. Not a commitment; moved to `design.md` when taken.
 - Colour blending on RGB hosts: `tint` with alpha.
 - Scrollbar or percentage indicators as a generic view hint.
 - A heatmap persisted per app across sessions.
+
+## From the owner, end of the first session
+
+- Layer sandwich with transparency: background layers behind the app's
+  text (the default), layers in front of it, ordered; the app's text is
+  one layer among them. Today: `blend` (`over`, `behind`, `tint`) and `z`.
+  Missing: `behind` as the default, a named layer order where the app text
+  has a place, per-cell alpha.
+- Showcase apps: sprite handling and scrollable frames, on vim, less, more.
+- Confetti `--spawn --rate N` (per minute; default 20).
+- Fishtank living in an extended frame: fishes keep frame coordinates and
+  scroll with the content.
+- A demo of the dynamic frames (tmux panes and windows, vim splits).
+- Try: htop, less, man, tmux, ranger, glances, opencode.
+
+## From the first session's work
+
+- `frame.get {frame}` instead of `frame.at {name}`.
+- Update a sprite made by a draw extension in place (the big clock
+  re-creates its sprite each minute).
+- One width function for the emulator and the scene.
+- A finite animation added while the raw frame is not yet usable (250 ms
+  after the first screen) plays unseen: hold its clock until shown.
+- Islands of an extended frame are never collected.
