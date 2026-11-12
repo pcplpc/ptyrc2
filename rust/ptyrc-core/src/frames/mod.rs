@@ -180,6 +180,10 @@ struct Pane {
     right: u16,
     gutter_cand: (u16, u8),
     gutter_row: Option<i64>,
+    /// Frame row of the first content row, read on a status row.
+    status_row: Option<i64>,
+    /// The status row does not count screen rows: not read any more.
+    status_bad: bool,
     /// Left chrome a plugin asked for.
     plugin_left: u16,
     fixed_tb: Option<(u16, u16)>,
@@ -282,6 +286,40 @@ fn is_wide(ch: char) -> bool {
         0x1100..=0x115F | 0x2E80..=0xA4CF | 0xAC00..=0xD7A3 | 0xF900..=0xFAFF
         | 0xFE30..=0xFE4F | 0xFF00..=0xFF60 | 0xFFE0..=0xFFE6
         | 0x1F300..=0x1FAFF | 0x20000..=0x3FFFD)
+}
+
+/// `line N` or `lines N-M` in a status row: `N - 1`.
+fn status_line(text: &str) -> Option<i64> {
+    let lower = text.to_ascii_lowercase();
+    let bytes = lower.as_bytes();
+    let mut from = 0;
+    while let Some(k) = lower[from..].find("line") {
+        let at = from + k;
+        from = at + 4;
+        if at > 0 && bytes[at - 1].is_ascii_alphanumeric() {
+            continue;
+        }
+        let mut i = at + 4;
+        if bytes.get(i) == Some(&b's') {
+            i += 1;
+        }
+        let digits = i + bytes[i..].iter().take_while(|b| **b == b' ').count();
+        if digits == i {
+            continue;
+        }
+        let end = digits
+            + bytes[digits..]
+                .iter()
+                .take_while(|b| b.is_ascii_digit())
+                .count();
+        if end == digits || end - digits > 9 || bytes.get(end).is_some_and(u8::is_ascii_alphabetic)
+        {
+            continue;
+        }
+        let n: i64 = lower[digits..end].parse().ok()?;
+        return (n >= 1).then_some(n - 1);
+    }
+    None
 }
 
 fn ms(v: u32) -> Duration {
@@ -931,6 +969,8 @@ impl Frames {
                 right: 0,
                 gutter_cand: (0, 0),
                 gutter_row: None,
+                status_row: None,
+                status_bad: false,
                 plugin_left: 0,
                 fixed_tb: None,
                 hint: None,
@@ -1192,6 +1232,36 @@ impl Frames {
         Some((end + 1, n0 - 1 - first as i64))
     }
 
+    /// Position shown by a status row, as pagers print it: `line 30`,
+    /// `lines 30-58/300`. The row is the last of the pane or the one
+    /// below it, holds the cursor, starts in standout, on the alternate
+    /// screen. Returns the frame row of the first content row.
+    fn status(&self, input: &ScreenInput, rect: Rect) -> Option<i64> {
+        let (col, row) = (input.cursor.col, input.cursor.row);
+        if !input.alt_screen
+            || rect.h == 0
+            || col < rect.x
+            || col >= rect.right()
+            || row + 1 < rect.bottom()
+            || row > rect.bottom()
+            || row >= self.screen.rows
+        {
+            return None;
+        }
+        let first = (rect.x..rect.right()).find(|c| !input.grid.cell(*c, row).is_blank())?;
+        if !input
+            .grid
+            .cell(first, row)
+            .style
+            .attrs
+            .contains(ptyrc_vt::Attrs::INVERSE)
+        {
+            return None;
+        }
+        let line = self.screen.lines[row as usize].slice(rect.x, rect.right());
+        status_line(&line.text)
+    }
+
     /// Feed a pane's tracker with the screen. `input` is absent on a tick:
     /// plugins are not consulted then.
     fn observe(
@@ -1311,6 +1381,13 @@ impl Frames {
                 }
             }
             p.gutter_row = found.filter(|g| g.0 == p.left).map(|g| g.1);
+            if let Some(inp) = input {
+                p.status_row = if p.status_bad {
+                    None
+                } else {
+                    self.status(inp, p.rect)
+                };
+            }
         }
 
         // Row hashes of the content columns.
@@ -1344,6 +1421,7 @@ impl Frames {
         };
         let mut seed = 0i64;
         let mut seed_real = true;
+        let (mut travel, mut room, mut cleared) = (0i64, i64::MAX, false);
         if let Some(inp) = input {
             for e in inp.events {
                 if let VtEvent::Scroll {
@@ -1356,7 +1434,11 @@ impl Frames {
                     if x.w as u32 * 5 >= rect.w as u32 * 4 && x.h as u32 * 5 >= rect.h as u32 * 4 {
                         seed -= *dy as i64;
                         seed_real &= *scrollback;
+                        travel += (*dy as i64).abs();
+                        room = room.min(x.h as i64);
                     }
+                } else if matches!(e, VtEvent::Clear | VtEvent::AltScreen(_)) {
+                    cleared = true;
                 }
             }
         }
@@ -1365,8 +1447,14 @@ impl Frames {
             (None, Some(h)) => (h.row.map(|r| r - p.ext.top as i64), h.col),
             _ => (None, None),
         };
-        // Numbers on screen are the better witness.
+        // Numbers on screen are the better witness; a status row is read
+        // when nothing else tells.
         let hint_oy = p.gutter_row.or(hint_oy);
+        let top = p.fixed_tb.map_or(p.ext.top, |tb| tb.0) as i64;
+        let (hint_oy, hint_soft) = match hint_oy {
+            Some(oy) => (Some(oy), false),
+            None => (p.status_row.map(|r| r - top), p.status_row.is_some()),
+        };
         let cur = (self.cursor.col, self.cursor.row);
         let obs = Obs {
             hashes: &p.hashes,
@@ -1374,11 +1462,14 @@ impl Frames {
             width: b - a,
             seed,
             seed_real,
+            seed_tape: !cleared && travel == seed.abs() && seed.abs() < room,
             cursor_row: rect
                 .contains(cur.0, cur.1)
                 .then(|| (cur.1 - rect.y) as usize),
             hint_oy,
             hint_ox,
+            hint_soft,
+            bottom_floor: (hint_soft && self.cursor.row + 1 == rect.bottom()) as u16,
             side_pending: p.gutter_cand.1 > 0,
             fixed_tb: p.fixed_tb,
             now,
@@ -1394,6 +1485,10 @@ impl Frames {
             Outcome::Same
         };
         p.fresh = false;
+        if std::mem::take(&mut p.ext.hint_refused) {
+            p.status_bad = true;
+            p.status_row = None;
+        }
         for s in p.ext.shifts.drain(..) {
             ev.push(FrameEvent::Shift {
                 frame: id,

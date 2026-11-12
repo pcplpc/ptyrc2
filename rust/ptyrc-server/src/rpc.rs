@@ -315,17 +315,25 @@ struct FrameTextParams {
 fn frame_text(engine: &ScreenEngine, params: Value) -> Res {
     let p: FrameTextParams = parse(params)?;
     let id = frame_of(engine, &p.frame)?;
-    let (lo, hi) = engine
+    let info = engine
         .frames
         .list()
-        .iter()
+        .into_iter()
         .find(|f| f.id == id)
-        .map(|f| (f.extent[0], f.extent[1]))
         .ok_or_else(|| ScreenEngine::no_frame(id))?;
-    let y0 = p.y0.unwrap_or(lo).max(lo);
-    let y1 = p.y1.unwrap_or(hi + 1).min(hi + 1).max(y0);
-    if y1 - y0 > 100_000 {
-        return Err(RpcError::bad_params("more than 100000 rows"));
+    // Without a range: the island the view is on, at most `MAX` rows
+    // around the view.
+    const MAX: i64 = 100_000;
+    let (lo, hi) = (info.extent[0], info.extent[1]);
+    let y0 = p
+        .y0
+        .unwrap_or_else(|| lo.max(info.origin[1].saturating_sub(MAX / 2)));
+    let y1 = p.y1.unwrap_or_else(|| (hi + 1).min(y0.saturating_add(MAX)));
+    let y1 = y1.max(y0);
+    if y1.saturating_sub(y0) > MAX {
+        return Err(RpcError::bad_params(format!(
+            "rows {y0}..{y1}: more than {MAX}; give a narrower y0 and y1"
+        )));
     }
     Ok(json!({"lines": engine.frames.text(id, y0, y1), "y0": y0}))
 }

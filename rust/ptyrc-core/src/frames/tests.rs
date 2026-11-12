@@ -697,6 +697,148 @@ fn wiped_pane_keeps_what_was_there() {
 }
 
 #[test]
+fn islands_are_collected() {
+    // A shell cleared again and again: one island per clear, the oldest
+    // forgotten; the extent is the island on screen.
+    let mut s = Sim::new();
+    let page =
+        |k: usize| -> Vec<String> { (0..12).map(|i| format!("run {k:02} out {i:02}")).collect() };
+    s.settle(&view(&page(0), 0, 20, &[]));
+    let id = s.pane().id;
+    for k in 1..=12 {
+        s.feed(&Grid::new(COLS, 20), 300);
+        s.feed(&view(&page(k), 0, 20, &[]), 300);
+        s.idle(300);
+    }
+    let info = s.pane();
+    assert_eq!(info.id, id);
+    assert_eq!(info.extent[1] - info.extent[0], 19, "{info:?}");
+    assert_eq!(info.extent[0], info.origin[1]);
+    assert_eq!(s.f.text(id, info.extent[0], info.extent[0] + 12), page(12));
+    // The first runs are gone, the last ones are found again.
+    assert_eq!(s.f.text(id, 0, 3), vec!["", "", ""]);
+    assert!(s.f.find(id, &lit("run 01 out 03"), true).is_empty());
+    assert_eq!(s.f.find(id, &lit("run 09 out 03"), true).len(), 1);
+    s.feed(&view(&page(9), 0, 20, &[]), 300);
+    let back = s.pane().origin[1];
+    assert!(back < info.origin[1] && back >= ext::ISLAND_GAP);
+}
+
+#[test]
+fn island_merge_moves_the_rows_on_screen() {
+    // The merge comes before the rows on screen are remembered: the shift
+    // covers them all the same, drawings are fixed on them.
+    let d = doc(400);
+    let mut s = Sim::new();
+    s.settle(&view(&d, 0, 20, &[]));
+    let id = s.pane().id;
+    s.idle(300);
+    s.feed(&view(&d, 30, 20, &[]), 300);
+    let island = s.pane().origin[1];
+    assert!(island >= ext::ISLAND_GAP);
+    let mut merged = None;
+    for (k, top) in (5..30).rev().enumerate() {
+        let ev = s.feed(&view(&d, top, 20, &[]), 20);
+        if let Some(FrameEvent::Shift { from, to, dy, .. }) =
+            ev.iter().find(|e| matches!(e, FrameEvent::Shift { .. }))
+        {
+            merged = Some((*from, *to, *dy, k as i64 + 1));
+            break;
+        }
+    }
+    let (from, to, dy, steps) = merged.expect("merge");
+    // The view was at `island - steps`, twenty rows.
+    assert!(
+        from <= island - steps && to >= island - steps + 19,
+        "{from} {to}"
+    );
+    assert_eq!(island + dy, 30);
+    s.idle(300);
+    assert_eq!(s.f.text(id, 0, 50), d[..50].to_vec());
+}
+
+#[test]
+fn lines_inserted_away_from_the_cursor_are_an_edit() {
+    // A splice is believed at the cursor only. Elsewhere the rows are
+    // rewritten in place: nothing moves in the frame, the text is right.
+    let d = doc(100);
+    let mut s = Sim::new();
+    s.settle(&view(&d, 0, 20, &[]));
+    let id = s.pane().id;
+    s.idle(300);
+    let mut e = d.clone();
+    e.insert(8, "NEW one".into());
+    e.insert(9, "NEW two".into());
+    s.cursor = (0, 18);
+    let ev = s.feed(&view(&e, 0, 20, &[]), 100);
+    assert!(
+        !ev.iter()
+            .any(|x| matches!(x, FrameEvent::Shift { .. } | FrameEvent::Scroll { .. })),
+        "{ev:?}"
+    );
+    assert_eq!(s.pane().origin, [0, 0]);
+    s.idle(300);
+    assert_eq!(s.f.text(id, 0, 20), e[..20].to_vec());
+}
+
+#[test]
+fn narrower_pane_keeps_its_frame() {
+    // The terminal loses ten columns; the lines fit: same frame, same rows.
+    let d = doc(300);
+    let mut s = Sim::new();
+    s.settle(&view(&d, 40, 20, &[]));
+    let id = s.pane().id;
+    for top in 41..=50 {
+        s.feed(&view(&d, top, 20, &[]), 100);
+    }
+    s.idle(500);
+    let origin = s.pane().origin;
+    let lines: Vec<&str> = d[50..70].iter().map(String::as_str).collect();
+    let ev = s.feed(&Grid::from_lines(COLS - 10, &lines), 100);
+    assert!(ev.contains(&FrameEvent::Attached { frame: id }), "{ev:?}");
+    assert_eq!(
+        (s.pane().id, s.pane().origin, s.pane().rect),
+        (id, origin, [0, 0, COLS - 10, 20])
+    );
+    s.idle(1600);
+    assert!(s.pane().usable);
+    let lines: Vec<&str> = d[55..75].iter().map(String::as_str).collect();
+    s.feed(&Grid::from_lines(COLS - 10, &lines), 100);
+    assert_eq!(s.pane().origin, [origin[0], origin[1] + 5]);
+    assert_eq!(s.f.text(id, 0, 2), d[40..42].to_vec());
+}
+
+#[test]
+fn layout_flaps_under_load() {
+    // A border half redrawn every other burst while a pane scrolls: no
+    // frame is allocated, the panes resume, the scroll is followed.
+    let (a, b, c) = (doc(300), doc(100), doc(100));
+    let mut s = Sim::new();
+    let screen = |top: usize| tmux(&a[top..], &b, &c, "status");
+    s.settle(&screen(0));
+    let ids: Vec<_> = s.panes().iter().map(|p| p.id).collect();
+    let all = s.f.list().len();
+    let mut events = Vec::new();
+    for top in 1..=40 {
+        let mut broken = screen(top);
+        put(&mut broken, 0, 10, &" ".repeat(40));
+        events.extend(s.feed(&broken, 20));
+        events.extend(s.feed(&screen(top), 20));
+    }
+    assert!(
+        !events.iter().any(|e| matches!(
+            e,
+            FrameEvent::Added { .. } | FrameEvent::Dropped { .. } | FrameEvent::Layout { .. }
+        )),
+        "{events:?}"
+    );
+    assert_eq!(s.f.list().len(), all);
+    assert_eq!(s.panes().iter().map(|p| p.id).collect::<Vec<_>>(), ids);
+    assert!(s.panes().iter().all(|p| p.usable));
+    assert_eq!(s.panes()[0].origin, [0, 40]);
+}
+
+#[test]
 fn half_drawn_screens_are_not_remembered() {
     let d = doc(50);
     let mut s = Sim::new();
@@ -1348,25 +1490,236 @@ fn the_alternate_screen_has_its_own_frames() {
     assert_eq!(s.f.text(editor, 0, 25), other[..25].to_vec());
 }
 
+/// A pager on the alternate screen, painting as `less` 710 was recorded
+/// to: a page down feeds lines at the bottom row, a page up reverse-indexes
+/// at the top, a far jump forward feeds a marker and a screenful, a jump
+/// to the top clears, a search repaints by cursor addressing.
+struct Pager {
+    vt: ptyrc_vt::Vt,
+    s: Sim,
+    doc: Vec<String>,
+    top: usize,
+    rows: usize,
+    /// Standout `line N` prompt, as `man` shows; else `:`.
+    status: bool,
+}
+
+impl Pager {
+    fn open(doc: Vec<String>, rows: usize, status: bool) -> Pager {
+        let mut p = Pager {
+            vt: ptyrc_vt::Vt::new(COLS, rows as u16),
+            s: Sim::new(),
+            doc,
+            top: 0,
+            rows,
+            status,
+        };
+        let mut out = format!("\x1b[?1049h\x1b[{rows};1H\r");
+        out += &p.lines(0, rows - 1);
+        out += &p.prompt();
+        p.step(&out);
+        p.s.idle(2000);
+        p
+    }
+
+    fn lines(&self, from: usize, n: usize) -> String {
+        (from..from + n)
+            .map(|i| format!("{}\r\n", self.doc.get(i).map_or("~", String::as_str)))
+            .collect()
+    }
+
+    fn prompt(&self) -> String {
+        if self.status {
+            format!(
+                "\x1b[7m Manual page line {} (press h)\x1b[27m\x1b[K",
+                self.top + 1
+            )
+        } else {
+            ":\x1b[K".to_string()
+        }
+    }
+
+    fn step(&mut self, bytes: &str) -> Vec<FrameEvent> {
+        self.vt.feed(bytes.as_bytes());
+        let c = self.vt.cursor();
+        self.s.cursor = (c.col, c.row);
+        self.s.alt = self.vt.modes().alt_screen;
+        let events = self.vt.take_events();
+        let grid = self.vt.grid().clone();
+        self.s.feed_ev(&grid, 300, &events)
+    }
+
+    fn down(&mut self, n: usize) -> Vec<FrameEvent> {
+        let from = self.top + self.rows - 1;
+        self.top += n;
+        let out = format!("\r\x1b[K{}{}", self.lines(from, n), self.prompt());
+        self.step(&out)
+    }
+
+    fn up(&mut self, n: usize) -> Vec<FrameEvent> {
+        let mut out = "\r\x1b[K".to_string();
+        for i in (self.top - n..self.top).rev() {
+            out += &format!("\x1b[H\x1bM{}\r\n", self.doc[i]);
+        }
+        self.top -= n;
+        out += &format!("\x1b[{};1H\r\x1b[K{}", self.rows, self.prompt());
+        self.step(&out)
+    }
+
+    /// `G`, `40g`: a marker line, then a screenful, all fed at the bottom.
+    fn skip_to(&mut self, top: usize) -> Vec<FrameEvent> {
+        self.top = top;
+        let out = format!(
+            "\r\x1b[K...skipping...\r\n{}{}",
+            self.lines(top, self.rows - 1),
+            self.prompt()
+        );
+        self.step(&out)
+    }
+
+    /// `g`: a clear, then the first screenful reverse-indexed in.
+    fn jump_top(&mut self) -> Vec<FrameEvent> {
+        self.top = 0;
+        let mut out = "\r\x1b[K\x1b[H\x1b[2J".to_string();
+        for i in (0..self.rows - 1).rev() {
+            out += &format!("\x1b[H\x1bM{}\r\n", self.doc[i]);
+        }
+        out += &format!("\x1b[{};1H\r\x1b[K{}", self.rows, self.prompt());
+        self.step(&out)
+    }
+
+    /// A search hit: every row addressed and rewritten.
+    fn repaint_at(&mut self, top: usize) -> Vec<FrameEvent> {
+        self.top = top;
+        let mut out = String::new();
+        for r in 0..self.rows - 1 {
+            let text = self.doc.get(top + r).map_or("~", String::as_str);
+            out += &format!("\x1b[{};1H\x1b[K{text}", r + 1);
+        }
+        out += &format!("\x1b[{};1H\r\x1b[K{}", self.rows, self.prompt());
+        self.step(&out)
+    }
+
+    fn origin(&self) -> i64 {
+        self.s.pane().origin[1]
+    }
+}
+
 #[test]
-fn a_pager_page_is_not_trusted_as_a_scroll() {
-    // A pager repaints a page down and a jump with the same line feeds:
-    // without rows to align, the view goes to an island, and comes back.
-    let d = doc(200);
-    let mut s = Sim::new();
-    s.alt = true;
-    s.settle(&view(&d, 0, 19, &[":"]));
-    let id = s.pane().id;
-    let scroll = VtEvent::Scroll {
-        region: Rect::new(0, 0, COLS, 20),
-        dy: -19,
-        scrollback: false,
-    };
-    s.feed_ev(&view(&d, 150, 19, &[":"]), 300, &[scroll]);
-    assert_eq!(s.pane().id, id);
-    assert!(s.pane().origin[1] >= ext::ISLAND_GAP);
-    s.feed_ev(&view(&d, 0, 19, &[":"]), 300, &[scroll]);
-    assert_eq!(s.pane().origin, [0, 0]);
+fn a_pager_page_without_overlap_is_a_scroll() {
+    // A page down feeds one line less than the screen has rows: every
+    // line that went through is seen, the distance is exact.
+    let mut p = Pager::open(doc(300), 20, false);
+    let id = p.s.pane().id;
+    let ev = p.down(19);
+    assert!(ev.contains(&FrameEvent::Scroll {
+        frame: id,
+        dx: 0,
+        dy: 19
+    }));
+    assert_eq!(p.origin(), 19);
+    p.down(19);
+    p.down(19);
+    assert_eq!(p.origin(), 57);
+    let ev = p.up(19);
+    assert!(ev.contains(&FrameEvent::Scroll {
+        frame: id,
+        dx: 0,
+        dy: -19
+    }));
+    p.up(19);
+    p.up(19);
+    assert_eq!((p.s.pane().id, p.origin()), (id, 0));
+    p.s.idle(300);
+    let info = p.s.pane();
+    assert_eq!(info.extent[0], 0);
+    assert!(info.extent[1] < 100, "no island: {info:?}");
+    assert_eq!(p.s.f.text(id, 0, 76), p.doc[..76].to_vec());
+}
+
+#[test]
+fn a_pager_jump_is_not_a_scroll() {
+    // A far jump feeds a whole screen or more: a line went through unseen.
+    // The view goes to an island; a clear and a repaint find the top again.
+    let mut p = Pager::open(doc(300), 20, false);
+    let id = p.s.pane().id;
+    p.down(19);
+    p.skip_to(250);
+    assert_eq!(p.s.pane().id, id);
+    assert!(p.origin() >= ext::ISLAND_GAP);
+    p.jump_top();
+    assert_eq!(p.origin(), 0);
+    p.skip_to(250);
+    assert!(p.origin() >= ext::ISLAND_GAP);
+    p.repaint_at(10);
+    assert_eq!(p.origin(), 10);
+}
+
+#[test]
+fn a_status_row_places_a_pager_jump() {
+    // `line N` in a standout prompt under the cursor: rows are absolute.
+    let mut p = Pager::open(doc(300), 20, true);
+    let id = p.s.pane().id;
+    p.down(19);
+    assert_eq!(p.origin(), 19);
+    let ev = p.skip_to(250);
+    assert!(ev.contains(&FrameEvent::Jump { frame: id }));
+    assert_eq!(p.origin(), 250);
+    p.up(19);
+    assert_eq!(p.origin(), 231);
+    p.repaint_at(120);
+    assert_eq!(p.origin(), 120);
+    p.jump_top();
+    assert_eq!((p.s.pane().id, p.origin()), (id, 0));
+    p.s.idle(300);
+    assert_eq!(p.s.f.text(id, 231, 269), p.doc[231..269].to_vec());
+    assert_eq!(p.s.pane().extent, [0, 268]);
+}
+
+#[test]
+fn a_pager_jump_fed_in_two_bursts_is_placed_by_the_status_row() {
+    // The marker and a few lines, then the rest: two feeds that look like
+    // scrolls. The status row says further: a jump.
+    let mut p = Pager::open(doc(300), 20, true);
+    let id = p.s.pane().id;
+    p.down(19);
+    let first = format!("\r\x1b[K...skipping...\r\n{}", p.lines(250, 6));
+    p.step(&first);
+    p.top = 250;
+    let rest = format!("{}{}", p.lines(256, 13), p.prompt());
+    let ev = p.step(&rest);
+    assert!(ev.contains(&FrameEvent::Jump { frame: id }));
+    assert_eq!(p.origin(), 250);
+}
+
+#[test]
+fn a_status_row_that_counts_wrapped_lines_is_dropped() {
+    // The number moves less than the rows do: it counts file lines. It is
+    // not read any more; the frame keeps screen rows.
+    let mut p = Pager::open(doc(300), 20, true);
+    p.down(5);
+    assert_eq!(p.origin(), 5);
+    p.top -= 2;
+    p.down(5);
+    assert_eq!(p.origin(), 10);
+    p.down(19);
+    assert_eq!(p.origin(), 29);
+    p.skip_to(250);
+    assert!(p.origin() >= ext::ISLAND_GAP);
+}
+
+#[test]
+fn status_rows_are_parsed() {
+    assert_eq!(
+        status_line(" Manual page bash(1) line 30 (press h for help)"),
+        Some(29)
+    );
+    assert_eq!(status_line("lines 30-58/300 9%"), Some(29));
+    assert_eq!(status_line("long.txt line 6180/6208 (END)"), Some(6179));
+    assert_eq!(status_line("outline 3"), None);
+    assert_eq!(status_line("line 3rd"), None);
+    assert_eq!(status_line("line: 3"), None);
+    assert_eq!(status_line("--More--(20%)"), None);
 }
 
 #[test]
