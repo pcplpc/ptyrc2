@@ -251,10 +251,25 @@ class Sprite:
     def __init__(self, pilot: Pilot, sprite_id: int | None) -> None:
         self._pilot = pilot
         self.id = sprite_id
+        self._effect: str | None = None
 
     def update(self, **patch: Any) -> None:
         """Patch wire fields: `anchor`, `content`, `frames`, `layer`, `z`..."""
         self._pilot.call("draw.update", id=self.id, **patch)
+        if "effect" in patch:
+            self._effect = patch["effect"]["name"]
+
+    def tune(self, **params: Any) -> None:
+        """New parameters for its running effect, which keeps its state:
+        `draw.update {id, effect}` under the effect's own name. The
+        effect says which it takes (`bad-params`). The name is asked
+        once (`draw.list`) when this handle did not start the effect."""
+        if self._effect is None:
+            kind = (self.info() or {}).get("kind", "")
+            if not kind.startswith("effect:"):
+                raise PtyrcError("bad-params", f"sprite {self.id} runs no effect")
+            self._effect = kind.removeprefix("effect:")
+        self.update(effect={"name": self._effect, "params": params})
 
     def set(self, rows: Any = None, **kw: Any) -> None:
         """New content, with the arguments of `sprite_spec`."""
@@ -723,7 +738,9 @@ class Pilot(Tools):
 
     def put(self, spec: dict[str, Any]) -> Sprite:
         """Add a sprite from its wire form."""
-        return self._sprite("draw.put", spec)
+        sprite = self._sprite("draw.put", spec)
+        sprite._effect = (spec.get("effect") or {}).get("name")
+        return sprite
 
     def ext(
         self, name: str, function: str, params: Any = None, **sprite: Any
