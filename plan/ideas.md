@@ -233,6 +233,12 @@ Gaps met while writing the apps; none fixed in the core.
   fish a tick at most; the jump after a `less` page down is gone.
 - Built: fishes, half of them shy (`--shy N`): each hides behind the
   nearest text, 4 to 10 s, then swims to another spot; fear first.
+- Built: fishes `-d`, `-b`, `-r`, `-a`: decorations standing on text,
+  bubbles, random species and events; populated areas remembered in
+  frame cells (`_reef.py`, see `design.md`). Left: decorations are
+  placed on the text of the first visit, a later edit above one leaves
+  it behind the new text; nothing stands where there is no text; the
+  memory dies with the app.
 - Built: sand in braille, one stream, avalanches, strata, kept across
   resizes and text changes, `--cursor` (see `design.md`). No cursor, or
   on column 0: the spout of a sand without `--cursor`. Left: the pile

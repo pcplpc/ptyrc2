@@ -95,3 +95,18 @@ Supersedes `--spawn --rate` above.
   size of the pool, 5 by default. Every 10 s one word leaves the pool,
   then another comes in. `-a --count 0`: the size is drawn between 10
   and 30, periodically.
+
+## Fishes aquarium
+
+- `-d`, `--decorate`: decorations that stand on text (small castles,
+  sea shells, algae), behind or in front of the fishes, always behind
+  the text.
+- `-b`, `--bubbles`: animated dim bubbles from the bottom, slowly to
+  the top.
+- `-r`, `--random`: random types of fishes as they respawn, and events
+  (objects that fall in the water, and so on).
+- `-a`, `--all`: everything. The basic fishes stay basic; with `-a` it
+  is a very fancy aquarium, scrolled in vim.
+- Decorations, bubbles and animations remember the areas already
+  populated.
+- Only beautiful ASCII art and good animations; nothing bad.
