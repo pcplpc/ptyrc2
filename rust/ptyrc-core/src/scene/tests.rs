@@ -102,6 +102,14 @@ impl Surfaces for Mock {
         self.spot
     }
 
+    fn text(&self, id: FrameId) -> Vec<String> {
+        if id == PANE {
+            self.lines.clone()
+        } else {
+            Vec::new()
+        }
+    }
+
     fn cursor(&self) -> (u16, u16) {
         self.cursor
     }
@@ -1070,6 +1078,53 @@ fn sprite_text_is_storable() {
     for cell in row {
         assert!(!cell.text.chars().any(char::is_control));
     }
+}
+
+/// Draws the first letter under it at the cursor's cell.
+struct Echo(String, Option<(u16, u16)>);
+
+impl Effect for Echo {
+    fn render(&mut self, _t: Duration, canvas: &mut Canvas) -> bool {
+        if let Some((x, y)) = self.1 {
+            canvas.put(x as i32, y as i32, &self.0, &StyleSpec::default());
+        }
+        true
+    }
+
+    fn looks(&self) -> bool {
+        true
+    }
+
+    fn look(&mut self, under: &Under) {
+        self.0 = under.rows.concat().trim().chars().take(1).collect();
+        self.1 = under.cursor;
+    }
+}
+
+#[test]
+fn an_effect_sees_the_text_and_the_cursor_under_it() {
+    let mut mock = Mock::new();
+    mock.lines = vec![String::new(), "  word".into()];
+    let mut scene = Scene::new();
+    scene.register_effect(
+        "echo",
+        Box::new(|_| Ok(Box::new(Echo(String::new(), None)))),
+    );
+    let fx = json!({"frame": PANE, "layer": "front", "effect": {"name": "echo"}});
+    scene.add(1, spec(fx), ms(0)).unwrap();
+    // The cursor is outside the pane: nothing to draw at.
+    assert_eq!(show(&mut scene, &mock, &base(), 0)[3], "");
+    // Screen (13, 3) is the canvas cell (3, 2).
+    mock.cursor = (13, 3);
+    assert_eq!(show(&mut scene, &mock, &base(), 100)[3], "             w");
+    mock.lines[1] = "  other".into();
+    assert_eq!(show(&mut scene, &mock, &base(), 200)[3], "             o");
+    // Not usable: the effect keeps what it saw.
+    mock.pane().usable = false;
+    mock.lines.clear();
+    show(&mut scene, &mock, &base(), 300);
+    mock.pane().usable = true;
+    assert_eq!(show(&mut scene, &mock, &base(), 301)[3], "             o");
 }
 
 #[test]

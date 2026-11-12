@@ -10,7 +10,7 @@ mod spec;
 #[cfg(test)]
 mod tests;
 
-pub use effect::{Effect, EffectFactory, Rng, confetti, sparkle};
+pub use effect::{Effect, EffectFactory, Rng, Under, confetti, sparkle};
 pub use raster::Canvas;
 pub use spec::*;
 
@@ -616,6 +616,18 @@ impl Scene {
                         };
                         fx.canvas.resize(w, h);
                         fx.canvas.clear();
+                        if let Some(info) = info.as_ref().filter(|i| i.usable)
+                            && fx.effect.looks()
+                        {
+                            let rows = surfaces.text(info.id);
+                            let (cx, cy) = (cursor.0 as i64, cursor.1 as i64);
+                            let (x, y) = (cx - info.rect.x as i64, cy - info.rect.y as i64);
+                            let inside = x >= 0 && y >= 0 && x < w as i64 && y < h as i64;
+                            fx.effect.look(&Under {
+                                rows: &rows,
+                                cursor: inside.then_some((x as u16, y as u16)),
+                            });
+                        }
                         if !fx
                             .effect
                             .render(now.saturating_sub(sprite.born), &mut fx.canvas)

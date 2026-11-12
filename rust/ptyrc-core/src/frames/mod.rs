@@ -1756,6 +1756,16 @@ impl Surfaces for Frames {
         }
     }
 
+    fn text(&self, id: FrameId) -> Vec<String> {
+        match self.info(id) {
+            Some(info) => {
+                let y0 = info.origin.y;
+                Frames::text(self, id, y0, y0 + info.rect.h as i64)
+            }
+            None => Vec::new(),
+        }
+    }
+
     fn find(&self, id: FrameId, query: &TextQuery, known: bool) -> Vec<TextMatch> {
         self.try_find(id, query, known).unwrap_or_default()
     }

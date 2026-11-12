@@ -155,6 +155,11 @@ pub trait Surfaces {
         taken: &[Rect],
     ) -> Option<(u16, u16)>;
 
+    /// Text of the rows of a frame's view, top first.
+    fn text(&self, _id: FrameId) -> Vec<String> {
+        Vec::new()
+    }
+
     /// Current cursor, screen coordinates.
     fn cursor(&self) -> (u16, u16);
 

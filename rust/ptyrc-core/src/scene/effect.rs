@@ -13,10 +13,28 @@ use std::time::Duration;
 pub trait Effect: Send {
     fn render(&mut self, t: Duration, canvas: &mut Canvas) -> bool;
 
+    /// Whether `look` is wanted.
+    fn looks(&self) -> bool {
+        false
+    }
+
+    /// What the app shows under the canvas; called before each `render`
+    /// while the frame is usable.
+    fn look(&mut self, _under: &Under) {}
+
     /// Time between two renders.
     fn period(&self) -> Duration {
         Duration::from_millis(50)
     }
+}
+
+/// The app under an effect's canvas. Exact when the canvas is the view
+/// of its frame (no `size`, default anchor).
+pub struct Under<'a> {
+    /// Rows of the view, top first, trailing spaces trimmed.
+    pub rows: &'a [String],
+    /// The cursor as a canvas cell; `None`: outside.
+    pub cursor: Option<(u16, u16)>,
 }
 
 /// Builds an effect from its `params`.
