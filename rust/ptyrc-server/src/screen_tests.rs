@@ -523,3 +523,41 @@ fn idle_events_on_change_only() {
     rig.advance(5000);
     assert_eq!(rig.engine.ticks, before);
 }
+
+#[test]
+fn a_forgotten_island_takes_its_sprites() {
+    let mut rig = Rig::new(40, 20);
+    rig.topics.insert("draw".into());
+    let page = |k: usize| -> String {
+        let rows: Vec<String> = (0..12).map(|i| format!("run {k:02} out {i:02}")).collect();
+        format!("\x1b[2J\x1b[H{}", rows.join("\r\n"))
+    };
+    let pane = |rig: &mut Rig| {
+        let frames = rig.call("frame.list", json!({}))["frames"].clone();
+        let pane = frames
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["kind"] == "pane");
+        pane.expect("a pane").clone()
+    };
+    rig.burst(page(0).as_bytes());
+    rig.advance(2000);
+    let first = pane(&mut rig);
+    let at = json!([20, first["origin"][1].as_i64().unwrap() + 3]);
+    let anchor = json!({"at": at, "space": "frame"});
+    let spec = json!({"frame": first["id"], "anchor": anchor, "content": {"rows": ["<MK"]}});
+    let id = rig.put(spec);
+    assert!(rig.row(3).ends_with("<MK"), "{:?}", rig.row(3));
+    // A shell cleared again and again: an island per clear, eight kept.
+    for k in 1..=12 {
+        rig.burst(page(k).as_bytes());
+        rig.advance(600);
+    }
+    assert_eq!(pane(&mut rig)["id"], first["id"]);
+    assert_eq!(rig.call("draw.list", json!({}))["sprites"], json!([]));
+    let draw: Vec<_> = rig.events.iter().filter(|(t, _)| t == "draw").collect();
+    assert_eq!(draw.len(), 1, "{draw:?}");
+    assert_eq!(draw[0].1["removed"], json!([id]));
+    assert_eq!(draw[0].1["frame"], first["id"]);
+}

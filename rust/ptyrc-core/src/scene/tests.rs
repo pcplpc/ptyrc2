@@ -1680,3 +1680,38 @@ fn list_on_tells_what_shows() {
     scene.remove(front);
     assert_eq!(scene.compose(&base, &mock).text()[0], "Tbcd");
 }
+
+#[test]
+fn forgotten_rows_and_frames_take_their_sprites() {
+    let mock = Mock::new();
+    let mut scene = Scene::new();
+    let mut put = |frame: FrameId, y: i64| {
+        let anchor = json!({"at": [0, y], "space": "frame"});
+        scene
+            .add(
+                1,
+                spec(json!({"frame": frame, "anchor": anchor, "content": {"rows": ["x"]}})),
+                ms(0),
+            )
+            .unwrap()
+    };
+    let (here, far, other) = (put(PANE, 2), put(PANE, 100_005), put(RAW, 100_005));
+    let hud = scene
+        .add(
+            1,
+            spec(json!({"frame": PANE, "content": {"rows": ["h"]}})),
+            ms(0),
+        )
+        .unwrap();
+    scene.tick(ms(0), &mock);
+    scene.take_dirty();
+    // An island of the pane is forgotten: only what is fixed on its rows.
+    assert_eq!(scene.shift(PANE, 99_800, 100_220, ROWS_GONE), vec![far]);
+    assert!(scene.take_dirty());
+    assert!(scene.shift(PANE, 99_800, 100_220, ROWS_GONE).is_empty());
+    let ids = |scene: &Scene| scene.list().iter().map(|s| s.id).collect::<Vec<_>>();
+    assert_eq!(ids(&scene), vec![here, other, hud]);
+    // The frame itself: everything on it.
+    assert_eq!(scene.drop_frame(PANE), vec![here, hud]);
+    assert_eq!(ids(&scene), vec![other]);
+}

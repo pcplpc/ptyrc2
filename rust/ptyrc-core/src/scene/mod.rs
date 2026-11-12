@@ -200,6 +200,10 @@ impl Sprite {
     }
 }
 
+/// `dy` of `Scene::shift` and of `FrameEvent::Shift` for rows that are
+/// forgotten (an island collected), not moved.
+pub const ROWS_GONE: i64 = i64::MIN;
+
 /// Every sprite, and what they add to the screen.
 pub struct Scene {
     /// Sorted by `(layer, z, id)`: paint order.
@@ -504,8 +508,11 @@ impl Scene {
 
     /// Rows `from..=to` of `frame` moved by `dy` in frame space (a splice,
     /// an island merge): sprites fixed on those rows move with them.
-    pub fn shift(&mut self, frame: FrameId, from: i64, to: i64, dy: i64) {
+    /// `dy` is `ROWS_GONE`: the rows are forgotten; the sprites fixed on
+    /// them are removed, their ids returned.
+    pub fn shift(&mut self, frame: FrameId, from: i64, to: i64, dy: i64) -> Vec<SpriteId> {
         let rows = from..=to;
+        let mut gone = Vec::new();
         for sprite in self.sprites.iter_mut().filter(|s| s.frame == Some(frame)) {
             if let Anchor::At {
                 at,
@@ -513,16 +520,39 @@ impl Scene {
             } = &mut sprite.anchor
                 && rows.contains(&at[1])
             {
-                at[1] += dy;
+                if dy == ROWS_GONE {
+                    gone.push(sprite.id);
+                } else {
+                    at[1] += dy;
+                }
                 self.dirty = true;
             }
             if let Some((pos, _)) = &mut sprite.text_at
                 && rows.contains(&pos.y)
             {
-                pos.y += dy;
+                if dy == ROWS_GONE {
+                    sprite.text_at = None;
+                } else {
+                    pos.y += dy;
+                }
                 self.dirty = true;
             }
         }
+        self.sprites.retain(|s| !gone.contains(&s.id));
+        gone
+    }
+
+    /// `frame` is forgotten: remove the sprites on it; their ids.
+    pub fn drop_frame(&mut self, frame: FrameId) -> Vec<SpriteId> {
+        let gone: Vec<SpriteId> = self
+            .sprites
+            .iter()
+            .filter(|s| s.frame == Some(frame))
+            .map(|s| s.id)
+            .collect();
+        self.sprites.retain(|s| s.frame != Some(frame));
+        self.dirty |= !gone.is_empty();
+        gone
     }
 
     fn note_removed(&mut self, before: usize) -> usize {

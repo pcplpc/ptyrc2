@@ -5,7 +5,7 @@
 
 use crate::engine::{ConnId, Ctx, Engine, Reply, Token};
 use crate::rpc;
-use ptyrc_core::frames::{FrameConfig, Frames, ScreenInput};
+use ptyrc_core::frames::{FrameConfig, FrameEvent, Frames, ScreenInput};
 use ptyrc_core::plugin::{DrawExt, TuiSupport};
 use ptyrc_core::scene::Scene;
 use ptyrc_core::{FrameId, FrameSel, OwnerId, TextQuery};
@@ -145,23 +145,36 @@ impl ScreenEngine {
             events,
         };
         let changes = self.frames.update(&input, now);
-        self.shift_sprites(&changes);
+        self.shift_sprites(&changes, ctx);
         if !changes.is_empty() && ctx.has_subscribers("frames") {
             ctx.emit("frames", json!({"frames": self.frames.list()}));
         }
     }
 
-    /// Frame rows that moved in frame space take their sprites along.
-    fn shift_sprites(&mut self, changes: &[ptyrc_core::frames::FrameEvent]) {
+    /// Frame rows that moved in frame space take their sprites along;
+    /// rows and frames that are forgotten take theirs away (topic
+    /// `draw`).
+    fn shift_sprites(&mut self, changes: &[FrameEvent], ctx: &mut Ctx) {
         for change in changes {
-            if let ptyrc_core::frames::FrameEvent::Shift {
-                frame,
-                from,
-                to,
-                dy,
-            } = *change
-            {
-                self.scene.shift(frame, from, to, dy);
+            let (frame, removed, rows) = match *change {
+                FrameEvent::Shift {
+                    frame,
+                    from,
+                    to,
+                    dy,
+                } => (
+                    frame,
+                    self.scene.shift(frame, from, to, dy),
+                    Some([from, to]),
+                ),
+                FrameEvent::Dropped { frame } => (frame, self.scene.drop_frame(frame), None),
+                _ => continue,
+            };
+            if !removed.is_empty() {
+                ctx.emit(
+                    "draw",
+                    json!({"removed": removed, "frame": frame, "rows": rows}),
+                );
             }
         }
     }
@@ -403,7 +416,7 @@ impl Engine for ScreenEngine {
         self.ticked = now;
         self.ticks += 1;
         let changes = self.frames.tick(now);
-        self.shift_sprites(&changes);
+        self.shift_sprites(&changes, ctx);
         if !changes.is_empty() && ctx.has_subscribers("frames") {
             ctx.emit("frames", json!({"frames": self.frames.list()}));
         }

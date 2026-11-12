@@ -699,8 +699,9 @@ class Pilot:
     # -- events and debug -------------------------------------------------
 
     def subscribe(self, *topics: str) -> None:
-        """Ask for events: `screen`, `cursor`, `frames`, `idle`, `input`,
-        `size`, `exit`."""
+        """Ask for events: `screen`, `cursor`, `frames`, `idle` (a frame
+        became idle, or busy), `draw` (sprites removed with the rows or
+        the frame they were on), `input`, `size`, `exit`."""
         self.call("subscribe", topics=list(topics))
 
     def events(
