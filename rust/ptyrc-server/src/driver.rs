@@ -28,6 +28,8 @@ use std::time::{Duration, Instant};
 
 /// Upper bounds of a burst (design: "Coalescing").
 const BURST_MAX_BYTES: usize = 1 << 20;
+/// Below this size a burst is written at once, without the quiet time.
+const BURST_MIN_WAIT: usize = 32;
 const BURST_MAX_TIME: Duration = Duration::from_millis(8);
 /// Keyboard input is not read while this much waits for the app.
 const PTY_QUEUE_HIGH: usize = 1 << 20;
@@ -433,7 +435,8 @@ impl Driver {
                 Err(Errno::INTR) => {}
                 Err(Errno::AGAIN) => {
                     let left = BURST_MAX_TIME.saturating_sub(first.elapsed()).min(quiet);
-                    if burst.is_empty() || left.is_zero() {
+                    // A few bytes are a key echo or a cursor move: no wait.
+                    if burst.len() < BURST_MIN_WAIT || left.is_zero() {
                         break;
                     }
                     let wait = Timespec {

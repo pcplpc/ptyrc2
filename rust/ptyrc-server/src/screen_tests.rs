@@ -127,11 +127,11 @@ impl Rig {
         let e = &self.engine;
         assert_eq!(
             self.host.grid(),
-            e.host.grid(),
+            e.host().grid(),
             "host model drifted from the host"
         );
         if e.app.in_ground() {
-            assert!(e.host.same_state(&e.app), "host state is not the app's");
+            assert!(e.host().same_state(&e.app), "host state is not the app's");
             assert!(
                 self.host.same_state(&e.app),
                 "real host state is not the app's"
@@ -323,4 +323,120 @@ fn resize_forgets_painted_sprites() {
     // The raw frame settles again, then the sprite is back.
     rig.advance(1000);
     assert_eq!(rig.row(0), "text      SPRITE");
+}
+
+/// Mixed text with colours and a status line, as `scripts/bench.sh`.
+fn flood(bytes: usize) -> Vec<u8> {
+    let words = [
+        "the", "quick", "brown", "fox", "jumps", "世界", "🌼", "naïve", "dog",
+    ];
+    let mut seed = 0x2545_f491_4f6c_dd1du64;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+    let mut out = Vec::with_capacity(bytes + 256);
+    let mut i = 0;
+    while out.len() < bytes {
+        if i % 4 == 0 {
+            out.extend_from_slice(format!("\x1b[3{}m", i % 8).as_bytes());
+        }
+        for _ in 0..3 + next() % 16 {
+            out.extend_from_slice(words[(next() % 9) as usize].as_bytes());
+            out.push(b' ');
+        }
+        if i % 50 == 0 {
+            out.extend_from_slice(b"\x1b[1;4H\x1b[7m status \x1b[0m\x1b[40;1H");
+        }
+        out.extend_from_slice(b"\x1b[0m\r\n");
+        i += 1;
+    }
+    out
+}
+
+/// Cost of the burst path. `cargo test --release -p ptyrc-server bench --
+/// --ignored --nocapture`.
+#[test]
+#[ignore]
+fn bench_burst_path() {
+    use std::time::Instant;
+    let data = flood(32 << 20);
+    let mib = data.len() as f64 / (1 << 20) as f64;
+    for (label, chunk) in [
+        ("64 KiB bursts", 65536),
+        ("4 KiB bursts", 4096),
+        ("256 B bursts", 256),
+    ] {
+        let mut vt = Vt::new(120, 40);
+        let t = Instant::now();
+        for c in data.chunks(chunk) {
+            vt.feed(c);
+        }
+        let feed = t.elapsed().as_secs_f64();
+        let mut line = format!("{label}: one Vt {:.0} MiB/s", mib / feed);
+        for sprites in [false, true] {
+            let mut rig = Rig::new(120, 40);
+            if sprites {
+                rig.put(text_at(-1, 0, " 12:34:56 "));
+                rig.put(text_at(40, 10, "+--------+"));
+                rig.put(json!({"effect": {"name": "confetti", "params": {"duration_ms": 600000}}}));
+            }
+            let t = Instant::now();
+            let mut out = Vec::new();
+            for c in data.chunks(chunk) {
+                out.clear();
+                rig.now += Duration::from_micros(300);
+                let now = rig.now;
+                rig.ctx(|e, ctx| e.on_burst(c, now, &mut out, ctx));
+            }
+            let secs = t.elapsed().as_secs_f64();
+            line.push_str(&format!(
+                ", engine{} {:.1} MiB/s ({:.0} us/burst)",
+                if sprites { "+sprites" } else { "" },
+                mib / secs,
+                secs * 1e6 / (data.len() / chunk) as f64
+            ));
+        }
+        println!("{line}");
+    }
+    // A key echo: one byte on a still screen.
+    for sprites in [false, true] {
+        let mut rig = Rig::new(120, 40);
+        if std::env::var_os("PTYRC_BENCH_FILL").is_some() {
+            rig.burst(&data[..200_000]);
+        }
+        if sprites {
+            rig.put(text_at(-1, 0, " 12:34:56 "));
+        }
+        let mut out = Vec::new();
+        let run = |rig: &mut Rig, out: &mut Vec<u8>, n: usize, cold: bool| {
+            let mut junk = vec![1u8; 32 << 20];
+            let mut spent = Duration::ZERO;
+            for i in 0..n {
+                if cold {
+                    // Evict the caches, as the idle time between keys does.
+                    for b in junk.iter_mut().step_by(64) {
+                        *b = b.wrapping_add(1);
+                    }
+                }
+                out.clear();
+                rig.now += Duration::from_millis(3);
+                let now = rig.now;
+                // A typed line: a new glyph each time, a new row now and then.
+                let key: &[u8] = if i % 60 == 59 { b"\r\n" } else { b"a" };
+                let t = Instant::now();
+                rig.ctx(|e, ctx| e.on_burst(key, now, out, ctx));
+                spent += t.elapsed();
+            }
+            spent.as_secs_f64() * 1e6 / n as f64
+        };
+        let hot = run(&mut rig, &mut out, 20_000, false);
+        let cold = run(&mut rig, &mut out, 300, true);
+        println!(
+            "key echo{}: {hot:.1} us/burst hot, {cold:.1} us/burst cold",
+            if sprites { " with a sprite" } else { "" },
+        );
+    }
 }

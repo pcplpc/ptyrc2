@@ -51,6 +51,9 @@ pub struct ScreenEngine {
     pub(crate) base: Grid,
     /// The host may show sprite cells.
     painted: bool,
+    /// No sprite since the host model was last fed: it is the app model,
+    /// and is copied from it when the first sprite comes.
+    host_stale: bool,
     pub(crate) frames: Frames,
     pub(crate) scene: Scene,
     pub(crate) exts: Vec<Box<dyn DrawExt>>,
@@ -66,6 +69,10 @@ pub struct ScreenEngine {
     pub(crate) bursts: u64,
     /// Time of the last tick.
     ticked: Duration,
+    /// Ticks run.
+    pub(crate) ticks: u64,
+    /// Time spent in `on_burst`, for `debug.dump`.
+    pub(crate) burst_time: Duration,
 }
 
 impl ScreenEngine {
@@ -81,6 +88,7 @@ impl ScreenEngine {
             host: Vt::new(80, 24),
             base: Grid::new(80, 24),
             painted: false,
+            host_stale: false,
             frames: Frames::new(FrameConfig::default(), supports),
             scene,
             exts,
@@ -92,12 +100,16 @@ impl ScreenEngine {
             injected: 0,
             bursts: 0,
             ticked: Duration::ZERO,
+            ticks: 0,
+            burst_time: Duration::ZERO,
         }
     }
 
     fn resize(&mut self, cols: u16, rows: u16) {
         self.app.resize(cols, rows);
-        self.host.resize(cols, rows);
+        if !self.host_stale {
+            self.host.resize(cols, rows);
+        }
         // The host model is resized as the app model: crop and pad, which
         // is what hosts do on the alternate screen. Sprite cells stay known
         // and are repaired from there. A host that reflows its main screen
@@ -149,6 +161,7 @@ impl ScreenEngine {
         if self.scene.is_empty() && !self.painted {
             return;
         }
+        self.fresh_host();
         if !self.app.in_ground() || self.host.grid().cols() != self.app.grid().cols() {
             return;
         }
@@ -165,6 +178,24 @@ impl ScreenEngine {
         self.injected += (out.len() - before) as u64;
     }
 
+    /// Bring the host model up to date after a time without sprites.
+    fn fresh_host(&mut self) {
+        if self.host_stale {
+            self.host.clone_from(&self.app);
+            self.host.take_events();
+            self.host_stale = false;
+        }
+    }
+
+    /// The model of the host: the app's while no sprite is up.
+    pub(crate) fn host(&self) -> &Vt {
+        if self.host_stale {
+            &self.app
+        } else {
+            &self.host
+        }
+    }
+
     /// Write bytes of our own to the host.
     fn inject(&mut self, bytes: &[u8], out: &mut Vec<u8>) {
         out.extend_from_slice(bytes);
@@ -174,7 +205,11 @@ impl ScreenEngine {
 
     /// End a synchronized update we opened and the app does not hold.
     fn close_sync(&mut self, out: &mut Vec<u8>) {
-        if self.host.modes().sync_update && !self.app.modes().sync_update && self.app.in_ground() {
+        if !self.host_stale
+            && self.host.modes().sync_update
+            && !self.app.modes().sync_update
+            && self.app.in_ground()
+        {
             self.inject(ESU, out);
         }
     }
@@ -225,6 +260,14 @@ impl Engine for ScreenEngine {
 
     fn on_burst(&mut self, burst: &[u8], now: Duration, out: &mut Vec<u8>, ctx: &mut Ctx) {
         self.bursts += 1;
+        let started = std::time::Instant::now();
+        let sprites = self.painted || !self.scene.is_empty();
+        if sprites {
+            self.fresh_host();
+        } else {
+            // No sprite: the host model is the app model, fed once.
+            self.host_stale = true;
+        }
         self.app.feed(burst);
         let events = self.app.take_events();
         let to_scrollback = events.iter().any(|e| {
@@ -236,38 +279,41 @@ impl Engine for ScreenEngine {
                 }
             )
         });
-        // With sprites up, the burst and its repair are one synchronized
-        // update: the host never shows the app's redraw without them.
-        let sprites = self.painted || !self.scene.is_empty();
-        let can_inject = self.host.in_ground();
-        if sprites && can_inject && self.app.in_ground() && !self.host.modes().sync_update {
-            self.inject(BSU, out);
-        }
-        if self.painted && to_scrollback && can_inject {
-            // Sprites never enter the host scrollback.
-            let before = out.len();
-            repair(&mut self.host, &self.base, out);
-            self.injected += (out.len() - before) as u64;
-            self.painted = false;
-        }
-        // An app that ends its own synchronized update with the burst:
-        // the repair goes before that end, inside the app's update.
         let mut tail: &[u8] = &[];
-        let mut body = burst;
-        if sprites && burst.ends_with(ESU) && !self.app.modes().sync_update {
-            body = &burst[..burst.len() - ESU.len()];
-            tail = ESU;
+        if !sprites {
+            out.extend_from_slice(burst);
+        } else {
+            // With sprites up, the burst and its repair are one synchronized
+            // update: the host never shows the app's redraw without them.
+            let can_inject = self.host.in_ground();
+            if sprites && can_inject && self.app.in_ground() && !self.host.modes().sync_update {
+                self.inject(BSU, out);
+            }
+            if self.painted && to_scrollback && can_inject {
+                // Sprites never enter the host scrollback.
+                let before = out.len();
+                repair(&mut self.host, &self.base, out);
+                self.injected += (out.len() - before) as u64;
+                self.painted = false;
+            }
+            // An app that ends its own synchronized update with the burst:
+            // the repair goes before that end, inside the app's update.
+            let mut body = burst;
+            if sprites && burst.ends_with(ESU) && !self.app.modes().sync_update {
+                body = &burst[..burst.len() - ESU.len()];
+                tail = ESU;
+            }
+            out.extend_from_slice(body);
+            self.host.feed(body);
+            let closes = self.host.in_ground() && self.host.modes().sync_update;
+            if !tail.is_empty() && !closes {
+                // Not the end of an open update: no split.
+                out.extend_from_slice(tail);
+                self.host.feed(tail);
+                tail = &[];
+            }
+            self.host.take_events();
         }
-        out.extend_from_slice(body);
-        self.host.feed(body);
-        let closes = self.host.in_ground() && self.host.modes().sync_update;
-        if !tail.is_empty() && !closes {
-            // Not the end of an open update: no split.
-            out.extend_from_slice(tail);
-            self.host.feed(tail);
-            tail = &[];
-        }
-        self.host.take_events();
 
         let grid = self.app.grid();
         let changed_rows: Vec<u16> =
@@ -285,18 +331,28 @@ impl Engine for ScreenEngine {
         self.paint(now, out);
         if !tail.is_empty() {
             out.extend_from_slice(tail);
+            self.fresh_host();
             self.host.feed(tail);
         }
         self.close_sync(out);
-        if !changed_rows.is_empty() {
+        if self.base.cols() != self.app.grid().cols() || self.base.rows() != self.app.grid().rows()
+        {
             self.base.clone_from(self.app.grid());
+        } else {
+            for &row in &changed_rows {
+                self.base
+                    .row_mut(row)
+                    .clone_from_slice(self.app.grid().row(row));
+            }
         }
         self.emit_changes(changed_rows, ctx);
         self.settle_waits(now, ctx);
+        self.burst_time += started.elapsed();
     }
 
     fn on_tick(&mut self, now: Duration, out: &mut Vec<u8>, ctx: &mut Ctx) {
         self.ticked = now;
+        self.ticks += 1;
         let changes = self.frames.tick(now);
         self.shift_sprites(&changes);
         if !changes.is_empty() && ctx.has_subscribers("frames") {
@@ -343,6 +399,7 @@ impl Engine for ScreenEngine {
     }
 
     fn on_exit(&mut self, out: &mut Vec<u8>, _ctx: &mut Ctx) {
+        self.fresh_host();
         if !self.host.in_ground() {
             // The app died inside a sequence: CAN ends it on the host.
             self.app.feed(b"\x18");

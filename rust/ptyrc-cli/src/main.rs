@@ -103,6 +103,9 @@ struct Run {
     /// Plain pass-through: no screen model, no drawing
     #[arg(long)]
     transparent: bool,
+    /// Generic heuristics only: no per-app preset (vim, tmux...)
+    #[arg(long)]
+    no_presets: bool,
     /// Quiet time that ends a burst of app output, in milliseconds
     #[arg(long, default_value_t = 1)]
     coalesce_ms: u64,
@@ -214,10 +217,15 @@ fn verb_run(args: Run) -> Result<ExitCode, String> {
         headless: args.headless,
         size: args.size,
         host_log: args.host_log,
-        coalesce_ms: args.coalesce_ms,
+        // Nothing looks at a transparent stream: no reason to hold it.
+        coalesce_ms: if args.transparent {
+            0
+        } else {
+            args.coalesce_ms
+        },
     };
-    let status =
-        ptyrc_server::run(config, plugins::engine(args.transparent)).map_err(|e| e.to_string())?;
+    let status = ptyrc_server::run(config, plugins::engine(args.transparent, !args.no_presets))
+        .map_err(|e| e.to_string())?;
     Ok(ExitCode::from(status.clamp(0, 255) as u8))
 }
 

@@ -22,11 +22,12 @@ pub fn draw_ext() -> Vec<Box<dyn DrawExt>> {
 }
 
 /// The engine the driver runs. `transparent`: plain pass-through, no
-/// screen model.
-pub fn engine(transparent: bool) -> Box<dyn Engine> {
+/// screen model. `presets`: with the per-app presets.
+pub fn engine(transparent: bool, presets: bool) -> Box<dyn Engine> {
     if transparent {
         Box::new(PassThrough)
     } else {
-        Box::new(ScreenEngine::new(tui_support(), draw_ext()))
+        let supports = if presets { tui_support() } else { Vec::new() };
+        Box::new(ScreenEngine::new(supports, draw_ext()))
     }
 }
