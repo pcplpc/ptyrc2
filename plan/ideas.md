@@ -150,24 +150,9 @@ another backdrop is a pane; the agent preset knows the `┃ ... ╹▀▀▀` bo
 
 Open, in the frames (`frames/mod.rs`, `frames/ext.rs`):
 
-- htop, glances: panes are re-allocated at each refresh until the monitor
-  rule holds. Keys: none, wait. Expected: pane ids fixed from the first
-  layout, usable after `settle_ms`. Observed: htop ids 3,6 -> 7,8 -> 9,10
-  (usable at 5.6 s instead of 1.8 s); glances a new id for the stats pane
-  and for the table every 2 s for 7 s, again at 11.7 s. A sprite on such
-  a pane is hidden at each change. The chrome around changes too (uptime,
-  clock), so the "jump when the chrome is unchanged" rule never applies.
-- htop: `down down pagedown`, wait 6 s. Expected: the table pane keeps
-  rows 11..35. Observed: it shrinks, once to 11..34 (the key bar, right)
-  and in one run to 20..34: rows of the re-sorted table that stayed are
-  learned as chrome.
 - htop: the selected row is a bar until it first moves (rows 10 and 11
   are chrome, the table starts at 12). A list highlight could be told at
   once from a bar by its place: not at an edge, not next to a rule.
-- opencode: `ctrl+p` (palette, a centred panel). Expected: the pane under
-  it keeps its origin; the panel is an overlay. Observed: the pane jumps
-  to an island (origin 0,100000). The cells under a nested pane should
-  not vote in the parent's scroll detection.
 - opencode: the session view (transcript, sidebar) was not seen: it
   needs a prompt submitted to a model. The preset is checked on the home
   screen only. Messages of a transcript are panels too: expect candidate
@@ -262,3 +247,23 @@ tick while a layout was pending). Left:
   first selection change.
 - glances has no preset. htop menus (sort, setup) are left to the
   generic segmentation.
+
+## Monitors and overlays, third session
+
+Built: monitors are told at the first repaint (shape, no cursor, in
+place); rows under an overlay do not vote; `Tuning.monitor`. Left:
+
+- A monitor that shows a cursor and repaints more than 3 s apart
+  (`ptyrc run watch -n 5 ls -l`, then `ptyrc frames`) makes an island
+  per refresh.
+- A pane first seen under an overlay takes the overlay's rows; rows
+  under an overlay show their old text in `frame.text`.
+- A columnar file in an editor that hides its cursor: a jump painted in
+  place would be taken for a repaint.
+- htop without its preset: the selected row is chrome until it moves.
+- `scripts/e2e-frames.sh pages` (less): one run in eight, extent
+  `[0,145]` for `[0,144]`, the `:` prompt row remembered at rows 29, 58,
+  87. Not diagnosed.
+- `scripts/lib-e2e.sh` cannot pass `--no-presets`: the monitor scenario
+  runs with the htop preset on. An `E2E_RUN_ARGS` would test the
+  generic path.

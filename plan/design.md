@@ -231,7 +231,8 @@ origin. Each update compares the previous view content with the new one:
    beats `dy = 0` clearly and aligns at least `max(2, 30 %)` of the
    non-blank rows. `VtEvent::Scroll` inside the rect seeds the candidates.
    Rows that stay put while the rest shifts are chrome: the scroll band is
-   the largest run of rows that moves, learned over time.
+   the largest run of rows that moves, learned over time. Rows inside a
+   region the emulator scrolled are not top chrome.
    **Feed**: no row aligns, but the emulator counted the scroll. The
    distance is trusted when the rows went into the host scrollback (main
    screen), or when the screen was fed as a tape: one direction, fewer
@@ -343,8 +344,19 @@ Further rules, from real apps:
   layout is committed or replaced; ticks do not clear it.
 - When nothing aligns, the emulator's scroll counts are trusted only if
   rows entered the host scrollback (a shell printing a lot at once).
-- A pane replaced whole twice within 3 s is a monitor (htop): rewritten
-  in place from then on, no island.
+- A pane replaced whole is a monitor when the cells were rewritten where
+  they are (no clear, no scroll in the burst), no cursor shows in the
+  pane, and the rows kept their shape: on average 30 % of the cells keep
+  their glyph and 70 % their class (digit, letter, same sign). Failing
+  that, when it was replaced twice within 3 s. A monitor is rewritten in
+  place: every change is an edit of the rows in view, no frame is spent,
+  no island. It ends on a clear, or on a change of half its rows that is
+  of another shape. A scroll the emulator counted and the rows confirm
+  (nine in ten) is still a scroll. A preset declares one with
+  `Tuning.monitor`.
+- Rows of a pane under a smaller pane of the last segmentation (a
+  palette, a modal) are not read while they are: they keep what they
+  showed and do not vote.
 - A hinted view that contradicts what is remembered is another document:
   another frame; the first is found again by content.
 - `find`: a literal is searched in the row as it is; for a regular
