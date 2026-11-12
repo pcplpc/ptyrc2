@@ -64,7 +64,11 @@ fn show() {
     let mut walls = vec![""; 15];
     walls[7] = "           a shelf of words";
     walls[14] = "     lower";
-    let mut sand = make(json!({"walls": walls, "rate": 150}));
+    let rate: f64 = std::env::var("RATE")
+        .ok()
+        .and_then(|r| r.parse().ok())
+        .unwrap_or(150.0);
+    let mut sand = make(json!({"walls": walls, "rate": rate}));
     let mut canvas = Canvas::new(60, 20);
     for t in (0..=30_000u64).step_by(FRAME_MS as usize) {
         canvas.clear();
@@ -437,4 +441,22 @@ fn a_hot_column_is_a_worse_spout() {
     run(&mut sand, 21, 6, 0, 100);
     let x = sand.spout.unwrap().x;
     assert!(!(8..13).contains(&x) && (5..16).contains(&x), "{x}");
+}
+
+#[test]
+fn a_heavy_stream_spreads_and_does_not_choke() {
+    let mut sand = make(json!({"rate": 400}));
+    run(&mut sand, 60, 20, 0, 4800);
+    // All that was owed came out: no column stands under the spout.
+    assert!(sand.grains() >= 1900, "{}", sand.grains());
+    let rows = rows(&sand);
+    let top = rows.iter().position(|r| r.trim().len() > 6).unwrap();
+    assert!(top >= 12, "{rows:#?}");
+    // The slopes are gentle: the floor is covered far wider than high.
+    assert!(rows[19].trim().len() > 4 * (20 - top), "{rows:#?}");
+    // A light stream is as it was: one dot a step, friction whole.
+    let mut light = make(json!({"rate": 100}));
+    run(&mut light, 60, 20, 0, 4800);
+    let rows = super::tests::rows(&light);
+    assert!(rows[19].trim().len() < 30, "{rows:#?}");
 }

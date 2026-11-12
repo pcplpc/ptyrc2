@@ -41,6 +41,12 @@
 //!
 //! A grain that moves wakes the three above it: a toppling grain starts
 //! an avalanche.
+//!
+//! A heavy stream (more than `FLOW` grains a step) has a reach `r`, the
+//! grains a step over `FLOW`, `REACH` at most. A held grain then slides
+//! up to `r` dots a step, stops `r` times less often, gives way sideways
+//! through `r - 1` grains, and wakes those it lands on: the slopes carry
+//! what the spout pours, and no column stands under it.
 
 use ptyrc_core::frames::HeatClass;
 use ptyrc_core::plugin::{DrawExt, FnDoc};
@@ -71,6 +77,10 @@ const CLIFF: usize = 3;
 const FRICTION: u64 = 96;
 /// Steps a spout stays choked before it moves.
 const CHOKE: u32 = 60;
+/// Grains a step that slides of one dot carry away from under the spout.
+const FLOW: f64 = 1.2;
+/// Dots a grain slides in one step, at most.
+const REACH: usize = 8;
 /// Rows of cells kept out of the canvas, at most.
 const ATTIC: usize = 1024;
 
@@ -411,11 +421,17 @@ impl Sand {
     }
 
     /// Where the grain at `(x, y)`, held from below, goes.
-    fn slide(&mut self, x: usize, y: usize, awake: bool) -> Option<(usize, usize)> {
+    fn slide(&mut self, x: usize, y: usize, awake: bool, reach: usize) -> Option<(usize, usize)> {
         let w = self.w * DW;
+        // The nearest free dot of the row, through `reach - 1` grains at
+        // most: under a heavy stream the heap gives way sideways.
         let side = |d: i64| {
-            let nx = x as i64 + d;
-            (nx >= 0 && nx < w as i64 && self.free(nx as usize, y)).then_some(nx as usize)
+            (1..=reach as i64)
+                .map(|k| x as i64 + d * k)
+                .take_while(|nx| *nx >= 0 && *nx < w as i64)
+                .map(|nx| nx as usize)
+                .find(|nx| !matches!(self.at(*nx, y), Dot::Grain(..)))
+                .filter(|nx| self.free(*nx, y))
         };
         let fall = |nx: Option<usize>| nx.map_or(0, |nx| self.drop(nx, y));
         let (left, right) = (side(-1), side(1));
@@ -425,7 +441,7 @@ impl Sand {
         if dl.max(dr) >= need {
             let go_left = dl > dr || (dl == dr && coin & 1 == 0);
             let (nx, depth) = if go_left { (left, dl) } else { (right, dr) };
-            if awake && depth == 1 && (coin >> 8) & 0xff < FRICTION {
+            if awake && depth == 1 && (coin >> 8) & 0xff < FRICTION / reach as u64 {
                 return None;
             }
             return nx.map(|nx| (nx, y + 1));
@@ -448,8 +464,35 @@ impl Sand {
         nx.map(|nx| (nx, y + 1))
     }
 
+    /// Move a grain; it wakes the three above the place it leaves.
+    fn shift(&mut self, from: (usize, usize), to: (usize, usize), shade: u8, knock: bool) {
+        let (x, y) = from;
+        self.set(x, y, Dot::Free);
+        self.set(to.0, to.1, Dot::Grain(shade, true));
+        if knock {
+            // It shakes what it lands on and beside.
+            let w = self.w * DW;
+            for ky in to.1..(to.1 + 2).min(self.h * DH) {
+                for kx in to.0.saturating_sub(1)..(to.0 + 2).min(w) {
+                    if let Dot::Grain(s, false) = self.at(kx, ky) {
+                        self.set(kx, ky, Dot::Grain(s, true));
+                    }
+                }
+            }
+        }
+        if y > 0 {
+            for ax in x.saturating_sub(1)..(x + 2).min(self.w * DW) {
+                if let Dot::Grain(s, false) = self.at(ax, y - 1) {
+                    self.set(ax, y - 1, Dot::Grain(s, true));
+                }
+            }
+        }
+    }
+
     fn step(&mut self) {
         let (w, h) = (self.w * DW, self.h * DH);
+        let per_step = self.params.rate * STEP_MS as f64 / 1000.0;
+        let reach = (per_step / FLOW).ceil().clamp(1.0, REACH as f64) as usize;
         // Bottom up, so a grain moves once per step; the sweep changes
         // side each step, so neither is favoured.
         let reverse = self.steps & 1 == 1;
@@ -459,27 +502,25 @@ impl Sand {
                 let Dot::Grain(shade, awake) = self.at(x, y) else {
                     continue;
                 };
-                let to = if y + 1 == h {
-                    None
-                } else if self.free(x, y + 1) {
-                    Some((x, y + 1))
-                } else {
-                    self.slide(x, y, awake)
-                };
-                let Some((nx, ny)) = to else {
-                    if awake {
-                        self.set(x, y, Dot::Grain(shade, false));
-                    }
+                if y + 1 < h && self.free(x, y + 1) {
+                    self.shift((x, y), (x, y + 1), shade, reach > 1);
                     continue;
-                };
-                self.set(x, y, Dot::Free);
-                self.set(nx, ny, Dot::Grain(shade, true));
-                if y > 0 {
-                    for ax in x.saturating_sub(1)..(x + 2).min(w) {
-                        if let Dot::Grain(s, false) = self.at(ax, y - 1) {
-                            self.set(ax, y - 1, Dot::Grain(s, true));
-                        }
+                }
+                // Held from below: down the slope, further when the
+                // stream is heavy, so the slides keep up with it.
+                let (mut x, mut y, mut awake, mut moved) = (x, y, awake, false);
+                for _ in 0..reach {
+                    if y + 1 >= h || self.free(x, y + 1) {
+                        break;
                     }
+                    let Some((nx, ny)) = self.slide(x, y, awake, reach) else {
+                        break;
+                    };
+                    self.shift((x, y), (nx, ny), shade, reach > 1);
+                    (x, y, awake, moved) = (nx, ny, true, true);
+                }
+                if !moved && awake {
+                    self.set(x, y, Dot::Grain(shade, false));
                 }
             }
         }
