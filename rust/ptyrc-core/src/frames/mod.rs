@@ -732,6 +732,16 @@ impl Frames {
         best.map(|b| b.0)
     }
 
+    /// Key of a pane: what fills the screen first (a tmux window), then
+    /// what the pane shows (a file).
+    fn full_key(&self, pane_key: Option<String>) -> Option<String> {
+        match (&self.screen_key, pane_key) {
+            (Some(s), Some(k)) if *s != k => Some(format!("{s}/{k}")),
+            (Some(s), _) => Some(s.clone()),
+            (None, k) => k,
+        }
+    }
+
     fn segment(&self, input: &ScreenInput, now: Duration) -> (Vec<Leaf>, Vec<Sep>) {
         let all = Rect::new(0, 0, self.screen.cols, self.screen.rows);
         let pv = self.pane_view(input, all);
@@ -868,12 +878,16 @@ impl Frames {
         leaf: &Leaf,
         input: Option<&ScreenInput>,
         skip: &[FrameId],
+        by_content: bool,
     ) -> Option<FrameId> {
         let rect = leaf.rect();
-        let key = input.and_then(|inp| {
+        // `by_content`: the key cannot tell the candidates apart.
+        let key = input.filter(|_| !by_content).and_then(|inp| {
             let pv = self.pane_view(inp, rect);
-            self.detect(&pv)
-                .and_then(|s| self.supports[s].frame_key(&pv))
+            self.full_key(
+                self.detect(&pv)
+                    .and_then(|s| self.supports[s].frame_key(&pv)),
+            )
         });
         // Same rectangle first; else a frame whose rectangle overlaps (a
         // pane resized keeps its identity).
@@ -898,7 +912,7 @@ impl Frames {
                 let score = if p.kind == FrameKind::Chrome {
                     1.0
                 } else if key.is_some() && p.key == key {
-                    2.0
+                    2.0 + p.ext.share(&self.hashes_for(rect, p.left, p.right))
                 } else if key.is_some() && p.key.is_some() {
                     0.0
                 } else {
@@ -989,7 +1003,7 @@ impl Frames {
             if let Some(id) = keep {
                 self.resume(id);
                 active.push(id);
-            } else if let Some(id) = self.recognise(leaf, input, &active) {
+            } else if let Some(id) = self.recognise(leaf, input, &active, false) {
                 self.attach(id, leaf.rect(), now, ev);
                 active.push(id);
             } else {
@@ -1150,13 +1164,7 @@ impl Frames {
                     new_key = None;
                 }
             }
-            // What fills the screen comes first: a tmux window, then the
-            // file a pane of it shows.
-            new_key = match (&self.screen_key, new_key) {
-                (Some(s), Some(k)) if *s != k => Some(format!("{s}/{k}")),
-                (Some(s), _) => Some(s.clone()),
-                (None, k) => k,
-            };
+            new_key = self.full_key(new_key);
         }
 
         // Generic gutter: a number column is left chrome, with or without
@@ -1275,7 +1283,8 @@ impl Frames {
             ev.push(FrameEvent::Rect { frame: id });
         }
 
-        if out != Outcome::Lost && !key_changed {
+        let other_doc = out == Outcome::Other;
+        if !matches!(out, Outcome::Lost | Outcome::Other) && !key_changed {
             p.key = new_key;
             self.panes.insert(id, p);
             return;
@@ -1288,16 +1297,16 @@ impl Frames {
         };
         let same_key = p.key.is_some() && p.key == new_key;
         self.panes.insert(id, p);
-        let other = if same_key {
+        let other = if same_key && !other_doc {
             None
         } else {
-            self.recognise(&leaf, input, &self.active)
+            self.recognise(&leaf, input, &self.active, same_key)
         };
         let next = if let Some(other) = other {
             self.deactivate(id, now, ev);
             self.attach(other, leaf.rect(), now, ev);
             Some(other)
-        } else if key_changed || (chrome_changed && !same_key) {
+        } else if key_changed || other_doc || (chrome_changed && !same_key) {
             self.deactivate(id, now, ev);
             let fresh = self.new_pane(&leaf, now);
             ev.push(FrameEvent::Added { frame: fresh });

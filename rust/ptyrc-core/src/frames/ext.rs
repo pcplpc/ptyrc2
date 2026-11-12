@@ -40,6 +40,9 @@ pub(crate) enum Outcome {
     Jump,
     /// Whole change, origin unknown. Nothing was applied.
     Lost,
+    /// Whole change, and the app places the view on rows remembered with
+    /// other content: another document. Nothing was applied.
+    Other,
 }
 
 /// A change of the remembered buffer the scene must follow.
@@ -363,7 +366,7 @@ impl Ext {
             return Outcome::Same;
         }
         let out = self.classify(o);
-        if out != Outcome::Lost {
+        if !matches!(out, Outcome::Lost | Outcome::Other) {
             self.hint(o, matches!(out, Outcome::Jump));
         }
         out
@@ -477,6 +480,18 @@ impl Ext {
         }
         if nb >= 2 && c0 * 5 < nb * 2 {
             if let Some(oy) = o.hint_oy {
+                let (mut known, mut same) = (0usize, 0usize);
+                for i in a..b {
+                    if let Some(s) = self.lines.get(&(oy + i as i64))
+                        && s.hash != BLANK
+                    {
+                        known += 1;
+                        same += (s.hash == nh[i]) as usize;
+                    }
+                }
+                if known >= 3 && same * 5 < known {
+                    return Outcome::Other;
+                }
                 self.oy = oy;
                 self.absolute = true;
                 self.enter_island(h);

@@ -1201,6 +1201,30 @@ fn plugin_chrome_hint_key() {
 // -- wire, cost --------------------------------------------------------
 
 #[test]
+fn hinted_view_of_another_document_is_another_frame() {
+    // The app says "row 0" for both files (a tab switch at the top of
+    // each): the first frame is not overwritten, and comes back.
+    let a = doc(300);
+    let b: Vec<String> = (0..300).map(|i| format!("other {i:04} zzz")).collect();
+    let mut s = Sim::with(FrameConfig::default(), vec![Box::new(Fake)]);
+    let screen = |d: &[String], top: usize| view(&d[top..], 0, 20, &[&format!("FAKE x {top}")]);
+    s.settle(&screen(&a, 0));
+    let first = s.pane().id;
+    s.feed(&screen(&a, 10), 300);
+    s.feed(&screen(&a, 0), 300);
+    s.feed(&screen(&b, 0), 300);
+    let second = s.pane().id;
+    assert_ne!(second, first);
+    s.feed(&screen(&b, 5), 300);
+    s.idle(300);
+    s.feed(&screen(&a, 0), 300);
+    assert_eq!((s.pane().id, s.pane().origin), (first, [0, 0]));
+    s.idle(300);
+    assert_eq!(s.f.text(first, 0, 30), a[..30].to_vec());
+    assert_eq!(s.f.text(second, 0, 25), b[..25].to_vec());
+}
+
+#[test]
 fn wire_forms() {
     let mut s = Sim::new();
     s.settle(&view(&doc(30), 0, 20, &[]));

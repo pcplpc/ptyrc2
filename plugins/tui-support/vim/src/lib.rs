@@ -18,6 +18,30 @@ static GUTTER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*(\d+) ").unwr
 
 pub struct Vim;
 
+/// Text of a screen row over the columns of the pane.
+fn screen_row(pane: &PaneView, y: u16) -> String {
+    (pane.rect.x..pane.rect.right())
+        .map(|x| pane.grid.cell(x, y))
+        .filter(|c| c.width != 0)
+        .map(|c| c.text.as_str())
+        .collect()
+}
+
+/// The pane reaches the bottom of the screen: it holds the command line.
+fn at_bottom(pane: &PaneView) -> bool {
+    pane.rect.bottom() == pane.grid.rows()
+}
+
+/// The status line of a window in a split: the row right below the pane.
+fn status_below(pane: &PaneView) -> Option<String> {
+    let y = pane.rect.bottom();
+    if y >= pane.grid.rows() {
+        return None;
+    }
+    let text = screen_row(pane, y);
+    RULER.is_match(text.trim_end()).then_some(text)
+}
+
 /// Row of the pane (relative) holding the ruler, searched from the bottom.
 fn ruler_row(pane: &PaneView) -> Option<(u16, String)> {
     let h = pane.rect.h;
@@ -25,6 +49,13 @@ fn ruler_row(pane: &PaneView) -> Option<(u16, String)> {
         let text = pane.row_text(row);
         RULER.is_match(text.trim_end()).then_some((row, text))
     })
+}
+
+/// The ruler text, inside the pane or on the status line below it.
+fn ruler(pane: &PaneView) -> Option<String> {
+    ruler_row(pane)
+        .map(|(_, text)| text)
+        .or_else(|| status_below(pane))
 }
 
 fn tilde_rows(pane: &PaneView) -> u16 {
@@ -43,7 +74,7 @@ impl TuiSupport for Vim {
             return 0.0;
         }
         let mut score: f32 = 0.0;
-        if ruler_row(pane).is_some() {
+        if ruler(pane).is_some() {
             score += 0.6;
         }
         let last = pane.row_text(pane.rect.h - 1);
@@ -60,12 +91,14 @@ impl TuiSupport for Vim {
         score.min(1.0)
     }
 
-    /// The command line, and the ruler row when it is a separate one.
+    /// The command line, and the ruler row when it is a separate one. A
+    /// window of a split has neither inside it.
     fn chrome(&self, pane: &PaneView) -> Option<Chrome> {
         let h = pane.rect.h;
         let bottom = match ruler_row(pane) {
             Some((row, _)) => h - row,
-            None => 1,
+            None if at_bottom(pane) => 1,
+            None => 0,
         };
         Some(Chrome {
             bottom: bottom.min(h.saturating_sub(1)),
@@ -107,7 +140,7 @@ impl TuiSupport for Vim {
                 col: None,
             });
         }
-        let (_, text) = ruler_row(pane)?;
+        let text = ruler(pane)?;
         let caps = RULER.captures(text.trim_end())?;
         matches!(&caps[3], "Top" | "All").then_some(ViewHint {
             row: Some(0),
@@ -115,8 +148,18 @@ impl TuiSupport for Vim {
         })
     }
 
-    /// The file named by the terminal title, for a full-screen editor.
+    /// The file: named by the status line of a split window, else by the
+    /// terminal title for a full-screen editor.
     fn frame_key(&self, pane: &PaneView) -> Option<String> {
+        if let Some(status) = status_below(pane) {
+            let end = RULER.find(status.trim_end())?.start();
+            let name = status[..end]
+                .trim()
+                .trim_end_matches("[+]")
+                .trim_end_matches("[RO]")
+                .trim();
+            return (!name.is_empty()).then(|| format!("vim:{name}"));
+        }
         if pane.rect != pane.grid.rect() {
             return None;
         }
@@ -169,6 +212,38 @@ mod tests {
         let p = pane(&grid, "");
         assert!(Vim.detect(&p) >= 0.5);
         assert_eq!(Vim.view_hint(&p).unwrap().row, Some(0));
+    }
+
+    #[test]
+    fn window_of_a_split() {
+        let grid = Grid::from_lines(
+            40,
+            &[
+                "other 008 sigma mu",
+                "other 009 theta",
+                "other 010 tau",
+                "dir/other.txt [+]         8,1        6%",
+                "line 001: brown",
+                "line 002: apple",
+                "line 003: the",
+                "dir/long.txt              1,1       Top",
+                ":",
+            ],
+        );
+        let pane = |y, h| PaneView {
+            grid: &grid,
+            rect: ptyrc_vt::Rect::new(0, y, 40, h),
+            cursor: None,
+            title: "",
+            alt_screen: true,
+        };
+        let (top, low) = (pane(0, 3), pane(4, 3));
+        assert!(Vim.detect(&top) >= 0.5);
+        assert_eq!(Vim.chrome(&top).unwrap().bottom, 0);
+        assert_eq!(Vim.view_hint(&top), None);
+        assert_eq!(Vim.frame_key(&top).unwrap(), "vim:dir/other.txt");
+        assert_eq!(Vim.view_hint(&low).unwrap().row, Some(0));
+        assert_eq!(Vim.frame_key(&low).unwrap(), "vim:dir/long.txt");
     }
 
     #[test]
