@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from ptyrc import Pilot
+from ptyrc import Match, Pilot
 from ptyrc_apps import (
     APPS,
     _arcade,
@@ -23,6 +23,7 @@ from ptyrc_apps import (
     confetti,
     fishes,
     flower,
+    marks,
     sand,
     snake,
 )
@@ -892,6 +893,66 @@ def test_cat_life(session: Pilot) -> None:
     run(lambda: it.act == "alert")
     assert (it.x, it.g) != was and it.sprite.info()["covered"] == 0
     it.sprite.remove()
+
+
+def test_marks_wanted() -> None:
+    def match(y: int, shown: bool = True, text: str = "ab") -> Match:
+        return Match(1, 3, y, len(text), text, (3, y - 100) if shown else None)
+
+    found = [
+        (1, 0, [match(90, False), match(100), match(109), match(140, False)]),
+        (1, 1, [match(105, text="xyz"), match(106, text="")]),
+    ]
+    keys, counts = marks.wanted(found, {1: (100, 10)})
+    # In view first, then the nearest rows; an empty match is no mark.
+    assert [k[2] for k in keys] == [100, 109, 105, 90, 140]
+    assert keys[2] == (1, 3, 105, 1, "xyz")
+    assert counts == [[2, 4], [1, 1]]
+    assert [k[2] for k in marks.wanted(found, {1: (100, 10)}, most=3)[0]] == [
+        100,
+        109,
+        105,
+    ]
+
+
+def test_marks_hud() -> None:
+    rows = marks.hud(["TODO", "a very long pattern indeed"], [[2, 2], [1, 12]])
+    text = ["".join(run["t"] for run in row) for row in rows]
+    assert text == ["  TODO                 2 ", "  a very long pat…  1/12 "]
+    assert rows[0][1]["bg"] == marks.INKS[0][0] != rows[1][1]["bg"]
+
+
+def test_marks(session: Pilot) -> None:
+    session.send("clear; echo 'an apple, a pear, an Apple'\n")
+    session.wait_for("Apple", frame="raw")
+    time.sleep(0.3)
+    args = ["-s", session.session, "apple", "-i", "-e", "p[ea]+r"]
+    status: list[int] = []
+    thread = threading.Thread(target=lambda: status.append(marks.main(args, seconds=4)))
+    thread.start()
+
+    def tints() -> list[tuple[int, int]]:
+        return sorted(
+            (s["size"][0], s["anchor"]["at"][1])
+            for s in session.sprites()
+            if s["blend"] == "tint" and s["visible"]
+        )
+
+    def displayed(note: str) -> bool:
+        return any(note in row for row in session.dump()["host"])
+
+    # Three matches on the row of the output, and the display.
+    assert until(lambda: [w for w, _ in tints()] == [4, 5, 5], 3), session.sprites()
+    assert len({y for _, y in tints()}) == 1
+    assert until(lambda: displayed(" apple    2") and displayed(" p[ea]+r  1"), 2)
+    # New text: marked when it shows, without asking.
+    session.send("echo APPLE\n")
+    assert until(lambda: len(tints()) >= 5, 3), tints()  # typed, then printed
+    assert until(lambda: displayed(" apple    4"), 2), shown(session)
+    thread.join()
+    assert status == [0]
+    assert until(lambda: session.sprites() == [], 3)
+    assert marks.main(["-s", session.session, "-e", "("]) == 1
 
 
 def test_clock(session: Pilot) -> None:

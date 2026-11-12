@@ -15,6 +15,7 @@ APPS = {
     "confetti": "a burst of confetti; a party with --party",
     "fishes": "fishes behind the text, afraid of the cursor",
     "flower": "a flower next to a word",
+    "marks": "a highlighter: the matches of patterns, in colours",
     "sand": "sand falling in an idle pane",
     "snake": "a snake that plays alone between the words",
 }
