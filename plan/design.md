@@ -348,7 +348,8 @@ Sprite, as JSON (the wire form; serde on the core types):
   "content": {"rows": ["text", "..."], "style": {"fg": "red"}},
   "frames": [{"rows": ["..."], "ms": 100}],
   "loop": true,
-  "blend": "over",
+  "layer": "back",
+  "blend": "normal",
   "z": 0,
   "ttl_ms": null,
   "persist": false,
@@ -380,8 +381,12 @@ Sprite, as JSON (the wire form; serde on the core types):
 - `style`: `fg`, `bg` (colour name, `0..255`, `"#rrggbb"`, `"default"`;
   absent: inherit the cell below), `bold`, `dim`, `italic`, `underline`,
   `inverse`, `strike`, `blink`.
-- `blend`: `over`; `behind` (only where the app cell is blank: text stays
-  on top); `tint` (keeps the app glyph, applies the style).
+- `layer`: an integer other than 0, or `"back"` (-1), `"front"` (1). See
+  Layers. Absent: `back`; `front` for a tint.
+- `blend`: `normal`; `tint` (keeps the glyph below, applies the style).
+  `over` and `behind`, names of the first draft, are read as `normal`
+  with the layer `front` or `back` when none is given.
+- `z`: order inside a layer.
 - `effect`: a native generator in place of `content`; it owns the sprite's
   cells every tick. Built in: `confetti`. Plugins add more.
 - A sprite belongs to the connection that added it and dies with it unless
@@ -389,6 +394,54 @@ Sprite, as JSON (the wire form; serde on the core types):
 
 Sprites are clipped to the view rect of their frame. `compose` goes through
 `Grid::put`.
+
+A finite animation and an effect start their clock when the sprite is
+first drawn: added on a frame that is not usable yet, or on a text that
+is not there yet, they wait. `ttl_ms` counts from the add in any case.
+
+### Layers
+
+A sandwich. The app is layer 0. Sprites of negative layers are behind
+it, sprites of positive layers in front. Paint order is `(layer, z,
+id)`. The default is behind: the app's text stays in front of what is
+drawn.
+
+Background and foreground are those of `ptyrc-vt`: `Cell::has_ink()`,
+`Cell::backdrop()`.
+
+Back layers are flattened among themselves first (a nearer glyph
+replaces a farther one; a glyph without `bg` keeps the colour of the
+layers behind it), then seen through the app, cell by cell:
+
+- A back glyph shows where the app cell has no ink. A wide glyph needs
+  two such cells with the same resulting style; otherwise it is not
+  drawn, by halves neither.
+- A back colour (`bg`) shows where the app's backdrop is the default
+  one and the cell is not inverse. An app glyph there keeps its text,
+  its foreground and its attributes, and stands on the sprite's
+  background: a true sandwich. A wide app glyph takes the colour behind
+  its head.
+- Another backdrop is the app's and wins: a panel of another colour, a
+  status bar, inverse video. A back glyph is still seen through its
+  cells without ink, on the app's colour; a back `bg` is not seen there.
+- A `tint` behind the app is a colour of background only.
+
+With back layers alone, every app cell with ink keeps its glyph, its
+foreground and its attributes, and every backdrop the app chose is kept
+(tested as a property).
+
+Front layers go over whatever is below, app text included: a space is
+transparent unless `opaque`; a glyph without `bg` keeps the colour
+below it. A front `tint` recolours the app's glyphs.
+
+A scene of four layers:
+
+```
+ptyrc draw text --layer -2 --bg 17 --opaque ...    static background
+ptyrc draw text --at 4,2 '<*//><'                  a drawing in front of it
+                                                   the app's text
+ptyrc draw text --layer front --auto top-right ... a display in front of all
+```
 
 ## Plugins
 
@@ -464,7 +517,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `draw.remove` | `id` | `{}` |
 | `draw.clear` | `all` | `{"removed":n}` |
 | `draw.list` | | `{"sprites":[...]}` |
-| `draw.ext` | `name`, `function`, `params`, sprite fields | `{"id":n}` |
+| `draw.ext` | `name`, `function`, `params`, sprite fields; with `id`: redraw that sprite in place (content replaced, the rest kept unless given) | `{"id":n}` |
 | `draw.exts` | | `{"exts":[{"name","functions":[...]}],"effects":[...]}` |
 | `batch` | `calls`: `[{"method","params"}]` | `{"results":[{"result"} or {"error"},...]}`, applied in one repaint |
 | `subscribe` | `topics`: `screen`, `cursor`, `frames`, `input`, `size`, `exit` | `{}` |
@@ -498,6 +551,8 @@ ptyrc wait [PATTERN] [--stable MS] [--gone] [--timeout MS]
 ptyrc frames [--watch]
 ptyrc heat [-f FRAME]
 ptyrc draw text|ext|effect|exts|rm|ls|clear ...   (sprites persist)
+      [--layer back|front|N] [--blend normal|tint] [-z N]
+      draw ext --id SPRITE NAME FUNCTION [JSON]   redraw in place
 ptyrc show                        live mirror of the remote screen
 ptyrc events [TOPIC...]           JSON events, one per line
 ptyrc debug overlay frames|heat|off ; ptyrc debug dump

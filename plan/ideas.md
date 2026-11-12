@@ -37,11 +37,6 @@ Backlog. Not a commitment; moved to `design.md` when taken.
 ## From the first session's work
 
 - `frame.get {frame}` instead of `frame.at {name}`.
-- Update a sprite made by a draw extension in place (the big clock
-  re-creates its sprite each minute).
-- One width function for the emulator and the scene.
-- A finite animation added while the raw frame is not yet usable (250 ms
-  after the first screen) plays unseen: hold its clock until shown.
 - Islands of an extended frame are never collected.
 
 ## From the owner, after the first session
@@ -75,3 +70,24 @@ Notes, not commitments. They extend "background against foreground" above.
   a big animation (sand in an empty pane).
 - Team: the session agent pilots; forked siblings own disjoint paths and
   may delegate bounded pieces to sub-agents.
+
+## Layers, second session
+
+Built: see `design.md`, "Layers". Left:
+
+- Alpha. A back `bg` under a panel of the app is hidden; a blend of the
+  two needs RGB on both sides, and the default background of the host is
+  not known to the driver (OSC 11 would tell). `alpha` per sprite, on
+  RGB colours only, once that is.
+- Named layers beyond `back` and `front` (`"hud"`, `"wallpaper"`): only
+  integers today.
+- A panel as a surface: a back sprite clipped to a panel of the app, or
+  placed on it by name of colour.
+- A drawing next to a word (`--near`) is hidden where the app has text,
+  as any back sprite. A hint in `draw.list` (`covered`: share of its
+  cells hidden by ink) would help a client choose `front`.
+- `Grid::put` gives the spacer of a wide glyph the style of its head;
+  the scene relies on it. The front layers do not check that a wide
+  sprite glyph lands on one backdrop.
+- An effect made by a draw extension cannot be redrawn in place
+  (`draw.ext` with `id` replaces content and frames only).
