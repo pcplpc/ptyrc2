@@ -462,9 +462,9 @@ Idle: `score` is the share of the view's cells that are not hot and have
 0.8`. `free` is the share static and without foreground. All three are
 computed at the time of the request: time passes without a tick.
 
-`debug overlay heat`: red for hot (brighter when busier), light blue for
-static text, green for free, violet for a panel; the last three brighten
-until the cell has been still for 10 s.
+`debug overlay heat`: dark backgrounds only. Red for hot (brighter when
+busier), blue for static text, green for free, violet for a panel; the
+last three brighten until the cell has been still for 10 s.
 
 The heat is lazy. A row is brought up to date when the screen changed on
 it; otherwise it is read as it would stand at the asked time (decay
