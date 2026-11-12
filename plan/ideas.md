@@ -416,6 +416,51 @@ attach, input interception, mouse clicks, screenshots, selectors. Left:
   a deliberate change of the heuristics needs `scripts/record-tapes.sh
   --snap` and a read of the diff.
 
+## Tools, fifth session, second round
+
+Built (`design.md`, "Tools"): a seek back (the tape replayed from its
+start by a new engine); the tape header, version 2 (host colours,
+presets; colours told later are a record); a paused replay holds a
+`screen.wait` to the real clock; tapes of vim, htop, ranger; host mouse
+reports parsed (SGR, X10) while a client listens to `mouse`: a click on
+a sprite is an event, any other is the app's, in its own form;
+`input.click` with `mods`, `count`, `to`; `Locator.click` options,
+`Pilot.clicks`, `Pilot.on_click`, `scripts/click-sprite.py`; `attach`
+takes the app's cursor-key, mouse and paste modes and follows the size
+of its terminal; `shot` draws the cursor. Left:
+
+- A rewind drops the sprites and refuses the pending waits; no event
+  says so. A client that draws on a replay draws again after a seek
+  back.
+- `replay` takes the colours of the tape as an option would
+  (`host_colors.from`: `option`); no `--host-fg` / `--host-bg` on
+  `replay`. A colour set at run time by a client is not recorded: only
+  what the host answers is.
+- Paused, `stable_ms` and `idle` waits can only time out: they count
+  tape time.
+- Tapes: vim's `ctrl+f` (two rows of overlap) is read as a jump, each
+  page an island; the tape uses `ctrl+d`. htop is run on one process
+  (`-p 1`): a full list holds user names and paths. ranger's top bar
+  holds the user and the host: `scrub` replaces them, same length. No
+  tape of an agent TUI, none per e2e flake.
+- Host mouse: the hit is the sprite's box, not its ink; effects are
+  not clicked. No hover event unless the app asked for 1003 (the host
+  is asked for 1002). A report cut by a read is not seen; modes 1005
+  and 1015 are not read. While a client listens, the host terminal's
+  own selection needs shift, as under any app that takes the mouse.
+  The driver asks again after every burst that sets a private mode:
+  some bytes more per burst, while listened to.
+- `input.click`: a drag is one move; no path, no hold time.
+- `attach`: a mode the app sets with nothing drawn is seen within
+  250 ms, not at once; a key typed in between goes in the old mode.
+  The detach key cut by a read is still not seen. `--resize` on a
+  session with a host terminal is refused at the first resize.
+- `shot`: `--ansi` has no cursor; one cursor shape (a block). No PNG:
+  text in a bitmap needs a font and a rasterizer, a heavy dependency;
+  an SVG is converted outside (`rsvg-convert`, a browser).
+- `ptyrc events` without a topic leaves `mouse` out: listening changes
+  what the host terminal does.
+
 ## Effects, fifth session
 
 Built: `Under` in cells, over the canvas rect, with the heat on

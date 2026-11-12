@@ -215,7 +215,8 @@ class Tape:
 
     def seek(self, t: float) -> dict[str, Any]:
         """Run to tape time `t` without waiting, then pause. Past the end
-        of the tape, time passes and nothing is fed."""
+        of the tape, time passes and nothing is fed. Back in time: the
+        tape is replayed from its start, and the sprites are gone."""
         return self._pilot.call("tape.seek", t=t)
 
     def play(self, speed: float | None = None) -> dict[str, Any]:
