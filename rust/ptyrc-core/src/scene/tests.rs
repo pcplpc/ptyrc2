@@ -1731,9 +1731,8 @@ fn back_layers_never_touch_ink() {
                 // A backdrop the app chose is kept, but the one a sprite
                 // names as its panel; inverse cells are kept in any case.
                 let inverse = app.style.attrs.contains(Attrs::INVERSE);
-                if (app.backdrop() != Color::Default || inverse)
-                    && (inverse || !named.contains(&app.style.bg))
-                {
+                let named = !inverse && named.contains(&app.style.bg);
+                if inverse || (app.backdrop() != Color::Default && !named) {
                     assert_eq!(got.backdrop(), app.backdrop(), "round {round} at {x},{y}");
                 }
                 // Wide pairs stay whole.

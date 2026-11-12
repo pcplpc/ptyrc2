@@ -515,8 +515,204 @@ for y, line in enumerate(sys.stdin.read().split("\n")[:22]):
     pass effects
 }
 
+# waste LOG COLS ROWS: what the driver wrote to the host, replayed on a
+# model of it, per synchronized update. `written`: cells written;
+# `wasted`: those written more than once, or with what they held;
+# `outside`: cells written out of an update after the first one.
+waste() {
+    python3 - "$@" <<'PY'
+import re, sys
+# waste.py LOG COLS ROWS: what the driver wrote, per synchronized update.
+log, cols, rows = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+data = open(log, "rb").read().decode("utf-8", "replace")
+tok = re.compile(r"\x1b\[([?0-9;]*)([A-Za-z])|\x1b[()][0-9A-B]|\x1b[=>78M]|([\r\n\b])|([^\x1b\r\n\b])", re.S)
+grid = [[(" ", "")] * cols for _ in range(rows)]
+x = y = 0
+pen = ""
+inside = False
+start, wrote = None, None
+stats = {"updates": 0, "bytes": 0, "written": 0, "wasted": 0, "outside": 0, "worst": 0}
+seen_update = False
+begin = 0
+def blank():
+    return [(" ", "")] * cols
+for m in tok.finditer(data):
+    params, final, ctl, ch = m.group(1), m.group(2), m.group(3), m.group(4)
+    if final:
+        n = [int(p) if p.isdigit() else 0 for p in params.split(";")] if params else [0]
+        if final == "h" and params == "?2026":
+            inside, seen_update, begin = True, True, m.start()
+            start = [r[:] for r in grid]
+            wrote = [[0] * cols for _ in range(rows)]
+        elif final == "l" and params == "?2026":
+            inside = False
+            changed = sum(a != b for ra, rb in zip(start, grid) for a, b in zip(ra, rb))
+            written = sum(map(sum, wrote))
+            stats["updates"] += 1
+            stats["bytes"] += m.end() - begin
+            stats["written"] += written
+            stats["wasted"] += written - changed
+            stats["worst"] = max(stats["worst"], written - changed)
+        elif final == "H":
+            y = min(max(n[0], 1), rows) - 1
+            x = min(max(n[1] if len(n) > 1 else 1, 1), cols) - 1
+        elif final == "C":
+            x = min(x + max(n[0], 1), cols - 1)
+        elif final == "D":
+            x = max(x - max(n[0], 1), 0)
+        elif final == "A":
+            y = max(y - max(n[0], 1), 0)
+        elif final == "B":
+            y = min(y + max(n[0], 1), rows - 1)
+        elif final == "G":
+            x = min(max(n[0], 1), cols) - 1
+        elif final == "m":
+            pen = params if params.startswith("0") or not params else pen + ";" + params
+            if pen in ("0", ""):
+                pen = ""
+        elif final == "K":
+            for cx in range(x, cols):
+                grid[y][cx] = (" ", "")
+        elif final == "J":
+            grid = [blank() for _ in range(rows)]
+        continue
+    if ctl == "\r":
+        x = 0
+    elif ctl == "\b":
+        x = max(x - 1, 0)
+    elif ctl == "\n":
+        if y == rows - 1:
+            grid = grid[1:] + [blank()]
+            if inside:
+                start = start[1:] + [blank()]
+                wrote = wrote[1:] + [[0] * cols]
+        else:
+            y += 1
+    elif ch:
+        if x >= cols:
+            x = cols - 1
+        cell = (ch, "" if ch == " " and "48" not in pen and "7" not in pen.split(";") else pen)
+        # A blank on a blank is the app's: a space between two words.
+        idle = cell == (" ", "") and grid[y][x] == cell
+        grid[y][x] = cell
+        if inside:
+            wrote[y][x] += not idle
+        elif seen_update:
+            stats["outside"] += 1
+        x += 1
+u = max(stats["updates"], 1)
+print(f'updates={stats["updates"]} bytes_per_update={stats["bytes"] // u} written={stats["written"]} '
+      f'wasted={stats["wasted"]} worst={stats["worst"]} outside={stats["outside"]}')
+PY
+}
+
+# Flicker: per effect, over a static screen and over one that scrolls,
+# the host log of a headless driver. An effect repaints only the cells
+# that change; a scroll and its repair are one update.
+s_flicker() {
+    cat >"$WORK/static.sh" <<'EOF'
+#!/bin/sh
+printf 'hello world, some text here\n\n   a second line of words\n\n\n'
+printf '      ================ shelf ================\n'
+sleep 30
+EOF
+    cat >"$WORK/scroll.sh" <<'EOF'
+#!/bin/sh
+i=0
+while [ $i -lt 400 ]; do
+    i=$((i + 1))
+    echo "line $i of some scrolling text, words and words"
+    sleep 0.05
+done
+EOF
+    chmod +x "$WORK/static.sh" "$WORK/scroll.sh"
+    local fx app params pids=() bad=""
+    for fx in sand rain snow confetti; do
+        for app in static scroll; do
+            "$BIN" run --name "rd-fl-$fx-$app-$TAG" --headless --size 60x16 \
+                --host-log "$WORK/$fx-$app.log" -- "$WORK/$app.sh" &
+            pids+=($!)
+        done
+    done
+    sleep 0.8
+    for fx in sand rain snow confetti; do
+        params='{}'
+        [ $fx = confetti ] && params='{"duration_ms": 60000, "count": 200}'
+        for app in static scroll; do
+            "$BIN" -s "rd-fl-$fx-$app-$TAG" draw effect $fx "$params" >/dev/null ||
+                bad="$bad $fx-$app:draw"
+        done
+    done
+    sleep 3
+    for fx in sand rain snow confetti; do
+        for app in static scroll; do
+            "$BIN" -s "rd-fl-$fx-$app-$TAG" --json call debug.dump |
+                grep -q '"host_is_desired": *true' || bad="$bad $fx-$app:model"
+        done
+    done
+    kill "${pids[@]}" 2>/dev/null
+    wait "${pids[@]}" 2>/dev/null
+    local measure
+    for fx in sand rain snow confetti; do
+        for app in static scroll; do
+            measure=$(waste "$WORK/$fx-$app.log" 60 16)
+            [ -n "${E2E_VERBOSE:-}" ] && echo "  $fx $app: $measure"
+            python3 - "$app" $measure <<'PY' || bad="$bad $fx-$app:[$measure]"
+import sys
+app = sys.argv[1]
+m = {k: int(v) for k, v in (kv.split("=") for kv in sys.argv[2:])}
+ok = m["updates"] >= 10 and m["outside"] == 0
+if app == "static":
+    ok = ok and m["wasted"] == 0
+else:
+    # Cells of a row that leaves are unpainted, then painted again.
+    ok = ok and m["wasted"] * 20 <= m["written"]
+sys.exit(0 if ok else 1)
+PY
+        done
+    done
+    [ -z "$bad" ] || { fail flicker "$bad"; return; }
+    pass flicker
+}
+
+# Host colours and layer names at run time, headless.
+s_colors() {
+    local name=rd-colors-$TAG log=$WORK/colors.log
+    cat >"$WORK/still.sh" <<'EOF'
+#!/bin/sh
+printf 'some text\n'
+sleep 30
+EOF
+    chmod +x "$WORK/still.sh"
+    "$BIN" run --name "$name" --headless --size 40x8 --host-log "$log" -- "$WORK/still.sh" &
+    local pid=$!
+    sleep 0.6
+    local c="$BIN -s $name --json call"
+    $c layer.define '{"name": "stage", "z": -50}' | grep -q '"stage"' ||
+        { kill $pid; fail colors "layer.define"; return; }
+    $c draw.put '{"layer": "stage", "alpha": 0.5, "persist": true, "anchor": {"at": [2, 3]},
+        "content": {"rows": ["##"], "opaque": true, "style": {"bg": "#ffffff"}}}' >/dev/null ||
+        { kill $pid; fail colors "a declared layer name is refused"; return; }
+    sleep 0.3
+    local before after dump
+    before=$(grep -o '2026h' "$log" | wc -l)
+    $c session.colors '{"bg": "#ffffff"}' | grep -q '"bg": *"client"' ||
+        { kill $pid; fail colors "session.colors"; return; }
+    sleep 0.3
+    after=$(grep -o '2026h' "$log" | wc -l)
+    dump=$($c debug.dump)
+    kill $pid 2>/dev/null
+    wait $pid 2>/dev/null
+    # Mixed with black, then with white: one more update, no other.
+    grep -q '48;2;128;128;128' "$log" || { fail colors "no mix with the first colour"; return; }
+    grep -q '48;2;255;255;255' "$log" || { fail colors "no mix with the new colour"; return; }
+    [ "$after" -eq $((before + 1)) ] || { fail colors "updates: $before then $after"; return; }
+    grep -q '"host_is_desired": *true' <<<"$dump" || { fail colors "model"; return; }
+    pass colors
+}
+
 mkfiles
-ALL="vim shell tmux resize exit client cursor effects"
+ALL="vim shell tmux resize exit client cursor effects flicker colors"
 for scenario in ${*:-$ALL}; do
     "s_$scenario"
 done

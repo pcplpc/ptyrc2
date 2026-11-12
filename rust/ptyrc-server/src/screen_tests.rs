@@ -261,6 +261,28 @@ fn sprites_stay_out_of_the_scrollback() {
 }
 
 #[test]
+fn a_scroll_unpaints_only_the_rows_that_leave() {
+    let mut rig = Rig::new(20, 4);
+    rig.burst(b"one\r\ntwo\r\nthree\r\nfour");
+    rig.put(text_at(10, 3, "SPRITE"));
+    // Row 0 leaves; the sprite is on row 3: nothing before the burst.
+    let out = rig.burst(b"\r\nfive");
+    assert!(out.starts_with(&[BSU, b"\r\nfive"].concat()), "{out:?}");
+    assert_eq!(count(&out, BSU), 1);
+    // It scrolled to row 2 with the text, and is put back on row 3.
+    assert_eq!(rig.row(2), "four");
+    assert_eq!(rig.row(3), "five      SPRITE");
+    assert_eq!(count(&out, b"SPRITE"), 1);
+    // A burst that also deletes a line: any row may leave, all is unpainted.
+    let out = rig.burst(b"\x1b[1;1H\x1b[M\x1b[4;1H\r\nsix");
+    assert!(
+        !out.starts_with(&[BSU, b"\x1b[1;1H\x1b[M"].concat()),
+        "{out:?}"
+    );
+    assert_eq!(rig.row(3), "six       SPRITE");
+}
+
+#[test]
 fn animation_cost_follows_changed_cells() {
     let mut rig = Rig::new(80, 24);
     rig.put(json!({
