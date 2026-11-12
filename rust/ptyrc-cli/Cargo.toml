@@ -22,6 +22,7 @@ ptyrc-tui-agent = { path = "../../plugins/tui-support/agent-tui" }
 ptyrc-draw-shapes = { path = "../../plugins/draw-ext/shapes" }
 ptyrc-draw-bigtext = { path = "../../plugins/draw-ext/bigtext" }
 ptyrc-draw-rain = { path = "../../plugins/draw-ext/rain" }
+ptyrc-draw-snow = { path = "../../plugins/draw-ext/snow" }
 ptyrc-draw-sand = { path = "../../plugins/draw-ext/sand" }
 clap = { version = "4", features = ["derive"] }
 

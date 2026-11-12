@@ -1,0 +1,12 @@
+[package]
+name = "ptyrc-draw-snow"
+description = "ptyrc: draw extension: snow that settles on the text"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ptyrc-core.workspace = true
+ptyrc-vt.workspace = true
+serde.workspace = true
+serde_json.workspace = true
