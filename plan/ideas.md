@@ -75,3 +75,21 @@ Notes, not commitments. They extend "background against foreground" above.
   a big animation (sand in an empty pane).
 - Team: the session agent pilots; forked siblings own disjoint paths and
   may delegate bounded pieces to sub-agents.
+
+## Heat and idle, second session
+
+Built: see "Heatmap" in `design.md`. Left:
+
+- `screen.wait {idle: true}` and an `idle` event topic, so a client does
+  not poll `frame.idle`.
+- The 150 ms grace is a constant; an app that clears and redraws more
+  slowly still heats what it redraws.
+- A scroll is a visible change of every cell that differs: a pager stays
+  mostly idle on regular text, hot on prose. Heat that follows the frame
+  rows rather than the view is another model.
+- `still` restarts when a pane is resized or attached again; an inactive
+  frame reports an idle score of 0.
+- `quietest` still orders by mean activity; `idle` is the new name.
+- The backdrop of a frame counts every cell, text cells included; at
+  most 32 colours are counted (gradients).
+- The heat overlay shows panes only, not the raw frame nor chrome.
