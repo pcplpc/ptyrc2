@@ -169,6 +169,10 @@ struct Driver {
     replies: Replies,
     /// When to stop waiting for the host's colours.
     replies_until: Option<Duration>,
+    /// The host was asked for mouse reports, for a client.
+    host_mouse: bool,
+    /// A press went to this sprite: so do the moves and the release.
+    mouse_held: Option<Value>,
     /// A replay: makes the engine again when the tape is rewound.
     factory: Option<Box<dyn FnMut() -> Box<dyn Engine>>>,
 }
@@ -366,6 +370,8 @@ impl Driver {
             colors,
             replies: Replies::default(),
             replies_until: None,
+            host_mouse: false,
+            mouse_held: None,
             factory: None,
         })
     }
@@ -415,6 +421,8 @@ impl Driver {
             colors,
             replies: Replies::default(),
             replies_until: None,
+            host_mouse: false,
+            mouse_held: None,
             factory: None,
         })
     }
@@ -764,6 +772,10 @@ impl Driver {
         }
         let mut out = Vec::with_capacity(burst.len() + 256);
         hook!(self, now, |ctx| engine.on_burst(&burst, now, &mut out, ctx));
+        if self.host_mouse && burst.windows(3).any(|w| w == b"\x1b[?") {
+            // The app may have set the mouse of the host: ours again.
+            out.extend_from_slice(mouse::HOST_ON);
+        }
         self.host.write(&out)?;
         Ok(true)
     }
@@ -813,8 +825,86 @@ impl Driver {
         Ok(())
     }
 
+    /// Ask the host for mouse reports while a client listens to `mouse`;
+    /// give it back the modes of the app after.
+    fn sync_host_mouse(&mut self, engine: &dyn Engine) {
+        let wanted = self.host.interactive && self.topics.contains("mouse");
+        if wanted == self.host_mouse {
+            return;
+        }
+        self.host_mouse = wanted;
+        let _ = if wanted {
+            self.host.write(mouse::HOST_ON)
+        } else {
+            self.mouse_held = None;
+            let mut out = mouse::HOST_OFF.to_vec();
+            out.extend(engine.mouse_mode().set_sequence());
+            self.host.write(&out)
+        };
+    }
+
+    /// Take the mouse reports out of keyboard bytes: one on a sprite is
+    /// a `mouse` event; another is written again as the app asked, or
+    /// dropped when it did not.
+    fn sort_mouse(&mut self, bytes: &[u8], engine: &dyn Engine) -> Vec<u8> {
+        let mut out = Vec::with_capacity(bytes.len());
+        let mut rest = bytes;
+        while let Some(start) = mouse::find(rest) {
+            out.extend_from_slice(&rest[..start]);
+            rest = &rest[start..];
+            let Some((report, len)) = mouse::parse(rest) else {
+                out.extend_from_slice(&rest[..3]);
+                rest = &rest[3..];
+                continue;
+            };
+            rest = &rest[len..];
+            let hit = match self.mouse_held.clone() {
+                // Held: the sprite of the press, the cell of the report.
+                Some(mut held) if !report.press() => {
+                    let at = engine.sprite_at(report.x, report.y);
+                    let same = at.as_ref().is_some_and(|at| at["sprite"] == held["sprite"]);
+                    match at {
+                        Some(at) if same => Some(at),
+                        _ => {
+                            held["x"] = json!(report.x);
+                            held["y"] = json!(report.y);
+                            held["at"] = Value::Null;
+                            held["frame"] = Value::Null;
+                            held["pos"] = Value::Null;
+                            Some(held)
+                        }
+                    }
+                }
+                _ => engine.sprite_at(report.x, report.y),
+            };
+            match hit {
+                Some(mut data) => {
+                    if report.press() {
+                        self.mouse_held = Some(data.clone());
+                    } else if report.release {
+                        self.mouse_held = None;
+                    }
+                    data["button"] = json!(report.button());
+                    data["action"] = json!(report.action());
+                    data["mods"] = json!(report.mods());
+                    self.emit("mouse", data);
+                }
+                None => out.extend(report.encode(engine.mouse_mode()).unwrap_or_default()),
+            }
+        }
+        out.extend_from_slice(rest);
+        out
+    }
+
     /// Keyboard bytes on their way to the app.
     fn forward_input(&mut self, bytes: &[u8], engine: &mut dyn Engine) {
+        let sorted;
+        let bytes = if self.host_mouse {
+            sorted = self.sort_mouse(bytes, engine);
+            &sorted[..]
+        } else {
+            bytes
+        };
         let held;
         let bytes = match &self.grab {
             Some(grab) => {
@@ -1144,6 +1234,7 @@ impl Driver {
             conn.topics.extend(topics);
         }
         self.refresh_topics();
+        self.sync_host_mouse(engine);
         // A tick, so that the engine sees the new topics.
         self.repaint = true;
         Ok(json!({}))
@@ -1229,19 +1320,61 @@ impl Driver {
         let (Some(x), Some(y)) = (cell("x"), cell("y")) else {
             return Err(RpcError::bad_params("x, y: a screen cell"));
         };
-        if x >= self.info.cols || y >= self.info.rows {
-            return Err(RpcError::bad_params(format!(
-                "{x},{y} is off the screen ({}x{})",
-                self.info.cols, self.info.rows
-            )));
+        let on_screen = |x: u16, y: u16| {
+            if x >= self.info.cols || y >= self.info.rows {
+                return Err(RpcError::bad_params(format!(
+                    "{x},{y} is off the screen ({}x{})",
+                    self.info.cols, self.info.rows
+                )));
+            }
+            Ok((x, y))
+        };
+        let at = on_screen(x, y)?;
+        let to = match params.get("to") {
+            None | Some(Value::Null) => None,
+            Some(to) => {
+                let cell = |i: usize| to.get(i).and_then(Value::as_u64);
+                let cell = |i: usize| cell(i).and_then(|n| u16::try_from(n).ok());
+                match (cell(0), cell(1)) {
+                    (Some(x), Some(y)) => Some(on_screen(x, y)?),
+                    _ => return Err(RpcError::bad_params("to: [x, y], a screen cell")),
+                }
+            }
+        };
+        let mut mods = 0;
+        if let Some(list) = params.get("mods").filter(|m| !m.is_null()) {
+            let names = list.as_array().map(|a| a.iter().map(Value::as_str));
+            for name in names.ok_or_else(|| RpcError::bad_params("mods: array of names"))? {
+                let name = name.unwrap_or("");
+                mods |= mouse::mod_bits(name).ok_or_else(|| {
+                    RpcError::bad_params(format!("mods: no such modifier: {name}")).with_hint(
+                        format!(
+                            "{}modifiers: {}",
+                            suggest::did_you_mean(name, mouse::MODS),
+                            mouse::MODS.join(", ")
+                        ),
+                    )
+                })?;
+            }
         }
+        let count = match params.get("count") {
+            None | Some(Value::Null) => 1,
+            Some(count) => match count.as_u64() {
+                Some(n @ 1..=3) => n as u8,
+                _ => return Err(RpcError::bad_params("count: 1, 2 or 3 clicks")),
+            },
+        };
         let button = params
             .get("button")
             .map_or(Some("left"), Value::as_str)
             .filter(|b| mouse::BUTTONS.contains(b))
             .ok_or_else(|| {
-                RpcError::bad_params("button: no such button")
-                    .with_hint(format!("buttons: {}", mouse::BUTTONS.join(", ")))
+                let given = params.get("button").and_then(Value::as_str).unwrap_or("");
+                RpcError::bad_params("button: no such button").with_hint(format!(
+                    "{}buttons: {}",
+                    suggest::did_you_mean(given, mouse::BUTTONS),
+                    mouse::BUTTONS.join(", ")
+                ))
             })?;
         let mode = engine.mouse_mode();
         if !mode.on {
@@ -1251,7 +1384,14 @@ impl Driver {
             )
             .with_hint("it asked for no mouse reports (modes 9, 1000, 1002, 1003)"));
         }
-        let bytes = mouse::click(mode, button, x, y).ok_or_else(|| {
+        let gesture = mouse::Gesture {
+            button,
+            mods,
+            at,
+            to,
+            count,
+        };
+        let bytes = mouse::gesture(mode, gesture).ok_or_else(|| {
             RpcError::new(
                 ErrorCode::NotUsable,
                 "the app's mouse mode (X10) cannot tell a cell past 222",
@@ -1443,6 +1583,7 @@ impl Driver {
             self.grab.take_if(|g| g.conn == id);
             self.pending.retain(|_, (conn, _)| *conn != id);
             self.refresh_topics();
+            self.sync_host_mouse(engine);
             hook!(self, self.now(), |ctx| engine.on_disconnect(id, ctx));
         }
     }
@@ -1455,6 +1596,9 @@ impl Driver {
             recorder.exit(self.start.elapsed(), status);
         }
         let mut out = Vec::new();
+        if self.host_mouse {
+            out.extend_from_slice(mouse::HOST_OFF);
+        }
         hook!(self, self.now(), |ctx| engine.on_exit(&mut out, ctx));
         let _ = self.host.write(&out);
         self.emit("exit", json!({"status": status}));

@@ -678,7 +678,31 @@ impl Engine for ScreenEngine {
             on: modes.mouse,
             press_only: modes.mouse_press_only,
             sgr: modes.mouse_sgr,
+            bits: modes.mouse_bits,
         }
+    }
+
+    /// The topmost sprite whose box holds the cell; effects are not
+    /// clicked, nor the debug overlay.
+    fn sprite_at(&self, x: u16, y: u16) -> Option<Value> {
+        let (cx, cy) = (x as i64, y as i64);
+        let sprites = self.scene.list();
+        let (hit, [sx, sy]) = sprites.iter().rev().find_map(|s| {
+            let [sx, sy] = s.screen?;
+            let [w, h] = s.size;
+            let inside = cx >= sx && cx < sx + w as i64 && cy >= sy && cy < sy + h as i64;
+            let clicked = inside && s.owner != DEBUG_OWNER && !s.kind.starts_with("effect");
+            clicked.then_some((s, [sx, sy]))
+        })?;
+        let at = self.frames.at(x, y);
+        Some(json!({
+            "sprite": hit.id,
+            "at": [cx - sx, cy - sy],
+            "x": x,
+            "y": y,
+            "frame": at.map(|(id, _)| id),
+            "pos": at.map(|(_, pos)| [pos.x, pos.y]),
+        }))
     }
 
     fn bracketed_paste(&self) -> bool {

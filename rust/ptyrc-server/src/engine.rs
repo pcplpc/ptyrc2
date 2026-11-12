@@ -168,6 +168,12 @@ pub trait Engine {
         crate::mouse::MouseMode::default()
     }
 
+    /// The sprite a click at this screen cell is for: the data of its
+    /// `mouse` event. `None`: the click is the app's.
+    fn sprite_at(&self, _x: u16, _y: u16) -> Option<Value> {
+        None
+    }
+
     /// The default colours of the host: at start, then when the host
     /// tells others.
     fn on_host_colors(&mut self, _colors: ptyrc_core::scene::HostColors, _ctx: &mut Ctx) {}

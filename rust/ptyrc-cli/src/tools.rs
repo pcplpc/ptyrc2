@@ -214,9 +214,30 @@ pub struct Click {
     /// With --text: the match to click, from 0
     #[arg(long, default_value_t = 0, requires = "text")]
     nth: usize,
-    /// left, middle, right, wheel-up, wheel-down
+    /// left, middle, right, wheel-up, wheel-down, wheel-left, wheel-right
     #[arg(short, long, default_value = "left")]
     button: String,
+    /// Drag: release on this screen cell
+    #[arg(long, value_name = "X,Y")]
+    to: Option<String>,
+    /// A modifier held: shift, alt, ctrl (repeatable)
+    #[arg(short, long = "mod", value_name = "NAME")]
+    mods: Vec<String>,
+    /// Clicks in a row: 2 is a double click
+    #[arg(long, default_value_t = 1, value_name = "N")]
+    count: u8,
+}
+
+fn cell_of(text: &str) -> Result<(u16, u16), Fail> {
+    let cell = text
+        .split_once(',')
+        .and_then(|(x, y)| Some((x.trim().parse::<u16>().ok()?, y.trim().parse::<u16>().ok()?)));
+    cell.ok_or_else(|| {
+        Fail::usage(
+            format!("not a cell: {text}"),
+            "X,Y from 0, as in 12,3; text on the screen with --text",
+        )
+    })
 }
 
 pub fn click(common: &Common, args: Click) -> Done {
@@ -249,23 +270,16 @@ pub fn click(common: &Common, args: Click) -> Done {
             }
         }
     } else {
-        let cell = args.target.split_once(',').and_then(|(x, y)| {
-            Some((x.trim().parse::<u16>().ok()?, y.trim().parse::<u16>().ok()?))
-        });
-        match cell {
-            Some((x, y)) => json!([x, y]),
-            None => {
-                return Err(Fail::usage(
-                    format!("not a cell: {}", args.target),
-                    "X,Y from 0, as in 12,3; text on the screen with --text",
-                ));
-            }
-        }
+        let (x, y) = cell_of(&args.target)?;
+        json!([x, y])
     };
-    client.call(
-        "input.click",
-        json!({"x": cell[0], "y": cell[1], "button": args.button}),
-    )?;
+    let mut params = json!({"x": cell[0], "y": cell[1], "button": args.button,
+                            "mods": args.mods, "count": args.count});
+    if let Some(to) = &args.to {
+        let (x, y) = cell_of(to)?;
+        params["to"] = json!([x, y]);
+    }
+    client.call("input.click", params)?;
     if common.json {
         print_json(&json!({"x": cell[0], "y": cell[1]}), false);
     }

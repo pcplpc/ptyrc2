@@ -38,6 +38,9 @@ pub struct Modes {
     pub mouse: bool,
     /// Only presses are reported (mode 9 alone).
     pub mouse_press_only: bool,
+    /// The reporting modes on: bit 0 is mode 9, bit 1 1000, bit 2 1002,
+    /// bit 3 1003.
+    pub mouse_bits: u8,
     /// Mouse reports in SGR form (1006).
     pub mouse_sgr: bool,
     pub focus_events: bool,
@@ -63,6 +66,7 @@ impl Default for Modes {
             app_keypad: false,
             mouse: false,
             mouse_press_only: false,
+            mouse_bits: 0,
             mouse_sgr: false,
             focus_events: false,
             cursor_shape: 0,
@@ -1047,6 +1051,7 @@ impl Vt {
                         } else {
                             self.mouse_bits &= !bit;
                         }
+                        self.modes.mouse_bits = self.mouse_bits;
                         self.modes.mouse = self.mouse_bits != 0;
                         self.modes.mouse_press_only = self.mouse_bits == 1;
                     }

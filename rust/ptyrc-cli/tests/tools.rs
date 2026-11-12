@@ -127,7 +127,7 @@ fn grabbed_keys_do_not_reach_the_app() {
 fn clicks_are_told_as_the_app_asked() {
     let sb = Sandbox::new("click");
     let script = format!("printf 'one two\\r\\n\\033[?1000h\\033[?1006h'; {SHOW_KEYS}");
-    let _driver = sb.headless("c", "100x6", &["sh", "-c", &script]);
+    let _driver = sb.headless("c", "200x6", &["sh", "-c", &script]);
     let mut client = sb.client("c");
     let wait = |client: &mut Client, pattern: &str| {
         let got = client
@@ -151,10 +151,21 @@ fn clicks_are_told_as_the_app_asked() {
         )
         .unwrap();
     wait(&mut client, "^[[<65;1;1M");
+    // Modifiers, a double click; a drag is press and release for an app
+    // that did not ask for the moves.
+    let out = sb.run(&[
+        "-s", "c", "click", "7,3", "--mod", "alt", "--count", "2", "--to", "9,4",
+    ]);
+    assert!(out.status.success());
+    wait(&mut client, "^[[<8;8;4M^[[<8;10;5m^[[<8;8;4M^[[<8;10;5m");
+    let out = sb.run(&["-s", "c", "click", "1,1", "--mod", "ctl"]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("did you mean ctrl?"), "{err}");
     let e = client
-        .call("input.click", json!({"x": 100, "y": 0}))
+        .call("input.click", json!({"x": 200, "y": 0}))
         .unwrap_err();
-    assert!(e.to_string().contains("off the screen (100x6)"), "{e}");
+    assert!(e.to_string().contains("off the screen (200x6)"), "{e}");
     let e = client
         .call("input.click", json!({"x": 0, "y": 0, "button": "fourth"}))
         .unwrap_err();
@@ -189,6 +200,84 @@ fn clicks_are_told_as_the_app_asked() {
     assert_eq!(out.status.code(), Some(4));
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("does not listen to the mouse"), "{err}");
+}
+
+#[test]
+fn host_clicks_go_to_a_sprite_or_to_the_app() {
+    let sb = Sandbox::new("mouse");
+    // The app asks for clicks in the X10 form.
+    let script = format!("printf '\\033[?1000h'; {SHOW_KEYS}");
+    let (mut host, mut driver) =
+        HostPty::spawn(&sb, &[BIN, "run", "--name", "m", "--", "sh", "-c", &script]);
+    wait_for(|| sb.socket("m").exists(), "socket");
+    let mut client = sb.client("m");
+    client
+        .call("screen.wait", json!({"stable_ms": 200, "timeout_ms": 5000}))
+        .unwrap();
+    let sprite = client
+        .call(
+            "draw.put",
+            json!({"content": {"rows": ["[-ok-]"]}, "anchor": {"at": [10, 3], "space": "view"},
+                   "layer": "front", "persist": true}),
+        )
+        .unwrap()["id"]
+        .clone();
+    host.wait_seen("[-ok-]");
+
+    // A listener: the host is asked for reports, in the SGR form.
+    client.subscribe(&["mouse"]).unwrap();
+    host.wait_seen("\x1b[?1002h\x1b[?1006h");
+    let next = |client: &mut Client| loop {
+        let event = client.next_event(Some(TIMEOUT)).unwrap().expect("an event");
+        if event.event == "mouse" {
+            return event.data;
+        }
+    };
+
+    // On the sprite: an event, press and release; the app sees nothing.
+    host.type_in(b"\x1b[<0;13;4M\x1b[<0;13;4m");
+    let press = next(&mut client);
+    assert_eq!(
+        press,
+        json!({"sprite": sprite, "at": [2, 0], "x": 12, "y": 3, "frame": press["frame"],
+               "pos": press["pos"], "button": "left", "action": "press", "mods": []})
+    );
+    assert!(press["frame"].is_number() && press["pos"].is_array());
+    assert_eq!(next(&mut client)["action"], "release");
+
+    // A drag that leaves the sprite stays with it, to the release.
+    host.type_in(b"\x1b[<16;11;4M\x1b[<48;30;5M\x1b[<16;30;5m");
+    assert_eq!(next(&mut client)["mods"], json!(["ctrl"]));
+    let drag = next(&mut client);
+    assert_eq!(
+        (
+            drag["action"].clone(),
+            drag["sprite"].clone(),
+            drag["at"].clone()
+        ),
+        (json!("drag"), sprite.clone(), Value::Null)
+    );
+    assert_eq!(
+        (drag["x"].clone(), drag["y"].clone()),
+        (json!(29), json!(4))
+    );
+    assert_eq!(next(&mut client)["action"], "release");
+
+    // Elsewhere: the app's, written again in its own form; a drag it
+    // did not ask for is dropped.
+    host.type_in(b"a\x1b[<0;2;6M\x1b[<32;3;6M\x1b[<0;3;6mb");
+    host.wait_seen("a^[[M \"&^[[M##&b");
+    assert!(!seen(&host).contains("^[[<"), "{:?}", seen(&host));
+
+    // The listener gone, the host has the app's mode again, and the
+    // reports are the app's business.
+    drop(client);
+    host.wait_seen("\x1b[?1002l\x1b[?1003l\x1b[?1000l\x1b[?9l\x1b[?1006l\x1b[?1000h\x1b[?1006l");
+    host.type_in(b"\x1b[M !!c");
+    host.wait_seen("^[[M !!c");
+
+    drop(driver.0.kill());
+    host.wait_exit(&mut driver);
 }
 
 #[test]
