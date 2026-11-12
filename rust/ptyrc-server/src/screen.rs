@@ -580,6 +580,9 @@ impl Engine for ScreenEngine {
             }
             self.emit_cursor(ctx);
             self.watch_text(ctx);
+        } else if self.shown.is_empty() && ctx.has_subscribers("text") {
+            // A first subscriber: what the frames show now is the base.
+            self.watch_text(ctx);
         }
         self.paint(now, out);
         self.close_sync(out);

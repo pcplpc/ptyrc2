@@ -40,8 +40,15 @@ def test_spawn_connect_close() -> None:
 
 def test_app_exit_ends_session() -> None:
     with Pilot.spawn(["sh", "-c", "sleep 0.2; exit 3"], name="life-b") as pilot:
-        events = list(pilot.events("exit", timeout=5))
+        events = []
+        # The session ends: the last event, then a closed connection.
+        with pytest.raises(PtyrcError) as err:
+            for event in pilot.events("exit", timeout=5):
+                events.append(event)
+        assert err.value.code == "gone"
         assert events[-1] == ("exit", {"status": 3})
+        with pytest.raises(PtyrcError):
+            pilot.event(timeout=1)
     assert "life-b" not in live_sessions()
 
 

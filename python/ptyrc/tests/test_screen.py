@@ -99,6 +99,62 @@ def test_events(shell: Pilot) -> None:
     assert "screen" in seen and seen[-1] == "exit"
 
 
+def test_silence_is_not_the_end(shell: Pilot) -> None:
+    shell.subscribe("screen")
+    shell.wait_for(stable=0.3)
+    assert list(shell.events(timeout=0.2)) == []
+    assert shell.event(timeout=0.1) is None
+    assert shell.connected
+
+
+def test_snapshot(shell: Pilot) -> None:
+    shell.send("echo hi\n")
+    shell.wait_for(stable=0.3)
+    # Nothing moves: without a snapshot, no event.
+    shell.subscribe("cursor", "frames", "idle", "size", snapshot=True)
+    seen = dict(shell.events(timeout=0.3))
+    assert set(seen) == {"cursor", "frames", "idle", "size"}
+    cursor = shell.cursor()
+    assert (seen["cursor"]["x"], seen["cursor"]["y"]) == (cursor.x, cursor.y)
+    assert tuple(seen["cursor"]["pos"]) == cursor.pos
+    assert seen["cursor"]["frame"] == cursor.frame
+    assert seen["size"] == {"size": [80, 24]}
+    assert seen["frames"]["frames"][0]["id"] == 0
+    assert seen["idle"]["idle"] is False
+
+
+def test_text_events(shell: Pilot) -> None:
+    shell.wait_for(stable=0.3)
+    shell.subscribe("text")
+    shell.send("echo hi\n")
+    shell.wait_for(stable=0.3)
+    raw = [d for t, d in shell.events(timeout=0.3) if t == "text" and d["frame"] == 0]
+    rows = {y for d in raw for y in d["rows"]}
+    assert {0, 1, 2} <= rows, raw
+    assert all(d["origin"] == [0, 0] for d in raw)
+
+
+def test_reads_inside_a_batch(shell: Pilot) -> None:
+    shell.send("echo fox dog fox\n")
+    shell.wait_for(stable=0.3)
+    with shell.batch() as batch:
+        foxes = shell.find("fox")
+        dogs = shell.find("dog")
+        lines = shell.text()
+        tint = shell.draw("   ", at=(0, 0), blend="tint", fg="red", opaque=True)
+        info = tint.info()
+        listed = shell.sprites()
+        assert foxes == [] and info == {}  # not sent yet
+    assert len(batch.results) == 6
+    assert len(foxes) >= 2 and len(dogs) >= 1
+    assert lines == shell.text()
+    assert info["id"] == tint.id and info["style"] == {"fg": "red"}
+    assert [s["id"] for s in listed] == [tint.id]
+    assert tint.info()["style"] == info["style"]
+    tint.remove()
+    assert tint.info() is None
+
+
 def test_errors(shell: Pilot) -> None:
     with pytest.raises(PtyrcError) as err:
         shell.call("no.such")
