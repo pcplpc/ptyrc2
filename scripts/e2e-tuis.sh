@@ -319,11 +319,18 @@ a_glances() {
     e2e_wait -E 'CPU +[0-9]' --timeout 15000 >/dev/null 2>&1
     sleep 3
     same_text glances
-    check "glances: the title is chrome, the rules cut panes" \
-        'len(P) >= 2 and C and C[0]["rect"] == [0, 0, W, 1] and all(f["rect"][2] == W for f in P)'
+    check "glances: the title is chrome; summary, sidebar and processes are panes" \
+        '[f["key"] for f in P] == ["glances:summary", "glances:sidebar", "glances:processes"] and C[0]["rect"] == [0, 0, W, 1] and P[1]["rect"][0] == 0 and P[2]["rect"][0] == P[1]["rect"][2] + 1 and P[2]["rect"][0] + P[2]["rect"][2] == W and P[1]["rect"][1] + P[1]["rect"][3] == H'
     check "glances: panes usable 3 s after the start" \
         'all(f["usable"] for f in P)'
-    steady glances 5
+    local ids
+    ids=$(frames_json | python3 -c '
+import json, sys
+print(sorted(f["id"] for f in json.load(sys.stdin)["frames"]
+             if f["state"] != "inactive" and f["kind"] == "pane"))')
+    steady glances 6
+    check "glances: the same frames since the start, at their origin" \
+        "sorted(f[\"id\"] for f in P) == $ids and all(f[\"origin\"] == [0, 0] for f in P)"
     sprite glances
     same_text glances
     e2e_keys q
