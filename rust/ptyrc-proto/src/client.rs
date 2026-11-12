@@ -28,15 +28,37 @@ impl fmt::Display for ClientError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ClientError::Select(e) => e.fmt(f),
-            ClientError::Io(e) => e.fmt(f),
+            ClientError::Io(e) => write!(f, "connection: {e}"),
             ClientError::Protocol(e) => write!(f, "protocol: {e}"),
             ClientError::Rpc(e) => e.fmt(f),
-            ClientError::Closed => f.write_str("connection closed"),
+            ClientError::Closed => f.write_str("connection closed by the driver"),
         }
     }
 }
 
 impl std::error::Error for ClientError {}
+
+impl ClientError {
+    /// What to try, when there is something to say.
+    pub fn hint(&self) -> Option<String> {
+        match self {
+            ClientError::Select(e) => Some(e.hint()),
+            ClientError::Rpc(e) => e.hint.clone(),
+            ClientError::Closed => Some("the session ended; list sessions: ptyrc ls".into()),
+            ClientError::Io(_) | ClientError::Protocol(_) => None,
+        }
+    }
+
+    /// Exit status of a CLI verb that failed with this error: 3 no
+    /// session, 2 or 4 a request refused, 5 the connection.
+    pub fn exit_status(&self) -> u8 {
+        match self {
+            ClientError::Select(_) => 3,
+            ClientError::Rpc(e) => e.exit_status(),
+            ClientError::Io(_) | ClientError::Protocol(_) | ClientError::Closed => 5,
+        }
+    }
+}
 
 impl From<io::Error> for ClientError {
     fn from(e: io::Error) -> ClientError {

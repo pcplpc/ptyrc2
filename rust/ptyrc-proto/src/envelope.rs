@@ -11,6 +11,9 @@ pub const PROTOCOL: u32 = 1;
 /// Server identification sent in `hello`.
 pub const SERVER: &str = concat!("ptyrc/", env!("CARGO_PKG_VERSION"));
 
+/// Topics of `subscribe`.
+pub const TOPICS: [&str; 6] = ["screen", "cursor", "frames", "input", "size", "exit"];
+
 /// Client to server. `id` is echoed as given.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Request {
@@ -57,6 +60,9 @@ impl ErrorCode {
 pub struct RpcError {
     pub code: ErrorCode,
     pub message: String,
+    /// What to try: valid values, the nearest one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
 }
 
 impl RpcError {
@@ -64,7 +70,13 @@ impl RpcError {
         RpcError {
             code,
             message: message.into(),
+            hint: None,
         }
+    }
+
+    pub fn with_hint(mut self, hint: impl Into<String>) -> RpcError {
+        self.hint = Some(hint.into());
+        self
     }
 
     pub fn bad_params(message: impl Into<String>) -> RpcError {
@@ -76,6 +88,15 @@ impl RpcError {
             ErrorCode::UnknownMethod,
             format!("unknown method: {method}"),
         )
+    }
+
+    /// Exit status of a CLI verb refused with this error.
+    pub fn exit_status(&self) -> u8 {
+        match self.code {
+            ErrorCode::BadRequest | ErrorCode::UnknownMethod | ErrorCode::BadParams => 2,
+            ErrorCode::Gone | ErrorCode::Internal => 5,
+            _ => 4,
+        }
     }
 }
 
