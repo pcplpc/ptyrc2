@@ -340,6 +340,18 @@ fn frame_heat(engine: &ScreenEngine, params: Value) -> Res {
     Ok(json!({"rows": heat.digits()}))
 }
 
+fn frame_get(engine: &ScreenEngine, params: Value) -> Res {
+    let p: ViewParams = parse(params)?;
+    let id = frame_of(engine, &p.frame)?;
+    let info = engine
+        .frames
+        .list()
+        .into_iter()
+        .find(|f| f.id == id)
+        .ok_or_else(|| ScreenEngine::no_frame(id))?;
+    Ok(json!({"frame": info}))
+}
+
 fn frame_at(engine: &ScreenEngine, params: Value) -> Res {
     if let Some(name) = params.get("name").and_then(Value::as_str) {
         let id = frame_of(engine, &Some(FrameSel::Name(name.to_string())))?;
@@ -552,6 +564,7 @@ fn debug_dump(engine: &ScreenEngine) -> Res {
     Ok(json!({
         "size": [engine.app.cols(), engine.app.rows()],
         "desired": desired.text(),
+        "host_ansi": render_ansi(engine.host.grid(), None),
         "host_is_desired": *engine.host.grid() == desired,
         "host_cursor": {"x": host_cursor.col, "y": host_cursor.row,
                         "visible": host_cursor.visible,
@@ -593,6 +606,7 @@ pub(crate) fn handle(
         "frame.text" => frame_text(engine, params),
         "frame.heat" => frame_heat(engine, params),
         "frame.at" => frame_at(engine, params),
+        "frame.get" => frame_get(engine, params),
         "draw.put" => draw_put(engine, conn, params, now),
         "draw.update" => draw_update(engine, params, now),
         "draw.remove" => match params.get("id").and_then(Value::as_u64) {

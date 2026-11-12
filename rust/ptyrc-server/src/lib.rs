@@ -13,6 +13,8 @@ pub mod keys;
 pub mod pty;
 mod rpc;
 pub mod screen;
+#[cfg(test)]
+mod screen_tests;
 
 pub use driver::{Config, run};
 pub use engine::{ConnId, Ctx, Engine, PassThrough, Reply, SessionInfo, Token};
