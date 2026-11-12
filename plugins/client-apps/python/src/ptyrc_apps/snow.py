@@ -34,7 +34,6 @@ from .sand import heir
 
 __all__ = ["gust", "main", "snow"]
 
-POLL = 0.5  # seconds between two looks at a frame replaced
 GUST = (6.0, 15.0)  # seconds between two winds
 
 
@@ -51,20 +50,34 @@ def gust(wind: float, rng: random.Random) -> float:
 
 
 def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
+    """As `sand.follow`, with a gust now and then."""
     rng = random.Random()
     frame = _cli.pick(pilot, args.frame)
     sprite = snow(pilot, frame, args.rate, args.wind)
     end = None if seconds is None else time.monotonic() + seconds
-    blow = time.monotonic() + rng.uniform(*GUST)
-    while pilot.connected and (end is None or time.monotonic() < end):
-        time.sleep(POLL)
-        if args.wind and time.monotonic() >= blow:
-            blow = time.monotonic() + rng.uniform(*GUST)
+    blow = time.monotonic() + rng.uniform(*GUST) if args.wind else None
+    pilot.subscribe("frames", "exit")
+    while True:
+        now = time.monotonic()
+        if end is not None and now >= end:
+            return
+        if blow is not None and now >= blow:
+            blow = now + rng.uniform(*GUST)
             params = {"wind": gust(args.wind, rng)}
             sprite.update(effect={"name": "snow", "params": params})
-        if frame.kind == "raw" or _cli.on_screen(frame) or frame.state != "inactive":
+        waits = [t - now for t in (end, blow) if t is not None]
+        event = pilot.event(timeout=min(waits) if waits else None)
+        if event is None:
+            continue
+        if event[0] == "exit":
+            return
+        if event[0] != "frames" or frame.kind == "raw":
+            continue
+        frames = [Frame(pilot, info) for info in event[1]["frames"]]
+        mine = next((f for f in frames if f.id == frame.id), None)
+        if mine is not None and mine.state != "inactive":
             continue  # in sight, or settling: the driver keeps the sprite
-        if (new := heir(pilot, frame)) is not None:
+        if (new := heir(frame, frames)) is not None:
             sprite.update(frame=new.id)
             frame = new
 

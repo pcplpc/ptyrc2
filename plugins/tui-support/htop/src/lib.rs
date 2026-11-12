@@ -72,7 +72,7 @@ fn part(pane: &PaneView) -> Option<(Look, Part)> {
     if let Some(look) = Look::of(pane.grid, pane.rect) {
         return Some((look, Part::Whole));
     }
-    let look = Look::of(pane.grid, pane.grid.rect())?;
+    let look = Look::of(pane.grid, pane.area)?;
     let part = if pane.rect == look.table() {
         Part::Table
     } else if pane.rect == look.meters() {
@@ -92,7 +92,7 @@ impl TuiSupport for Htop {
         if part(pane).is_some() { 0.9 } else { 0.0 }
     }
 
-    /// Not split (inside another app's pane): all but the table. A pane
+    /// Asked whole (the core split nothing): all but the table. A pane
     /// of the split has none: no row of the table is learned as chrome.
     fn chrome(&self, pane: &PaneView) -> Option<Chrome> {
         let (look, part) = part(pane)?;
@@ -114,15 +114,15 @@ impl TuiSupport for Htop {
         }
     }
 
-    /// Meters, header, table, function bar.
     /// Meters and table are repainted in place.
-    fn tuning(&self) -> Tuning {
+    fn tuning(&self, pane: &PaneView) -> Tuning {
         Tuning {
-            monitor: true,
+            monitor: part(pane).is_some(),
             ..Tuning::default()
         }
     }
 
+    /// Meters, header, table, function bar.
     fn segment(&self, screen: &PaneView) -> Option<Vec<Rect>> {
         let look = Look::of(screen.grid, screen.rect)?;
         let a = look.area;
@@ -174,6 +174,7 @@ mod tests {
         PaneView {
             grid,
             rect,
+            area: grid.rect(),
             cursor: None,
             title: "",
             alt_screen: true,
@@ -210,7 +211,7 @@ mod tests {
         assert_eq!(Htop.segment(&pane(&g, g.rect())), None);
     }
 
-    /// In a pane of another app: known, not split, the table scrolls.
+    /// An area of the screen asked whole: known, chrome around the table.
     #[test]
     fn nested() {
         let inner = screen(BAR);

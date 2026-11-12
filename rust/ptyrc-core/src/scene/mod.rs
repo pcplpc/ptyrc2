@@ -46,6 +46,14 @@ struct Anim {
     plays: Option<u32>,
     /// From `frames`: ends, and is removed, when finite.
     timed: bool,
+    /// Style of the first content, for `draw.list`.
+    style: Option<StyleSpec>,
+}
+
+/// The style a content is given: its `style`, else that of its first run.
+fn first_style(content: &Content) -> Option<StyleSpec> {
+    let run = || content.cells.iter().flatten().flatten().next();
+    content.style.or_else(|| run().map(|r| r.style))
 }
 
 struct Fx {
@@ -300,6 +308,7 @@ impl Scene {
                 since: Duration::ZERO,
                 plays: None,
                 timed: false,
+                style: first_style(content),
             }),
             (None, Some(list)) if !list.is_empty() => Ok(Anim {
                 frames: list
@@ -311,6 +320,7 @@ impl Scene {
                 since: Duration::ZERO,
                 plays: looping.plays(),
                 timed: true,
+                style: first_style(&list[0].content),
             }),
             (None, Some(_)) => Err(SceneError::BadParams("frames is empty".into())),
             _ => Err(SceneError::BadParams(
@@ -675,6 +685,10 @@ impl Scene {
                         Body::Fx(f) => format!("effect:{}", f.name),
                     },
                     size: [w, h],
+                    style: match &s.body {
+                        Body::Anim(a) => a.style,
+                        Body::Fx(_) => None,
+                    },
                     layer: s.layer,
                     blend: s.blend,
                     alpha: s.alpha,

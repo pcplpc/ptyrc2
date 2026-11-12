@@ -538,6 +538,10 @@ pub struct SpriteInfo {
     pub anchor: Anchor,
     pub kind: String,
     pub size: [u16; 2],
+    /// Style of the content, of the first frame of an animation, of the
+    /// first run of `cells`; absent for an effect or when none is given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<StyleSpec>,
     pub layer: i32,
     pub blend: Blend,
     #[serde(default = "one")]

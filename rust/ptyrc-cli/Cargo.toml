@@ -18,6 +18,7 @@ ptyrc-tui-vim = { path = "../../plugins/tui-support/vim" }
 ptyrc-tui-tmux = { path = "../../plugins/tui-support/tmux" }
 ptyrc-tui-ranger = { path = "../../plugins/tui-support/ranger" }
 ptyrc-tui-htop = { path = "../../plugins/tui-support/htop" }
+ptyrc-tui-glances = { path = "../../plugins/tui-support/glances" }
 ptyrc-tui-agent = { path = "../../plugins/tui-support/agent-tui" }
 ptyrc-draw-shapes = { path = "../../plugins/draw-ext/shapes" }
 ptyrc-draw-bigtext = { path = "../../plugins/draw-ext/bigtext" }

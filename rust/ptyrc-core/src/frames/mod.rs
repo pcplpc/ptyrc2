@@ -15,13 +15,13 @@ mod tests_heat;
 
 pub use heat::{HeatClass, HeatView, IDLE_SECS, IDLE_SHARE, Idle};
 
-use crate::plugin::{Chrome, PaneView, TuiSupport, ViewHint};
+use crate::plugin::{Chrome, PaneView, TuiSupport, Tuning, ViewHint};
 use crate::types::*;
 use ext::{Ext, Obs, Outcome, Row};
 use heat::Heat;
 use ptyrc_vt::{Cursor, Grid, Rect, VtEvent};
 use screen::{Line, Screen, fnv};
-use segment::{Distrust, Leaf, Segmenter, Sep, r4, scrolled_seps};
+use segment::{Distrust, Leaf, Segmenter, Sep, r4, rect_of, scrolled_seps};
 use serde::Serialize;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -258,6 +258,7 @@ struct Advice {
     chrome: Option<Chrome>,
     hint: Option<ViewHint>,
     key: Option<String>,
+    tuning: Tuning,
 }
 
 struct Placed {
@@ -268,6 +269,12 @@ struct Placed {
 
 /// Spots handed out, by `(frame, w, h, prefer)`.
 type PlaceCache = HashMap<(FrameId, u16, u16, u8), Vec<Placed>>;
+
+/// Pane of a preset, by rectangle: the area the preset segmented.
+type Areas = HashMap<segment::Rect4, segment::Rect4>;
+
+/// How long a rectangle no longer reached keeps its presets.
+const NESTED_KEEP: Duration = Duration::from_secs(10);
 
 /// Every frame of a screen.
 pub struct Frames {
@@ -302,6 +309,12 @@ pub struct Frames {
     title_changed: bool,
     /// Preset answers for the leaves of the pending layout.
     advice: HashMap<segment::Rect4, Advice>,
+    /// Panes made by a preset in the last segmentation, and the area it
+    /// segmented.
+    areas: Areas,
+    /// Presets found on the rectangles the segmentation reached, and when
+    /// asked.
+    nested: RefCell<HashMap<segment::Rect4, (Duration, Vec<usize>)>>,
     placed: RefCell<PlaceCache>,
 }
 
@@ -441,6 +454,8 @@ impl Frames {
             screen_conf_at: None,
             title_changed: false,
             advice: HashMap::new(),
+            areas: HashMap::new(),
+            nested: RefCell::new(HashMap::new()),
             placed: RefCell::new(HashMap::new()),
         }
     }
@@ -507,7 +522,7 @@ impl Frames {
         let cursor_row = Some(input.cursor.row);
         let expired = self.distrust.iter().any(|d| d.until <= now);
         // A plugin that knows the screen may segment on anything it sees.
-        let plugins = screen_presets;
+        let plugins = screen_presets || (self.screen.any_change && !self.areas.is_empty());
         if self.seg.is_none()
             || self.screen.class_change
             || cursor_row != self.seg_cursor
@@ -515,7 +530,7 @@ impl Frames {
             || plugins
         {
             self.distrust.retain(|d| d.until > now);
-            let (mut leaves, mut seps) = self.segment(input, now);
+            let (mut leaves, mut seps, mut areas) = self.segment(input, now);
             let moved = {
                 let s = &self.screen;
                 let prev = |r: u16| {
@@ -540,8 +555,9 @@ impl Frames {
                         until: now + ms(self.cfg.distrust_ms),
                     });
                 }
-                (leaves, seps) = self.segment(input, now);
+                (leaves, seps, areas) = self.segment(input, now);
             }
+            self.areas = areas;
             self.seps = seps;
             self.seg = Some(leaves);
             self.seg_cursor = cursor_row;
@@ -930,6 +946,7 @@ impl Frames {
         PaneView {
             grid: input.grid,
             rect,
+            area: self.areas.get(&r4(rect)).map_or(rect, |a| rect_of(*a)),
             cursor: rect.contains(cur.0, cur.1).then_some(cur),
             title: input.title,
             alt_screen: input.alt_screen,
@@ -975,6 +992,7 @@ impl Frames {
                     chrome: sup.chrome(pv),
                     hint: sup.view_hint(pv),
                     key: sup.frame_key(pv),
+                    tuning: sup.tuning(pv),
                 }
             }
             None => Advice::default(),
@@ -991,7 +1009,52 @@ impl Frames {
         }
     }
 
-    fn segment(&self, input: &ScreenInput, now: Duration) -> (Vec<Leaf>, Vec<Sep>) {
+    /// Leaves of the rectangles a preset made of `area`.
+    fn preset_leaves(&self, rects: Vec<Rect>, area: Rect) -> Vec<Leaf> {
+        let mut leaves: Vec<Leaf> = rects
+            .into_iter()
+            .map(|r| r.intersect(&area))
+            .filter(|r| !r.is_empty())
+            .map(|r| Leaf {
+                rect: r4(r),
+                kind: (r.h < self.cfg.min_pane_rows || r.w < self.cfg.min_pane_cols) as u8,
+            })
+            .collect();
+        leaves.sort();
+        leaves.dedup();
+        leaves
+    }
+
+    /// The panes a preset makes of `rect`, a rectangle below the whole
+    /// screen. Presets are looked for as on a pane (`detect_due`); those
+    /// found are asked at every segmentation.
+    fn segment_nested(&self, input: &ScreenInput, rect: Rect, now: Duration) -> Option<Vec<Leaf>> {
+        if rect.h < self.cfg.min_pane_rows || rect.w < self.cfg.min_pane_cols {
+            return None;
+        }
+        let pv = PaneView {
+            area: rect,
+            ..self.pane_view(input, rect)
+        };
+        let mut nested = self.nested.borrow_mut();
+        let at = nested.get(&r4(rect)).map(|n| n.0);
+        if self.detect_due(rect, at, now) {
+            let found = (0..self.supports.len())
+                .filter(|i| self.supports[*i].detect(&pv) >= 0.5)
+                .collect();
+            if nested.len() >= 64 {
+                nested.retain(|_, n| now < n.0 + NESTED_KEEP);
+            }
+            nested.insert(r4(rect), (now, found));
+        }
+        nested[&r4(rect)]
+            .1
+            .iter()
+            .find_map(|i| self.supports[*i].segment(&pv))
+            .map(|rects| self.preset_leaves(rects, rect))
+    }
+
+    fn segment(&self, input: &ScreenInput, now: Duration) -> (Vec<Leaf>, Vec<Sep>, Areas) {
         let all = Rect::new(0, 0, self.screen.cols, self.screen.rows);
         let pv = self.pane_view(input, all);
         for (i, s) in self.supports.iter().enumerate() {
@@ -1002,21 +1065,20 @@ impl Frames {
             if conf >= 0.5
                 && let Some(rects) = s.segment(&pv)
             {
-                let mut leaves: Vec<Leaf> = rects
-                    .into_iter()
-                    .map(|r| r.intersect(&all))
-                    .filter(|r| !r.is_empty())
-                    .map(|r| Leaf {
-                        rect: r4(r),
-                        kind: (r.h < self.cfg.min_pane_rows || r.w < self.cfg.min_pane_cols) as u8,
-                    })
-                    .collect();
-                leaves.sort();
-                leaves.dedup();
-                return (leaves, Vec::new());
+                let leaves = self.preset_leaves(rects, all);
+                let areas = leaves.iter().map(|l| (l.rect, r4(all))).collect();
+                return (leaves, Vec::new(), areas);
             }
         }
-        Segmenter {
+        let areas = RefCell::new(Areas::new());
+        let ask = |rect: Rect| {
+            let leaves = self.segment_nested(input, rect, now)?;
+            areas
+                .borrow_mut()
+                .extend(leaves.iter().map(|l| (l.rect, r4(rect))));
+            Some(leaves)
+        };
+        let (leaves, seps) = Segmenter {
             screen: &self.screen,
             cursor_row: Some(input.cursor.row),
             min_rows: self.cfg.min_pane_rows,
@@ -1025,8 +1087,10 @@ impl Frames {
             now,
             leaves: Vec::new(),
             seps: Vec::new(),
+            ask: (!self.supports.is_empty()).then_some(&ask),
         }
-        .run()
+        .run();
+        (leaves, seps, areas.into_inner())
     }
 
     /// Bring the layout in line with the last segmentation.
@@ -1527,16 +1591,10 @@ impl Frames {
             None
         };
         if let Some(advice) = advice {
-            if let Some(s) = advice.support
-                && p.support != Some(s)
-            {
-                let t = self.supports[s].tuning();
-                p.settle = ms(t.settle_ms.unwrap_or(self.cfg.settle_ms));
-                p.commit = ms(t.commit_ms.unwrap_or(self.cfg.commit_ms));
-            }
-            p.declared = advice
-                .support
-                .is_some_and(|s| self.supports[s].tuning().monitor);
+            let t = advice.tuning;
+            p.settle = ms(t.settle_ms.unwrap_or(self.cfg.settle_ms));
+            p.commit = ms(t.commit_ms.unwrap_or(self.cfg.commit_ms));
+            p.declared = t.monitor;
             p.support = advice.support;
             p.fixed_tb = advice.chrome.map(|c| (c.top, c.bottom));
             let (l, r) = advice.chrome.map_or((0, 0), |c| (c.left, c.right));

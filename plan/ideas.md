@@ -231,16 +231,37 @@ Built: `screen.wait {idle}`, topics `idle` and `draw`, `visible` and
 Built: `ranger`, `htop`; vim splits in tmux (advice was cleared by a
 tick while a layout was pending). Left:
 
-- A preset cannot split inside another app's pane (ranger, htop in a
-  tmux pane): `segment` per pane.
-- `Tuning.monitor`: a preset declares a pane rewritten in place (htop
-  table, ranger preview hop islands, `0,200000` then `0,400000`, on each
-  whole rewrite; ids and rects hold).
+- htop menus (sort, setup) are left to the generic segmentation.
+
+## Presets, fifth session
+
+Built: `segment` asked per rectangle of the generic segmentation
+(ranger, htop, glances split inside a tmux pane, keys composed); a
+`Tuning` per pane (`tuning(&self, pane)`, `PaneView::area`): the ranger
+preview is a monitor and keeps its frame; `glances`; a table entry is
+not a bar (htop without its preset: the selection is in the table from
+the start). See `design.md`, "Dynamic frame" and "Plugins". Left:
+
+- The panes of a preset are final: no preset inside a pane of a preset
+  (htop in a vim `:terminal` when vim segments the screen; vim has no
+  `segment` today, so it works there).
+- A preset is asked of rectangles between rules. An app in a pane cut
+  by a bar that is not its own (above a status bar of another app, no
+  rule between) is reached only if the cut leaves it whole.
+- Presets found on a rectangle are detected again at most once a second
+  on a one-row change; `segment` runs at every segmentation while a
+  screen preset (tmux) is there.
+- Table entries: rows of one shape only (columns). A highlight in a
+  list of names of unequal lengths is a bar until it moves, as before.
+- htop without its preset: the function bar is not chrome (mixed
+  backdrops). `scripts/lib-e2e.sh` cannot pass `--no-presets`: the
+  table-entry rule is under unit tests only.
+- glances: other layouts (`-1`, `-2`, `-4`, a narrow screen without the
+  `TASKS` row) are left to the generic segmentation; the alerts under
+  the processes are part of `glances:processes`; a sidebar under 8
+  cells is not split.
 - ranger: an inverse run inside a text preview is read as a column;
-  `draw_borders` not tried; the preview pane gets a new frame id on the
-  first selection change.
-- glances has no preset. htop menus (sort, setup) are left to the
-  generic segmentation.
+  `draw_borders` not tried.
 
 ## Monitors and overlays, third session
 
@@ -301,6 +322,31 @@ Built: `cat`, `marks`, `rain` (see `design.md`). Gaps met:
 - `_cli.parse` uses `parse_args`; `marks ERROR -i WARN` needs
   `parse_intermixed_args`.
 
+## Clients, fifth session
+
+Built: `subscribe {snapshot}`; `cursor` in frame cells; topic `text`;
+the idle watch on a deadline; `style` in `draw.list`; in Python, reads
+inside `batch()`, `Pilot.event`, `gone` raised by `events` on a closed
+connection; `_cli.parse` intermixed (see `design.md`). Left:
+
+- `sand.heir` stays, driven by the topic `frames`. Two tmux panes with
+  little text resized together kept their frames when tried (100x30 to
+  70x30); the case where they do not was not found again, not proven
+  gone.
+- Topic `text` compares the text of view rows by hash, in the server:
+  a change of style is not told; a frame back from inactive is compared
+  with what it showed when it left. `snake`, `brick`, `blocks`,
+  `fishes`, `flower` still read the text on a period; `rain` and
+  `sand` read it in the driver.
+- `ptyrc events` has no `--snapshot`.
+- No snapshot for `screen`, `text`, `draw`, `input`, `exit`.
+- A hot cell whose `still` passed 10 s makes the idle watch look again
+  20 ms later, until the class follows.
+- Not started: host colours set at run time and their event; layer
+  names declared by a client.
+- `Pilot.cursor`, `wait_for`, `wait_idle`, `frame`, `frames` refuse or
+  queue blindly inside `batch()`.
+
 ## Effects, fifth session
 
 Built: `Under` in cells, over the canvas rect, with the heat on
@@ -329,6 +375,7 @@ on the heat; `snow` (see `design.md`, "Effects"). Left:
   word of its own row, so a ragged right margin holds little; `▁`..`█`
   need a font with block elements.
 - `sand.py`, `rain.py`: their docstrings and README rows still describe
-  the stillness kept by the rain and a pile that does not scroll; the
-  `heir` poll is unchanged. `Sprite.tune(params)` in the Python pilot
+  the stillness kept by the rain and a pile that does not scroll.
+  `snow.py` repeats the loop of `sand.follow` to send its gusts between
+  two events. `Sprite.tune(params)` in the Python pilot
   would spare `update(effect={"name": ..., "params": ...})`.

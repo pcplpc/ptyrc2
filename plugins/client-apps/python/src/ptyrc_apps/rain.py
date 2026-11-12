@@ -17,24 +17,21 @@ What it shows:
   on columns that changed in the last ten seconds, so the rain keeps
   away from where someone types.
 - A frame replaced by a resize: the sprite is moved to the pane that
-  took its place (`sand.heir`).
+  took its place (`sand.follow`), on an event of the topic `frames`.
 """
 
 from __future__ import annotations
 
 import argparse
 import random
-import time
 from collections.abc import Sequence
 
 from ptyrc import Frame, Pilot, Sprite
 
 from . import _cli
-from .sand import heir
+from .sand import follow
 
 __all__ = ["main", "pour"]
-
-POLL = 0.5  # seconds between two looks at a frame replaced
 
 
 def pour(pilot: Pilot, frame: Frame, rate: float) -> Sprite:
@@ -45,17 +42,7 @@ def pour(pilot: Pilot, frame: Frame, rate: float) -> Sprite:
 
 def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
     frame = _cli.pick(pilot, args.frame)
-    rain = pour(pilot, frame, args.rate)
-    if frame.kind == "raw":  # the screen: always there
-        return _cli.hold(pilot, seconds)
-    end = None if seconds is None else time.monotonic() + seconds
-    while end is None or time.monotonic() < end:
-        time.sleep(POLL)
-        if _cli.on_screen(frame) or frame.state != "inactive":
-            continue  # in sight, or settling: the driver keeps the sprite
-        if (new := heir(pilot, frame)) is not None:
-            rain.update(frame=new.id)
-            frame = new
+    follow(pilot, frame, pour(pilot, frame, args.rate), seconds)
 
 
 def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> int:

@@ -9,6 +9,8 @@ use ptyrc_vt::{Grid, Rect};
 pub struct PaneView<'a> {
     pub grid: &'a Grid,
     pub rect: Rect,
+    /// The area a preset segmented to make this pane; `rect` otherwise.
+    pub area: Rect,
     /// Screen cursor, if inside `rect`.
     pub cursor: Option<(u16, u16)>,
     pub title: &'a str,
@@ -45,7 +47,7 @@ pub struct ViewHint {
     pub col: Option<i64>,
 }
 
-/// Overrides of the frame heuristics. `None`: keep the default.
+/// Overrides of the frame heuristics for a pane. `None`: keep the default.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Tuning {
     pub settle_ms: Option<u32>,
@@ -76,12 +78,16 @@ pub trait TuiSupport: Send {
         None
     }
 
-    /// Panes of the area, replacing the generic segmentation.
+    /// Panes of the area, replacing the generic segmentation: the whole
+    /// screen, or a rectangle the generic segmentation reached (a pane of
+    /// another app). The panes are not split further; each is shown with
+    /// `PaneView::area` set to the area.
     fn segment(&self, _area: &PaneView) -> Option<Vec<Rect>> {
         None
     }
 
-    fn tuning(&self) -> Tuning {
+    /// Asked with the rest, for each pane.
+    fn tuning(&self, _pane: &PaneView) -> Tuning {
         Tuning::default()
     }
 }

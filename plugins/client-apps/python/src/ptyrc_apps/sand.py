@@ -17,10 +17,11 @@ What it shows:
   by the driver at each render. Text written on the pile takes the
   place of its grains; a resize cuts off what no longer fits.
 - `--cursor`: the stream falls on the cursor's column.
-- A frame replaced: a pane with little text does not keep its identity
-  through a resize, the driver allocates a new frame. The app moves its
-  sprite there (`Sprite.update(frame=...)`): the effect, and its pile,
-  go on.
+- A frame replaced: of two panes with little text, resized together,
+  the driver cannot tell which is which and allocates new frames. The
+  app is told by the topic `frames` and moves its sprite to the pane
+  that took the place (`Sprite.update(frame=...)`): the effect, and its
+  pile, go on. Nothing is polled: the app sleeps on the socket.
 """
 
 from __future__ import annotations
@@ -34,9 +35,9 @@ from ptyrc import Frame, Pilot, PtyrcError, Sprite
 
 from . import _cli
 
-__all__ = ["heir", "main", "pour", "still"]
+__all__ = ["follow", "heir", "main", "pour", "still"]
 
-POLL = 0.5  # seconds between two looks at a frame replaced
+POLL = 0.5  # seconds between two looks at a layout still settling
 
 
 def pour(pilot: Pilot, frame: Frame, rate: float, cursor: bool = False) -> Sprite:
@@ -47,10 +48,11 @@ def pour(pilot: Pilot, frame: Frame, rate: float, cursor: bool = False) -> Sprit
     return pilot.effect("sand", params, frame=frame.id, layer="back")
 
 
-def heir(pilot: Pilot, frame: Frame) -> Frame | None:
-    """The pane that took the place of `frame`, now inactive: usable,
-    same key (another tmux window is not a place to follow to), over at
-    least half of the smaller of the two; the one that overlaps most."""
+def heir(frame: Frame, panes: Sequence[Frame]) -> Frame | None:
+    """Of `panes`, the one that took the place of `frame`, now
+    inactive: usable, same key (another tmux window is not a place to
+    follow to), over at least half of the smaller of the two; the one
+    that overlaps most."""
     x, y, w, h = frame.rect
 
     def shared(pane: Frame) -> int:
@@ -59,14 +61,43 @@ def heir(pilot: Pilot, frame: Frame) -> Frame | None:
         down = min(y + h, py + ph) - max(y, py)
         return max(0, across) * max(0, down)
 
-    panes = [
+    heirs = [
         pane
-        for pane in pilot.panes()
+        for pane in panes
         if pane.id != frame.id
+        and pane.kind == "pane"
+        and pane.usable
         and pane.key == frame.key
         and 2 * shared(pane) >= min(w * h, pane.size[0] * pane.size[1])
     ]
-    return max(panes, key=shared, default=None)
+    return max(heirs, key=shared, default=None)
+
+
+def follow(
+    pilot: Pilot, frame: Frame, sprite: Sprite, seconds: float | None = None
+) -> None:
+    """Stay connected, until the session ends or for `seconds`; move
+    `sprite` to the pane that takes the place of `frame`. Driven by the
+    topic `frames`: every change of layout comes with the frames as
+    they are, so nothing is asked."""
+    end = None if seconds is None else time.monotonic() + seconds
+    pilot.subscribe("frames", "exit")
+    while True:
+        left = None if end is None else end - time.monotonic()
+        if left is not None and left <= 0:
+            return
+        event = pilot.event(timeout=left)
+        if event is None or event[0] == "exit":
+            return
+        if event[0] != "frames" or frame.kind == "raw":
+            continue
+        frames = [Frame(pilot, info) for info in event[1]["frames"]]
+        mine = next((f for f in frames if f.id == frame.id), None)
+        if mine is not None and mine.state != "inactive":
+            continue  # in sight, or settling: the driver keeps the sprite
+        if (new := heir(frame, frames)) is not None:
+            sprite.update(frame=new.id)
+            frame = new
 
 
 def still(pilot: Pilot, sel: int | str, timeout: float) -> Frame | None:
@@ -102,13 +133,7 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
         if args.now or frame is not None:
             time.sleep(POLL)  # a layout still settling
     sand = pour(pilot, frame, args.rate, args.cursor)
-    while end is None or time.monotonic() < end:
-        time.sleep(POLL)
-        if frame.kind == "raw" or _cli.on_screen(frame) or frame.state != "inactive":
-            continue  # in sight, or settling: the driver keeps the sprite
-        if (new := heir(pilot, frame)) is not None:
-            sand.update(frame=new.id)
-            frame = new
+    follow(pilot, frame, sand, None if end is None else end - time.monotonic())
 
 
 def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> int:

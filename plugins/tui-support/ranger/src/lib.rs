@@ -7,7 +7,7 @@
 //! each shown in inverse video over the width of its column, one blank
 //! cell between two columns.
 
-use ptyrc_core::plugin::{Chrome, PaneView, TuiSupport, ViewHint};
+use ptyrc_core::plugin::{Chrome, PaneView, TuiSupport, Tuning, ViewHint};
 use ptyrc_vt::{Attrs, Grid, Rect};
 use regex::Regex;
 use std::sync::LazyLock;
@@ -155,7 +155,7 @@ fn part(pane: &PaneView) -> Option<(Look, Part)> {
     if let Some(look) = Look::of(pane.grid, pane.rect) {
         return Some((look, Part::Whole));
     }
-    let look = Look::of(pane.grid, pane.grid.rect())?;
+    let look = Look::of(pane.grid, pane.area)?;
     let i = (0..look.columns.len()).find(|i| look.rect(*i) == pane.rect)?;
     Some((look, Part::Column(i)))
 }
@@ -173,7 +173,7 @@ impl TuiSupport for Ranger {
         }
     }
 
-    /// Not split (inside another app's pane): the title and status rows.
+    /// Asked whole (the core split nothing): the title and status rows.
     fn chrome(&self, pane: &PaneView) -> Option<Chrome> {
         match part(pane)?.1 {
             Part::Whole => Some(Chrome {
@@ -209,6 +209,15 @@ impl TuiSupport for Ranger {
             Part::Whole => Some(format!("ranger:{}", look.dir())),
             Part::Column(i) if i == look.main() => Some(format!("ranger:{}", look.dir())),
             Part::Column(_) => None,
+        }
+    }
+
+    /// The preview, right of the main column, is repainted in place.
+    fn tuning(&self, pane: &PaneView) -> Tuning {
+        let monitor = matches!(part(pane), Some((look, Part::Column(i))) if i > look.main());
+        Tuning {
+            monitor,
+            ..Tuning::default()
         }
     }
 

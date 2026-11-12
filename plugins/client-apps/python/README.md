@@ -75,12 +75,23 @@ What to know:
   app's text); topic `draw` lists the sprites removed with rows the
   driver forgot.
 - **Events, not ticks**: an app with nothing to animate waits on
-  `pilot.events(..., timeout=...)`: it wakes on a change, or when its
-  next step is due (`cat.py`, `marks.py`).
-- **A frame replaced**: a pane keeps its frame through a resize when the
-  driver knows its text again; a nearly empty one gets a new frame, and
-  the sprites stay with the old, inactive one. `sand.heir` finds the
-  new pane; `Sprite.update(frame=...)` moves the sprite, state kept.
+  `pilot.events(..., timeout=...)` or `pilot.event(timeout)`: it wakes
+  on a change, or when its next step is due (`cat.py`, `marks.py`).
+  Silence ends the wait; a session that ended raises `PtyrcError`
+  (`gone`), which `_cli.run` takes for a normal end: no loop tests the
+  connection.
+- **The state at start**: `pilot.subscribe(..., snapshot=True)` sends
+  what is (idle, cursor, frames, size) as the first events (`cat.py`).
+- **Topic `text`**: per frame, the frame rows whose text changed, and
+  the origin after a scroll; a row that scrolls into view is not a
+  change. Topic `cursor` tells the cursor in frame cells (`frame`,
+  `pos`).
+- **A frame replaced**: a pane keeps its frame through a resize, a
+  nearly empty one too when it is the only such pane. Otherwise it gets
+  a new frame, and the sprites stay with the old, inactive one.
+  `sand.follow` waits on the topic `frames`, `sand.heir` finds the new
+  pane in the event's data; `Sprite.update(frame=...)` moves the
+  sprite, state kept.
 - **What**: `rows` (a space is transparent), `cells` (styled runs),
   `frames` (an animation the driver plays alone), `effect` (a native
   generator), `pilot.ext(...)` (a draw extension).
@@ -95,7 +106,9 @@ What to know:
   they show in one repaint.
 - **Reading**: `pilot.text()`, `pilot.find()`, `Frame.known()` (what a pane
   remembers outside its view), `pilot.cursor(trail=True)`,
-  `pilot.events("screen", "cursor", "frames")`.
+  `pilot.events("screen", "text", "cursor", "frames")`. Inside
+  `batch()`, `text`, `find`, `sprites` and `Sprite.info` return a list
+  or a dict filled when the batch is sent (`marks.py`).
 
 `_cli.ticks(period)` paces a loop and yields the measured step;
 `_cli.hold(pilot)` keeps an app with nothing to send connected.
