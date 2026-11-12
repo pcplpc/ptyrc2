@@ -247,7 +247,7 @@ def test_arrows_move_a_sprite_and_vim_does_not_see_them(long_file: Path) -> None
         host.type(b"j")
         until(lambda: pilot.cursor().y == 3)
         # The escape key gives the arrows back, and the app ends.
-        host.type(b"\x1d")
+        host.type(b"\x14")
         ship.join(timeout=5)
         assert not ship.is_alive()
         until(lambda: not ships())

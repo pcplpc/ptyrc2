@@ -8,7 +8,7 @@
 `input.grab` takes the four arrows from the keyboard of the session
 before the app. Each press comes as an `input` event and moves a sprite
 in the pane that holds the cursor, in frame cells: scrolled, it goes
-with the text. Every other key is the app's. ctrl+] gives the arrows
+with the text. Every other key is the app's. ctrl+t gives the arrows
 back and ends.
 """
 

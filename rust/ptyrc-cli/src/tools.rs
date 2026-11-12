@@ -31,7 +31,7 @@ fn special_key(what: &str, key: &str) -> Result<Vec<u8>, Fail> {
         Ok(bytes) if key.chars().count() > 1 => Ok(bytes),
         _ => Err(Fail::usage(
             format!("{what}: not a key: {key}"),
-            "a named key that is not text, as ctrl+] or f12",
+            "a named key that is not text, as ctrl+t or f12",
         )),
     }
 }
@@ -60,8 +60,8 @@ fn modes_on(info: &Value) -> Vec<u16> {
 
 #[derive(Args)]
 pub struct Attach {
-    /// The key that leaves; it is not sent [ctrl+] when not given]
-    #[arg(long, value_name = "KEY", default_value = "ctrl+]")]
+    /// The key that leaves; it is not sent [ctrl+t when not given]
+    #[arg(long, value_name = "KEY", default_value = "ctrl+t")]
     detach: String,
     /// Give the session the size of this terminal, and again when this
     /// terminal is resized (headless sessions)
@@ -229,7 +229,7 @@ pub struct Grab {
     /// Keys to take [default: all]
     keys: Vec<String>,
     /// The key that always releases; it reaches nobody
-    #[arg(long, value_name = "KEY", default_value = "ctrl+]")]
+    #[arg(long, value_name = "KEY", default_value = "ctrl+t")]
     escape: String,
 }
 

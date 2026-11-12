@@ -44,7 +44,7 @@ fn grabbed_keys_do_not_reach_the_app() {
     let got = client
         .call("input.grab", json!({"keys": ["up", "down"]}))
         .unwrap();
-    assert_eq!(got, json!({"escape": "ctrl+]"}));
+    assert_eq!(got, json!({"escape": "ctrl+t"}));
     host.type_in(b"\x1b[Ab\x1bOBc\x1b[C");
     host.wait_seen("c^[[C");
     assert_eq!(next_input(&mut client)["key"], "up");
@@ -75,10 +75,10 @@ fn grabbed_keys_do_not_reach_the_app() {
     host.type_in("xé".as_bytes());
     assert_eq!(next_input(&mut client)["key"], "x");
     assert_eq!(next_input(&mut client)["key"], "é");
-    host.type_in(b"\x1dz");
+    host.type_in(b"\x14z");
     assert_eq!(next_input(&mut client), json!({"released": "escape"}));
     host.wait_seen("z");
-    assert!(!seen(&host).contains('x') && !seen(&host).contains("^]"));
+    assert!(!seen(&host).contains('x') && !seen(&host).contains("^T"));
 
     // A grab goes with its client; `input.release` gives it back.
     other.call("input.grab", json!({})).unwrap();
@@ -394,7 +394,7 @@ fn attach_mirrors_and_types() {
     host.wait_seen("\x1b[5;1H\x1b[?25h");
 
     // The detach key leaves; it is not typed; the session lives.
-    host.type_in(b"x\x1dy");
+    host.type_in(b"x\x14y");
     assert_eq!(host.wait_exit(&mut attach), 0);
     assert!(seen(&host).contains("detached from a"), "{:?}", seen(&host));
     assert!(seen(&host).contains("\x1b[?1049l"));
@@ -460,7 +460,7 @@ fn attach_takes_the_modes_and_follows_the_size() {
     client.call("input.send", json!({"text": "x"})).unwrap();
     host.wait_seen("^[[<0;3;2Mx");
     host.seen.clear();
-    host.type_in(b"\x1d");
+    host.type_in(b"\x14");
     assert_eq!(host.wait_exit(&mut attach), 0);
     // Left: the modes are given back.
     assert!(

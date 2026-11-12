@@ -870,7 +870,7 @@ that moves a snapshot is read in the diff of the `.snap`.
 
 - `ptyrc attach`: the remote screen here (as `show`, with the cursor)
   and the keys of this terminal there, as bytes. `--detach KEY`
-  (`ctrl+]`) leaves; it is not sent, nor what was typed after it in the
+  (`ctrl+t`) leaves; it is not sent, nor what was typed after it in the
   same read. The remote size is not changed: a larger remote screen is
   cut at this terminal's size; `--resize` gives a headless session this
   terminal's size, at the start and each time this terminal is resized
@@ -885,7 +885,7 @@ that moves a snapshot is read in the diff of the `.snap`.
   client alone, subscribed or not: `{"key","bytes","grabbed":true}`,
   `key` its name as `input.send` takes it, a printable character
   itself, null for what has no name (a mouse report). Keys not taken go
-  to the app. The escape key (`ctrl+]`, or `escape`: a named key that
+  to the app. The escape key (`ctrl+t`, or `escape`: a named key that
   is not text) always releases: it reaches neither, the client gets
   `{"released":"escape"}`. A grab ends with `input.release` or with its
   connection. Keys typed by clients (`input.send`) are never grabbed.
@@ -961,7 +961,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `screen.wait` | `pattern` or `stable_ms` or `idle` (or `gone`), `timeout_ms`, `frame` | `{"matched":bool,"match":...}`; with `idle`: `{"matched":true,"match":null,"frame":id,"idle":{"score","idle","free"}}`, the frame name resolved at each look |
 | `input.send` | `text` or `keys` or `bytes` (base64), `paste` | `{}` |
 | `input.click` | `x`, `y` (screen cell), `button`: `left`, `middle`, `right`, `wheel-up`, `wheel-down`, `wheel-left`, `wheel-right`; `mods`: `shift`, `alt`, `ctrl`; `count` (1 to 3); `to`: `[x, y]` | `{}` |
-| `input.grab` | `keys`: names (absent: all), `escape` (`ctrl+]`) | `{"escape":name}` |
+| `input.grab` | `keys`: names (absent: all), `escape` (`ctrl+t`) | `{"escape":name}` |
 | `input.release` | | `{}` |
 | `tape.status` | | `{"t","end","records","next","paused","speed","done"}`, seconds; a replay only |
 | `tape.step` | `records` (1) | status, once paused there |

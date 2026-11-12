@@ -6,7 +6,7 @@ use crate::keys;
 use std::collections::HashSet;
 
 /// The key that releases a grab when none is given.
-pub(crate) const ESCAPE: &str = "ctrl+]";
+pub(crate) const ESCAPE: &str = "ctrl+t";
 
 /// One client holds the keyboard, or some keys of it.
 pub(crate) struct Grab {
@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn everything_is_taken_until_the_escape() {
         let grab = Grab::new(ConnId(1), None, ESCAPE).unwrap();
-        let sorted = grab.sort("xé\x1b[M !!\x1dyz".as_bytes());
+        let sorted = grab.sort("xé\x1b[M !!\x14yz".as_bytes());
         assert_eq!(sorted.taken.len(), 3);
         assert_eq!(sorted.taken[2], (None, b"\x1b[M !!".to_vec()));
         assert!(sorted.released);

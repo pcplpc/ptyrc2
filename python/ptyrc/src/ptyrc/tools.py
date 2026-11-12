@@ -379,7 +379,7 @@ class Tools:
         thread.start()
         return thread
 
-    def grab(self, *keys: str, escape: str = "ctrl+]") -> None:
+    def grab(self, *keys: str, escape: str = "ctrl+t") -> None:
         """Take keys of the host keyboard before the app: those named, or
         all. Each comes as an `input` event, `{"key", "bytes", "grabbed"}`
         (`Pilot.events()`). `escape` always releases, as `release()` and

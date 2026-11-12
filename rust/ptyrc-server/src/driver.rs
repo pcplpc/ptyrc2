@@ -1472,7 +1472,7 @@ impl Driver {
         };
         let grab = Grab::new(conn, keys, escape).map_err(|e| {
             RpcError::bad_params(e)
-                .with_hint("a named key, as ctrl+] or f12: it never reaches the app")
+                .with_hint("a named key, as ctrl+t or f12: it never reaches the app")
         })?;
         self.grab = Some(grab);
         Ok(json!({"escape": escape}))

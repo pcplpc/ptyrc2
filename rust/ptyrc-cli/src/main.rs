@@ -86,7 +86,7 @@ enum Verb {
     Draw(verbs::Draw),
     /// Mirror the remote screen here (^C to leave)
     Show,
-    /// The remote screen here and this keyboard there (ctrl+] to leave)
+    /// The remote screen here and this keyboard there (ctrl+t to leave)
     Attach(tools::Attach),
     /// Take keys from the session's keyboard before the app; print them
     Grab(tools::Grab),
