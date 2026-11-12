@@ -301,3 +301,43 @@ Built: `cat`, `marks`, `rain` (see `design.md`). Gaps met:
   front sprites.
 - `_cli.parse` uses `parse_args`; `marks ERROR -i WARN` needs
   `parse_intermixed_args`.
+
+## Tools, fifth session
+
+Built: tapes (`run --record`, `replay`, `tape`, `snap`, `--check`),
+`attach`, `input.grab`, `input.click`, `shot`, locators (see
+`design.md`, "Tools"). From the top of this file: record and replay,
+attach, input interception, mouse clicks, screenshots, selectors. Left:
+
+- A tape does not hold the host colours nor `--no-presets`: a replay
+  takes the defaults and the presets of its own command line.
+- A tape goes forward only: no rewind short of replaying. A `Vt` is
+  `Clone`; the frames and the scene are not.
+- `replay` is headless: it is watched with `show` or `attach`. No
+  export to asciicast.
+- Paused, a replay stops every timer: `screen.wait` neither settles nor
+  times out; a client that waits must move the tape from another
+  connection.
+- Typed bytes on a tape (`i`) are not replayed; a tape could drive a
+  live app (`ptyrc play-keys`), with the waits its `o` records imply.
+- `attach` sends the bytes of this terminal as they are: a terminal in
+  normal cursor-key mode facing an app in application mode sends
+  `ESC [ A`; most apps take both. No mouse, no paste brackets, no
+  resize after the start (`--resize` is read once); a detach key split
+  across two reads is not seen.
+- `attach --sprites` and `show` poll or redraw whole screens; a
+  `host` topic with the composed changes would do both.
+- A grab sees the keys the host keyboard sends, split as they come: a
+  sequence cut by a read is two keys. Modified arrows (`ESC [ 1;5 C`)
+  have no name: taken by a grab of all, never by a set.
+- Host mouse reports are not parsed: no click on a sprite, no hover. A
+  grab of all gives them raw (`key: null`).
+- `input.click`: no drag, no modifiers, no double click; modes 1005 and
+  1015 are written as X10.
+- `shot`: no cursor, no hyperlinks, no blink; `--svg` trusts the viewer
+  for a monospace font (`textLength` keeps the grid). No PNG.
+- `Locator.wait` looks again every 20 to 200 ms; `Locator.all` is the
+  view only (`known` rows have no screen cell).
+- The snapshots of `tests/tapes/` hold the frames to today's answers:
+  a deliberate change of the heuristics needs `scripts/record-tapes.sh
+  --snap` and a read of the diff.

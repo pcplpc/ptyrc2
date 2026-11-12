@@ -939,10 +939,7 @@ impl Driver {
                 self.grab.take_if(|g| g.conn == conn);
                 Ok(json!({}))
             }
-            _ if method.starts_with("tape.") => match self.tape(method, &params, in_batch) {
-                Some(result) => result,
-                None => return None,
-            },
+            _ if method.starts_with("tape.") => self.tape(method, &params, in_batch)?,
             "batch" if in_batch => Err(RpcError::new(ErrorCode::BadRequest, "batch inside batch")),
             "batch" => self.batch(conn, params, engine),
             _ => {

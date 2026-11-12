@@ -37,6 +37,20 @@ with Pilot.spawn(["vim", "notes.md"], size=(100, 30)) as pilot:
 | frames | `frames`, `panes`, `frame`, `frame_at`; `Frame.text`, `known`, `find`, `heat`, `heat_classes`, `idle`, `check_idle`, `is_idle`, `to_screen`, `to_frame`, `draw` |
 | draw | `draw`, `put`, `effect`, `ext`, `sprites`, `clear`; `Sprite.set`, `ext`, `move`, `update`, `info`, `remove` |
 | other | `batch`, `events`, `subscribe`, `resize`, `debug_overlay`, `dump`, `call` |
+| tools | `locator`, `Frame.locator`, `click`, `grab`, `release`, `shown`, `snapshot`; `spawn(record=)`, `Pilot.replay`, `tape` |
+
+A `Locator` is a place named by the text there, looked up at each use:
+
+```python
+total = pilot.locator("Total:")
+total.wait()
+assert total.right(2).read(5) == "42.00"  # 2 cells after the match
+pilot.frame("active").locator("OK").click()  # as the app's mouse mode wants
+
+with Pilot.replay("session.tape") as replay:  # written by spawn(record=...)
+    replay.tape.seek(2.5)  # tape seconds; the clock stops there
+    assert "TODO" in "\n".join(replay.text())
+```
 
 Sprites are drawn behind the app's text unless `layer="front"`; the app
 is layer 0, negative layers are behind it.
