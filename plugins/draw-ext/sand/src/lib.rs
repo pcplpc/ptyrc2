@@ -232,7 +232,9 @@ impl DrawExt for SandExt {
     }
 
     fn draw(&self, function: &str, _params: &serde_json::Value) -> Result<SpriteSpec, String> {
-        Err(format!("sand: no function {function}; use the effect `sand`"))
+        Err(format!(
+            "sand: no function {function}; use the effect `sand`"
+        ))
     }
 
     fn effects(&self) -> Vec<(&'static str, EffectFactory)> {
