@@ -9,10 +9,12 @@ import sys
 import time
 from collections.abc import Callable, Iterator, Sequence
 
-from ptyrc import Frame, Pilot, PtyrcError
+from ptyrc import Frame, Pilot, PtyrcError, Sprite
 
 __all__ = [
+    "follow",
     "frame_arg",
+    "heir",
     "hold",
     "in_sight",
     "on_screen",
@@ -112,6 +114,73 @@ def hold(pilot: Pilot, seconds: float | None = None) -> None:
     that ends without a word raises `gone`: `run` takes it for an end."""
     for _ in pilot.events("exit", timeout=seconds):
         return
+
+
+def heir(frame: Frame, panes: Sequence[Frame]) -> Frame | None:
+    """Of `panes`, the one that took the place of `frame`, now
+    inactive: usable, same key (another tmux window is not a place to
+    follow to), over at least half of the smaller of the two; the one
+    that overlaps most."""
+    x, y, w, h = frame.rect
+
+    def shared(pane: Frame) -> int:
+        px, py, pw, ph = pane.rect
+        across = min(x + w, px + pw) - max(x, px)
+        down = min(y + h, py + ph) - max(y, py)
+        return max(0, across) * max(0, down)
+
+    heirs = [
+        pane
+        for pane in panes
+        if pane.id != frame.id
+        and pane.kind == "pane"
+        and pane.usable
+        and pane.key == frame.key
+        and 2 * shared(pane) >= min(w * h, pane.size[0] * pane.size[1])
+    ]
+    return max(heirs, key=shared, default=None)
+
+
+def follow(
+    pilot: Pilot,
+    frame: Frame,
+    sprite: Sprite,
+    seconds: float | None = None,
+    beats: Iterator[float] | None = None,
+) -> None:
+    """Stay connected, until the session ends or for `seconds`; move
+    `sprite` to the pane that takes the place of `frame`. Driven by the
+    topic `frames`: every change of layout comes with the frames as
+    they are, so nothing is asked.
+
+    `beats`: the app's own work between two events. Each `next()` gives
+    the seconds to wait before the one after: a generator does its work
+    after each `yield`."""
+    now = time.monotonic()
+    end = None if seconds is None else now + seconds
+    beat = None if beats is None else now + next(beats)
+    pilot.subscribe("frames", "exit")
+    while True:
+        now = time.monotonic()
+        if end is not None and now >= end:
+            return
+        if beats is not None and beat is not None and now >= beat:
+            beat = now + next(beats)
+        waits = [t - now for t in (end, beat) if t is not None]
+        event = pilot.event(timeout=min(waits) if waits else None)
+        if event is None:
+            continue
+        if event[0] == "exit":
+            return
+        if event[0] != "frames" or frame.kind == "raw":
+            continue
+        frames = [Frame(pilot, info) for info in event[1]["frames"]]
+        mine = next((f for f in frames if f.id == frame.id), None)
+        if mine is not None and mine.state != "inactive":
+            continue  # in sight, or settling: the driver keeps the sprite
+        if (new := heir(frame, frames)) is not None:
+            sprite.update(frame=new.id)
+            frame = new
 
 
 def on_screen(frame: Frame) -> bool:
