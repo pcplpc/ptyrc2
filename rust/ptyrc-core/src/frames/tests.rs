@@ -1388,3 +1388,40 @@ fn random_screens_do_not_break_anything() {
         }
     }
 }
+
+struct Halves;
+
+impl TuiSupport for Halves {
+    fn name(&self) -> &'static str {
+        "halves"
+    }
+
+    fn detect(&self, pane: &PaneView) -> f32 {
+        if pane.title == "halves" { 1.0 } else { 0.0 }
+    }
+
+    fn segment(&self, area: &PaneView) -> Option<Vec<Rect>> {
+        let w = area.rect.w / 2;
+        Some(vec![
+            Rect::new(0, 0, w, area.rect.h),
+            Rect::new(w, 0, area.rect.w - w, area.rect.h),
+        ])
+    }
+}
+
+#[test]
+fn plugin_segmentation_replaces_the_generic_one() {
+    let mut s = Sim::with(FrameConfig::default(), vec![Box::new(Halves)]);
+    let g = view(&doc(30), 0, 20, &[]);
+    s.settle(&g);
+    assert_eq!(s.rects(), vec![[0, 0, COLS, 20]]);
+    s.title = "halves".into();
+    let mut g2 = g.clone();
+    put(&mut g2, 0, 0, "x");
+    s.feed(&g2, 10);
+    s.idle(200);
+    assert_eq!(s.rects(), vec![[0, 0, 30, 20], [30, 0, 30, 20]]);
+    // Panes born on a tick meet the plugins at the next burst.
+    s.feed(&g2, 10);
+    assert_eq!(s.panes()[0].support.as_deref(), Some("halves"));
+}

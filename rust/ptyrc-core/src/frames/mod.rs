@@ -324,10 +324,13 @@ impl Frames {
         // Segmentation, when something structural may have changed.
         let cursor_row = Some(input.cursor.row);
         let expired = self.distrust.iter().any(|d| d.until <= now);
+        // A plugin may segment on anything it sees.
+        let plugins = !self.supports.is_empty() && (self.screen.any_change || title_changed);
         if self.seg.is_none()
             || self.screen.class_change
             || cursor_row != self.seg_cursor
             || expired
+            || plugins
         {
             self.distrust.retain(|d| d.until > now);
             let (mut leaves, mut seps) = self.segment(input, now);
@@ -1080,8 +1083,9 @@ impl Frames {
         let mut new_key = p.key.clone();
 
         // Plugin knowledge.
+        let consult = input.is_some() && (dirty || p.fresh || p.support_at.is_none());
         if let Some(inp) = input
-            && (dirty || p.fresh)
+            && consult
         {
             let pv = self.pane_view(inp, p.rect);
             if p.support_at
@@ -1204,7 +1208,7 @@ impl Frames {
             p.reattach = false;
         }
         let key_changed = p.key.is_some() && new_key.is_some() && p.key != new_key && !p.fresh;
-        let out = if p.fresh || dirty || p.ext.rows.is_empty() {
+        let out = if p.fresh || dirty || consult || p.ext.rows.is_empty() {
             p.ext.observe(&obs)
         } else {
             Outcome::Same
