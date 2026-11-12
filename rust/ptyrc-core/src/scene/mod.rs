@@ -17,7 +17,7 @@ pub use spec::*;
 use crate::types::{
     FrameId, FramePos, FrameSel, OwnerId, RAW, SpriteId, SurfaceInfo, Surfaces, TextQuery,
 };
-use ptyrc_vt::{Attrs, Cell, Grid, Rect, Style};
+use ptyrc_vt::{Attrs, Cell, Color, Grid, Rect, Style};
 use raster::Slot;
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -31,7 +31,7 @@ const MOTION_STEP: Duration = Duration::from_millis(33);
 /// A text anchor keeps its match when one is found this close (rows).
 const TEXT_STICKY_ROWS: i64 = 3;
 
-const FRAME_NAMES: [&str; 4] = ["raw", "active", "largest", "quietest"];
+const FRAME_NAMES: [&str; 5] = ["raw", "active", "largest", "quietest", "idle"];
 
 struct Anim {
     frames: Vec<Canvas>,
@@ -79,9 +79,16 @@ struct Sprite {
     frame: Option<FrameId>,
     anchor: Anchor,
     body: Body,
+    /// Never 0: the app's.
+    layer: i32,
+    /// Given by the client; otherwise the layer follows the blend.
+    layer_set: bool,
     blend: Blend,
     z: i32,
     persist: bool,
+    /// Drawn at least once. Until then the clocks of an animation and of
+    /// an effect are held.
+    shown: bool,
     born: Duration,
     expires: Option<Duration>,
     mover: Option<Mover>,
@@ -178,7 +185,7 @@ impl Sprite {
 
 /// Every sprite, and what they add to the screen.
 pub struct Scene {
-    /// Sorted by `(z, id)`: paint order.
+    /// Sorted by `(layer, z, id)`: paint order.
     sprites: Vec<Sprite>,
     next_id: SpriteId,
     effects: BTreeMap<String, EffectFactory>,
@@ -343,9 +350,12 @@ impl Scene {
             frame,
             anchor: spec.anchor,
             body,
-            blend: spec.blend,
+            layer: spec.layer.map_or(spec.blend.default_layer(), |l| l.0),
+            layer_set: spec.layer.is_some(),
+            blend: spec.blend.canonical(),
             z: spec.z,
             persist: spec.persist,
+            shown: false,
             born: now,
             expires: spec.ttl_ms.map(|ms| now + Duration::from_millis(ms)),
             mover: spec.motion.map(|motion| Mover {
@@ -360,7 +370,7 @@ impl Scene {
         };
         let at = self
             .sprites
-            .partition_point(|s| (s.z, s.id) < (sprite.z, sprite.id));
+            .partition_point(|s| (s.layer, s.z, s.id) < (sprite.layer, sprite.z, sprite.id));
         self.sprites.insert(at, sprite);
         self.dirty = true;
         Ok(id)
@@ -416,8 +426,18 @@ impl Scene {
             }
             _ => {}
         }
+        let mut order = false;
         if let Some(blend) = patch.blend {
-            sprite.blend = blend;
+            sprite.blend = blend.canonical();
+            if !sprite.layer_set && patch.layer.is_none() {
+                order |= sprite.layer != blend.default_layer();
+                sprite.layer = blend.default_layer();
+            }
+        }
+        if let Some(layer) = patch.layer {
+            order |= sprite.layer != layer.0;
+            sprite.layer = layer.0;
+            sprite.layer_set = true;
         }
         if let Some(persist) = patch.persist {
             sprite.persist = persist;
@@ -434,11 +454,12 @@ impl Scene {
                 last: now,
             });
         }
-        if let Some(z) = patch.z
-            && z != sprite.z
-        {
+        if let Some(z) = patch.z {
+            order |= z != sprite.z;
             sprite.z = z;
-            self.sprites.sort_by_key(|s| (s.z, s.id));
+        }
+        if order {
+            self.sprites.sort_by_key(|s| (s.layer, s.z, s.id));
         }
         self.dirty = true;
         Ok(())
@@ -510,6 +531,7 @@ impl Scene {
                         Body::Fx(f) => format!("effect:{}", f.name),
                     },
                     size: [w, h],
+                    layer: s.layer,
                     blend: s.blend,
                     z: s.z,
                     persist: s.persist,
@@ -546,6 +568,14 @@ impl Scene {
                 sprite.frame = surfaces.resolve(&sprite.sel);
             }
             let info = sprite.frame.and_then(|id| surfaces.info(id));
+
+            if !sprite.shown {
+                // Nothing was seen yet: the show starts when it is.
+                match &mut sprite.body {
+                    Body::Anim(anim) => anim.since = now,
+                    Body::Fx(_) => sprite.born = now,
+                }
+            }
 
             match &mut sprite.body {
                 Body::Anim(anim) if anim.timed => {
@@ -713,6 +743,7 @@ impl Scene {
                 screen = Some((nx, ny));
             }
 
+            sprite.shown |= screen.is_some();
             if screen != sprite.screen {
                 sprite.screen = screen;
                 dirty = true;
@@ -735,7 +766,9 @@ impl Scene {
                 at(t);
             }
             match &s.body {
-                Body::Anim(a) if a.timed => at(a.since + Duration::from_millis(a.ms[a.cur])),
+                Body::Anim(a) if a.timed && s.shown => {
+                    at(a.since + Duration::from_millis(a.ms[a.cur]))
+                }
                 Body::Anim(_) => {}
                 Body::Fx(f) => at(f.next),
             }
@@ -754,90 +787,281 @@ impl Scene {
         wake
     }
 
-    /// The app grid with the sprites on it. Uses the anchor state of the
-    /// last `tick` and the surfaces as they are now: a scroll between the
-    /// two moves frame-anchored sprites.
+    /// The app grid with the sprites on it: the back layers seen through
+    /// the cells the app left without ink, the app, the front layers.
+    /// Uses the anchor state of the last `tick` and the surfaces as they
+    /// are now: a scroll between the two moves frame-anchored sprites.
     pub fn compose(&self, base: &Grid, surfaces: &dyn Surfaces) -> Grid {
         let mut out = base.clone();
         if self.sprites.is_empty() {
             return out;
         }
         let cursor = surfaces.cursor();
-        for sprite in &self.sprites {
-            let Some(info) = sprite.frame.and_then(|id| surfaces.info(id)) else {
-                continue;
-            };
-            if !info.usable {
-                continue;
-            }
-            let Some((left, top)) = sprite.locate(&info, cursor) else {
-                continue;
-            };
-            let clip = info.rect.intersect(&base.rect());
-            if clip.is_empty() {
-                continue;
-            }
-            let canvas = sprite.canvas();
-            for cy in 0..canvas.height() {
-                let sy = top + cy as i64;
-                if sy < clip.y as i64 || sy >= clip.bottom() as i64 {
-                    continue;
-                }
-                for cx in 0..canvas.width() {
-                    let Slot::Glyph(glyph) = canvas.slot(cx, cy) else {
-                        continue;
-                    };
-                    let sx = left + cx as i64;
-                    let width = glyph.cell.width as i64;
-                    if sx < clip.x as i64 || sx + width > clip.right() as i64 {
-                        continue;
-                    }
-                    paint(&mut out, base, sx as u16, sy as u16, glyph, sprite.blend);
-                }
-            }
+        let front = self.sprites.partition_point(|s| s.layer < 0);
+        let mut back = Back::new(base);
+        for sprite in &self.sprites[..front] {
+            let tint = sprite.blend == Blend::Tint;
+            each_glyph(sprite, base, surfaces, cursor, |x, y, glyph| {
+                back.paint(x, y, glyph, tint)
+            });
+        }
+        back.resolve(base, &mut out);
+        for sprite in &self.sprites[front..] {
+            let tint = sprite.blend == Blend::Tint;
+            each_glyph(sprite, base, surfaces, cursor, |x, y, glyph| {
+                paint(&mut out, x, y, glyph, tint)
+            });
         }
         out
     }
 }
 
-fn paint(out: &mut Grid, base: &Grid, x: u16, y: u16, glyph: &raster::Glyph, blend: Blend) {
-    let wide = glyph.cell.width == 2;
-    match blend {
-        Blend::Tint => {
-            let cell = out.cell_mut(x, y);
-            tint(&mut cell.style, glyph);
-            if wide {
-                tint(&mut out.cell_mut(x + 1, y).style, glyph);
+/// Call `f` with every glyph of `sprite` that is inside its view, at its
+/// screen cell.
+fn each_glyph(
+    sprite: &Sprite,
+    base: &Grid,
+    surfaces: &dyn Surfaces,
+    cursor: (u16, u16),
+    mut f: impl FnMut(u16, u16, &raster::Glyph),
+) {
+    let Some(info) = sprite.frame.and_then(|id| surfaces.info(id)) else {
+        return;
+    };
+    if !info.usable {
+        return;
+    }
+    let Some((left, top)) = sprite.locate(&info, cursor) else {
+        return;
+    };
+    let clip = info.rect.intersect(&base.rect());
+    if clip.is_empty() {
+        return;
+    }
+    let canvas = sprite.canvas();
+    for cy in 0..canvas.height() {
+        let sy = top + cy as i64;
+        if sy < clip.y as i64 || sy >= clip.bottom() as i64 {
+            continue;
+        }
+        for cx in 0..canvas.width() {
+            let Slot::Glyph(glyph) = canvas.slot(cx, cy) else {
+                continue;
+            };
+            let sx = left + cx as i64;
+            let width = glyph.cell.width as i64;
+            if sx < clip.x as i64 || sx + width > clip.right() as i64 {
+                continue;
+            }
+            f(sx as u16, sy as u16, glyph);
+        }
+    }
+}
+
+/// What the back layers put in one cell.
+#[derive(Clone, Default)]
+struct BackCell {
+    /// Text and width of the glyph; `None`: a colour only.
+    glyph: Option<Cell>,
+    /// Right half of the wide glyph before it.
+    spacer: bool,
+    fg: Option<Color>,
+    bg: Option<Color>,
+    attrs: Attrs,
+}
+
+/// The back layers, flattened. Allocated at the first glyph.
+struct Back {
+    cols: u16,
+    rows: u16,
+    cells: Vec<Option<BackCell>>,
+}
+
+impl Back {
+    fn new(base: &Grid) -> Back {
+        Back {
+            cols: base.cols(),
+            rows: base.rows(),
+            cells: Vec::new(),
+        }
+    }
+
+    fn at(&mut self, x: u16, y: u16) -> &mut BackCell {
+        if self.cells.is_empty() {
+            self.cells = vec![None; self.cols as usize * self.rows as usize];
+        }
+        self.cells[y as usize * self.cols as usize + x as usize].get_or_insert_default()
+    }
+
+    /// Take the glyph out of `(x, y)` and out of its other half; the
+    /// colour stays.
+    fn cut(&mut self, x: u16, y: u16) {
+        let cell = self.at(x, y);
+        let other = if cell.spacer && x > 0 {
+            Some(x - 1)
+        } else if cell.glyph.as_ref().is_some_and(|g| g.width == 2) && x + 1 < self.cols {
+            Some(x + 1)
+        } else {
+            None
+        };
+        for x in other.into_iter().chain([x]) {
+            let cell = self.at(x, y);
+            cell.glyph = None;
+            cell.spacer = false;
+            cell.fg = None;
+            cell.attrs = Attrs::default();
+        }
+    }
+
+    fn paint(&mut self, x: u16, y: u16, glyph: &raster::Glyph, tint: bool) {
+        let wide = glyph.cell.width == 2;
+        if tint {
+            // Behind the app a tint is a colour of background.
+            for x in x..=x + wide as u16 {
+                let cell = self.at(x, y);
+                cell.bg = glyph.bg.or(cell.bg);
             }
             return;
         }
-        Blend::Behind => {
-            if !base.cell(x, y).is_blank() || (wide && !base.cell(x + 1, y).is_blank()) {
-                return;
+        self.cut(x, y);
+        let cell = self.at(x, y);
+        cell.glyph = Some(glyph.cell.clone());
+        cell.fg = glyph.fg;
+        cell.bg = glyph.bg.or(cell.bg);
+        cell.attrs = glyph.attrs;
+        if wide {
+            self.cut(x + 1, y);
+            let cell = self.at(x + 1, y);
+            cell.spacer = true;
+            cell.bg = glyph.bg.or(cell.bg);
+        }
+    }
+
+    /// Put the app on top: `out` is `base` with the back layers seen
+    /// through it.
+    ///
+    /// - A back glyph shows where the app cell has no ink (both cells of
+    ///   a wide glyph).
+    /// - A back colour shows where the app's backdrop is the default
+    ///   one. Another backdrop (a panel, a bar, inverse video) is the
+    ///   app's: it stays, and a back glyph is seen on it.
+    /// - An app cell with ink keeps its glyph and its style; only its
+    ///   default background gives way to a back colour. A wide glyph
+    ///   takes the colour behind its head.
+    fn resolve(&self, base: &Grid, out: &mut Grid) {
+        if self.cells.is_empty() {
+            return;
+        }
+        let no_ink = |x: u16, y: u16| !base.cell(x, y).has_ink();
+        for y in 0..self.rows {
+            for x in 0..self.cols {
+                let i = y as usize * self.cols as usize + x as usize;
+                let Some(back) = &self.cells[i] else {
+                    continue;
+                };
+                // Style of the back glyph `ink` seen in the cell `(x, y)`.
+                let seen = |x: u16, ink: &BackCell| {
+                    let app = base.cell(x, y);
+                    if is_open(app) {
+                        let own = &self.cells[y as usize * self.cols as usize + x as usize];
+                        Style {
+                            fg: ink.fg.unwrap_or(app.style.fg),
+                            bg: own.as_ref().and_then(|c| c.bg).unwrap_or(Color::Default),
+                            attrs: ink.attrs,
+                            ..Style::default()
+                        }
+                    } else {
+                        on_backdrop(app.style, ink.fg, None, ink.attrs)
+                    }
+                };
+                // A wide glyph needs two cells without ink, and one
+                // style: both halves on the same backdrop.
+                let glyph = back.glyph.as_ref().filter(|g| {
+                    no_ink(x, y)
+                        && (g.width != 2
+                            || (x + 1 < self.cols
+                                && no_ink(x + 1, y)
+                                && seen(x, back) == seen(x + 1, back)))
+                });
+                match glyph {
+                    Some(g) => {
+                        out.put(
+                            x,
+                            y,
+                            Cell {
+                                text: g.text.clone(),
+                                width: g.width,
+                                style: seen(x, back),
+                            },
+                        );
+                    }
+                    // The half of a wide glyph just put: `Grid::put`
+                    // made it.
+                    None if back.spacer && out.cell(x, y).width == 0 && no_ink(x, y) => {}
+                    // A colour only. A wide glyph of the app has one
+                    // style: its head decides for both halves.
+                    None => {
+                        let app = base.cell(x, y);
+                        if let (true, Some(bg)) = (is_open(app) && app.width != 0, back.bg) {
+                            out.cell_mut(x, y).style.bg = bg;
+                            if app.width == 2 && x + 1 < self.cols {
+                                out.cell_mut(x + 1, y).style.bg = bg;
+                            }
+                        }
+                    }
+                }
             }
         }
-        Blend::Over => {}
     }
-    let below = out.cell(x, y).style;
-    let style = if glyph.bg.is_none() && below.attrs.contains(Attrs::INVERSE) {
+}
+
+/// The app left the background of this cell to whoever is behind: the
+/// default colour, not inverse.
+fn is_open(app: &Cell) -> bool {
+    app.style.bg == Color::Default && !app.style.attrs.contains(Attrs::INVERSE)
+}
+
+/// Style of a glyph drawn on a cell of style `below`, whose colours it
+/// inherits where it sets none.
+fn on_backdrop(below: Style, fg: Option<Color>, bg: Option<Color>, attrs: Attrs) -> Style {
+    if bg.is_none() && below.attrs.contains(Attrs::INVERSE) {
         // The background seen is the foreground of the cell below: stay
         // inverse, colours swapped.
-        let mut attrs = glyph.attrs;
+        let mut attrs = attrs;
         attrs.insert(Attrs::INVERSE);
         Style {
             fg: below.fg,
-            bg: glyph.fg.unwrap_or(below.bg),
+            bg: fg.unwrap_or(below.bg),
             attrs,
             ..Style::default()
         }
     } else {
         Style {
-            fg: glyph.fg.unwrap_or(below.fg),
-            bg: glyph.bg.unwrap_or(below.bg),
-            attrs: glyph.attrs,
+            fg: fg.unwrap_or(below.fg),
+            bg: bg.unwrap_or(below.bg),
+            attrs,
             ..Style::default()
         }
-    };
+    }
+}
+
+/// A front layer: over whatever is there.
+fn paint(out: &mut Grid, x: u16, y: u16, glyph: &raster::Glyph, tint_only: bool) {
+    if tint_only {
+        // A wide glyph below has one style: tinted from its head.
+        for x in x..x + glyph.cell.width as u16 {
+            match out.cell(x, y).width {
+                0 => {}
+                2 if x + 1 < out.cols() => {
+                    tint(&mut out.cell_mut(x, y).style, glyph);
+                    tint(&mut out.cell_mut(x + 1, y).style, glyph);
+                }
+                _ => tint(&mut out.cell_mut(x, y).style, glyph),
+            }
+        }
+        return;
+    }
+    let style = on_backdrop(out.cell(x, y).style, glyph.fg, glyph.bg, glyph.attrs);
     out.put(
         x,
         y,

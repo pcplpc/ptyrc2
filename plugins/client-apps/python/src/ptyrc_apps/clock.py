@@ -8,9 +8,10 @@ What it shows:
 
 - `auto=`: the driver picks a spot that is free and still, near the
   preferred corner, and moves the sprite if the app starts using it;
+- `layer="front"`: a head-up display, in front of the app's text;
 - `Sprite.set`: new content for the same sprite, once a second;
-- `--big`: a draw extension builds the sprite on the driver, and a batch
-  swaps the old one for the new one in a single repaint.
+- `--big`: a draw extension builds the sprite on the driver, and
+  `Sprite.ext` redraws it in place when the minute changes.
 """
 
 from __future__ import annotations
@@ -49,7 +50,9 @@ def small(pilot: Pilot, args: argparse.Namespace, sprite: Sprite | None) -> Spri
     content = {"cells": face(datetime.now()), "bg": BACKGROUND, "bold": True}
     if sprite is None:
         # `opaque`: the spaces of the face hide what is below.
-        return pilot.draw(frame=args.frame, auto=args.prefer, opaque=True, **content)
+        return pilot.draw(
+            frame=args.frame, auto=args.prefer, layer="front", opaque=True, **content
+        )
     sprite.set(opaque=True, **content)
     return sprite
 
@@ -59,17 +62,19 @@ def big(pilot: Pilot, args: argparse.Namespace, sprite: Sprite | None) -> Sprite
     if sprite is not None and text == args.shown:
         return sprite
     args.shown = text
-    # Remove, then draw: inside a batch the screen never shows the gap.
-    with pilot.batch():
-        if sprite is not None:
-            sprite.remove()
+    digits = {"text": text, "fg": "bright-cyan"}
+    if sprite is None:
         return pilot.ext(
             "bigtext",
             "text",
-            {"text": text, "fg": "bright-cyan"},
+            digits,
             frame=args.frame,
             anchor={"auto": {"prefer": args.prefer}},
+            layer="front",
         )
+    # Same sprite, same spot: only what it shows changes.
+    sprite.ext("bigtext", "text", digits)
+    return sprite
 
 
 def app(pilot: Pilot, args: argparse.Namespace) -> None:

@@ -1420,7 +1420,8 @@ fn wire_forms() {
     assert_eq!(
         v[1],
         serde_json::json!({"id": 1, "kind": "pane", "state": "stable", "usable": true,
-            "rect": [0, 0, 60, 20], "origin": [0, 0], "extent": [0, 19], "key": null, "support": null})
+            "rect": [0, 0, 60, 20], "origin": [0, 0], "extent": [0, 19], "key": null, "support": null,
+            "idle": 0.0, "is_idle": false})
     );
     assert_eq!(v[0]["kind"], "raw");
     let e = serde_json::to_value(FrameEvent::Scroll {

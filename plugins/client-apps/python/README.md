@@ -12,7 +12,7 @@ python -m ptyrc_apps.clock -s NAME
 | app | what it shows |
 |---|---|
 | `confetti` | a native effect started with one call |
-| `clock` | automatic placement, a sprite updated in place, a draw extension, a batch |
+| `clock` | automatic placement, the front layer, a sprite updated in place, a draw extension |
 
 ## Writing an app
 
@@ -51,8 +51,12 @@ What to know:
 - **What**: `rows` (a space is transparent), `cells` (styled runs),
   `frames` (an animation the driver plays alone), `effect` (a native
   generator), `pilot.ext(...)` (a draw extension).
-- **How it mixes**: `blend="over"`, `"behind"` (the app's text stays on
-  top), `"tint"` (the app's glyphs, your colours).
+- **In which layer**: the app's text is layer 0. `layer="back"` (the
+  default) draws behind it, in the cells it leaves free; `layer="front"`
+  over it; integers order more layers (`-2` is behind `-1`), `z` orders
+  inside one. A `bg` behind the text shows under it: a sandwich.
+- **How it mixes**: `blend="tint"` keeps the app's glyphs and applies
+  your colours.
 - **Motion from the client**: change a sprite with `Sprite.set` or
   `Sprite.move`; group the changes of one step in `with pilot.batch():`,
   they show in one repaint.

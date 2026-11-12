@@ -36,7 +36,7 @@ const METHODS: [&str; 25] = [
     "debug.dump",
 ];
 
-const FRAME_NAMES: [&str; 4] = ["raw", "active", "largest", "quietest"];
+const FRAME_NAMES: [&str; 5] = ["raw", "active", "largest", "quietest", "idle"];
 const COLOURS: [&str; 10] = [
     "default", "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "grey",
 ];

@@ -140,7 +140,8 @@ fn minimal_spec_defaults() {
             space: Space::View
         }
     );
-    assert_eq!(s.blend, Blend::Over);
+    assert_eq!(s.blend, Blend::Normal);
+    assert_eq!(s.layer, None);
     assert_eq!(s.looping, LoopSpec::Flag(false));
     assert!(!s.persist);
     let mut scene = Scene::new();
@@ -537,17 +538,18 @@ fn blend_modes() {
     let mut scene = Scene::new();
     let content = json!({"rows": ["######"], "style": {"fg": "green", "bold": true}});
     let over = scene
-        .add(1, spec(json!({"content": content})), ms(0))
+        .add(
+            1,
+            spec(json!({"content": content, "layer": "front"})),
+            ms(0),
+        )
         .unwrap();
     assert_eq!(show(&mut scene, &mock, &grid, 0)[0], "######");
     scene.remove(over);
 
+    // The default: behind the app's text.
     let behind = scene
-        .add(
-            1,
-            spec(json!({"content": content, "blend": "behind"})),
-            ms(0),
-        )
+        .add(1, spec(json!({"content": content})), ms(0))
         .unwrap();
     let out = {
         scene.tick(ms(0), &mock);
@@ -582,7 +584,7 @@ fn colours_inherit_from_below() {
     };
     let mut scene = Scene::new();
     scene
-        .add(1, spec(json!({"content": {"cells": [[{"t": "a"}, {"t": "b", "fg": "green", "bg": "default"}, {"t": "c", "fg": "green"}]]}})), ms(0))
+        .add(1, spec(json!({"content": {"cells": [[{"t": "a"}, {"t": "b", "fg": "green", "bg": "default"}, {"t": "c", "fg": "green"}]]}, "layer": "front"})), ms(0))
         .unwrap();
     scene.tick(ms(0), &mock);
     let out = scene.compose(&grid, &mock);
@@ -608,16 +610,20 @@ fn spaces_are_holes_unless_opaque() {
     let grid = Grid::from_lines(20, &["abcdef", "abcdef", "abcdef", "", "", ""]);
     let mut scene = Scene::new();
     scene
-        .add(1, spec(json!({"content": {"rows": ["X X"]}})), ms(0))
+        .add(
+            1,
+            spec(json!({"content": {"rows": ["X X"]}, "layer": "front"})),
+            ms(0),
+        )
         .unwrap();
     scene
         .add(
             1,
-            spec(json!({"anchor": {"at": [0, 1]}, "content": {"rows": ["X X"], "opaque": true}})),
+            spec(json!({"anchor": {"at": [0, 1]}, "content": {"rows": ["X X"], "opaque": true}, "layer": "front"})),
             ms(0),
         )
         .unwrap();
-    scene.add(1, spec(json!({"anchor": {"at": [0, 2]}, "content": {"cells": [[{"t": "X "}, {"t": " X", "bg": "red"}]]}})), ms(0)).unwrap();
+    scene.add(1, spec(json!({"anchor": {"at": [0, 2]}, "content": {"cells": [[{"t": "X "}, {"t": " X", "bg": "red"}]]}, "layer": "front"})), ms(0)).unwrap();
     let rows = show(&mut scene, &mock, &grid, 0);
     assert_eq!(rows[0], "XbXdef");
     assert_eq!(rows[1], "X Xdef");
@@ -635,7 +641,7 @@ fn wide_glyphs() {
     scene
         .add(
             1,
-            spec(json!({"anchor": {"at": [1, 0]}, "content": {"rows": ["xy"]}})),
+            spec(json!({"anchor": {"at": [1, 0]}, "content": {"rows": ["xy"]}, "layer": "front"})),
             ms(0),
         )
         .unwrap();
@@ -722,6 +728,7 @@ fn animation_timing_and_loops() {
     scene
         .add(1, spec(json!({"frames": frames})), ms(1000))
         .unwrap();
+    scene.tick(ms(1000), &mock);
     assert_eq!(scene.next_wake(), Some(ms(1100)));
     assert_eq!(show(&mut scene, &mock, &base(), 1099)[0], "1");
     assert_eq!(show(&mut scene, &mock, &base(), 1100)[0], "2");
@@ -735,6 +742,7 @@ fn animation_timing_and_loops() {
     scene
         .add(1, spec(json!({"frames": frames, "loop": 2})), ms(0))
         .unwrap();
+    scene.tick(ms(0), &mock);
     assert_eq!(show(&mut scene, &mock, &base(), 160)[0], "1");
     assert_eq!(show(&mut scene, &mock, &base(), 260)[0], "2");
     assert_eq!(show(&mut scene, &mock, &base(), 299)[0], "2");
@@ -746,6 +754,7 @@ fn animation_timing_and_loops() {
     scene
         .add(1, spec(json!({"frames": frames, "loop": true})), ms(0))
         .unwrap();
+    scene.tick(ms(0), &mock);
     assert_eq!(show(&mut scene, &mock, &base(), 150 * 1000 + 120)[0], "2");
     assert!(!scene.is_empty());
 
@@ -832,7 +841,8 @@ fn ttl_and_patch() {
         )
         .unwrap();
     assert_eq!(show(&mut scene, &mock, &base(), 349)[0], "bb");
-    assert_eq!(scene.list()[0].blend, Blend::Behind);
+    assert_eq!(scene.list()[0].blend, Blend::Normal);
+    assert_eq!(scene.list()[0].layer, -1);
     assert_eq!(scene.list()[0].size, [2, 1]);
     // A failed update changes nothing.
     assert!(
@@ -1039,7 +1049,7 @@ fn sprite_text_is_storable() {
     scene
         .add(
             1,
-            spec(json!({"content": {"rows": [format!("a\tb\u{1b}c e{marks}")]}})),
+            spec(json!({"content": {"rows": [format!("a\tb\u{1b}c e{marks}")]}, "layer": "front"})),
             ms(0),
         )
         .unwrap();
@@ -1142,4 +1152,405 @@ fn sparkle_twinkles_in_place() {
     assert!(!scene.is_empty());
     assert!(kinds.contains(&'✦') && kinds.contains(&'·'), "{kinds:?}");
     assert!(sparkle(&json!({"colors": []})).is_err());
+}
+
+fn styled(fg: u8, bg: Color) -> Style {
+    Style {
+        fg: Color::Indexed(fg),
+        bg,
+        ..Style::default()
+    }
+}
+
+fn below(rng: &mut Rng, n: u64) -> u64 {
+    rng.next_u64() % n
+}
+
+/// Tick and compose.
+fn render(scene: &mut Scene, mock: &Mock, grid: &Grid, now: u64) -> Grid {
+    scene.tick(ms(now), mock);
+    scene.compose(grid, mock)
+}
+
+#[test]
+fn layer_names_and_defaults() {
+    let layer = |v: serde_json::Value| spec(json!({"content": {"rows": ["x"]}, "layer": v})).layer;
+    assert_eq!(layer(json!("back")), Some(Layer(-1)));
+    assert_eq!(layer(json!("front")), Some(Layer(1)));
+    assert_eq!(layer(json!(-7)), Some(Layer(-7)));
+    for bad in [json!(0), json!("app"), json!(1.5)] {
+        let v = json!({"content": {"rows": ["x"]}, "layer": bad});
+        assert!(serde_json::from_value::<SpriteSpec>(v).is_err());
+    }
+    assert_eq!(
+        serde_json::to_value(Layer(3)).unwrap(),
+        serde_json::json!(3)
+    );
+
+    // Without a layer: behind; a tint in front. The draft names of
+    // `blend` still say where.
+    let mut scene = Scene::new();
+    for (blend, layer) in [
+        (json!(null), -1),
+        (json!("normal"), -1),
+        (json!("tint"), 1),
+        (json!("over"), 1),
+        (json!("behind"), -1),
+    ] {
+        let mut v = json!({"content": {"rows": ["x"]}});
+        if !blend.is_null() {
+            v["blend"] = blend.clone();
+        }
+        let id = scene.add(1, spec(v), ms(0)).unwrap();
+        let info = scene.list().into_iter().find(|s| s.id == id).unwrap();
+        assert_eq!(info.layer, layer, "{blend}");
+        assert!(matches!(info.blend, Blend::Normal | Blend::Tint));
+    }
+    // A layer given wins over the draft name.
+    let id = scene
+        .add(
+            1,
+            spec(json!({"content": {"rows": ["x"]}, "blend": "over", "layer": -3})),
+            ms(0),
+        )
+        .unwrap();
+    assert_eq!(scene.list().iter().find(|s| s.id == id).unwrap().layer, -3);
+}
+
+#[test]
+fn back_layer_shows_through_cells_without_ink() {
+    let mock = Mock::new();
+    let panel = Color::Indexed(8);
+    let mut grid = Grid::from_lines(20, &["ab  cd      ", "", "", "", "", ""]);
+    for x in 0..6 {
+        grid.cell_mut(x, 0).style = styled(1, Color::Default);
+    }
+    // A grey panel: blank cells of another backdrop, one of them with text.
+    for x in 6..10 {
+        grid.cell_mut(x, 0).style = styled(1, panel);
+    }
+    grid.put(9, 0, Cell::narrow("p", styled(1, panel)));
+    // Inverse video: a backdrop of the app's too.
+    grid.cell_mut(10, 0).style = Style {
+        attrs: Attrs(Attrs::INVERSE),
+        ..styled(5, Color::Default)
+    };
+
+    let mut scene = Scene::new();
+    scene
+        .add(
+            1,
+            spec(json!({"content": {"rows": ["############"], "style": {"fg": "green"}}})),
+            ms(0),
+        )
+        .unwrap();
+    let out = render(&mut scene, &mock, &grid, 0);
+    assert_eq!(out.text()[0], "ab##cd###p##");
+    // Text of the app: untouched.
+    assert_eq!(out.cell(0, 0), grid.cell(0, 0));
+    assert_eq!(out.cell(9, 0), grid.cell(9, 0));
+    // The glyph takes the backdrop it is seen on.
+    assert_eq!(out.cell(2, 0).style, styled(2, Color::Default));
+    assert_eq!(out.cell(6, 0).style, styled(2, panel));
+    let inv = out.cell(10, 0).style;
+    assert!(inv.attrs.contains(Attrs::INVERSE));
+    assert_eq!((inv.fg, inv.bg), (Color::Indexed(5), Color::Indexed(2)));
+    assert_eq!(out.cell(11, 0).style, styled(2, Color::Default));
+}
+
+#[test]
+fn back_colour_is_a_sandwich() {
+    let mock = Mock::new();
+    let panel = Color::Indexed(8);
+    let mut grid = Grid::from_lines(20, &["ab  cd  ", "", "", "", "", ""]);
+    for x in 0..4 {
+        grid.cell_mut(x, 0).style = styled(1, Color::Default);
+    }
+    for x in 4..8 {
+        grid.cell_mut(x, 0).style = styled(1, panel);
+    }
+    let mut scene = Scene::new();
+    scene
+        .add(
+            1,
+            spec(json!({"content": {"rows": ["~~~~~~~~"], "style": {"fg": "cyan", "bg": "blue"}}})),
+            ms(0),
+        )
+        .unwrap();
+    let out = render(&mut scene, &mock, &grid, 0);
+    assert_eq!(out.text()[0], "ab~~cd~~");
+    // The app's glyph keeps its foreground and stands on the sprite's
+    // background.
+    assert_eq!(out.cell(0, 0).style, styled(1, Color::Indexed(4)));
+    assert_eq!(out.cell(2, 0).style, styled(6, Color::Indexed(4)));
+    // The panel's colour is the app's: it wins, under text and under the
+    // sprite's glyph.
+    assert_eq!(out.cell(4, 0).style, styled(1, panel));
+    assert_eq!(out.cell(6, 0).style, styled(6, panel));
+
+    // A tint behind the app is a colour of background and nothing else.
+    let mut scene = Scene::new();
+    scene
+        .add(
+            1,
+            spec(json!({"content": {"rows": ["####"], "style": {"fg": "green", "bg": "yellow", "bold": true}}, "blend": "tint", "layer": "back"})),
+            ms(0),
+        )
+        .unwrap();
+    let out = render(&mut scene, &mock, &grid, 0);
+    assert_eq!(out.text()[0], "ab  cd");
+    assert_eq!(out.cell(0, 0).style, styled(1, Color::Indexed(3)));
+    assert_eq!(out.cell(2, 0).style, styled(1, Color::Indexed(3)));
+}
+
+#[test]
+fn back_layers_stack_and_wide_glyphs_need_room() {
+    let mock = Mock::new();
+    let grid = Grid::from_lines(20, &["    x     ", "", "", "", "", ""]);
+    let mut scene = Scene::new();
+    // Far back: a field of colour. Nearer: glyphs without a colour of
+    // their own, seen on the field.
+    scene
+        .add(
+            1,
+            spec(json!({"content": {"rows": ["          "], "style": {"bg": "blue"}, "opaque": true}, "layer": -2})),
+            ms(0),
+        )
+        .unwrap();
+    scene
+        .add(
+            1,
+            spec(json!({"content": {"rows": ["a 世界b"], "style": {"fg": "red"}}})),
+            ms(0),
+        )
+        .unwrap();
+    let out = render(&mut scene, &mock, &grid, 0);
+    // 界 would cover the app's `x`: it is not drawn, by halves neither.
+    assert_eq!(out.row_text(0).trim_end(), "a 世x b");
+    assert_eq!((out.cell(2, 0).width, out.cell(3, 0).width), (2, 0));
+    for x in 0..10 {
+        assert_eq!(out.cell(x, 0).style.bg, Color::Indexed(4), "col {x}");
+    }
+    assert_eq!(out.cell(0, 0).style.fg, Color::Indexed(1));
+    assert_eq!(out.cell(1, 0).text, " ");
+
+    // A nearer wide glyph over the half of a farther one cuts it whole.
+    let mut scene = Scene::new();
+    scene
+        .add(
+            1,
+            spec(json!({"content": {"rows": ["世界"]}, "layer": -2})),
+            ms(0),
+        )
+        .unwrap();
+    scene
+        .add(
+            1,
+            spec(json!({"anchor": {"at": [1, 0]}, "content": {"rows": ["z"]}})),
+            ms(0),
+        )
+        .unwrap();
+    let out = render(&mut scene, &mock, &base(), 0);
+    assert_eq!(out.row_text(0).trim_end(), " z界");
+}
+
+#[test]
+fn four_layers() {
+    let mock = Mock::new();
+    let grid = Grid::from_lines(20, &["", "  the app's text", "", "  more text", "", ""]);
+    let mut scene = Scene::new();
+    // 1. A static background.
+    scene
+        .add(
+            1,
+            spec(json!({
+                "content": {"rows": ["....................", "....................",
+                                     "....................", "...................."],
+                            "style": {"fg": "blue"}},
+                "layer": -2,
+            })),
+            ms(0),
+        )
+        .unwrap();
+    // 2. An animation in front of it.
+    scene
+        .add(
+            1,
+            spec(json!({
+                "anchor": {"at": [0, 1]},
+                "frames": [{"rows": ["<>"], "ms": 100}, {"rows": ["><"], "ms": 100}],
+                "loop": true,
+                "motion": {"vx": 10.0},
+                "layer": "back",
+            })),
+            ms(0),
+        )
+        .unwrap();
+    // 3. The app. 4. A head-up display in front of all.
+    scene
+        .add(
+            1,
+            spec(json!({
+                "anchor": {"at": [-1, 1], "space": "view"},
+                "content": {"rows": ["[12:00]"], "opaque": true},
+                "layer": "front",
+            })),
+            ms(0),
+        )
+        .unwrap();
+    let rows = show(&mut scene, &mock, &grid, 0);
+    assert_eq!(rows[0], "....................");
+    assert_eq!(rows[1], "<>the.app's.t[12:00]");
+    assert_eq!(rows[2], "....................");
+    assert_eq!(rows[3], "..more.text.........");
+    // The fish swims behind the words and comes out between them.
+    let rows = show(&mut scene, &mock, &grid, 300);
+    assert_eq!(rows[1], "..the.app's.t[12:00]");
+    let rows = show(&mut scene, &mock, &grid, 400);
+    assert_eq!(rows[1], "..the>app's.t[12:00]");
+}
+
+#[test]
+fn back_layers_never_touch_ink() {
+    let mock = Mock::new();
+    let mut rng = Rng::new(7);
+    let colours = [
+        Color::Default,
+        Color::Indexed(1),
+        Color::Indexed(8),
+        Color::Rgb(9, 9, 9),
+    ];
+    for round in 0..200 {
+        let mut grid = base();
+        for y in 0..6 {
+            for x in 0..20 {
+                let mut style = Style {
+                    fg: colours[below(&mut rng, 4) as usize],
+                    bg: colours[below(&mut rng, 4) as usize],
+                    ..Style::default()
+                };
+                if below(&mut rng, 8) == 0 {
+                    style.attrs.insert(Attrs::INVERSE);
+                }
+                match below(&mut rng, 6) {
+                    0 | 1 => {
+                        grid.put(x, y, Cell::narrow("t", style));
+                    }
+                    2 if x < 19 => {
+                        grid.put(x, y, Cell::wide("世", style));
+                    }
+                    // The half of a wide glyph keeps the style of its head.
+                    _ if grid.cell(x, y).width == 0 => {}
+                    _ => grid.cell_mut(x, y).style = style,
+                }
+            }
+        }
+        let mut scene = Scene::new();
+        for _ in 0..4 {
+            let rows: Vec<String> = (0..3)
+                .map(|_| {
+                    (0..8)
+                        .map(|_| ["#", " ", "界", "~"][below(&mut rng, 4) as usize])
+                        .collect()
+                })
+                .collect();
+            let mut style = json!({});
+            if below(&mut rng, 2) == 0 {
+                style["fg"] = json!("green");
+            }
+            if below(&mut rng, 2) == 0 {
+                style["bg"] = json!("yellow");
+            }
+            let v = json!({
+                "anchor": {"at": [below(&mut rng, 18), below(&mut rng, 5)]},
+                "content": {"rows": rows, "style": style, "opaque": below(&mut rng, 2) == 0},
+                "layer": -1 - below(&mut rng, 3) as i32,
+                "blend": if below(&mut rng, 5) == 0 { "tint" } else { "normal" },
+            });
+            scene.add(1, spec(v), ms(0)).unwrap();
+        }
+        let out = render(&mut scene, &mock, &grid, 0);
+        for y in 0..6 {
+            for x in 0..20 {
+                let (app, got) = (grid.cell(x, y), out.cell(x, y));
+                if app.has_ink() {
+                    assert_eq!(
+                        (&got.text, got.width, got.style.fg, got.style.attrs),
+                        (&app.text, app.width, app.style.fg, app.style.attrs),
+                        "round {round} at {x},{y}"
+                    );
+                }
+                // A backdrop the app chose is kept everywhere.
+                if app.backdrop() != Color::Default || app.style.attrs.contains(Attrs::INVERSE) {
+                    assert_eq!(got.backdrop(), app.backdrop(), "round {round} at {x},{y}");
+                }
+                // Wide pairs stay whole.
+                if got.width == 2 {
+                    assert_eq!(out.cell(x + 1, y).width, 0, "round {round} at {x},{y}");
+                    assert_eq!(
+                        out.cell(x + 1, y).style,
+                        got.style,
+                        "round {round} at {x},{y}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn layer_patch_reorders() {
+    let mock = Mock::new();
+    let grid = Grid::from_lines(20, &["ab", "", "", "", "", ""]);
+    let mut scene = Scene::new();
+    let id = scene
+        .add(1, spec(json!({"content": {"rows": ["###"]}})), ms(0))
+        .unwrap();
+    assert_eq!(show(&mut scene, &mock, &grid, 0)[0], "ab#");
+    scene
+        .update(
+            id,
+            serde_json::from_value(json!({"layer": "front"})).unwrap(),
+            ms(0),
+        )
+        .unwrap();
+    assert_eq!(show(&mut scene, &mock, &grid, 0)[0], "###");
+    assert_eq!(scene.list()[0].layer, 1);
+    // Layers order before `z`.
+    scene
+        .add(
+            1,
+            spec(json!({"content": {"rows": ["x"]}, "layer": 2, "z": -5})),
+            ms(0),
+        )
+        .unwrap();
+    assert_eq!(show(&mut scene, &mock, &grid, 0)[0], "x##");
+}
+
+#[test]
+fn a_show_waits_to_be_seen() {
+    let mut mock = Mock::new();
+    mock.pane().usable = false;
+    let mut scene = Scene::new();
+    scene
+        .add(
+            1,
+            spec(json!({"frame": PANE, "frames": [{"rows": ["1"], "ms": 100}, {"rows": ["2"], "ms": 100}]})),
+            ms(0),
+        )
+        .unwrap();
+    // The frame is not usable yet: the clock is held and nothing wakes
+    // the scene for the animation.
+    assert_eq!(show(&mut scene, &mock, &base(), 150)[1], "");
+    assert_eq!(scene.next_wake(), None);
+    assert_eq!(show(&mut scene, &mock, &base(), 5000)[1], "");
+    assert!(!scene.is_empty());
+    mock.pane().usable = true;
+    assert_eq!(show(&mut scene, &mock, &base(), 6000)[1].trim(), "1");
+    assert_eq!(scene.next_wake(), Some(ms(6100)));
+    assert_eq!(show(&mut scene, &mock, &base(), 6100)[1].trim(), "2");
+    assert_eq!(show(&mut scene, &mock, &base(), 6200)[1], "");
+    assert!(scene.is_empty());
+    // Hidden again after it started, the clock runs: `ttl_ms` aside,
+    // only the first showing is waited for.
 }

@@ -48,6 +48,34 @@ def test_confetti(session: Pilot) -> None:
     )
 
 
+def test_confetti_stays_behind_busy_text(session: Pilot) -> None:
+    # A busy screen: every other cell holds text.
+    session.send(
+        "clear; for i in $(seq 20); do echo 'ab cd ef gh ij kl mn op qr st'; done\n"
+    )
+    session.wait_for("st", frame="raw")
+    time.sleep(0.3)
+    args = ["-s", session.session, "--duration", "0.8", "--count", "200", "--sparkle"]
+    status: list[int] = []
+    thread = threading.Thread(
+        target=lambda: status.append(confetti.main([*args, "--seed", "5"]))
+    )
+    thread.start()
+    pieces = samples = 0
+    while thread.is_alive():
+        # One call: the app screen and what the host shows, together.
+        dump = session.dump()
+        for app, host in zip(dump["app"], dump["host"], strict=True):
+            for a, h in zip(app, host.ljust(len(app)), strict=False):
+                assert a == " " or a == h, (app, host)
+        pieces += sum(row.count(c) for row in dump["host"] for c in "❋✦*·")
+        samples += 1
+        time.sleep(0.01)
+    thread.join()
+    assert status == [0] and samples > 5
+    assert pieces > 0, "the confetti never showed between the words"
+
+
 def test_clock(session: Pilot) -> None:
     def seen(host: str) -> bool:
         top = host.split("\n")[0]

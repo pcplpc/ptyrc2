@@ -311,9 +311,41 @@ Further rules, from real apps:
 
 ### Heatmap
 
-Per frame, in view coordinates, per cell: `activity` (EWMA of change
-events, time constants 2 s and 60 s) and `occupancy` (EWMA of non-blank).
-`safe = (1 - activity) * (1 - occupancy)`. Exposed as digits 0 to 9.
+Per frame, in view coordinates, per cell:
+
+- `activity`: EWMA of change events, time constants 2 s and 60 s. An
+  event is a visible change: the cell does not look as it did at the last
+  update (`Cell::looks_like`). Being written is not an event: a clear of a
+  clean area, an identical redraw, another pen on a blank count for
+  nothing. A change undone within 150 ms never happened (a clear in one
+  burst, the same text again in the next).
+- `occupancy`: EWMA of foreground (`Cell::has_ink`), 5 s. A background
+  colour does not occupy.
+- `still`: seconds without a visible change, from 0 when the frame is
+  first watched or resized.
+- `safe = (1 - activity) * (1 - occupancy)`. Exposed as digits 0 to 9.
+
+The backdrop of a frame is the `Cell::backdrop` most of its cells have.
+Class of a cell, exposed as a letter:
+
+| class | letter | meaning |
+|---|---|---|
+| `hot` | `h` | changed on screen within 10 s |
+| `text` | `t` | foreground that does not move |
+| `panel` | `p` | no foreground, a backdrop other than the frame's |
+| `free` | `.` | no foreground, the frame's backdrop |
+
+A panel is background of another colour: not occupied, as safe as a free
+cell.
+
+Idle: `score` is the share of the view's cells that are not hot and have
+`still >= 10 s`; text that does not move is static. `idle` is `score >=
+0.8`. `free` is the share static and without foreground. All three are
+computed at the time of the request: time passes without a tick.
+
+`debug overlay heat`: red for hot (brighter when busier), light blue for
+static text, green for free, violet for a panel; the last three brighten
+until the cell has been still for 10 s.
 
 ### Placement
 
@@ -357,7 +389,8 @@ Sprite, as JSON (the wire form; serde on the core types):
   "content": {"rows": ["text", "..."], "style": {"fg": "red"}},
   "frames": [{"rows": ["..."], "ms": 100}],
   "loop": true,
-  "blend": "over",
+  "layer": "back",
+  "blend": "normal",
   "z": 0,
   "ttl_ms": null,
   "persist": false,
@@ -371,7 +404,8 @@ Sprite, as JSON (the wire form; serde on the core types):
   once and the sprite is removed; frame `ms` 100.
 - `size: [w, h]`: canvas of an effect; default the frame's view.
 - `frame`: an id, or `"raw"`, `"active"` (pane holding the cursor),
-  `"largest"`, `"quietest"`. A name is resolved when the sprite is added.
+  `"largest"`, `"quietest"` (least mean activity), `"idle"` (highest idle
+  score, then most free, then largest). A name is resolved when the sprite is added.
 - `anchor`, one of:
   - `{"at": [x, y], "space": "frame" | "view"}`: fixed in the frame (moves
     with scrolling) or in the view (HUD). Negative `view` coordinates count
@@ -389,8 +423,12 @@ Sprite, as JSON (the wire form; serde on the core types):
 - `style`: `fg`, `bg` (colour name, `0..255`, `"#rrggbb"`, `"default"`;
   absent: inherit the cell below), `bold`, `dim`, `italic`, `underline`,
   `inverse`, `strike`, `blink`.
-- `blend`: `over`; `behind` (only where the app cell is blank: text stays
-  on top); `tint` (keeps the app glyph, applies the style).
+- `layer`: an integer other than 0, or `"back"` (-1), `"front"` (1). See
+  Layers. Absent: `back`; `front` for a tint.
+- `blend`: `normal`; `tint` (keeps the glyph below, applies the style).
+  `over` and `behind`, names of the first draft, are read as `normal`
+  with the layer `front` or `back` when none is given.
+- `z`: order inside a layer.
 - `effect`: a native generator in place of `content`; it owns the sprite's
   cells every tick. Built in: `confetti`. Plugins add more.
 - A sprite belongs to the connection that added it and dies with it unless
@@ -398,6 +436,58 @@ Sprite, as JSON (the wire form; serde on the core types):
 
 Sprites are clipped to the view rect of their frame. `compose` goes through
 `Grid::put`.
+
+A finite animation and an effect start their clock when the sprite is
+first drawn: added on a frame that is not usable yet, or on a text that
+is not there yet, they wait. `ttl_ms` counts from the add in any case.
+
+### Layers
+
+A sandwich. The app is layer 0. Sprites of negative layers are behind
+it, sprites of positive layers in front. Paint order is `(layer, z,
+id)`. The default is behind: the app's text stays in front of what is
+drawn.
+
+Background and foreground are those of `ptyrc-vt`: `Cell::has_ink()`,
+`Cell::backdrop()`.
+
+Back layers are flattened among themselves first (a nearer glyph
+replaces a farther one; a glyph without `bg` keeps the colour of the
+layers behind it), then seen through the app, cell by cell:
+
+- A back glyph shows where the app cell has no ink. A wide glyph needs
+  two such cells with the same resulting style; otherwise it is not
+  drawn, by halves neither.
+- A back colour (`bg`) shows where the app's backdrop is the default
+  one and the cell is not inverse. An app glyph there keeps its text,
+  its foreground and its attributes, and stands on the sprite's
+  background: a true sandwich. A wide app glyph takes the colour behind
+  its head.
+- Another backdrop is the app's and wins: a panel of another colour, a
+  status bar, inverse video. A back glyph is still seen through its
+  cells without ink, on the app's colour; a back `bg` is not seen there.
+- A `tint` behind the app is a colour of background only.
+
+With back layers alone, every app cell with ink keeps its glyph, its
+foreground and its attributes, and every backdrop the app chose is kept
+(tested as a property).
+
+Front layers go over whatever is below, app text included: a space is
+transparent unless `opaque`; a glyph without `bg` keeps the colour
+below it. A front `tint` recolours the app's glyphs.
+
+The reference apps follow: confetti and sparkles fall behind the text
+(`ptyrc-app confetti --front` brings the confetti over it), the clock is
+in front.
+
+A scene of four layers:
+
+```
+ptyrc draw text --layer -2 --bg 17 --opaque ...    static background
+ptyrc draw text --at 4,2 '<*//><'                  a drawing in front of it
+                                                   the app's text
+ptyrc draw text --layer front --auto top-right ... a display in front of all
+```
 
 ## Plugins
 
@@ -471,7 +561,8 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `input.send` | `text` or `keys` or `bytes` (base64), `paste` | `{}` |
 | `frame.list` | | `{"frames":[info,...],"layout":id}` |
 | `frame.text` | `frame`, `y0`, `y1` | `{"lines":[...],"y0":n}` remembered buffer |
-| `frame.heat` | `frame` | `{"rows":["0123...",...]}` |
+| `frame.heat` | `frame` | `{"rows":["0123...",...],"classes":["ht.p...",...]}` |
+| `frame.idle` | `frame` | `{"score":0..1,"idle":bool,"free":0..1}` |
 | `frame.get` | `frame` | `{"frame":info}` |
 | `frame.at` | `x`, `y`, or `name` | `{"frame":id,"pos":[x,y]}` |
 | `draw.put` | sprite | `{"id":n}` |
@@ -479,7 +570,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `draw.remove` | `id` | `{}` |
 | `draw.clear` | `all` | `{"removed":n}` |
 | `draw.list` | | `{"sprites":[...]}` |
-| `draw.ext` | `name`, `function`, `params`, sprite fields | `{"id":n}` |
+| `draw.ext` | `name`, `function`, `params`, sprite fields; with `id`: redraw that sprite in place (content replaced, the rest kept unless given) | `{"id":n}` |
 | `draw.exts` | | `{"exts":[{"name","functions":[...]}],"effects":[...]}` |
 | `batch` | `calls`: `[{"method","params"}]` | `{"results":[{"result"} or {"error"},...]}`, applied in one repaint |
 | `subscribe` | `topics`: `screen`, `cursor`, `frames`, `input`, `size`, `exit` | `{}` |
@@ -488,7 +579,8 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 
 Frame info: `{"id","kind":"raw"|"pane"|"chrome","state":"candidate"|
 "stable"|"inactive","usable","rect":[x,y,w,h],"origin":[x,y],
-"extent":[y_min,y_max],"key","support":"vim"|null}`.
+"extent":[y_min,y_max],"key","support":"vim"|null,"idle":0..1,
+"is_idle":bool}`.
 
 Keys for `input.send`: `enter`, `tab`, `esc`, `space`, `backspace`,
 `delete`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`,
@@ -516,8 +608,11 @@ ptyrc send TEXT                   type text
 ptyrc keys KEY...                 press keys
 ptyrc wait [PATTERN] [--stable MS] [--gone] [--timeout MS]
 ptyrc frames [--watch]
-ptyrc heat [-f FRAME]
+ptyrc heat [-f FRAME] [--classes]
+ptyrc idle [-f FRAME]             score; status 0 when idle, 1 when not
 ptyrc draw text|ext|effect|exts|rm|ls|clear ...   (sprites persist)
+      [--layer back|front|N] [--blend normal|tint] [-z N]
+      draw ext --id SPRITE NAME FUNCTION [JSON]   redraw in place
 ptyrc show                        live mirror of the remote screen
 ptyrc events [TOPIC...]           JSON events, one per line
 ptyrc debug overlay frames|heat|off ; ptyrc debug dump
@@ -535,7 +630,7 @@ ptyrc: hto: command not found in PATH
   did you mean htop?
 $ ptyrc text -f activ
 ptyrc: no-frame: no such frame: activ
-  did you mean active? frames: 0, 1; names: raw, active, largest, quietest
+  did you mean active? frames: 0, 1; names: raw, active, largest, quietest, idle
 ```
 
 Exit status:
@@ -560,7 +655,8 @@ killed). The Python pilot raises `PtyrcError` with the same `code`,
 `python/ptyrc`: `Pilot` (blocking, stdlib sockets, one reader thread for
 events), `Frame`, `Sprite` handles; mirrors the protocol one to one, plus
 `wait_for`, context managers and `Pilot.spawn(argv, headless=True)` for
-tests. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
+tests. `Frame.check_idle()` is the idle score, `Frame.is_idle` the
+boolean; both ask the driver when read. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
 `python -m ptyrc_apps.<name>` and `ptyrc-app <name>`: `confetti`,
 `flower`, `clock`, `fishes`, `snake`, `sand`.
 
@@ -574,6 +670,7 @@ tests. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
   `KNOWN` marks a defect recorded in `plan/ideas.md`.
 - `scripts/e2e-render.sh`: the driver in a detached tmux; what tmux shows
   is compared, text and styles, with the driver's model of the host.
+- `scripts/e2e-heat.sh`: heat classes and idle on a shell, vim and htop.
 - `scripts/bench.sh`: throughput and key-echo latency, bare, transparent,
   engine, engine with sprites.
 

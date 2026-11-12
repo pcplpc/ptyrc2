@@ -28,7 +28,7 @@ fn strings(value: &Value) -> Vec<&str> {
 
 #[derive(Args)]
 pub struct Text {
-    /// Frame id or name: raw, active, largest, quietest
+    /// Frame id or name: raw, active, largest, quietest, idle
     #[arg(short, long, default_value = "raw")]
     frame: String,
     /// Keep colours and attributes
@@ -184,8 +184,8 @@ pub fn wait(common: &Common, args: Wait) -> Done {
 
 fn print_frames(result: &Value) {
     println!(
-        "{:>4}  {:<6}  {:<9}  {:<14}  {:<12}  {:<13}  KEY",
-        "ID", "KIND", "STATE", "RECT", "ORIGIN", "EXTENT"
+        "{:>4}  {:<6}  {:<9}  {:<14}  {:<12}  {:<13}  {:<5}  KEY",
+        "ID", "KIND", "STATE", "RECT", "ORIGIN", "EXTENT", "IDLE"
     );
     for f in result["frames"].as_array().into_iter().flatten() {
         let r = &f["rect"];
@@ -198,14 +198,20 @@ fn print_frames(result: &Value) {
             .as_str()
             .map(|s| format!(" [{s}]"))
             .unwrap_or_default();
+        let idle = format!(
+            "{:.0}%{}",
+            f["idle"].as_f64().unwrap_or(0.0) * 100.0,
+            if f["is_idle"] == true { "*" } else { "" }
+        );
         println!(
-            "{:>4}  {:<6}  {:<9}  {:<14}  {:<12}  {:<13}  {}{}",
+            "{:>4}  {:<6}  {:<9}  {:<14}  {:<12}  {:<13}  {:<5}  {}{}",
             f["id"].to_string(),
             f["kind"].as_str().unwrap_or("?"),
             state,
             format!("{}x{}+{}+{}", r[2], r[3], r[0], r[1]),
             format!("{},{}", f["origin"][0], f["origin"][1]),
             format!("{}..{}", f["extent"][0], f["extent"][1]),
+            idle,
             f["key"].as_str().unwrap_or("-"),
             support,
         );
@@ -257,16 +263,38 @@ pub fn frames(common: &Common, args: Frames) -> Done {
     }
 }
 
-pub fn heat(common: &Common, frame: &str) -> Done {
+pub fn heat(common: &Common, frame: &str, classes: bool) -> Done {
     let result = call(common, "frame.heat", json!({"frame": frame_value(frame)}))?;
     if common.json {
         print_json(&result, false);
     } else {
-        for line in strings(&result["rows"]) {
+        let rows = if classes { "classes" } else { "rows" };
+        for line in strings(&result[rows]) {
             println!("{line}");
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// Exit status 0 when the frame is idle, 1 otherwise.
+pub fn idle(common: &Common, frame: &str) -> Done {
+    let result = call(common, "frame.idle", json!({"frame": frame_value(frame)}))?;
+    let is_idle = result["idle"] == true;
+    if common.json {
+        print_json(&result, false);
+    } else {
+        println!(
+            "{:.2} {} (free {:.2})",
+            result["score"].as_f64().unwrap_or(0.0),
+            if is_idle { "idle" } else { "busy" },
+            result["free"].as_f64().unwrap_or(0.0),
+        );
+    }
+    Ok(if is_idle {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    })
 }
 
 /// Where and how a sprite goes.
@@ -292,9 +320,14 @@ pub struct Place {
     /// Follow the cursor at offset DX,DY
     #[arg(long, value_name = "DX,DY", allow_hyphen_values = true)]
     cursor: Option<String>,
-    /// over, behind (text stays on top) or tint
-    #[arg(long, default_value = "over")]
+    /// back (behind the app's text), front, or an integer: the app is
+    /// 0, negative layers are behind it [default: back; front for a tint]
+    #[arg(long, value_name = "LAYER", allow_hyphen_values = true)]
+    layer: Option<String>,
+    /// normal, or tint: keep the glyph below and apply the style
+    #[arg(long, default_value = "normal")]
     blend: String,
+    /// Order inside a layer
     #[arg(short, default_value_t = 0, allow_hyphen_values = true)]
     z: i32,
     /// Remove after MS milliseconds
@@ -330,6 +363,12 @@ impl Place {
         let mut fields = Map::new();
         fields.insert("frame".into(), frame_value(&self.frame));
         fields.insert("anchor".into(), anchor);
+        if let Some(layer) = &self.layer {
+            let layer = layer
+                .parse::<i64>()
+                .map_or_else(|_| json!(layer), |n| json!(n));
+            fields.insert("layer".into(), layer);
+        }
         fields.insert("blend".into(), json!(self.blend));
         fields.insert("z".into(), json!(self.z));
         fields.insert("persist".into(), json!(true));
@@ -389,6 +428,9 @@ pub enum Draw {
     Ext {
         #[command(flatten)]
         place: Place,
+        /// Redraw this sprite in place instead of adding one
+        #[arg(long, value_name = "SPRITE")]
+        id: Option<u64>,
         name: String,
         function: String,
         /// Parameters of the function, a JSON object
@@ -448,11 +490,16 @@ pub fn draw(common: &Common, verb: Draw) -> Done {
         }
         Draw::Ext {
             place,
+            id,
             name,
             function,
             params,
         } => {
-            let mut spec = place.fields()?;
+            let mut spec = match id {
+                // In place: the sprite keeps its frame, anchor and layer.
+                Some(id) => Map::from_iter([("id".to_string(), json!(id))]),
+                None => place.fields()?,
+            };
             spec.insert("name".into(), json!(name));
             spec.insert("function".into(), json!(function));
             spec.insert("params".into(), json_arg(params)?);
@@ -509,12 +556,13 @@ pub fn draw(common: &Common, verb: Draw) -> Done {
                     None => "hidden".into(),
                 };
                 println!(
-                    "{:>5}  frame {:<4}  {}x{}  {:<8}  z{}  {}",
+                    "{:>5}  frame {:<4}  {}x{}  {:<8}  layer {:<3} z{}  {}",
                     s["id"].to_string(),
                     s["frame"].to_string(),
                     s["size"][0],
                     s["size"][1],
                     screen,
+                    s["layer"].to_string(),
                     s["z"],
                     s["kind"].as_str().unwrap_or("")
                 );
