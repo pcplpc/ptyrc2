@@ -469,6 +469,10 @@ s_monitor_generic() {
     settle 3
     check "monitor-generic: no preset, usable once settled" \
         "len(P) >= 1 and all(f['usable'] and f['support'] is None for f in P)"
+    local head; head=$(e2e_host | grep -n 'PID USER' | head -1 | cut -d: -f1)
+    check "monitor-generic: the header is chrome, the table starts under it, selected row included" \
+        "any(f['kind'] == 'chrome' and f['rect'][1] == $((head - 1)) and f['rect'][3] == 1 for f in F.values()) \
+         and any(f['rect'][1] == $head and f['rect'][3] >= 10 for f in P)"
     local before; before=$(e2e_p frames --all --json | python3 -c '
 import json, sys
 print(sorted(f["id"] for f in json.load(sys.stdin)["frames"]))')
