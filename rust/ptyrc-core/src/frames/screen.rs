@@ -368,8 +368,10 @@ mod tests {
 
     #[test]
     fn look_ignores_the_pen_of_a_blank() {
-        let mut grey = Style::default();
-        grey.bg = Color::Indexed(8);
+        let grey = Style {
+            bg: Color::Indexed(8),
+            ..Style::default()
+        };
         let mut bold = grey;
         bold.attrs.insert(Attrs::BOLD);
         bold.fg = Color::Indexed(1);
