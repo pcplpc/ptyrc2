@@ -2955,3 +2955,55 @@ fn shares_read_on_a_prompt() {
     assert_eq!(progress_of("100% done"), None);
     assert_eq!(progress_of("%"), None);
 }
+
+/// Knows a rectangle by `STACK` on its first row: four rows, then the
+/// rest.
+struct Stack;
+
+impl TuiSupport for Stack {
+    fn name(&self) -> &'static str {
+        "stack"
+    }
+
+    fn detect(&self, pane: &PaneView) -> f32 {
+        if pane.row_text(0).starts_with("STACK") {
+            1.0
+        } else {
+            0.0
+        }
+    }
+
+    fn segment(&self, area: &PaneView) -> Option<Vec<Rect>> {
+        let r = area.rect;
+        Some(vec![
+            Rect::new(r.x, r.y, r.w, 4),
+            Rect::new(r.x, r.y + 4, r.w, r.h - 4),
+        ])
+    }
+}
+
+#[test]
+fn a_preset_inside_a_pane_of_a_preset() {
+    let mut s = Sim::with(
+        FrameConfig::default(),
+        vec![Box::new(Halves), Box::new(Stack)],
+    );
+    s.title = "halves".into();
+    let d = doc(40);
+    let mut g = view(&d, 0, 20, &[]);
+    s.settle(&g);
+    let rects = |s: &Sim| s.panes().iter().map(|p| p.rect).collect::<Vec<_>>();
+    assert_eq!(rects(&s), [[0, 0, 30, 20], [30, 0, 30, 20]]);
+    // An app the second preset knows starts in the left pane: cut once
+    // more, and no further (its first pane starts with `STACK` too).
+    put(&mut g, 0, 0, "STACK of two          ");
+    put(&mut g, 0, 1, "another row           ");
+    s.settle(&g);
+    assert_eq!(rects(&s), [[0, 0, 30, 4], [30, 0, 30, 20], [0, 4, 30, 16]]);
+    assert!(s.panes().iter().all(|p| p.usable));
+    // It leaves: the pane of the first preset again.
+    put(&mut g, 0, 0, "line 0000 abcdefghij  ");
+    put(&mut g, 0, 1, "line 0001 abcdefghij  ");
+    s.settle(&g);
+    assert_eq!(rects(&s), [[0, 0, 30, 20], [30, 0, 30, 20]]);
+}

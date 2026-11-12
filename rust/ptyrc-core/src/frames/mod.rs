@@ -1076,8 +1076,15 @@ impl Frames {
 
     /// The panes a preset makes of `rect`, a rectangle below the whole
     /// screen. Presets are looked for as on a pane (`detect_due`); those
-    /// found are asked at every segmentation.
-    fn segment_nested(&self, input: &ScreenInput, rect: Rect, now: Duration) -> Option<Vec<Leaf>> {
+    /// found are asked at every segmentation, `not` excepted: the preset
+    /// that made `rect`. Returns the preset that answered.
+    fn segment_nested(
+        &self,
+        input: &ScreenInput,
+        rect: Rect,
+        not: Option<usize>,
+        now: Duration,
+    ) -> Option<(usize, Vec<Leaf>)> {
         if rect.h < self.cfg.min_pane_rows || rect.w < self.cfg.min_pane_cols {
             return None;
         }
@@ -1086,7 +1093,9 @@ impl Frames {
             ..self.pane_view(input, rect)
         };
         let mut nested = self.nested.borrow_mut();
-        let last = nested.get(&r4(rect)).map_or((None, None), |n| (Some(n.0), n.1));
+        let last = nested
+            .get(&r4(rect))
+            .map_or((None, None), |n| (Some(n.0), n.1));
         if self.detect_due(rect, last, now) {
             let found = (0..self.supports.len())
                 .filter(|i| self.supports[*i].detect(&pv) >= 0.5)
@@ -1099,8 +1108,42 @@ impl Frames {
         nested[&r4(rect)]
             .2
             .iter()
-            .find_map(|i| self.supports[*i].segment(&pv))
-            .map(|rects| self.preset_leaves(rects, rect))
+            .filter(|i| Some(**i) != not)
+            .find_map(|i| Some((*i, self.supports[*i].segment(&pv)?)))
+            .map(|(i, rects)| (i, self.preset_leaves(rects, rect)))
+    }
+
+    /// The panes of the preset `by`, each cut once more by another
+    /// preset that knows it (an app in a pane of an app): two presets
+    /// deep, no further. `areas` gets the area of every pane.
+    fn nest(
+        &self,
+        input: &ScreenInput,
+        leaves: Vec<Leaf>,
+        area: Rect,
+        by: usize,
+        areas: &mut Areas,
+        now: Duration,
+    ) -> Vec<Leaf> {
+        let mut out = Vec::with_capacity(leaves.len());
+        for leaf in leaves {
+            let inner = (leaf.kind == 0)
+                .then(|| self.segment_nested(input, leaf.rect(), Some(by), now))
+                .flatten();
+            match inner {
+                Some((_, inner)) => {
+                    areas.extend(inner.iter().map(|l| (l.rect, leaf.rect)));
+                    out.extend(inner);
+                }
+                None => {
+                    areas.insert(leaf.rect, r4(area));
+                    out.push(leaf);
+                }
+            }
+        }
+        out.sort();
+        out.dedup();
+        out
     }
 
     fn segment(&self, input: &ScreenInput, now: Duration) -> (Vec<Leaf>, Vec<Sep>, Areas) {
@@ -1115,17 +1158,15 @@ impl Frames {
                 && let Some(rects) = s.segment(&pv)
             {
                 let leaves = self.preset_leaves(rects, all);
-                let areas = leaves.iter().map(|l| (l.rect, r4(all))).collect();
+                let mut areas = Areas::new();
+                let leaves = self.nest(input, leaves, all, i, &mut areas, now);
                 return (leaves, Vec::new(), areas);
             }
         }
         let areas = RefCell::new(Areas::new());
         let ask = |rect: Rect| {
-            let leaves = self.segment_nested(input, rect, now)?;
-            areas
-                .borrow_mut()
-                .extend(leaves.iter().map(|l| (l.rect, r4(rect))));
-            Some(leaves)
+            let (by, leaves) = self.segment_nested(input, rect, None, now)?;
+            Some(self.nest(input, leaves, rect, by, &mut areas.borrow_mut(), now))
         };
         let (leaves, seps) = Segmenter {
             screen: &self.screen,
