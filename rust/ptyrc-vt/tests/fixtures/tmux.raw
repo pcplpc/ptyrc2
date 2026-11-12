@@ -1,0 +1,180 @@
+Script started on 2026-11-12 14:37:18+01:00 [COMMAND="env -u TMUX tmux -L vtfix-inner -f /tmp/fx new-session" TERM="tmux-256color" TTY="/dev/pts/75" COLUMNS="60" LINES="16"]
+[?1049h[H[J[?1h=[34h[?25h[?1000l[?1002l[?1003l[?1006l[?1005l[?2004h[?2031h[?996n[m[34h[?25h[?1006l[?1000l[?1002l[?1003l[1;1H[1;16r[c[>c[>q[?2026$p]10;?\]11;?\[1;1H[?1006l[?1000l[?1002l[?1003l[?1006h[?1000h[?1002h[?25l[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K[38;2;13;13;13m[48;2;154;205;50m
+[fx] [4m0:zsh*[m[38;2;13;13;13m[48;2;154;205;50m                                                 [m[34h[?25h[1;1H[m[34h[?25h[?1006l[?1000l[?1002l[?1003l[1;1H[1;16r[m[34h[?25h[?1006l[?1000l[?1002l[?1003l[1;1H[1;16r[m[34h[?25h[?1006l[?1000l[?1002l[?1003l[1;1H[1;16r[m[34h[?25h[?1006l[?1000l[?1002l[?1003l[1;1H[1;16r[m[34h[?25h[?1006l[?1000l[?1002l[?1003l[1;1H[1;16r[1;1H[?1006l[?1000l[?1002l[?1003l[?1006h[?1000h[?1002h[?2026h[?25l[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K[38;2;13;13;13m[48;2;154;205;50m
+[fx] [4m0:zsh*[m[38;2;13;13;13m[48;2;154;205;50m                                                 [m[34h[?25h[1;1H[?2026l$ [?2026h[?25l[38;2;13;13;13m[48;2;154;205;50m[16;1H[fx] [4m0:sh*[m[38;2;13;13;13m[48;2;154;205;50m                                                  [m[34h[?25h[1;3H[?2026lhead -30 long.txt
+1: the quick brown fox jumps over the lazy dog — ünïcödé 世
+界
+2: the quick brown fox jumps over the lazy dog — ünïcödé 世
+界
+3: the quick brown fox jumps over the lazy dog — ünïcödé 世
+界
+4: the quick brown fox jumps over the lazy dog — ünïcödé 世
+界
+5: the quick brown fox jumps over the lazy dog — ünïcödé 世
+界
+6: the quick brown fox jumps over the lazy dog — ünïcödé 世
+界
+7: the quick brown fox jumps over the lazy dog — ünïcödé 世
+界[1;15r[15;1H
+8: the quick brown fox jumps over the lazy dog [K— ünïcödé 世
+[K界
+9: the quick brown fox jumps over the lazy dog [K— ünïcödé 世
+[K界
+10: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+11: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+12: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+13: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+14: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+15: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+16: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+17: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+18: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+19: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+20: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+21: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+22: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+23: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+24: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+25: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+26: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+27: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+28: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+29: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+30: the quick brown fox jumps over the lazy dog [K— ünïcödé 世[15;1H
+[K界
+[K[1;16r[15;1H$ [?2026h[?25l[Hover the lazy dog — ünïcödé 世[C[K[38;2;179;179;179m│[m
+ 界                           [C[K[38;2;179;179;179m│[m
+27: the quick brown fox jumps [C[K[38;2;179;179;179m│[m
+over the lazy dog — ünïcödé 世[C[K[38;2;179;179;179m│[m
+ 界                           [C[K[38;2;179;179;179m│[m
+28: the quick brown fox jumps [C[K[38;2;179;179;179m│[m
+over the lazy dog — ünïcödé 世[C[K[38;2;179;179;179m│[m
+ 界                           [C[K[38;2;179;179;179m│[m
+29: the quick brown fox jumps [C[K[38;2;154;205;50m│[m
+over the lazy dog — ünïcödé 世[C[K[38;2;154;205;50m│[m
+ 界                           [C[K[38;2;154;205;50m│[m
+30: the quick brown fox jumps [C[K[38;2;154;205;50m│[m
+over the lazy dog — ünïcödé 世[C[K[38;2;154;205;50m│[m
+ 界                           [C[K[38;2;154;205;50m│[m
+$                             [C[K[38;2;154;205;50m│[m[38;2;13;13;13m[48;2;154;205;50m
+[fx] [4m0:sh*[m[38;2;13;13;13m[48;2;154;205;50m                                                  [m[34h[?25h[1;32H[?2026l[?2026h[15;1H$                             [1;32H[?2026l[?2026h[?25l[38;2;179;179;179m│[2;31H│[3;31H│[4;31H│[5;31H│[6;31H│[7;31H│[8;31H│[9;31H[38;2;154;205;50m│[10;31H│[11;31H│[12;31H│[13;31H│[14;31H│[15;31H│[m[38;2;13;13;13m[48;2;154;205;50m
+[fx] [4m0:zsh*[m[38;2;13;13;13m[48;2;154;205;50m                                                 [m[34h[?25h[1;32H[?2026l$ echo left right[?2026h[?25l[18D[38;2;179;179;179m│[2;31H│[3;31H│[4;31H│[5;31H│[6;31H│[7;31H│[8;31H│[9;31H[38;2;154;205;50m│[10;31H│[11;31H│[12;31H│[13;31H│[14;31H│[15;31H│[m[38;2;13;13;13m[48;2;154;205;50m
+[fx] [4m0:sh*[m[38;2;13;13;13m[48;2;154;205;50m                                                  [m[34h[?25h[1;49H[?2026l[2;32Hleft right[3;32H$ [?2026h[?25l[Hover the lazy dog — ünïcödé 世[C$ echo left right[K[18D[38;2;179;179;179m│[m
+ 界                           [Cleft right[K[11D[38;2;179;179;179m│[m
+27: the quick brown fox jumps [C$[K[38;2;179;179;179m│[m
+over the lazy dog — ünïcödé 世[C[K[38;2;179;179;179m│[m
+ 界                           [C[K[38;2;179;179;179m│[m
+28: the quick brown fox jumps [C[K[38;2;179;179;179m│[m
+over the lazy dog — ünïcödé 世[C[K[38;2;179;179;179m│[m
+ 界                           [38;2;154;205;50m├─────────────────────────────[m[9;1H29: the quick brown fox jumps [C[K[38;2;154;205;50m│[m
+over the lazy dog — ünïcödé 世[C[K[38;2;154;205;50m│[m
+ 界                           [C[K[38;2;154;205;50m│[m
+30: the quick brown fox jumps [C[K[38;2;154;205;50m│[m
+over the lazy dog — ünïcödé 世[C[K[38;2;154;205;50m│[m
+ 界                           [C[K[38;2;154;205;50m│[m
+$                             [C[K[38;2;154;205;50m│[m[38;2;13;13;13m[48;2;154;205;50m
+[fx] [4m0:sh*[m[38;2;13;13;13m[48;2;154;205;50m                                                  [m[34h[?25h[9;32H[?2026l[?2026h[3d$ [K[?25l[1;31H[38;2;179;179;179m│[2;31H│[3;31H│[4;31H│[5;31H│[6;31H│[7;31H│[8;31H[38;2;154;205;50m├─────────────────────────────[9;31H│[10;31H│[11;31H│[12;31H│[13;31H│[14;31H│[15;31H│[m[38;2;13;13;13m[48;2;154;205;50m
+[fx] [4m0:zsh*[m[38;2;13;13;13m[48;2;154;205;50m                                                 [m[34h[?25h[9;32H[?2026l$ seq 1 12[?2026h[?25l[1;31H[38;2;179;179;179m│[2;31H│[3;31H│[4;31H│[5;31H│[6;31H│[7;31H│[8;31H[38;2;154;205;50m├─────────────────────────────[9;31H│[10;31H│[11;31H│[12;31H│[13;31H│[14;31H│[15;31H│[m[38;2;13;13;13m[48;2;154;205;50m
+[fx] [4m0:sh*[m[38;2;13;13;13m[48;2;154;205;50m                                                  [m[34h[?25h[9;42H[?2026l[10;32H[?2026h[15d[?2026l[?2026h[?25l[Hover the lazy dog — ünïcödé 世[C$ echo left right[K[18D[38;2;179;179;179m│[m
+ 界                           [Cleft right[K[11D[38;2;179;179;179m│[m
+27: the quick brown fox jumps [C$[K[38;2;179;179;179m│[m
+over the lazy dog — ünïcödé 世[C[K[38;2;179;179;179m│[m
+ 界                           [C[K[38;2;179;179;179m│[m
+28: the quick brown fox jumps [C[K[38;2;179;179;179m│[m
+over the lazy dog — ünïcödé 世[C[K[38;2;179;179;179m│[m
+ 界                           [38;2;154;205;50m├─────────────────────────────[m[9;1H29: the quick brown fox jumps [C7[K[38;2;154;205;50m│[m
+over the lazy dog — ünïcödé 世[C8[K[38;2;154;205;50m│[m
+ 界                           [C9[K[38;2;154;205;50m│[m
+30: the quick brown fox jumps [C10[K[3D[38;2;154;205;50m│[m
+over the lazy dog — ünïcödé 世[C11[K[3D[38;2;154;205;50m│[m
+ 界                           [C12[K[3D[38;2;154;205;50m│[m
+$                             [C[K[38;2;154;205;50m│[m[34h[?25h[?2026l$ [?2026h[?25l[Hover the lazy dog — ünïcödé 世[C$ echo left right[K[18D[38;2;154;205;50m│[m
+ 界                           [Cleft right[K[11D[38;2;154;205;50m│[m
+27: the quick brown fox jumps [C$[K[38;2;154;205;50m│[m
+over the lazy dog — ünïcödé 世[C[K[38;2;154;205;50m│[m
+ 界                           [C[K[38;2;154;205;50m│[m
+28: the quick brown fox jumps [C[K[38;2;154;205;50m│[m
+over the lazy dog — ünïcödé 世[C[K[38;2;154;205;50m│[m
+ 界                           [38;2;154;205;50m├[38;2;179;179;179m─────────────────────────────[m[9;1H29: the quick brown fox jumps [C7[K[38;2;154;205;50m│[m
+over the lazy dog — ünïcödé 世[C8[K[38;2;154;205;50m│[m
+ 界                           [C9[K[38;2;154;205;50m│[m
+30: the quick brown fox jumps [C10[K[3D[38;2;154;205;50m│[m
+over the lazy dog — ünïcödé 世[C11[K[3D[38;2;154;205;50m│[m
+ 界                           [C12[K[3D[38;2;154;205;50m│[m
+$                             [C$[K[38;2;154;205;50m│[m[38;2;13;13;13m[48;2;154;205;50m
+[fx] [4m0:sh*[m[38;2;13;13;13m[48;2;154;205;50m                                                  [m[34h[?25h[15;3H[?2026lclear[?2026h[?2026l[?2026h[?25l[H 界                           [C$ echo left right[K[18D[38;2;154;205;50m│[m
+27: the quick brown fox jumps [Cleft right[K[11D[38;2;154;205;50m│[m
+over the lazy dog — ünïcödé 世[C$[K[38;2;154;205;50m│[m
+ 界                           [C[K[38;2;154;205;50m│[m
+28: the quick brown fox jumps [C[K[38;2;154;205;50m│[m
+over the lazy dog — ünïcödé 世[C[K[38;2;154;205;50m│[m
+ 界                           [C[K[38;2;154;205;50m│[m
+29: the quick brown fox jumps [38;2;154;205;50m├[38;2;179;179;179m─────────────────────────────[m[9;1Hover the lazy dog — ünïcödé 世[C7[K[38;2;154;205;50m│[m
+ 界                           [C8[K[38;2;154;205;50m│[m
+30: the quick brown fox jumps [C9[K[38;2;154;205;50m│[m
+over the lazy dog — ünïcödé 世[C10[K[3D[38;2;154;205;50m│[m
+ 界                           [C11[K[3D[38;2;154;205;50m│[m
+$ clear                       [C12[K[3D[38;2;154;205;50m│[m[15;30H[1K[2C$[K[38;2;154;205;50m│[m[34h[?25h[?2026l[?2026h[1;15r[2;30H[1K
+[1K
+[1K
+[1K
+[1K
+[1K
+[1K
+[1K
+[1K
+[1K
+[1K
+[1K
+[1K
+[1K[1d[1K[1;16r[1;1H[?2026l$ echo done
+done
+$ 

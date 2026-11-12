@@ -1,0 +1,16 @@
+199 199: the quick brown fox j|  7 hello7: the quick brown f
+    umps over the lazy dog — ü|    ox jumps over the lazy do
+    nïcödé 世界               |    g — ünïcödé 世界
+200 200: the quick brown fox j|  8 8: the quick brown fox ju
+    umps over the lazy dog — ü|    mps over the lazy dog — ü
+    nïcödé 世界               |    nïcödé 世界
+~                             |  9 9: the quick brown fox ju
+long.txt [+]   200,1       Bot|    mps over the lazy dog — ü
+  9 9: the quick brown fox jum|    nïcödé 世界
+    ps over the lazy dog — ünï| 10 10: the quick brown fox j
+    cödé 世界                 |    umps over the lazy dog —
+ 10 10: the quick brown fox ju|    ünïcödé 世界
+    mps over the lazy dog — ün|    @
+    ïcödé 世界                |    @
+long.txt [+]   9,5          4% long.txt [+]   7,1         3%
+:split

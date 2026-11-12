@@ -652,25 +652,32 @@ impl Vt {
             }
             return;
         }
+        if self.modes.insert {
+            for &b in run {
+                self.print(b as char);
+            }
+            return;
+        }
         let pen = self.pen;
-        let insert = self.modes.insert;
-        for &b in run {
+        self.last_char = run.last().map(|&b| b as char);
+        let mut run = run;
+        while !run.is_empty() {
             self.wrap_if_pending();
             let (col, row) = (self.col, self.row);
-            let cell = Cell {
-                text: SmolStr::new_inline(std::str::from_utf8(&[b]).unwrap_or(" ")),
-                width: 1,
-                style: pen,
-            };
-            if insert {
-                let fill = self.fill();
-                self.grid_mut().insert_cells(col, row, 1, &fill);
+            let k = run.len().min((self.cols - col) as usize);
+            self.grid_mut().put_ascii(col, row, &run[..k], pen);
+            self.last_pos = Some((col + k as u16 - 1, row));
+            self.advance(k as u16);
+            run = &run[k..];
+            if !self.modes.autowrap && !run.is_empty() {
+                // The rest piles up on the last column: only the last shows.
+                let last = &run[run.len() - 1..];
+                let col = self.cols - 1;
+                self.grid_mut().put_ascii(col, row, last, pen);
+                self.last_pos = Some((col, row));
+                break;
             }
-            self.grid_mut().put(col, row, cell);
-            self.advance(1);
-            self.last_pos = Some((col, row));
         }
-        self.last_char = run.last().map(|&b| b as char);
     }
 
     fn print(&mut self, c: char) {

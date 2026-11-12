@@ -297,6 +297,24 @@ impl Grid {
         true
     }
 
+    /// Write printable ASCII bytes as narrow cells from `(col, row)`; the
+    /// run must fit in the row. Same result as `put` for each.
+    pub fn put_ascii(&mut self, col: u16, row: u16, bytes: &[u8], style: Style) {
+        let n = bytes.len();
+        if n == 0 || row >= self.rows || col as usize + n > self.cols as usize {
+            return;
+        }
+        self.orphan(col, row);
+        self.orphan(col + n as u16 - 1, row);
+        let start = self.index(col, row);
+        for (cell, b) in self.cells[start..start + n].iter_mut().zip(bytes) {
+            let ch = [*b];
+            cell.text = SmolStr::new_inline(std::str::from_utf8(&ch).unwrap_or(" "));
+            cell.width = 1;
+            cell.style = style;
+        }
+    }
+
     /// Fill a row with copies of `fill`.
     pub fn clear_row(&mut self, row: u16, fill: &Cell) {
         for cell in self.row_mut(row) {

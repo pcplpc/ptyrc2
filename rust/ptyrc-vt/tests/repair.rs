@@ -214,6 +214,8 @@ fn run(seed: u64, cols: u16, rows: u16, steps: usize) {
     let mut rng = Rng(seed | 1);
     let mut app = Vt::new(cols, rows);
     let mut host = Vt::new(cols, rows);
+    // Fed byte by byte: chunking must not matter.
+    let mut bytewise = Vt::new(cols, rows);
     let mut held: Vec<u8> = Vec::new();
     for step in 0..steps {
         let mut chunk = std::mem::take(&mut held);
@@ -229,6 +231,13 @@ fn run(seed: u64, cols: u16, rows: u16, steps: usize) {
         }
         app.feed(&chunk);
         host.feed(&chunk);
+        for b in &chunk {
+            bytewise.feed(std::slice::from_ref(b));
+        }
+        assert!(
+            bytewise.grid() == app.grid() && bytewise.same_state(&app),
+            "seed {seed} step {step}: chunking matters"
+        );
         assert!(
             host.same_state(&app),
             "seed {seed} step {step}: fed alike, states differ\napp  {:?} {:?} {:?}\nhost {:?} {:?} {:?}\nchunk {:?}",
@@ -291,6 +300,11 @@ fn repair_is_silent_when_equal() {
     let want = host.grid().clone();
     let mut out = Vec::new();
     repair(&mut host, &want, &mut out);
+    assert!(out.is_empty());
+    // Inside a sequence: nothing.
+    let mut mid = host.clone();
+    mid.feed(b"\x1b[3");
+    repair(&mut mid, &Grid::new(10, 3), &mut out);
     assert!(out.is_empty());
     // Wrong size: nothing.
     repair(&mut host, &Grid::new(4, 4), &mut out);

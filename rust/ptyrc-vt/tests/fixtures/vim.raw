@@ -1,0 +1,71 @@
+Script started on 2026-11-12 14:36:44+01:00 [COMMAND="/usr/bin/vim -u NONE -N long.txt" TERM="tmux-256color" TTY="/dev/pts/75" COLUMNS="60" LINES="16"]
+[?1049h[?1h=[?2004h[1;16r[27m[24m[23m[0m[H[J[?25l[16;1H"long.txt" 200L, 14292B[2;1H▽[6n[2;1H  [3;1HPzz\[0%m[6n[3;1H           [1;1H[>c[1;1H1: the quick brown fox jumps over the lazy dog —[1;50Hü[1;51Hnïcödé[1;58H世[94m>>[0m[2;1H界[2;3H[K[3;1H2: the quick brown fox jumps over the lazy dog —[3;49H ü[3;51Hnïcödé[3;57H 世[94m>>[0m[4;1H界
+3: the quick brown fox jumps over the lazy dog —[5;50Hü[5;51Hnïcödé[5;58H世[94m>>[0m[6;1H界
+4: the quick brown fox jumps over the lazy dog —[7;50Hü[7;51Hnïcödé[7;58H世[94m>>[0m[8;1H界
+5: the quick brown fox jumps over the lazy dog —[9;50Hü[9;51Hnïcödé[9;58H世[94m>>[0m[10;1H界
+6: the quick brown fox jumps over the lazy dog —[11;50Hü[11;51Hnïcödé[11;58H世[94m>>[0m[12;1H界
+7: the quick brown fox jumps over the lazy dog —[13;50Hü[13;51Hnïcödé[13;58H世[94m>>[0m[14;1H界
+8: the quick brown fox jumps over the lazy dog —[15;50Hü[15;51Hnïcödé[15;58H世[94m>[15;1H@                                                           [0m[16;43H1,1[11CTop[34h[?25h[1;1H[?25l[16;33H^D[1;1H[16;33H  [1;1H4
+
+5
+
+6
+
+7
+
+8
+
+9
+
+10: the quick brown fox jumps over the lazy dog —[13;50H ü[13;52Hnïcödé[13;58H 世[15;1H11: the quick brown fox jumps over the lazy dog —[15;50H ü[15;52Hnïcödé[15;58H 世[15;1H[94m@                                                           [0m[16;43H4[13C 1%[34h[?25h[1;1H[?25l[16;33H^D[1;1H[16;33H  [1;1H7
+
+8
+
+9
+
+10: the quick brown fox jumps over the lazy dog —[7;50H ü[7;52Hnïcödé[7;58H 世[9;1H11: the quick brown fox jumps over the lazy dog —[9;50H ü[9;52Hnïcödé[9;58H 世[11;1H12: the quick brown fox jumps over the lazy dog —[11;50H ü[11;52Hnïcödé[11;58H 世[13;2H3
+
+14: the quick brown fox jumps over the lazy dog —[15;50H ü[15;52Hnïcödé[15;58H 世[15;1H[94m@                                                           [0m[16;43H7[14C3[34h[?25h[1;1H[?25l[16;1H[K[16;1H:set nu[34h[?25h[?25l[1;1H[38;5;130m  7 [0m7: the quick brown fox jumps over the lazy dog —[1;53H ü[1;55Hnïcödé[2;1H[38;5;130m    [0m 世界
+[38;5;130m  8 [0m8: the quick brown fox jumps over the lazy dog —[3;53H ü[3;55Hnïcödé[4;1H[38;5;130m    [0m 世界
+[38;5;130m  9 [0m9: the quick brown fox jumps over the lazy dog —[5;53H ü[5;55Hnïcödé[6;1H[38;5;130m    [0m 世界
+[38;5;130m 10 [0m10: the quick brown fox jumps over the lazy dog —[7;54H ü[7;56Hnïcöd[8;1H[38;5;130m    [0mé[8;7H世界
+[38;5;130m 11 [0m11: the quick brown fox jumps over the lazy dog —[9;54H ü[9;56Hnïcöd[10;1H[38;5;130m    [0mé[10;7H世界
+[38;5;130m 12 [0m12: the quick brown fox jumps over the lazy dog —[11;54H ü[11;56Hnïcöd[12;1H[38;5;130m    [0mé[12;7H世界
+[38;5;130m 13 [0m13: the quick brown fox jumps over the lazy dog —[13;54H ü[13;56Hnïcöd[14;1H[38;5;130m    [0mé[14;7H世界
+[38;5;130m 14 [0m14: the quick brown fox jumps over the lazy dog —[15;54H ü[15;56Hnïcöd[15;2H[38;5;130m  [0m[1C[94m@                                                       [0m[16;43H7,1[12C3%[34h[?25h[1;5H[?25l[16;1H[K[16;1H:vsplit[34h[?25h[?25l[1;31H[7m|[0m[2;5Hps over the lazy dog —[2;28Hü[2;29Hnï[7m|[0m[3;3H[38;5;130m [0m[1Ccödé[3;9H 世界                 [7m|[0m[4;3H[38;5;130m8[0m[1C8: the quick brown fox jum[7m|[0m[5;3H[38;5;130m [0m[1Cps over the lazy dog —[5;28Hü[5;29Hnï[7m|[0m[6;5Hcödé[6;9H 世界[17C[7m|[0m[7;2H[38;5;130m 9[0m[1C9: the quick brown fox jum[7m|[0m[8;5Hps over the lazy dog —[8;28Hü[8;29Hnï[7m|[0m[9;2H[38;5;130m  [0m[1Ccödé[9;9H 世界                 [7m|[0m[10;2H[38;5;130m10[0m[1C10: the quick brown fox ju[7m|[0m[11;2H[38;5;130m  [0m[1Cmps over the lazy dog —[11;29Hü[11;30Hn[7m|[0m[12;5Hïcödé[12;10H 世界[16C[7m|[0m[13;3H[38;5;130m1[0m[2C1[24C[7m|[0m[14;5Hmps over the lazy dog —[14;29Hü[14;30Hn[7m|[0m[13;2H[38;5;130m  [0m[1C[94m@                         [14;5H@                         [0m
+[1m[7mlong.txt       7,1          3% [0m[1;32H[38;5;130m  7 [0m7: the quick brown fox ju[2;32H[38;5;130m    [0mmps over the lazy dog —[2;60Hü[3;32H[38;5;130m    [0mnïcödé[3;43H世界[3;48H[K[4;32H[38;5;130m  8 [0m8: the quick brown fox ju[5;32H[38;5;130m    [0mmps over the lazy dog —[5;59H ü[6;32H[38;5;130m    [0mnïcödé[6;43H世界[7;32H[38;5;130m  9 [0m9: the quick brown fox ju[8;32H[38;5;130m    [0mmps over the lazy dog —[8;60Hü[9;32H[38;5;130m    [0mnïcödé[9;42H 世界[9;47H[K[10;32H[38;5;130m 10 [0m10: the quick brown fox j[11;32H[38;5;130m    [0mumps over the lazy dog —[11;60H [12;32H[38;5;130m    [0mü[12;37Hnïcödé[12;44H世界[13;32H[38;5;130m 11 [0m11: the quick brown fox j[14;32H[38;5;130m    [0mumps over the lazy dog —[13;33H[38;5;130m  [0m[1C[94m@                        [14;36H@                        [0m[15;32H[7mlong.txt       7,1         3%[34h[?25h[1;5H[?25l[0m[16;1H[1m-- INSERT --[0m[1;5Hhello7: the quick brown fo[2;5Hx jumps over the lazy dog [3;5H—[3;6H ü[3;8Hnïcödé[3;15H世界[15;10H[1m[7m[+]   7,6[0m[1;36Hhello7: the quick brown f[2;36Hox jumps over the lazy do[3;36Hg —[3;39H ü[3;41Hnïcödé[3;48H世界[15;41H[7m[+][34h[?25h[1;10H[0m[16;1H[K[1;9H[?25l[16;50H^[[1;9H[34h[?25h[?25l[16;50H  [1;10H[15;18H[1m[7m5[1;9H[34h[?25h[?25l[0m[16;50H^E[1;9H[16;50H  [1;9H[38;5;130m  8 [0m8: the quick brown fox jum
+[38;5;130m    [0mps over the lazy dog —[2;27H ü[2;29Hnï
+[38;5;130m    [0mcödé[3;9H 世界                 
+[38;5;130m  9 [0m9: the quick brown fox jum
+[38;5;130m    [0mps over the lazy dog —[5;27H ü[5;29Hnï
+[38;5;130m    [0mcödé[6;9H 世界                 
+[38;5;130m 10 [0m10: the quick brown fox ju
+[38;5;130m    [0mmps over the lazy dog —[8;28H ü[8;30Hn
+[38;5;130m    [0mïcödé[9;10H 世界                
+[38;5;130m    [0m[94m@                         [0m
+[38;5;130m    [0m[94m@                         [0m
+                              
+                              
+                              [10;2H[38;5;130m11[0m[1C11: the quick brown fox ju[11;5Hmps over the lazy dog —[11;28H ü[11;30Hn
+[38;5;130m    [0mïcödé[12;11H世界
+[38;5;130m 12 [0m12: the quick brown fox ju
+[38;5;130m    [0mmps over the lazy dog —[14;29Hü[14;30Hn[13;2H[38;5;130m  [0m[1C[94m@                         [14;5H@                         [34h[?25h[?25l[0m[15;16H[1m[7m8[1;9H[34h[?25h[?25l[0m[16;50H^E[1;9H[16;50H  [1;9H[38;5;130m  9 [0m9: the quick brown fox jum
+[38;5;130m    [0mps over the lazy dog —[2;27H ü[2;29Hnï
+[38;5;130m    [0mcödé[3;9H 世界                 
+[38;5;130m 10 [0m10: the quick brown fox ju
+[38;5;130m    [0mmps over the lazy dog —[5;28H ü[5;30Hn
+[38;5;130m    [0mïcödé[6;10H 世界                
+[38;5;130m 11 [0m11: the quick brown fox ju
+[38;5;130m    [0mmps over the lazy dog —[8;28H ü[8;30Hn
+[38;5;130m    [0mïcödé[9;10H 世界                
+[38;5;130m    [0m[94m@                         [0m
+[38;5;130m    [0m[94m@                         [0m
+                              
+                              
+                              [10;2H[38;5;130m12[0m[1C12: the quick brown fox ju[11;5Hmps over the lazy dog —[11;28H ü[11;30Hn
+[38;5;130m    [0mïcödé[12;11H世界
+[38;5;130m 13 [0m13: the quick brown fox ju
+[38;5;130m    [0mmps over the lazy dog —[14;29Hü[14;30Hn[13;2H[38;5;130m  [0m[1C[94m@                         [14;5H@                         [34h[?25h[?25l[0m[15;16H[1m[7m9[12C4[1;9H[34h[?25h[?25l[16;1H[0m:split[34h[?25h[?25l[7;2H[38;5;130m  [0m[1C[94m@                         [0m
+[1m[7mlong.txt [+]   9,5          4%[0m[9;3H[38;5;130m9[0m[1C9: the quick brown fox jum[10;2H[38;5;130m  [0m[1Cps over the lazy dog —[10;27H ü[10;29Hnï[11;5Hcödé[11;9H 世界                 [12;2H[38;5;130m10[0m[1C10: the quick brown fox ju[13;5Hmps over the lazy dog —[13;28H ü[13;30Hn[14;5Hïcödé[14;10H 世界                [15;31H[7m long.txt [+]   9,5          4%[34h[?25h[1;9H[?25l[0m[16;50HG[1;9H[16;50H [4;5H[1;1H[38;5;130m19[0m[2C199: the quick brown fox j[2;5Humps over the lazy dog —[2;29H ü[3;5Hnïcödé[3;11H 世界
+[38;5;130m20[0m[2C200: the quick brown fox j[5;5Humps over the lazy dog —[5;29H ü[6;5Hnïcödé[6;11H 世界
+[94m~    [34h[?25h[?25l[0m[8;16H[1m[7m200,1[7CBot[4;5H[34h[?25h

@@ -105,10 +105,15 @@ impl Painter<'_> {
 /// Make `host.grid()` equal `desired`: paint the cells that differ and
 /// restore the cursor, pen, hyperlink, charset, insert and origin modes
 /// found on entry. The bytes are appended to `out` and fed to `host`.
-/// Nothing is emitted when the grids are equal, or of different sizes.
+/// Nothing is emitted when the grids are equal or of different sizes, or
+/// when `host` is inside a sequence.
 pub fn repair(host: &mut Vt, desired: &Grid, out: &mut Vec<u8>) {
     let (cols, rows) = (host.cols(), host.rows());
-    if desired.cols() != cols || desired.rows() != rows || host.grid() == desired {
+    if desired.cols() != cols
+        || desired.rows() != rows
+        || !host.in_ground()
+        || host.grid() == desired
+    {
         return;
     }
     let cursor = host.cursor();
