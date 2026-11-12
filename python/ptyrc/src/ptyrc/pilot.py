@@ -103,6 +103,7 @@ def sprite_spec(
     frames: Sequence[Any] | None = None,
     frame_ms: int = 100,
     loop: bool | int = True,
+    layer: int | str | None = None,
     blend: str | None = None,
     z: int | None = None,
     ttl: float | None = None,
@@ -129,9 +130,13 @@ def sprite_spec(
     `ms`; `loop` True, False or a count), `effect` (a native generator,
     drawing on `size` cells or on the whole view).
 
-    Style keywords (`fg`, `bg`, `bold`...) extend `style`. `blend`: `over`,
-    `behind` (text stays on top), `tint`. `ttl` is in seconds. A sprite
-    dies with its connection unless `persist`.
+    Style keywords (`fg`, `bg`, `bold`...) extend `style`. `layer`: `"back"`
+    (the default: behind the app's text, seen where the app shows none),
+    `"front"`, or an integer; the app is 0, negative layers are behind
+    it, `z` orders inside a layer. `blend="tint"` keeps the glyph below
+    and applies the style; it is in front unless `layer` says otherwise.
+    `ttl` is in seconds. A sprite dies with its connection unless
+    `persist`.
     """
     unknown = set(style_kw) - set(_STYLE_KEYS)
     if unknown:
@@ -194,6 +199,8 @@ def sprite_spec(
     else:
         raise TypeError("one of rows, cells, frames, effect is required")
 
+    if layer is not None:
+        spec["layer"] = layer
     if blend is not None:
         spec["blend"] = blend
     if z is not None:
@@ -218,7 +225,7 @@ class Sprite:
         self.id = sprite_id
 
     def update(self, **patch: Any) -> None:
-        """Patch wire fields: `anchor`, `content`, `frames`, `z`, `blend`..."""
+        """Patch wire fields: `anchor`, `content`, `frames`, `layer`, `z`..."""
         self._pilot.call("draw.update", id=self.id, **patch)
 
     def set(self, rows: Any = None, **kw: Any) -> None:
@@ -226,6 +233,12 @@ class Sprite:
         spec = sprite_spec(rows, **kw)
         keys = ("content", "frames", "loop")
         self.update(**{k: spec[k] for k in keys if k in spec})
+
+    def ext(self, name: str, function: str, params: Any = None, **patch: Any) -> None:
+        """Redraw in place with an extension: what it draws replaces the
+        content; frame, anchor and layer are kept unless in `patch`."""
+        request = {"name": name, "function": function, "params": params or {}}
+        self._pilot.call("draw.ext", id=self.id, **request, **patch)
 
     def move(self, x: int, y: int, space: str = "view") -> None:
         self.update(anchor={"at": [x, y], "space": space})
@@ -604,7 +617,7 @@ class Pilot:
         self, name: str, function: str, params: Any = None, **sprite: Any
     ) -> Sprite:
         """Draw with an extension: `pilot.ext("shapes", "circle", {"r": 4})`.
-        `sprite` takes wire sprite fields (`frame`, `anchor`, `z`...)."""
+        `sprite` takes wire sprite fields (`frame`, `anchor`, `layer`...)."""
         request = {"name": name, "function": function, "params": params or {}}
         return self._sprite("draw.ext", {**request, **sprite})
 

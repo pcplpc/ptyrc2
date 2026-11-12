@@ -228,13 +228,19 @@ need() { command -v "$1" >/dev/null || [ -x "$1" ]; }
 # Sprites of every kind on the raw frame.
 sprites() {
     local n=$1
-    p "$n" draw text --at -1,0 --bg blue --fg white ' 12:34 ' >/dev/null
-    p "$n" draw text --at 30,3 --fg red 'STATIC' 'SPRITE' >/dev/null
-    p "$n" draw text --at 20,6 --blend behind --fg green 'behindbehindbehindbehind' >/dev/null
+    p "$n" draw text --layer front --at -1,0 --bg blue --fg white ' 12:34 ' >/dev/null
+    p "$n" draw text --layer front --at 30,3 --fg red 'STATIC' 'SPRITE' >/dev/null
+    # Behind the app's text: the default. With a background (a sandwich),
+    # farther back, and wide glyphs that need two free cells.
+    p "$n" draw text --at 20,6 --fg green 'behindbehindbehindbehind' >/dev/null
+    p "$n" draw text --at 0,9 --fg cyan --bg 17 --opaque '~~~~~~~~ ~~~~~~~~ ~~~~~~~~ ~~~~~~~~' >/dev/null
+    p "$n" draw text --layer -5 --at 4,7 --bg 22 --opaque '          ' '          ' '          ' >/dev/null
+    p "$n" draw text --at 12,4 --fg magenta '背景背景背景背景背景' >/dev/null
     p "$n" draw text --at 10,8 --blend tint --bg 52 'xxxxxxxxxxxxxxxx' >/dev/null
-    p "$n" draw text --auto bottom-right --bg magenta ' auto ' >/dev/null
-    p "$n" draw text --at 41,5 '界面' --fg yellow >/dev/null
+    p "$n" draw text --layer front --auto bottom-right --bg magenta ' auto ' >/dev/null
+    p "$n" draw text --layer front --at 41,5 '界面' --fg yellow >/dev/null
     p "$n" call draw.put '{"anchor":{"at":[50,2],"space":"view"},"persist":true,
+        "layer":"front",
         "frames":[{"rows":["(o )"],"ms":60},{"rows":["( o)"],"ms":60}],"loop":true}' >/dev/null
 }
 

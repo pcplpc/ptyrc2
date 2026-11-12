@@ -36,7 +36,7 @@ def test_anchors(shell: Pilot) -> None:
 
     at = shell.draw(["AT"], at=(40, 5))
     edge = shell.draw(["EDGE"], at=(-1, -1))
-    near = shell.draw(["<-"], near="flower")
+    near = shell.draw(["<-"], near="flower", layer="front")
     over = shell.draw(["^^"], near="flower", side="below")
     auto = shell.draw(["AUTO", "AUTO"], auto="top-right")
     follow = shell.draw(["C"], cursor=(2, 0))
@@ -71,15 +71,18 @@ def test_content_and_blend(shell: Pilot) -> None:
     row = shell.wait_for(r"^XXXXXXXX", regex=True).y
 
     # Spaces are transparent, unless opaque.
-    holes = shell.draw(["a a"], at=(0, row))
+    holes = shell.draw(["a a"], at=(0, row), layer="front")
     until(lambda: shown(shell)[row].startswith("aXaXXXXX"))
     holes.set(["b b"], opaque=True)
     until(lambda: shown(shell)[row].startswith("b bXXXXX"))
     holes.remove()
 
-    # Behind: only where the app left the cell blank.
-    behind = shell.draw(["......"], at=(6, row), blend="behind")
+    # The default layer is behind the app: seen where it left no ink.
+    behind = shell.draw(["......"], at=(6, row))
     until(lambda: shown(shell)[row].startswith("XXXXXXXX...."))
+    assert behind.info()["layer"] == -1
+    behind.update(layer="front")
+    until(lambda: shown(shell)[row].startswith("XXXXXX......"))
     behind.remove()
 
     # Tint: the app's glyphs, the sprite's colours.
@@ -98,6 +101,36 @@ def test_content_and_blend(shell: Pilot) -> None:
     assert sprite.info()["kind"] == "content"
     sprite.remove()
     sprite.remove()  # already gone: fine
+
+
+def test_layers(shell: Pilot) -> None:
+    assert sprite_spec(["a"], layer="front", z=2)["layer"] == "front"
+    shell.send("echo the app text\n")
+    row = shell.wait_for(r"^the app text", regex=True).y
+
+    # A sandwich: background, a drawing in front of it, the app's text,
+    # a head-up display in front of all.
+    field = shell.draw(["." * 20], at=(0, row), fg="blue", bg=17, layer=-2)
+    fish = shell.draw(["<><"], at=(12, row), fg="yellow")
+    hud = shell.draw(["[hud]"], at=(15, row), layer="front", opaque=True)
+    until(lambda: shown(shell)[row].startswith("the.app.text<><[hud]"))
+    assert [s["layer"] for s in shell.sprites()] == [-2, -1, 1]
+    # It swims behind the words and shows between them.
+    fish.move(6, row)
+    until(lambda: shown(shell)[row].startswith("the.app>text...[hud]"))
+
+    # The app's glyphs keep their colours and stand on the field's.
+    assert shell.dump()["app"][row].startswith("the app text")
+    runs = shell.cells()[row]
+    assert runs[0]["t"].startswith("the") and "bg" not in runs[0]
+    try:
+        shell.draw(["x"], layer=0)
+        raise AssertionError("layer 0 is the app's")
+    except PtyrcError as exc:
+        assert exc.code == "bad-params"
+    for sprite in (field, fish, hud):
+        sprite.remove()
+    assert until(lambda: shown(shell) == shell.text())
 
 
 def test_animation_and_ttl(shell: Pilot) -> None:
@@ -140,6 +173,10 @@ def test_effects_and_extensions(shell: Pilot) -> None:
     )
     assert big.info()["size"] == [7, 3]
     until(lambda: "▀" in "".join(shown(shell)[21:]))
+    # In place: same sprite, new drawing.
+    big.ext("bigtext", "text", {"text": "OKAY"})
+    assert big.info()["size"] == [15, 3]
+    assert len(shell.sprites()) == 2
     try:
         shell.ext("shapes", "spiral")
         raise AssertionError("an unknown function is refused")
