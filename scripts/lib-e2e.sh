@@ -11,6 +11,9 @@
 #   e2e_p VERB ARGS...               any client verb on the session
 #   e2e_stop                         end the current session
 #
+#   E2E_RUN_ARGS                     words given to `ptyrc run` by e2e_start
+#                                    (`E2E_RUN_ARGS=--no-presets`)
+#
 # Every session started is killed on exit; nothing else is touched.
 
 E2E_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -25,7 +28,8 @@ e2e_start() {
     E2E_HOST="ptyrc-$tag-$$"
     E2E_NAME="$tag-$$"
     local cmd
-    printf -v cmd '%q ' "$PTYRC" run --name "$E2E_NAME" -- "$@"
+    # shellcheck disable=SC2086
+    printf -v cmd '%q ' "$PTYRC" run --name "$E2E_NAME" ${E2E_RUN_ARGS:-} -- "$@"
     tmux new-session -d -s "$E2E_HOST" -x "${size%x*}" -y "${size#*x}" "$cmd" || return 1
     E2E_HOSTS+=("$E2E_HOST")
     local i
