@@ -458,6 +458,89 @@ fn batch_and_errors() {
 }
 
 #[test]
+fn draw_layers_from_the_cli() {
+    let sb = Sandbox::new("layers");
+    let mut app = sb.headless("l", &["cat"]);
+    let run = |args: &[&str]| {
+        let out = sb.ptyrc().args(["-s", "l"]).args(args).output().unwrap();
+        (
+            out.status.success(),
+            String::from_utf8_lossy(&out.stdout).trim().to_string(),
+            String::from_utf8_lossy(&out.stderr).to_string(),
+        )
+    };
+    assert!(run(&["send", "the app text"]).0);
+    assert!(run(&["wait", "the app text"]).0);
+    // A background, a drawing in front of it, the app, a display in
+    // front of all.
+    let at = ["--at", "0,0"];
+    assert!(
+        run(&[
+            &["draw", "text", "--layer", "-2", "--fg", "blue"],
+            &at[..],
+            &["...................."]
+        ]
+        .concat())
+        .0
+    );
+    assert!(run(&["draw", "text", "--at", "6,0", "<><"]).0);
+    assert!(run(&["draw", "text", "--layer", "front", "--at", "15,0", "[hud]"]).0);
+    let row = || {
+        let (_, out, _) = run(&["--json", "call", "debug.dump"]);
+        let dump: Value = serde_json::from_str(&out).unwrap();
+        dump["host"][0].as_str().unwrap().to_string()
+    };
+    wait_for(|| row() == "the.app>text...[hud]", "the four layers");
+    let (_, list, _) = run(&["draw", "ls"]);
+    assert!(
+        list.contains("layer -2") && list.contains("layer 1"),
+        "{list}"
+    );
+
+    // A drawing of an extension, redrawn in place.
+    let (ok, id, err) = run(&[
+        "draw",
+        "ext",
+        "--layer",
+        "front",
+        "--at",
+        "0,3",
+        "bigtext",
+        "text",
+        r#"{"text":"A"}"#,
+    ]);
+    assert!(ok, "{err}");
+    let (ok, same, err) = run(&[
+        "draw",
+        "ext",
+        "--id",
+        &id,
+        "bigtext",
+        "text",
+        r#"{"text":"AB"}"#,
+    ]);
+    assert!(ok && same == id, "{err}");
+    let (_, out, _) = run(&["--json", "draw", "ls"]);
+    let sprites: Value = serde_json::from_str(&out).unwrap();
+    let sprites = sprites["sprites"].as_array().unwrap();
+    assert_eq!(sprites.len(), 4);
+    let big = sprites
+        .iter()
+        .find(|s| s["id"].as_u64() == id.parse().ok())
+        .unwrap();
+    assert_eq!((&big["layer"], &big["size"][0]), (&json!(1), &json!(7)));
+
+    // Layer 0 is the app's.
+    let (ok, _, err) = run(&["draw", "text", "--layer", "0", "x"]);
+    assert!(!ok && err.contains("layer 0 is the app"), "{err}");
+    let (ok, _, err) = run(&["draw", "text", "--layer", "middle", "x"]);
+    assert!(!ok && err.contains("back, front"), "{err}");
+
+    assert!(run(&["keys", "enter", "ctrl+d"]).0);
+    wait_exit(&mut app);
+}
+
+#[test]
 fn sigterm_cleans_up() {
     let sb = Sandbox::new("term");
     let mut driver = sb.headless("t", &["cat"]);
