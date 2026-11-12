@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import itertools
+import os
 import random
 import re
+import shutil
+import subprocess
 import threading
 import time
 from collections import deque
@@ -1044,7 +1047,7 @@ class Wire:
         self.todo = deque(events)
         self.calls: list[tuple[str, dict[str, object]]] = []
 
-    def subscribe(self, *topics: str) -> None:
+    def subscribe(self, *topics: str, snapshot: bool = False) -> None:
         self.calls.append(("subscribe", {"topics": list(topics)}))
 
     def event(self, timeout: float | None = None) -> tuple[str, object] | None:
@@ -1064,6 +1067,11 @@ def test_sand_heir() -> None:
     assert sand.heir(frame, [settling, right]) is None
     other = Frame(None, pane_info(7, [0, 0, 30, 24]) | {"key": "tmux:1"})
     assert sand.heir(frame, [other]) is None
+    # The lower of two panes, the screen cut from 30 rows to 20.
+    low = Frame(None, pane_info(4, [0, 15, 100, 14], "inactive"))
+    new = [Frame(None, pane_info(i, [0, y, 100, 9])) for i, y in ((7, 0), (8, 10))]
+    assert sand.heir(low, new) is None
+    assert sand.heir(low, new, (1.0, 20 / 30)) is new[1]
 
 
 def test_sand_follows_its_frame() -> None:
@@ -1086,6 +1094,55 @@ def test_sand_follows_its_frame() -> None:
         ("subscribe", {"topics": ["frames", "exit"]}),
         ("draw.update", {"id": 5, "frame": 7}),
     ]
+
+
+@pytest.mark.skipif(shutil.which("tmux") is None, reason="needs tmux")
+def test_sand_follows_two_panes_resized() -> None:
+    """Why `heir` exists. Two stacked tmux panes with little text, the
+    host resized from 30 rows to 20: the driver cannot tell which pane
+    is which and allocates new frames. A sprite left alone on an old
+    frame is out of sight for good; the sand follows."""
+    sock = f"ptyrc-apps-{os.getpid()}"
+    tmux = ["tmux", "-L", sock, "-f", "/dev/null"]
+    shell = ["env", "PS1=$ ", "sh"]
+
+    def panes() -> list[Frame]:
+        return [f for f in pilot.frames() if f.kind == "pane" and f.usable]
+
+    with Pilot.spawn([*tmux, "new-session", *shell], size=(100, 30)) as pilot:
+        try:
+            pilot.wait_for("$ ")
+            subprocess.run([*tmux, "split-window", "-v", *shell], check=True)
+            assert until(lambda: len(panes()) == 2, 6)
+            top, bottom = sorted(panes(), key=lambda f: f.rect[1])
+            alone = pilot.effect("sparkle", frame=top.id, layer="back")
+            args = ["-s", pilot.session, "-f", str(bottom.id), "--now"]
+            status: list[int] = []
+            thread = threading.Thread(
+                target=lambda: status.append(sand.main(args, seconds=9))
+            )
+            thread.start()
+
+            def poured() -> dict[str, object] | None:
+                mine = [s for s in pilot.sprites() if s["id"] != alone.id]
+                return mine[0] if mine and mine[0]["visible"] else None
+
+            assert until(lambda: poured() is not None, 3)
+            assert poured()["frame"] == bottom.id
+            pilot.resize(100, 20)
+            assert until(lambda: len(panes()) == 2, 6)
+            new = {f.id: f for f in panes()}
+            assert not {top.id, bottom.id} & set(new), "the frames were kept"
+            # The sand is on the pane now where its own was.
+            assert until(lambda: poured() is not None, 3)
+            heir = new[poured()["frame"]]
+            assert heir.rect == (0, 10, 100, 9) and poured()["size"] == [100, 9]
+            # Nothing brings the other back.
+            assert alone.info()["visible"] is False
+            thread.join()
+            assert status == [0]
+        finally:
+            subprocess.run([*tmux, "kill-server"], check=False)
 
 
 def test_options_between_the_words() -> None:

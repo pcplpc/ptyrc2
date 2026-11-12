@@ -116,14 +116,17 @@ def hold(pilot: Pilot, seconds: float | None = None) -> None:
         return
 
 
-def heir(frame: Frame, panes: Sequence[Frame]) -> Frame | None:
-    """Of `panes`, the one that took the place of `frame`, now
-    inactive: usable, same key (another tmux window is not a place to
-    follow to), over at least half of the smaller of the two; the one
-    that overlaps most."""
-    x, y, w, h = frame.rect
+def heir(
+    frame: Frame, panes: Sequence[Frame], scale: tuple[float, float] = (1.0, 1.0)
+) -> Frame | None:
+    """Of `panes`, the one that took the place of `frame`, now gone:
+    usable, same key (another tmux window is not a place to follow
+    to), over at least half of the smaller of the two; the one that
+    overlaps most. `scale`: how much the screen grew since `frame` was
+    seen, across and down; its rectangle is scaled as much first."""
+    x, y, w, h = (v * k for v, k in zip(frame.rect, scale * 2, strict=True))
 
-    def shared(pane: Frame) -> int:
+    def shared(pane: Frame) -> float:
         px, py, pw, ph = pane.rect
         across = min(x + w, px + pw) - max(x, px)
         down = min(y + h, py + ph) - max(y, py)
@@ -151,7 +154,9 @@ def follow(
     """Stay connected, until the session ends or for `seconds`; move
     `sprite` to the pane that takes the place of `frame`. Driven by the
     topic `frames`: every change of layout comes with the frames as
-    they are, so nothing is asked.
+    they are, so nothing is asked. The size of the screen is noted
+    while the frame is settled: after a resize the place is looked for
+    in proportion.
 
     `beats`: the app's own work between two events. Each `next()` gives
     the seconds to wait before the one after: a generator does its work
@@ -159,7 +164,8 @@ def follow(
     now = time.monotonic()
     end = None if seconds is None else now + seconds
     beat = None if beats is None else now + next(beats)
-    pilot.subscribe("frames", "exit")
+    screen: tuple[int, int] | None = None  # when `frame` was last settled
+    pilot.subscribe("frames", "exit", snapshot=True)
     while True:
         now = time.monotonic()
         if end is not None and now >= end:
@@ -175,12 +181,19 @@ def follow(
         if event[0] != "frames" or frame.kind == "raw":
             continue
         frames = [Frame(pilot, info) for info in event[1]["frames"]]
+        raw = next((f for f in frames if f.kind == "raw"), None)
         mine = next((f for f in frames if f.id == frame.id), None)
         if mine is not None and mine.state != "inactive":
-            continue  # in sight, or settling: the driver keeps the sprite
-        if (new := heir(frame, frames)) is not None:
+            # In sight, or settling: the driver keeps the sprite.
+            if raw is not None and raw.state == mine.state == "stable":
+                frame, screen = mine, raw.size
+            continue
+        scale = (1.0, 1.0)
+        if raw is not None and screen is not None:
+            scale = (raw.size[0] / screen[0], raw.size[1] / screen[1])
+        if (new := heir(frame, frames, scale)) is not None:
             sprite.update(frame=new.id)
-            frame = new
+            frame, screen = new, raw.size if raw is not None else None
 
 
 def on_screen(frame: Frame) -> bool:
