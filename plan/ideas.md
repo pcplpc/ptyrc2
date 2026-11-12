@@ -43,3 +43,15 @@ Backlog. Not a commitment; moved to `design.md` when taken.
 - A finite animation added while the raw frame is not yet usable (250 ms
   after the first screen) plays unseen: hold its clock until shown.
 - Islands of an extended frame are never collected.
+
+## From the owner, after the first session
+
+- CLI errors must help: `ptyrc run` on a command that is missing or not
+  executable should say which, why, and what to try; same care for no
+  session, several sessions, a bad frame, a bad key name.
+- TUIs clean an area by drawing spaces, a black background or similar,
+  and redraw unchanged text identically. These are not updates. The
+  frames should tell them apart: compare what a cell shows before and
+  after rather than counting writes, and separate what is background
+  from what is foreground in a TUI. The heatmap should build on that:
+  `activity` from visible change only, `occupancy` from foreground only.
