@@ -657,9 +657,15 @@ impl Frames {
             .map_err(|e| e.to_string())?;
         let mut out = Vec::new();
         let mut scan = |line: &Line, x0: i64, y: i64, info: &SurfaceInfo| {
-            // Trailing blanks are not text: `$` is the end of what is
-            // written.
-            for m in re.find_iter(line.text.trim_end_matches(' ')) {
+            // For a regular expression trailing blanks are not text: `$`
+            // is the end of what is written. A literal is searched in the
+            // row as it is, so `"$ "` finds a prompt.
+            let hay = if query.regex {
+                line.text.trim_end_matches(' ')
+            } else {
+                &line.text[..]
+            };
+            for m in re.find_iter(hay) {
                 if m.is_empty() || out.len() >= 10_000 {
                     continue;
                 }
