@@ -537,7 +537,11 @@ mod tune_tests {
         let mut fx = sparkle(&json!({"count": 4, "life_ms": 700})).unwrap();
         let few = drawn(&mut *fx, 100).unwrap();
         assert!((1..=4).contains(&few));
-        for bad in [json!({"seed": 2}), json!({"colors": []}), json!({"count": -1})] {
+        for bad in [
+            json!({"seed": 2}),
+            json!({"colors": []}),
+            json!({"count": -1}),
+        ] {
             assert!(fx.tune(&bad).is_err(), "{bad}");
         }
         assert_eq!(drawn(&mut *fx, 100), Some(few));
