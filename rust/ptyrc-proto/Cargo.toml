@@ -1,0 +1,10 @@
+[package]
+name = "ptyrc-proto"
+description = "ptyrc: wire protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

@@ -1,2 +1,12 @@
 temp/
 git-identity.source
+target/
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+*.swp
+*~

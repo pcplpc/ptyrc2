@@ -1,0 +1,16 @@
+[package]
+name = "ptyrc-cli"
+description = "ptyrc: the pty remote controller"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ptyrc"
+path = "src/main.rs"
+
+[dependencies]
+ptyrc-server.workspace = true
+ptyrc-proto.workspace = true
+ptyrc-core.workspace = true
+serde_json.workspace = true

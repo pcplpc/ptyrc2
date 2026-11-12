@@ -1,0 +1,11 @@
+[package]
+name = "ptyrc-vt"
+description = "ptyrc: terminal model and repair painter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+smol_str.workspace = true
+unicode-width = "0.2"
+vte = "0.15"

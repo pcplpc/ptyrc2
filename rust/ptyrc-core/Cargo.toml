@@ -1,0 +1,12 @@
+[package]
+name = "ptyrc-core"
+description = "ptyrc: frames, heatmap, placement, scene"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ptyrc-vt.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
