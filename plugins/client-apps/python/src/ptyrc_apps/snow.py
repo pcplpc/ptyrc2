@@ -9,8 +9,8 @@ What it shows:
 - A native effect from a draw extension (`plugins/draw-ext/snow`): one
   request starts it, the driver plays it; the app only stays connected.
 - An effect that sees the cells under it: snow lies over a line of
-  text, a cell away from the words of its own row, and on the floor;
-  flakes pass behind the text.
+  text, a cell away from the words of its own row, and on the floor,
+  in smooth piles; flakes pass behind the text.
 - An effect that sees the heat: the snow melts where the screen
   changed lately, and around the cursor. Type, and it goes.
 - Frame rows: the snow lies on the rows of the frame, so it scrolls
@@ -69,14 +69,14 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
     out.add_argument(
         "--rate",
         type=float,
-        default=14.0,
-        help="flakes per second over 80 columns [default: 14]",
+        default=7.0,
+        help="flakes per second over 80 columns [default: 7]",
     )
     out.add_argument(
         "--wind",
         type=float,
-        default=0.6,
-        help="drift to the right, columns per second; it gusts; 0: none [default: 0.6]",
+        default=-1.0,
+        help="drift, columns per second, < 0 to the left; it gusts; 0: none [default: -1]",
     )
     return _cli.run(
         lambda pilot, args: app(pilot, args, seconds), _cli.parse(out, argv)
