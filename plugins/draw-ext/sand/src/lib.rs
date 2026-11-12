@@ -15,10 +15,17 @@
 //! - `duration_ms`: life of the effect. Absent: until removed.
 //! - `seed`.
 //!
-//! Walls: every cell of the frame's view that is not a space, read at
+//! Walls: every cell under the canvas that shows foreground, read at
 //! each render. A cell that gets text loses its grains; one that loses
 //! its text lets them fall. A resize keeps the grains, top-left fixed;
 //! those outside are lost.
+//!
+//! Scroll: grains are fixed on the rows of the frame. When the app
+//! scrolls, the pile moves with the text; rows that leave the canvas are
+//! put away (`ATTIC` rows at most, the farthest forgotten first) and
+//! come back with their text. A floor that left lets the pile fall.
+//!
+//! Heat: a column with cells that changed lately is a worse spout.
 //!
 //! Spout: the topmost free cell of a column. Chosen near the middle,
 //! over text, away from the ends of the run it lands on; kept while it
@@ -35,12 +42,14 @@
 //! A grain that moves wakes the three above it: a toppling grain starts
 //! an avalanche.
 
+use ptyrc_core::frames::HeatClass;
 use ptyrc_core::plugin::{DrawExt, FnDoc};
 use ptyrc_core::scene::{
-    Canvas, ColorSpec, Effect, EffectFactory, Rng, SpriteSpec, StyleSpec, Under,
+    Canvas, ColorSpec, Effect, EffectFactory, Looks, Rng, SpriteSpec, StyleSpec, Under,
 };
 use ptyrc_vt::Color;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 /// One simulation step: a falling grain moves one dot.
@@ -62,9 +71,11 @@ const CLIFF: usize = 3;
 const FRICTION: u64 = 96;
 /// Steps a spout stays choked before it moves.
 const CHOKE: u32 = 60;
+/// Rows of cells kept out of the canvas, at most.
+const ATTIC: usize = 1024;
 
-#[derive(Deserialize)]
-#[serde(default)]
+#[derive(Deserialize, Clone)]
+#[serde(default, deny_unknown_fields)]
 struct Params {
     walls: Vec<String>,
     rate: f64,
@@ -157,9 +168,18 @@ pub struct Sand {
     h: usize,
     /// `w * DW` by `h * DH`.
     dots: Vec<Dot>,
-    /// The app's rows, and whether they changed since the walls were set.
-    rows: Vec<String>,
+    /// Foreground of the app, `seen_w` cells a row, and whether it
+    /// changed since the walls were set.
+    seen: Vec<bool>,
+    seen_w: usize,
     stale: bool,
+    /// Per column: cells that changed lately.
+    hot: Vec<u16>,
+    /// Frame position of the canvas cell `(0, 0)`.
+    origin: Option<(i64, i64)>,
+    /// Rows of cells out of the canvas, by frame row: the frame column
+    /// of their first cell, their dots.
+    attic: BTreeMap<i64, (i64, Vec<Dot>)>,
     cursor: Option<(u16, u16)>,
     spout: Option<Spout>,
     choked: u32,
@@ -171,9 +191,32 @@ pub struct Sand {
 impl Sand {
     fn new(mut params: Params) -> Sand {
         let (shades, per) = shades(&params.colors);
+        let walls = std::mem::take(&mut params.walls);
+        let mut sand = Sand::bare(params, shades, per);
+        sand.seen_w = walls
+            .iter()
+            .map(|r| Canvas::text_width(r) as usize)
+            .max()
+            .unwrap_or(0);
+        for row in &walls {
+            let at = sand.seen.len();
+            for ch in row.chars() {
+                let width = ptyrc_vt::char_width(ch).max(1) as usize;
+                sand.seen.extend(std::iter::repeat_n(ch != ' ', width));
+            }
+            sand.seen.resize(at + sand.seen_w, false);
+        }
+        sand
+    }
+
+    fn bare(params: Params, shades: Vec<Color>, per: usize) -> Sand {
         Sand {
             rng: Rng::new(params.seed),
-            rows: std::mem::take(&mut params.walls),
+            seen_w: 0,
+            seen: Vec::new(),
+            hot: Vec::new(),
+            origin: None,
+            attic: BTreeMap::new(),
             params,
             shades,
             per,
@@ -229,18 +272,58 @@ impl Sand {
         self.stale = true;
     }
 
-    /// Set the walls from `rows`: new text eats the grains under it.
+    /// The canvas shows other rows of the frame: the pile goes with
+    /// them. Rows that leave are put away, rows that come are taken out.
+    fn scroll(&mut self, from: (i64, i64), to: (i64, i64)) {
+        let (w, h) = (self.w * DW, self.h);
+        for cy in 0..h {
+            let strip: Vec<Dot> = self.dots[cy * DH * w..(cy + 1) * DH * w]
+                .iter()
+                .map(|d| if *d == Dot::Wall { Dot::Free } else { *d })
+                .collect();
+            if strip.iter().any(|d| *d != Dot::Free) {
+                self.attic.insert(from.1 + cy as i64, (from.0, strip));
+            }
+        }
+        self.dots.fill(Dot::Free);
+        for cy in 0..h {
+            let Some((x0, strip)) = self.attic.remove(&(to.1 + cy as i64)) else {
+                continue;
+            };
+            let old_w = strip.len() / DH;
+            let shift = (x0 - to.0) * DW as i64;
+            for (i, dot) in strip.into_iter().enumerate() {
+                let x = (i % old_w) as i64 + shift;
+                if dot != Dot::Free && x >= 0 && x < w as i64 {
+                    self.dots[(cy * DH + i / old_w) * w + x as usize] = dot;
+                }
+            }
+        }
+        while self.attic.len() > ATTIC {
+            let (first, last) = (
+                *self.attic.keys().next().unwrap(),
+                *self.attic.keys().next_back().unwrap(),
+            );
+            let far = if to.1 - first > last - to.1 {
+                first
+            } else {
+                last
+            };
+            self.attic.remove(&far);
+        }
+        self.stale = true;
+    }
+
+    /// Set the walls from what was seen: new text eats the grains under
+    /// it.
     fn build(&mut self) {
         let (w, h) = (self.w, self.h);
         let mut walls = vec![false; w * h];
-        for (y, row) in self.rows.iter().take(h).enumerate() {
-            let mut x = 0usize;
-            for ch in row.chars() {
-                let width = ptyrc_vt::char_width(ch).max(1) as usize;
-                for k in x..(x + width).min(w) {
-                    walls[y * w + k] = ch != ' ';
+        if self.seen_w > 0 {
+            for (y, row) in self.seen.chunks(self.seen_w).take(h).enumerate() {
+                for (x, ink) in row.iter().take(w).enumerate() {
+                    walls[y * w + x] = *ink;
                 }
-                x += width;
             }
         }
         for (i, wall) in walls.into_iter().enumerate() {
@@ -279,6 +362,7 @@ impl Sand {
             .filter(|s| self.open(s))
             .min_by_key(|s| {
                 let mut cost = (2 * s.x as i64 + 1 - w).abs() + 8 * s.y as i64;
+                cost += 6 * self.hot.get(s.x).copied().unwrap_or(0) as i64;
                 match (s.y..self.h).find(|y| self.wall(s.x, *y)) {
                     None => cost += 2 * w,
                     Some(ground) => {
@@ -526,21 +610,91 @@ impl Effect for Sand {
         Duration::from_millis(FRAME_MS)
     }
 
-    fn looks(&self) -> bool {
-        true
+    fn looks(&self) -> Looks {
+        Looks::Heat
     }
 
     fn look(&mut self, under: &Under) {
-        if self.rows != under.rows {
-            self.rows = under.rows.to_vec();
+        let seen = under.inked();
+        let seen_w = under.size.0 as usize;
+        if (seen_w, &seen) != (self.seen_w, &self.seen) {
+            (self.seen_w, self.seen) = (seen_w, seen);
             self.stale = true;
         }
         self.cursor = under.cursor;
+        self.hot = (0..under.size.0)
+            .map(|x| {
+                (0..under.size.1)
+                    .filter(|y| under.heat(x, *y).is_some_and(|w| w.class == HeatClass::Hot))
+                    .count() as u16
+            })
+            .collect();
+        if let Some(from) = self.origin
+            && from != under.origin
+            && self.w > 0
+        {
+            self.scroll(from, under.origin);
+        }
+        self.origin = Some(under.origin);
+    }
+
+    fn tune(&mut self, params: &serde_json::Value) -> Result<(), String> {
+        let mut merged =
+            serde_json::to_value(Shown::of(&self.params)).map_err(|e| e.to_string())?;
+        let (Some(old), Some(new)) = (merged.as_object_mut(), params.as_object()) else {
+            return Err("sand: params: an object is needed".into());
+        };
+        old.extend(new.clone());
+        let params = checked(&merged)?;
+        if params.colors != self.params.colors {
+            (self.shades, self.per) = shades(&params.colors);
+            let n = self.shades.len();
+            for dot in &mut self.dots {
+                if let Dot::Grain(shade, _) = dot {
+                    *shade = (*shade as usize % n) as u8;
+                }
+            }
+            for (_, strip) in self.attic.values_mut() {
+                for dot in strip {
+                    if let Dot::Grain(shade, _) = dot {
+                        *shade = (*shade as usize % n) as u8;
+                    }
+                }
+            }
+        }
+        self.params = Params {
+            walls: Vec::new(),
+            seed: self.params.seed,
+            ..params
+        };
+        self.aim();
+        Ok(())
     }
 }
 
-/// Factory of the `sand` effect.
-pub fn sand(params: &serde_json::Value) -> Result<Box<dyn Effect>, String> {
+/// The parameters a running sand may be given again.
+#[derive(serde::Serialize)]
+struct Shown {
+    rate: f64,
+    cursor: bool,
+    colors: Vec<ColorSpec>,
+    color_ms: u64,
+    duration_ms: Option<u64>,
+}
+
+impl Shown {
+    fn of(p: &Params) -> Shown {
+        Shown {
+            rate: p.rate,
+            cursor: p.cursor,
+            colors: p.colors.clone(),
+            color_ms: p.color_ms,
+            duration_ms: p.duration_ms,
+        }
+    }
+}
+
+fn checked(params: &serde_json::Value) -> Result<Params, String> {
     let params: Params = if params.is_null() {
         Params::default()
     } else {
@@ -555,7 +709,12 @@ pub fn sand(params: &serde_json::Value) -> Result<Box<dyn Effect>, String> {
     if params.color_ms == 0 {
         return Err("sand: color_ms: at least 1".into());
     }
-    Ok(Box::new(Sand::new(params)))
+    Ok(params)
+}
+
+/// Factory of the `sand` effect.
+pub fn sand(params: &serde_json::Value) -> Result<Box<dyn Effect>, String> {
+    Ok(Box::new(Sand::new(checked(params)?)))
 }
 
 /// The extension: one effect, no draw function.

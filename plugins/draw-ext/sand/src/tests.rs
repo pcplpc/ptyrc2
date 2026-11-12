@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use super::*;
+use ptyrc_vt::Grid;
 use serde_json::json;
 
 fn make(params: serde_json::Value) -> Sand {
@@ -42,11 +43,11 @@ fn rows(sand: &Sand) -> Vec<String> {
 }
 
 fn look(sand: &mut Sand, rows: &[&str], cursor: Option<(u16, u16)>) {
-    let rows: Vec<String> = rows.iter().map(|r| r.to_string()).collect();
-    sand.look(&Under {
-        rows: &rows,
-        cursor,
-    });
+    let grid = Grid::from_lines(64, if rows.is_empty() { &[""] } else { rows });
+    let mut under = Under::of(&grid);
+    under.cursor = cursor;
+    under.origin = sand.origin.unwrap_or((0, 0));
+    sand.look(&under);
 }
 
 /// Grains in the cells `[x0, x1)` of row `y`.
@@ -326,4 +327,114 @@ fn ends_and_rejects() {
     assert!(super::sand(&json!({"color_ms": 0})).is_err());
     assert!(super::sand(&json!({"cursor": true})).is_ok());
     assert!(super::sand(&json!(null)).is_ok());
+}
+
+#[test]
+fn a_wide_glyph_is_two_walls_and_shifts_nothing() {
+    let mut vt = ptyrc_vt::Vt::new(20, 4);
+    vt.feed("\r\n\r\na\t世b".as_bytes());
+    let mut sand = make(json!({"rate": 0}));
+    sand.look(&Under::of(vt.grid()));
+    run(&mut sand, 20, 4, 0, 0);
+    assert_eq!(rows(&sand)[2], "#       ###         ");
+}
+
+/// `look` at `rows`, the canvas at the frame row `oy`.
+fn look_at(sand: &mut Sand, rows: &[&str], oy: i64) {
+    let grid = Grid::from_lines(64, rows);
+    let mut under = Under::of(&grid);
+    under.origin = (0, oy);
+    sand.look(&under);
+}
+
+#[test]
+fn the_pile_scrolls_with_the_text() {
+    let text = ["", "", "", "   ##########", "", ""];
+    let mut sand = make(json!({"rate": 100}));
+    look_at(&mut sand, &text, 0);
+    run(&mut sand, 16, 6, 0, 2880);
+    sand.params.rate = 0.0;
+    run(&mut sand, 16, 6, 2880, 4800);
+    let before = rows(&sand);
+    let all = sand.grains();
+    assert!(count(&sand, 2, 0, 16) > 20, "{before:#?}");
+
+    // The app scrolls two rows: the text and its pile are two rows up.
+    look_at(&mut sand, &["", "   ##########", "", "", "", ""], 2);
+    run(&mut sand, 16, 6, 4800, 4800);
+    let after = rows(&sand);
+    assert_eq!(after[0], before[2]);
+    assert_eq!(after[1], before[3]);
+    // What left the canvas is kept, and comes back.
+    assert!(sand.grains() < all);
+    look_at(&mut sand, &text, 0);
+    run(&mut sand, 16, 6, 4800, 4800);
+    assert_eq!(sand.grains(), all);
+    assert_eq!(rows(&sand)[..4], before[..4]);
+
+    // A jump far away and back: the same.
+    look_at(&mut sand, &[""], 100_000);
+    run(&mut sand, 16, 6, 4800, 4800);
+    assert_eq!(sand.grains(), 0);
+    look_at(&mut sand, &text, 0);
+    run(&mut sand, 16, 6, 4800, 4800);
+    assert_eq!(rows(&sand)[..4], before[..4]);
+}
+
+#[test]
+fn sand_out_of_sight_is_bounded() {
+    let mut sand = make(json!({"rate": 0}));
+    look_at(&mut sand, &[""], 0);
+    run(&mut sand, 4, 2, 0, 0);
+    for k in 0..(ATTIC as i64 + 50) {
+        sand.set(0, 0, Dot::Grain(0, false));
+        sand.set(0, 4, Dot::Grain(0, false));
+        look_at(&mut sand, &["", "####"], 2 * k + 2);
+    }
+    assert_eq!(sand.attic.len(), ATTIC);
+    // The nearest rows are the ones kept.
+    assert!(sand.attic.contains_key(&(2 * (ATTIC as i64 + 49))));
+    assert!(!sand.attic.contains_key(&0));
+}
+
+#[test]
+fn a_running_sand_takes_new_parameters() {
+    let mut sand = make(json!({"rate": 100}));
+    run(&mut sand, 20, 6, 0, 2000);
+    let (grains, steps) = (sand.grains(), sand.steps);
+    assert!(sand.tune(&json!({"rate": -1})).is_err());
+    assert!(sand.tune(&json!({"grains": 4})).is_err());
+    assert_eq!(sand.params.rate, 100.0);
+    sand.tune(&json!({"rate": 0, "colors": ["#102030"]}))
+        .unwrap();
+    assert_eq!((sand.grains(), sand.steps), (grains, steps));
+    run(&mut sand, 20, 6, 2000, 3000);
+    assert_eq!(sand.grains(), grains);
+    assert!(
+        sand.glyph(10, 5)
+            .is_some_and(|g| g.1 == Color::Rgb(0x10, 0x20, 0x30))
+    );
+}
+
+#[test]
+fn a_hot_column_is_a_worse_spout() {
+    let mut sand = make(json!({"rate": 100}));
+    let grid = Grid::new(21, 6);
+    let n = 21 * 6;
+    let mut heat = ptyrc_core::frames::HeatView {
+        cols: 21,
+        rows: 6,
+        safe: vec![1.0; n],
+        activity: vec![0.0; n],
+        occupancy: vec![0.0; n],
+        still: vec![60.0; n],
+        class: vec![Default::default(); n],
+    };
+    for x in 8..13 {
+        heat.class[3 * 21 + x] = HeatClass::Hot;
+    }
+    sand.look(&Under::of(&grid).with_heat(Some(&heat)));
+    run(&mut sand, 21, 6, 0, 100);
+    let x = sand.spout.unwrap().x;
+    assert!(!(8..13).contains(&x) && (5..16).contains(&x), "{x}");
 }
