@@ -203,6 +203,13 @@ struct Pane {
     /// Pane rows `[a, b)` under a smaller pane of the last segmentation
     /// (a palette, a modal): not read while they are.
     covered: Vec<(u16, u16)>,
+    /// Feeds that follow one another closely (`FEED_GAP`): when the last
+    /// came, and their sum.
+    fed: Option<(Duration, i64)>,
+    /// The pane was repainted in place around a cursor shown on this
+    /// cell, at this time, this long after the repaint before; nothing
+    /// moved since.
+    repaint_cursor: Option<((u16, u16), Duration, Option<Duration>)>,
     left: u16,
     right: u16,
     gutter_cand: (u16, u8),
@@ -1182,6 +1189,8 @@ impl Frames {
                 monitor: false,
                 declared: false,
                 covered: Vec::new(),
+                repaint_cursor: None,
+                fed: None,
                 left: 0,
                 right: 0,
                 gutter_cand: (0, 0),
@@ -1681,18 +1690,28 @@ impl Frames {
         }
 
         // Rows under an overlay keep what they showed: they do not vote
-        // for a scroll or a jump, and are not rewritten.
-        if p.ext.rows.len() == p.hashes.len() {
-            for (a, b) in &p.covered {
-                for i in *a as usize..*b as usize {
-                    p.hashes[i] = p.ext.rows[i].hash;
-                }
+        // for a scroll or a jump, and are not rewritten. Never seen
+        // before, they are blank: the overlay's text is not the pane's.
+        let known = p.ext.rows.len() == p.hashes.len();
+        let mut hidden: HashMap<usize, Line> = HashMap::new();
+        for (a, b) in &p.covered {
+            for i in *a as usize..*b as usize {
+                let (hash, line) = if known {
+                    (p.ext.rows[i].hash, p.ext.rows[i].line.clone())
+                } else {
+                    (screen::BLANK, Line::blank())
+                };
+                p.hashes[i] = hash;
+                hidden.insert(i, line);
             }
         }
 
         let screen = &self.screen;
         let rect = p.rect;
         let line = move |i: usize| {
+            if let Some(l) = hidden.get(&i) {
+                return l.clone();
+            }
             let mut l = screen.lines[rect.y as usize + i].slice(a, b);
             l.trim_end();
             l
@@ -1740,6 +1759,33 @@ impl Frames {
             None => (p.status_row.map(|r| r - top), p.status_row.is_some()),
         };
         let cur = (self.cursor.col, self.cursor.row);
+        // Whole pages fed in one burst (a key held): a pager feeds a page
+        // as the region less its prompt rows, a jump as a whole region
+        // or by a clear. Two to four pages are told from a jump by the
+        // count.
+        let page = room - p.fixed_tb.map_or(p.ext.bottom, |tb| tb.1) as i64;
+        let paged = |fed: i64| {
+            page >= 2
+                && page < room
+                && fed.abs() % page == 0
+                && (1..=4).contains(&(fed.abs() / page))
+        };
+        let pages = seed.abs() >= room && paged(seed);
+        // A feed of a screen or more that came in pieces is a jump as
+        // well: no piece tells, their sum does.
+        let mut overfed = false;
+        if seed != 0 && travel == seed.abs() {
+            let sum = match p.fed {
+                Some((t, sum)) if now <= t + ext::FEED_GAP && sum.signum() == seed.signum() => {
+                    sum + seed
+                }
+                _ => seed,
+            };
+            overfed = sum != seed && sum.abs() >= room && !paged(sum);
+            p.fed = (!overfed).then_some((now, sum));
+        } else if dirty {
+            p.fed = None;
+        }
         let obs = Obs {
             hashes: &p.hashes,
             line: &line,
@@ -1748,8 +1794,9 @@ impl Frames {
             seed_real,
             seed_tape: p.cleared.is_none_or(|t| now >= t + REPAINT)
                 && travel == seed.abs()
-                && seed.abs() < room,
+                && (seed.abs() < room || pages),
             seed_rows,
+            overfed,
             cursor_row: rect
                 .contains(cur.0, cur.1)
                 .then(|| (cur.1 - rect.y) as usize),
@@ -1771,10 +1818,9 @@ impl Frames {
         // does one or the other, or is placed by a hint.
         // Nor does it show a cursor in the pane: nothing is read or edited
         // there.
-        let in_place = !cleared
-            && travel == 0
-            && p.cleared.is_none_or(|t| now >= t + REPAINT)
-            && !(self.cursor.visible && p.rect.contains(self.cursor.col, self.cursor.row));
+        let still = !cleared && travel == 0 && p.cleared.is_none_or(|t| now >= t + REPAINT);
+        let shown = self.cursor.visible && p.rect.contains(self.cursor.col, self.cursor.row);
+        let in_place = still && !shown;
         if p.monitor && dirty && p.ext.rows.len() == p.hashes.len() {
             let (mut inked, mut changed) = (0usize, 0usize);
             for (row, hash) in p.ext.rows.iter().zip(&p.hashes) {
@@ -1837,8 +1883,32 @@ impl Frames {
         }
 
         let other_doc = out == Outcome::Other;
-        let repaint =
-            out == Outcome::Lost && !key_changed && in_place && repainted(&p.ext.rows, &line);
+        let same_shape =
+            out == Outcome::Lost && !key_changed && still && repainted(&p.ext.rows, &line);
+        // A cursor is shown: an editor paints a jump in a table this way,
+        // when a key is pressed. Three repaints at even intervals (one
+        // part in ten), the cursor on the same cell, no scroll nor jump
+        // between them, are a monitor's, however far apart.
+        let mut again = false;
+        if cleared
+            || matches!(
+                out,
+                Outcome::Scroll { .. } | Outcome::Splice { .. } | Outcome::Jump
+            )
+        {
+            p.repaint_cursor = None;
+        } else if same_shape && shown {
+            let since = match p.repaint_cursor {
+                Some((at, t, every)) if at == cur => {
+                    let d = now.saturating_sub(t);
+                    again = every.is_some_and(|e| e.abs_diff(d) * 10 <= e.max(d));
+                    Some(d)
+                }
+                _ => None,
+            };
+            p.repaint_cursor = Some((cur, now, since));
+        }
+        let repaint = same_shape && (in_place || again);
         if !matches!(out, Outcome::Lost | Outcome::Other) && !key_changed {
             p.key = new_key;
             self.panes.insert(id, p);

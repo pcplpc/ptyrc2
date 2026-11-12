@@ -251,7 +251,16 @@ origin. Each update compares the previous view content with the new one:
    pager's page down or up is such a feed (`less`, `man`, `more`: one
    line less than the screen). A pager paints a jump by a clear, by
    cursor addressing, or by feeding a whole screen or more: not a feed.
-   Under a feed, the last rows that did not travel are bottom chrome.
+   Two to four pages fed in one burst (a key held) are a feed: a page
+   is the region less its bottom chrome, so their sum is not a jump's;
+   the rows that went through unseen stay unknown. Feeds that follow one
+   another within 10 ms and sum to the region or more, not to whole
+   pages, are one jump that came in pieces: the rows are looked up, else
+   an island.
+   Under a feed, the last rows that did not travel are bottom chrome:
+   those of the screen before when fed forward, of the screen after
+   when fed backward. A blank last row does not vote (a prompt erased
+   in a burst of its own, a page cut before its prompt).
 2. **Horizontal scroll**: same on columns when rows changed with `dy = 0`.
 3. **Splice**: the top aligns at one shift and the bottom at another. `k`
    lines were inserted or deleted at the seam; the buffer is spliced and
@@ -290,7 +299,9 @@ island only.
 
 The origin follows at once (sprites move in the burst that scrolls).
 Content enters the remembered buffer once it has been unchanged for
-`commit_ms` (150), so a half-drawn screen is not remembered.
+`commit_ms` (150), so a half-drawn screen is not remembered. A row that
+leaves the view is remembered on the way out, unless it came less than
+10 ms before: it was on its way through (the marker of a pager's jump).
 
 ### Dynamic frame
 
@@ -366,7 +377,10 @@ Further rules, from real apps:
   they are (no clear, no scroll in the burst), no cursor shows in the
   pane, and the rows kept their shape: on average 30 % of the cells keep
   their glyph and 70 % their class (digit, letter, same sign). Failing
-  that, when it was replaced twice within 3 s. A monitor is rewritten in
+  that, when it was replaced twice within 3 s; or, a cursor showing,
+  three times at even intervals (one part in ten) with the cursor on
+  the same cell and no scroll nor jump between: two islands are spent,
+  then it is a monitor (`watch -n 5`). A monitor is rewritten in
   place: every change is an edit of the rows in view, no frame is spent,
   no island. It ends on a clear, or on a change of half its rows that is
   of another shape. A scroll the emulator counted and the rows confirm
@@ -374,7 +388,8 @@ Further rules, from real apps:
   `Tuning.monitor`.
 - Rows of a pane under a smaller pane of the last segmentation (a
   palette, a modal) are not read while they are: they keep what they
-  showed and do not vote.
+  showed and do not vote. Never seen before (a pane first seen under
+  an overlay), they are blank until uncovered.
 - A hinted view that contradicts what is remembered is another document:
   another frame; the first is found again by content.
 - `find`: a literal is searched in the row as it is; for a regular

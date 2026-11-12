@@ -254,8 +254,7 @@ the start). See `design.md`, "Dynamic frame" and "Plugins". Left:
 - Table entries: rows of one shape only (columns). A highlight in a
   list of names of unequal lengths is a bar until it moves, as before.
 - htop without its preset: the function bar is not chrome (mixed
-  backdrops). `scripts/lib-e2e.sh` cannot pass `--no-presets`: the
-  table-entry rule is under unit tests only.
+  backdrops).
 - glances: other layouts (`-1`, `-2`, `-4`, a narrow screen without the
   `TASKS` row) are left to the generic segmentation; the alerts under
   the processes are part of `glances:processes`; a sidebar under 8
@@ -268,20 +267,51 @@ the start). See `design.md`, "Dynamic frame" and "Plugins". Left:
 Built: monitors are told at the first repaint (shape, no cursor, in
 place); rows under an overlay do not vote; `Tuning.monitor`. Left:
 
-- A monitor that shows a cursor and repaints more than 3 s apart
-  (`ptyrc run watch -n 5 ls -l`, then `ptyrc frames`) makes an island
-  per refresh.
-- A pane first seen under an overlay takes the overlay's rows; rows
-  under an overlay show their old text in `frame.text`.
 - A columnar file in an editor that hides its cursor: a jump painted in
   place would be taken for a repaint.
 - htop without its preset: the selected row is chrome until it moves.
-- `scripts/e2e-frames.sh pages` (less): one run in eight, extent
-  `[0,145]` for `[0,144]`, the `:` prompt row remembered at rows 29, 58,
-  87. Not diagnosed.
-- `scripts/lib-e2e.sh` cannot pass `--no-presets`: the monitor scenario
-  runs with the htop preset on. An `E2E_RUN_ARGS` would test the
-  generic path.
+
+## Frames, fifth session
+
+Built (see `design.md`, "Extended frame" and "Further rules"):
+
+- The `pages` flake. less erases its prompt in a burst of its own when
+  the key comes (under 32 bytes, written at once); the page follows.
+  The blank last row voted "no bottom chrome", and the vote stayed
+  among the last four as long as pages went up, which did not vote. A
+  blank last row abstains; backward feeds vote.
+- Two to four pager pages in one burst are a feed of known distance.
+- A feed of a screen or more cut in bursts (a `G` under load: each
+  piece shorter than the screen) is a jump.
+- `pages-status`, seen once under load: a `G` in two bursts left
+  `...skipping...` remembered at row 58. A row that leaves the view
+  within 10 ms of coming is not remembered.
+- A slow monitor that shows a cursor: three even repaints, two islands
+  spent.
+- A pane first seen under an overlay: the covered rows are blank.
+- `E2E_RUN_ARGS` in `scripts/lib-e2e.sh`; scenarios `monitor-generic`
+  (htop, `--no-presets`) and `monitor-slow`.
+
+Left:
+
+- Plain `less` on `G` still goes to an island: nothing on screen tells
+  the distance. It merges when walked into; drawings follow (`pages`).
+- Pieces of a jump more than 10 ms apart are scrolls; a page then part
+  of the next within 10 ms is taken for a jump; so is a wheel flick of
+  a screen or more whose lines come under 10 ms apart. A feed cannot be
+  told from a jump by the screen alone: a `less` preset could read
+  `...skipping...`.
+- Pages in one burst need the bottom chrome learned (two pages seen),
+  and the count is the only witness: 28 lines down and a `G` in one
+  burst would read as two pages.
+- The prompt row of a pager is remembered from the first page to the
+  second, when the chrome is learned and the row forgotten.
+- Rows under an overlay keep the text last seen there, in `frame.text`
+  too: what the app changed under it is not known. A frame attached
+  again under an overlay lets its stale rows vote.
+- A monitor with a cursor whose period varies by more than a tenth, or
+  whose cursor moves, makes an island per refresh; an editor paging
+  through a table at an even pace, cursor still, is taken for one.
 
 ## Layers, third session
 

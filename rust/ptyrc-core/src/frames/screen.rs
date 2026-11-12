@@ -133,6 +133,15 @@ impl Line {
         }
     }
 
+    /// A row without text.
+    pub fn blank() -> Line {
+        Line {
+            text: String::new(),
+            cols: None,
+            ascii: true,
+        }
+    }
+
     pub fn trim_end(&mut self) {
         let n = self.text.trim_end_matches(' ').len();
         if n == self.text.len() {

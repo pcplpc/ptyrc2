@@ -6,7 +6,8 @@
 #
 #   scripts/e2e-frames.sh [SCENARIO...]     default: all
 #   scenarios: vim vim-nu vim-nowrap vim-splits tmux shell pager pages
-#              pages-status man more agent monitor resize
+#              pages-status man more agent monitor monitor-generic
+#              monitor-slow resize
 
 cd "$(dirname "$0")/.." || exit 2
 . scripts/lib-e2e.sh
@@ -316,6 +317,10 @@ s_pages() {
     check "pages: back at the top" "ids() == [$id] and pane()['origin'][1] == 0"
     mark_at "pages: and off screen at the top" -
     known "pages: the remembered buffer is the file" "$id" "$WORK/long.txt"
+    e2e_send '  '; quiet
+    check "pages: two pages typed at once" "ids() == [$id] and pane()['origin'][1] == 58"
+    e2e_send 'bb'; quiet
+    check "pages: and two back" "ids() == [$id] and pane()['origin'][1] == 0 and pane()['extent'] == [0, 144]"
     e2e_keys G; quiet
     check "pages: G feeds a whole screen: a jump, to an island" "ids() == [$id] and pane()['origin'][1] >= 100000"
     e2e_p draw clear >/dev/null
@@ -457,6 +462,54 @@ print(sorted(f["id"] for f in json.load(sys.stdin)["frames"] if f["state"] != "i
     e2e_stop
 }
 
+# The same without the htop preset: the generic rules tell a monitor.
+s_monitor_generic() {
+    have htop || { echo "SKIP  monitor-generic"; return; }
+    E2E_RUN_ARGS=--no-presets e2e_start fr-mongen 100x30 htop || return
+    settle 3
+    check "monitor-generic: no preset, usable once settled" \
+        "len(P) >= 1 and all(f['usable'] and f['support'] is None for f in P)"
+    local head; head=$(e2e_host | grep -n 'PID USER' | head -1 | cut -d: -f1)
+    check "monitor-generic: the header is chrome, the table starts under it, selected row included" \
+        "any(f['kind'] == 'chrome' and f['rect'][1] == $((head - 1)) and f['rect'][3] == 1 for f in F.values()) \
+         and any(f['rect'][1] == $head and f['rect'][3] >= 10 for f in P)"
+    local before; before=$(e2e_p frames --all --json | python3 -c '
+import json, sys
+print(sorted(f["id"] for f in json.load(sys.stdin)["frames"]))')
+    settle 5
+    check "monitor-generic: refreshes spend no frame and no island" \
+        "sorted(f['id'] for f in A) == $before and all(f['extent'][1] < 1000 for f in P)"
+    e2e_stop
+}
+
+# A table repainted where it is every 3.2 s, the cursor shown: an editor
+# could paint a jump so. The third even repaint is a monitor's.
+s_monitor_slow() {
+    have python3 || { echo "SKIP  monitor-slow"; return; }
+    cat > "$WORK/slow_monitor.py" <<'EOF'
+import sys, time
+n = 0
+while True:
+    sys.stdout.write("\x1b[H")
+    for i in range(20):
+        sys.stdout.write(f"{n * 97 + i * 13:6} proc-{(n * 7 + i * 3) % 50:<3} {n + i}.{n % 10}%\x1b[K\r\n")
+    sys.stdout.flush()
+    n += 1
+    time.sleep(3.2)
+EOF
+    e2e_start fr-monslow 100x30 python3 "$WORK/slow_monitor.py" || return
+    settle 2
+    local id; id=$(pane_id)
+    settle 9
+    local at; at=$(e2e_p frames --json | python3 -c '
+import json, sys
+print([f["origin"][1] for f in json.load(sys.stdin)["frames"] if f["kind"] == "pane"][0])')
+    settle 7
+    check "monitor-slow: after two repaints, the same rows and frame" \
+        "ids() == [$id] and pane()['origin'][1] == $at and pane()['usable']"
+    e2e_stop
+}
+
 s_resize() {
     have $VIM || { echo "SKIP  resize"; return; }
     e2e_start fr-resize 100x30 $VIM -u NONE -N -n "$WORK/long.txt" || return
@@ -474,7 +527,7 @@ s_resize() {
 [ -x "$PTYRC" ] || { echo "no binary at $PTYRC: cargo build -p ptyrc-cli" >&2; exit 2; }
 have tmux || { echo "tmux is required as the host" >&2; exit 2; }
 
-for scenario in "${@:-vim vim-nu vim-nowrap vim-splits tmux shell pager pages pages-status man more agent monitor resize}"; do
+for scenario in "${@:-vim vim-nu vim-nowrap vim-splits tmux shell pager pages pages-status man more agent monitor monitor-generic monitor-slow resize}"; do
     for one in $scenario; do
         case $one in
             vim) s_vim ;;
@@ -490,6 +543,8 @@ for scenario in "${@:-vim vim-nu vim-nowrap vim-splits tmux shell pager pages pa
             more) s_more ;;
             agent) s_agent ;;
             monitor) s_monitor ;;
+            monitor-generic) s_monitor_generic ;;
+            monitor-slow) s_monitor_slow ;;
             resize) s_resize ;;
             *) echo "unknown scenario: $one" >&2; exit 2 ;;
         esac

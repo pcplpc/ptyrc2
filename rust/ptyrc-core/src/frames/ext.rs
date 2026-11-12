@@ -8,6 +8,10 @@ use std::time::Duration;
 
 /// Distance between islands, in rows.
 pub(crate) const ISLAND_GAP: i64 = 100_000;
+/// One write of the app may reach the driver in several bursts, this far
+/// apart; keys repeat more slowly. A row that leaves the view sooner
+/// than this after it came was on its way through: not remembered.
+pub(crate) const FEED_GAP: Duration = Duration::from_millis(10);
 /// Islands kept per frame; the least recently shown goes first.
 const MAX_ISLANDS: usize = 8;
 
@@ -84,6 +88,10 @@ pub(crate) struct Obs<'a> {
     pub seed_tape: bool,
     /// Pane rows `[a, b)` those events moved: no top chrome among them.
     pub seed_rows: Option<(usize, usize)>,
+    /// This feed and those just before it sum to the height of the
+    /// region or more: lines went through unseen, the distance is not
+    /// known.
+    pub overfed: bool,
     /// Cursor row inside the pane.
     pub cursor_row: Option<usize>,
     /// Absolute frame row of pane row 0, when the app shows it.
@@ -574,6 +582,21 @@ impl Ext {
         };
         let (c0, w0) = score(0);
 
+        // A jump fed in pieces: the rows are looked up, or lost. A status
+        // row places it below.
+        if o.overfed && o.hint_oy.is_none() {
+            if let Some((oy, votes)) = self.lookup(nh, None)
+                && votes >= need(nb, 30, 2)
+            {
+                self.oy = oy;
+                self.enter_island(h);
+                self.rows = (0..h).map(|i| self.fresh(o, i)).collect();
+                self.mark_known(a, b);
+                return Outcome::Jump;
+            }
+            return Outcome::Lost;
+        }
+
         // 1. Scroll.
         let span = (b - a) as i64;
         let mut best: Option<(i64, usize, usize)> = None;
@@ -613,7 +636,7 @@ impl Ext {
                 self.learn_tape_chrome(o, &ph);
             }
             let (a, b) = self.band(h);
-            self.flush(o.now);
+            self.flush(o.now.saturating_sub(FEED_GAP) + Duration::from_nanos(1));
             self.oy += o.seed;
             self.rows = (0..h).map(|i| self.fresh(o, i)).collect();
             self.mark_known(a, b);
@@ -765,7 +788,7 @@ impl Ext {
         let inb = |i: i64| i >= a as i64 && i < b as i64;
         // Rows that leave the view are remembered on the way out.
         for j in a..b {
-            if !inb(j as i64 - dy) && self.rows[j].since < o.now {
+            if !inb(j as i64 - dy) && self.rows[j].since + FEED_GAP <= o.now {
                 self.commit_row(j);
             }
         }
@@ -814,6 +837,17 @@ impl Ext {
         let bottom = (tail_start.min(h)..h)
             .find(|i| nh[*i as usize] != BLANK)
             .map_or(0, |i| h - i);
+        // Blank rows under the rows that came in say nothing: a prompt
+        // erased and not yet written again (a page fed in two bursts).
+        // The last vote holds.
+        let bottom = if bottom == 0 && tail_start < h {
+            self.chrome_obs
+                .back()
+                .map_or(self.bottom as i64, |v| v.1 as i64)
+                .min(h - tail_start)
+        } else {
+            bottom
+        };
         // The first rows the emulator scrolled are content, moved or
         // repainted. The last may be a prompt written over.
         let top = match o.seed_rows {
@@ -824,17 +858,24 @@ impl Ext {
     }
 
     /// Chrome under a tape feed: the last rows did not travel with the
-    /// rest, they were written over (a prompt).
+    /// rest, they were written over (a prompt). Fed forward, they are
+    /// the last rows of the screen before; fed backward, the last rows
+    /// of the screen after. A blank row says nothing.
     fn learn_tape_chrome(&mut self, o: &Obs, ph: &[u64]) {
-        if o.fixed_tb.is_some() || o.seed <= 0 {
+        if o.fixed_tb.is_some() {
             return;
         }
         let nh = o.hashes;
-        let bottom = (0..ph.len())
+        let h = ph.len();
+        let (was, is) = if o.seed > 0 { (ph, nh) } else { (nh, ph) };
+        if was[h - 1] == BLANK || o.seed.unsigned_abs() as usize >= h {
+            return;
+        }
+        let bottom = (0..h)
             .rev()
             .take_while(|i| {
-                let to = *i as i64 - o.seed;
-                to >= self.top as i64 && ph[*i] != BLANK && nh[to as usize] != ph[*i]
+                let to = *i as i64 - o.seed.abs();
+                to >= self.top as i64 && was[*i] != BLANK && is[to as usize] != was[*i]
             })
             .count();
         self.chrome_vote(self.top, bottom as u16);

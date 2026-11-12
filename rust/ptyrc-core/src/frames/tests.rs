@@ -1544,13 +1544,38 @@ impl Pager {
     }
 
     fn step(&mut self, bytes: &str) -> Vec<FrameEvent> {
+        self.step_after(bytes, 300)
+    }
+
+    fn step_after(&mut self, bytes: &str, dt: u64) -> Vec<FrameEvent> {
         self.vt.feed(bytes.as_bytes());
         let c = self.vt.cursor();
         self.s.cursor = (c.col, c.row);
         self.s.alt = self.vt.modes().alt_screen;
         let events = self.vt.take_events();
         let grid = self.vt.grid().clone();
-        self.s.feed_ev(&grid, 300, &events)
+        self.s.feed_ev(&grid, dt, &events)
+    }
+
+    /// A page down that reaches the driver in two bursts, cut after `cut`
+    /// lines.
+    fn down_split(&mut self, n: usize, cut: usize) {
+        let from = self.top + self.rows - 1;
+        self.top += n;
+        let first = format!("\r\x1b[K{}", self.lines(from, cut));
+        let rest = format!("{}{}", self.lines(from + cut, n - cut), self.prompt());
+        self.step(&first);
+        self.step_after(&rest, 3);
+    }
+
+    /// A page down whose first burst only erases the prompt, as a key
+    /// echo goes out alone.
+    fn down_late(&mut self, n: usize) {
+        let from = self.top + self.rows - 1;
+        self.top += n;
+        self.step("\r\x1b[K");
+        let out = format!("{}{}", self.lines(from, n), self.prompt());
+        self.step_after(&out, 3);
     }
 
     fn down(&mut self, n: usize) -> Vec<FrameEvent> {
@@ -1642,6 +1667,99 @@ fn a_pager_page_without_overlap_is_a_scroll() {
 }
 
 #[test]
+fn a_pager_page_in_two_bursts_keeps_the_prompt_out() {
+    // The last row is blank between the two bursts: it says nothing of
+    // the chrome, and the prompt is never remembered.
+    for split in 1..=4 {
+        for cut in [1, 7, 18] {
+            let mut p = Pager::open(doc(300), 20, false);
+            let id = p.s.pane().id;
+            for page in 1..=4 {
+                if page == split {
+                    p.down_split(19, cut);
+                } else {
+                    p.down(19);
+                }
+            }
+            p.s.idle(300);
+            let info = p.s.pane();
+            assert_eq!(info.origin[1], 76, "split {split} cut {cut}");
+            assert_eq!(info.extent, [0, 94], "split {split} cut {cut}");
+            assert_eq!(p.s.f.text(id, 0, 95), p.doc[..95].to_vec());
+        }
+    }
+    // The prompt erased alone, then the page; pages up tell the chrome
+    // as well.
+    for late in 1..=4 {
+        let mut p = Pager::open(doc(300), 20, false);
+        let id = p.s.pane().id;
+        for page in 1..=4 {
+            if page == late {
+                p.down_late(19);
+            } else {
+                p.down(19);
+            }
+        }
+        p.s.idle(300);
+        assert_eq!(p.s.pane().extent, [0, 94], "late {late}");
+        p.up(19);
+        p.s.idle(300);
+        assert_eq!(p.s.pane().extent, [0, 94], "late {late}");
+        assert_eq!(p.s.f.text(id, 0, 95), p.doc[..95].to_vec());
+    }
+    let mut p = Pager::open(doc(300), 20, false);
+    p.down_late(19);
+    p.down(19);
+    p.up(19);
+    p.s.idle(300);
+    assert_eq!(p.s.pane().extent, [0, 56]);
+}
+
+#[test]
+fn pager_pages_in_one_burst_are_a_scroll() {
+    // A key held: two or three pages reach the driver at once. Each is
+    // the screen less the prompt row; a jump feeds a whole screen.
+    let mut p = Pager::open(doc(300), 20, false);
+    let id = p.s.pane().id;
+    p.down(19);
+    p.down(19);
+    let from = p.top + p.rows - 1;
+    p.top += 38;
+    let out = format!(
+        "\r\x1b[K{}{}\r\x1b[K{}{}",
+        p.lines(from, 19),
+        p.prompt(),
+        p.lines(from + 19, 19),
+        p.prompt()
+    );
+    let ev = p.step(&out);
+    assert!(ev.contains(&FrameEvent::Scroll {
+        frame: id,
+        dx: 0,
+        dy: 38
+    }));
+    assert_eq!((p.s.pane().id, p.origin()), (id, 76));
+    let mut out = String::new();
+    for _ in 0..3 {
+        out += "\r\x1b[K";
+        for i in (p.top - 19..p.top).rev() {
+            out += &format!("\x1b[H\x1bM{}\r\n", p.doc[i]);
+        }
+        p.top -= 19;
+        out += &format!("\x1b[{};1H\r\x1b[K{}", p.rows, p.prompt());
+    }
+    p.step(&out);
+    assert_eq!(p.origin(), 19);
+    p.s.idle(300);
+    let info = p.s.pane();
+    assert_eq!(info.extent, [0, 94], "no island: {info:?}");
+    // Rows that went through unseen are not known.
+    assert_eq!(p.s.f.text(id, 19, 38), p.doc[19..38].to_vec());
+    assert_eq!(p.s.f.text(id, 76, 95), p.doc[76..95].to_vec());
+    assert!(p.s.f.text(id, 60, 70).iter().all(String::is_empty));
+}
+
+#[test]
 fn a_pager_jump_is_not_a_scroll() {
     // A far jump feeds a whole screen or more: a line went through unseen.
     // The view goes to an island; a clear and a repaint find the top again.
@@ -1657,6 +1775,51 @@ fn a_pager_jump_is_not_a_scroll() {
     assert!(p.origin() >= ext::ISLAND_GAP);
     p.repaint_at(10);
     assert_eq!(p.origin(), 10);
+}
+
+#[test]
+fn a_pager_jump_fed_in_pieces_is_not_a_scroll() {
+    // The feed of a whole screen cut in two or three bursts: each piece
+    // is shorter than the screen, their sum is not.
+    for cuts in [vec![1], vec![7], vec![19], vec![5, 12]] {
+        let mut p = Pager::open(doc(300), 20, false);
+        let id = p.s.pane().id;
+        p.down(19);
+        p.top = 250;
+        let mut lines: Vec<String> = vec!["...skipping...\r\n".into()];
+        lines.extend((250..269).map(|i| format!("{}\r\n", p.doc[i])));
+        let mut from = 0;
+        for (k, cut) in cuts.iter().chain([&20]).enumerate() {
+            let mut out = if k == 0 {
+                "\r\x1b[K".to_string()
+            } else {
+                String::new()
+            };
+            out += &lines[from..*cut].concat();
+            if *cut == 20 {
+                out += &p.prompt();
+            }
+            from = *cut;
+            p.step_after(&out, if k == 0 { 300 } else { 2 });
+        }
+        assert_eq!(p.s.pane().id, id);
+        assert!(
+            p.origin() >= ext::ISLAND_GAP,
+            "cuts {cuts:?}: {}",
+            p.origin()
+        );
+        p.jump_top();
+        assert_eq!(p.origin(), 0);
+        p.s.idle(300);
+        assert_eq!(p.s.f.text(id, 0, 38), p.doc[..38].to_vec(), "cuts {cuts:?}");
+    }
+    // Lines fed one by one as a key repeats, however many, are scrolls.
+    let mut p = Pager::open(doc(300), 20, false);
+    for n in 1..=45 {
+        p.step_after(&format!("\r\x1b[K{}{}", p.lines(18 + n, 1), p.prompt()), 30);
+        p.top += 1;
+        assert_eq!(p.origin(), n as i64);
+    }
 }
 
 #[test]
@@ -1722,6 +1885,27 @@ fn a_pager_jump_fed_in_two_bursts_is_placed_by_the_status_row() {
     let ev = p.step(&rest);
     assert!(ev.contains(&FrameEvent::Jump { frame: id }));
     assert_eq!(p.origin(), 250);
+}
+
+#[test]
+fn a_pager_jump_fed_in_pieces_leaves_no_marker() {
+    // With a status row the jump is placed; the marker line that went
+    // through between two bursts is not remembered.
+    for cut in [1, 7, 19] {
+        let mut p = Pager::open(doc(300), 20, true);
+        let id = p.s.pane().id;
+        p.down(19);
+        p.top = 250;
+        let mut lines: Vec<String> = vec!["...skipping...\r\n".into()];
+        lines.extend((250..269).map(|i| format!("{}\r\n", p.doc[i])));
+        p.step(&format!("\r\x1b[K{}", lines[..cut].concat()));
+        p.step_after(&format!("{}{}", lines[cut..].concat(), p.prompt()), 2);
+        assert_eq!(p.origin(), 250, "cut {cut}");
+        p.jump_top();
+        p.s.idle(300);
+        let known = p.s.f.find(id, &lit("skipping"), true);
+        assert!(known.is_empty(), "cut {cut}: {known:?}");
+    }
 }
 
 #[test]
@@ -1795,6 +1979,62 @@ fn a_monitor_is_rewritten_in_place() {
     bg(&mut g, Rect::new(0, 23, COLS, 1), 2);
     s.feed(&g, 10);
     assert_ne!(s.pane().id, id);
+}
+
+#[test]
+fn a_slow_monitor_with_a_cursor_spends_two_islands() {
+    // A table repainted every 5 s with the cursor shown, left on the same
+    // cell: two repaints may be an editor's jumps, the third, as long
+    // after the second as the second after the first, is a monitor's.
+    let table = |n: usize| {
+        let lines: Vec<String> = (0..20)
+            .map(|i| {
+                format!(
+                    "{:5} proc-{} {}.{}%",
+                    n * 97 + i * 13,
+                    (n * 7 + i * 3) % 50,
+                    n + i,
+                    n % 10
+                )
+            })
+            .collect();
+        let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        Grid::from_lines(COLS, &refs)
+    };
+    let mut s = Sim::new();
+    s.cursor = (0, 20);
+    s.settle(&table(0));
+    let id = s.pane().id;
+    s.feed(&table(1), 5000);
+    s.feed(&table(2), 5050);
+    let second = s.pane().origin[1];
+    for n in 3..9 {
+        s.feed(&table(n), 4950 + 20 * n as u64);
+        assert_eq!(
+            (s.pane().id, s.pane().origin[1]),
+            (id, second),
+            "refresh {n}"
+        );
+    }
+    assert!(s.pane().usable);
+
+    // The cursor moves with each repaint, or the repaints come as keys
+    // do: jumps in a table, an island each.
+    for moving in [true, false] {
+        let mut s = Sim::new();
+        s.cursor = (0, 3);
+        s.settle(&table(0));
+        let mut origins = vec![s.pane().origin[1]];
+        for (n, dt) in [4000, 9000, 5000, 16000].into_iter().enumerate() {
+            if moving {
+                s.cursor = (n as u16 + 1, 4 + n as u16);
+            }
+            s.feed(&table(n + 1), if moving { 5000 } else { dt });
+            origins.push(s.pane().origin[1]);
+        }
+        origins.dedup();
+        assert_eq!(origins.len(), 5, "{origins:?}");
+    }
 }
 
 /// A process monitor: meters, a header bar, a table sorted anew at each
@@ -2014,6 +2254,51 @@ fn rows_under_an_overlay_do_not_vote() {
         (back.id, back.origin, back.usable),
         (under.id, under.origin, true)
     );
+}
+
+#[test]
+fn a_pane_first_seen_under_an_overlay_does_not_take_its_rows() {
+    // The app starts with its palette open: the rows it hides are not
+    // known, and are not the palette's.
+    let mut s = Sim::new();
+    let d = doc(40);
+    let home = || {
+        let mut g = Grid::new(COLS, 24);
+        for (i, l) in d.iter().take(14).enumerate() {
+            put(&mut g, 4, 2 + i as u16, l);
+        }
+        g
+    };
+    let palette = || {
+        let mut g = home();
+        let r = Rect::new(10, 6, 40, 8);
+        for y in r.y..r.bottom() {
+            put(&mut g, r.x, y, &" ".repeat(r.w as usize));
+            put(&mut g, r.x + 2, y, &format!("command {y}"));
+        }
+        bg(&mut g, r, 8);
+        g
+    };
+    s.settle(&palette());
+    let panes = s.panes();
+    assert_eq!(panes.len(), 2, "{panes:#?}");
+    let under = panes.iter().find(|p| p.rect[3] == 24).expect("under");
+    let text = s.f.text(under.id, 0, 24);
+    assert_eq!(text[2].trim(), d[0]);
+    assert!(text[6..14].iter().all(String::is_empty), "{text:?}");
+    assert!(s.f.find(under.id, &lit("command"), true).is_empty());
+    let mut ev = s.feed(&home(), 1000);
+    ev.extend(s.idle(2000));
+    assert!(
+        !ev.iter().any(|e| matches!(e, FrameEvent::Jump { .. })),
+        "{ev:?}"
+    );
+    let back = s.pane();
+    assert_eq!((back.id, back.origin), (under.id, under.origin));
+    let text = s.f.text(under.id, 0, 24);
+    for i in 0..14 {
+        assert_eq!(text[2 + i].trim(), d[i]);
+    }
 }
 
 #[test]
