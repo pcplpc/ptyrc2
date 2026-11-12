@@ -427,6 +427,14 @@ impl Ext {
             self.apply_scroll(o, &ph, dy);
             return Outcome::Scroll { dx: 0, dy };
         }
+        // The emulator saw the pane scroll further than it is tall:
+        // nothing left to align, but the distance is known.
+        if o.seed.abs() >= span && nb >= 1 && c0 * 5 < nb * 2 {
+            self.flush(o.now);
+            self.oy += o.seed;
+            self.rows = (0..h).map(|i| self.fresh(o, i)).collect();
+            return Outcome::Scroll { dx: 0, dy: o.seed };
+        }
 
         // 2. Splice.
         if let Some(out) = self.splice(o, &ph, nb, c0) {

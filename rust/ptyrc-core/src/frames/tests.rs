@@ -1244,6 +1244,50 @@ fn regex_anchors_are_the_ends_of_the_text() {
 }
 
 #[test]
+fn a_column_of_numbers_is_not_a_gutter() {
+    // `seq 1 200`: numbers with nothing beside them.
+    let mut s = Sim::new();
+    let screen = |top: usize| {
+        let lines: Vec<String> = (top..top + 20).map(|i| format!("{i}")).collect();
+        let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        Grid::from_lines(COLS, &refs)
+    };
+    s.settle(&screen(1));
+    s.feed(&screen(2), 300);
+    s.feed(&screen(3), 300);
+    assert_eq!(s.pane().rect, [0, 0, COLS, 20]);
+    assert_eq!(s.pane().origin, [0, 2]);
+}
+
+#[test]
+fn scroll_further_than_the_view_by_vt_events() {
+    // A long command output in one burst: no row survives, the emulator
+    // counted the lines.
+    let d = doc(400);
+    let mut s = Sim::new();
+    s.settle(&view(&d, 0, 20, &[]));
+    let id = s.pane().id;
+    let scroll = |n: i16| VtEvent::Scroll {
+        region: Rect::new(0, 0, COLS, 20),
+        dy: -n,
+        scrollback: true,
+    };
+    let ev = s.feed_ev(&view(&d, 150, 20, &[]), 300, &[scroll(150)]);
+    assert!(
+        ev.contains(&FrameEvent::Scroll {
+            frame: id,
+            dx: 0,
+            dy: 150
+        }),
+        "{ev:?}"
+    );
+    assert_eq!(s.pane().origin, [0, 150]);
+    s.idle(300);
+    assert_eq!(s.pane().extent, [0, 169]);
+    assert_eq!(s.f.text(id, 0, 20), d[..20].to_vec());
+}
+
+#[test]
 fn wire_forms() {
     let mut s = Sim::new();
     s.settle(&view(&doc(30), 0, 20, &[]));

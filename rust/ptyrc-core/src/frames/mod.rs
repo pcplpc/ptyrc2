@@ -169,6 +169,8 @@ struct Pane {
     fresh: bool,
     reattach: bool,
     last_active: Duration,
+    /// Last time the cursor was seen inside, while on screen.
+    cursor_seen: Duration,
     left: u16,
     right: u16,
     gutter_cand: (u16, u8),
@@ -885,6 +887,7 @@ impl Frames {
                 fresh: true,
                 reattach: false,
                 last_active: now,
+                cursor_seen: Duration::ZERO,
                 left: 0,
                 right: 0,
                 gutter_cand: (0, 0),
@@ -921,18 +924,23 @@ impl Frames {
         by_content: bool,
     ) -> Option<FrameId> {
         let rect = leaf.rect();
-        // `by_content`: the key cannot tell the candidates apart.
-        let key = input.filter(|_| !by_content).and_then(|inp| {
+        // `by_content`: the key cannot tell the candidates apart. Without
+        // the screen (a tick), the key asked while the layout was pending.
+        let key = if by_content {
+            None
+        } else if let Some(inp) = input {
             let pv = self.pane_view(inp, rect);
             self.full_key(
                 self.detect(&pv)
                     .and_then(|s| self.supports[s].frame_key(&pv)),
             )
-        });
+        } else {
+            self.full_key(self.advice.get(&leaf.rect).and_then(|a| a.key.clone()))
+        };
         // Same rectangle first; else a frame whose rectangle overlaps (a
         // pane resized keeps its identity).
         for exact in [true, false] {
-            let mut best: Option<(FrameId, f32, Duration)> = None;
+            let mut best: Option<(FrameId, f32, (Duration, Duration))> = None;
             for p in self.panes.values() {
                 if p.state != FrameState::Inactive || p.kind != leaf.kind() || skip.contains(&p.id)
                 {
@@ -959,9 +967,12 @@ impl Frames {
                     p.ext.share(&self.hashes_for(rect, p.left, p.right))
                 };
                 if score >= self.cfg.identity
-                    && best.is_none_or(|b| score > b.1 || (score == b.1 && p.last_active > b.2))
+                    && best.is_none_or(|b| {
+                        // Equal scores: the frame the cursor was in last.
+                        score > b.1 || (score == b.1 && (p.cursor_seen, p.last_active) > b.2)
+                    })
                 {
-                    best = Some((p.id, score, p.last_active));
+                    best = Some((p.id, score, (p.cursor_seen, p.last_active)));
                 }
             }
             if best.is_some() {
@@ -1125,6 +1136,17 @@ impl Frames {
         if len < 3 || len * 10 < nonblank * 6 || end + 1 >= rect.w {
             return None;
         }
+        // Numbers with nothing beside them are content (a counter, a
+        // listing), not a gutter.
+        let beside = (first..first + len)
+            .filter(|i| {
+                let line = self.screen.lines[rect.y as usize + i].slice(rect.x + end, rect.right());
+                !line.text.trim_matches(' ').is_empty()
+            })
+            .count();
+        if beside * 2 < len {
+            return None;
+        }
         Some((end + 1, n0 - 1 - first as i64))
     }
 
@@ -1144,6 +1166,9 @@ impl Frames {
         if p.suspended {
             self.panes.insert(id, p);
             return;
+        }
+        if p.rect.contains(self.cursor.col, self.cursor.row) {
+            p.cursor_seen = now;
         }
         let dirty = !p.hashes_valid
             || (p.rect.y..p.rect.bottom()).any(|r| self.screen.row_dirty[r as usize]);
