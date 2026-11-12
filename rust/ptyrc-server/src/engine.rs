@@ -168,6 +168,12 @@ pub trait Engine {
         crate::mouse::MouseMode::default()
     }
 
+    /// The sprite a click at this screen cell is for: the data of its
+    /// `mouse` event. `None`: the click is the app's.
+    fn sprite_at(&self, _x: u16, _y: u16) -> Option<Value> {
+        None
+    }
+
     /// The default colours of the host: at start, then when the host
     /// tells others.
     fn on_host_colors(&mut self, _colors: ptyrc_core::scene::HostColors, _ctx: &mut Ctx) {}
@@ -177,6 +183,16 @@ pub trait Engine {
     fn snapshot(&mut self, _topic: &str, _now: Duration) -> Vec<Value> {
         Vec::new()
     }
+
+    /// The clock stands still (a paused replay): the real time at which
+    /// `on_stall` is to be called, if any.
+    fn stall_wake(&self) -> Option<std::time::Instant> {
+        None
+    }
+
+    /// The clock stands still and `stall_wake` passed: answer what cannot
+    /// wait on it any longer.
+    fn on_stall(&mut self, _ctx: &mut Ctx) {}
 
     /// Members merged into the `session.info` result (an object, or null).
     fn session_extras(&self) -> Value {

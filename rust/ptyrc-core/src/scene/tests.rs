@@ -1687,6 +1687,7 @@ fn back_layers_never_touch_ink() {
             }
         }
         let mut scene = Scene::new();
+        let mut named = Vec::new();
         for _ in 0..4 {
             let rows: Vec<String> = (0..3)
                 .map(|_| {
@@ -1702,12 +1703,18 @@ fn back_layers_never_touch_ink() {
             if below(&mut rng, 2) == 0 {
                 style["bg"] = json!("yellow");
             }
-            let v = json!({
+            let mut v = json!({
                 "anchor": {"at": [below(&mut rng, 18), below(&mut rng, 5)]},
                 "content": {"rows": rows, "style": style, "opaque": below(&mut rng, 2) == 0},
                 "layer": -1 - below(&mut rng, 3) as i32,
                 "blend": if below(&mut rng, 5) == 0 { "tint" } else { "normal" },
             });
+            // A sprite on a panel may replace that backdrop, no other.
+            if below(&mut rng, 3) == 0 {
+                let panel = [Color::Indexed(1), Color::Indexed(8)][below(&mut rng, 2) as usize];
+                v["panel"] = json!(ColorSpec(panel));
+                named.push(panel);
+            }
             scene.add(1, spec(v), ms(0)).unwrap();
         }
         let out = render(&mut scene, &mock, &grid, 0);
@@ -1721,8 +1728,11 @@ fn back_layers_never_touch_ink() {
                         "round {round} at {x},{y}"
                     );
                 }
-                // A backdrop the app chose is kept everywhere.
-                if app.backdrop() != Color::Default || app.style.attrs.contains(Attrs::INVERSE) {
+                // A backdrop the app chose is kept, but the one a sprite
+                // names as its panel; inverse cells are kept in any case.
+                let inverse = app.style.attrs.contains(Attrs::INVERSE);
+                let named = !inverse && named.contains(&app.style.bg);
+                if inverse || (app.backdrop() != Color::Default && !named) {
                     assert_eq!(got.backdrop(), app.backdrop(), "round {round} at {x},{y}");
                 }
                 // Wide pairs stay whole.
@@ -2289,4 +2299,226 @@ fn a_running_effect_is_tuned_in_place() {
         .update(text, patch(json!({"effect": {"name": "fade"}})), ms(100))
         .unwrap();
     assert_eq!(show(&mut scene, &mock, &base(), 100)[2], "ab1");
+}
+
+/// Notes the shifts it is told and the rows it is shown out of the view.
+struct Rows(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+impl Effect for Rows {
+    fn render(&mut self, _t: Duration, _canvas: &mut Canvas) -> bool {
+        true
+    }
+
+    fn looks(&self) -> Looks {
+        Looks::Cells
+    }
+
+    fn look(&mut self, under: &Under) {
+        let show = |y: i64| match under.row(y) {
+            Some(ink) => ink.iter().map(|i| if *i { '#' } else { '.' }).collect(),
+            None => "none".to_string(),
+        };
+        let mut notes = self.0.lock().unwrap();
+        notes.push(format!("{} {} {}", show(-1), show(0), show(4)));
+    }
+
+    fn shift(&mut self, from: i64, to: i64, dy: i64) {
+        self.0
+            .lock()
+            .unwrap()
+            .push(format!("shift {from} {to} {dy}"));
+    }
+}
+
+/// `Mock`, remembering one row of ink under the pane.
+struct Remembers(Mock);
+
+impl Surfaces for Remembers {
+    fn info(&self, id: FrameId) -> Option<SurfaceInfo> {
+        self.0.info(id)
+    }
+    fn resolve(&self, sel: &FrameSel) -> Option<FrameId> {
+        self.0.resolve(sel)
+    }
+    fn find(&self, id: FrameId, query: &TextQuery, known: bool) -> Vec<TextMatch> {
+        self.0.find(id, query, known)
+    }
+    fn place(&self, id: FrameId, w: u16, h: u16, p: Prefer, t: &[Rect]) -> Option<(u16, u16)> {
+        self.0.place(id, w, h, p, t)
+    }
+    fn ink_row(&self, id: FrameId, y: i64, x: i64, w: u16) -> Option<Vec<bool>> {
+        (id == PANE && y == 4).then(|| (x..x + w as i64).map(|x| x % 2 == 0).collect())
+    }
+    fn cursor(&self) -> (u16, u16) {
+        self.0.cursor()
+    }
+    fn cursor_trail(&self) -> Vec<CursorSample> {
+        self.0.cursor_trail()
+    }
+}
+
+#[test]
+fn an_effect_is_shown_rows_out_of_the_view_and_told_a_shift() {
+    let mock = Remembers(Mock::new());
+    let grid = base();
+    let notes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut scene = Scene::new();
+    let shared = notes.clone();
+    scene.register_effect(
+        "rows",
+        Box::new(move |_| Ok(Box::new(Rows(shared.clone())))),
+    );
+    let fx = json!({"frame": PANE, "effect": {"name": "rows"}});
+    scene.add(1, spec(fx), ms(0)).unwrap();
+    scene.tick_on(ms(0), &grid, &mock);
+    // Above: not remembered. A row of the view: not given. Under the
+    // view: what the frame remembers.
+    assert_eq!(notes.lock().unwrap()[..], ["none none #.#.#.#.#."]);
+
+    // A shift is told to the effects of the frame, which then look and
+    // render off their period.
+    scene.take_dirty();
+    scene.shift(RAW, 0, 9, 1);
+    assert!(!scene.dirty());
+    scene.shift(PANE, 2, 9, 3);
+    assert!(scene.dirty());
+    scene.tick_on(ms(1), &grid, &mock);
+    assert_eq!(
+        notes.lock().unwrap()[1..],
+        ["shift 2 9 3", "none none #.#.#.#.#."]
+    );
+}
+
+#[test]
+fn a_back_sprite_on_a_panel_is_clipped_to_it_and_replaces_its_colour() {
+    let mock = Mock::new();
+    let mut grid = base();
+    let blue = Style {
+        bg: Color::Indexed(4),
+        ..Style::default()
+    };
+    // A blue panel, columns 4..10 of rows 1..3, with a word on it.
+    for y in 1..3 {
+        for x in 4..10 {
+            grid.put(x, y, Cell::narrow(" ", blue));
+        }
+    }
+    grid.put(5, 1, Cell::narrow("w", blue));
+    let rows = ["####################"; 4];
+    let v = json!({
+        "anchor": {"at": [0, 0]},
+        "content": {"rows": rows, "style": {"fg": "green", "bg": "red"}},
+    });
+
+    // Not on the panel: the colour stops at it, the glyphs show on blue.
+    let mut scene = Scene::new();
+    let id = scene.add(1, spec(v.clone()), ms(0)).unwrap();
+    let out = render(&mut scene, &mock, &grid, 0);
+    assert_eq!(out.cell(3, 1).style.bg, Color::Indexed(1));
+    assert_eq!(out.cell(4, 1).style.bg, Color::Indexed(4));
+    assert_eq!(out.cell(4, 1).text, "#");
+
+    // On the panel: nothing outside; inside, red replaces blue, under
+    // the word too, which keeps its glyph.
+    let patch = serde_json::from_value(json!({"panel": "blue"})).unwrap();
+    scene.update(id, patch, ms(0)).unwrap();
+    let out = render(&mut scene, &mock, &grid, 0);
+    assert_eq!(out.cell(3, 1), grid.cell(3, 1));
+    assert_eq!(out.cell(4, 0), grid.cell(4, 0));
+    assert_eq!(out.cell(4, 1).text, "#");
+    assert_eq!(out.cell(4, 1).style.bg, Color::Indexed(1));
+    assert_eq!(out.cell(5, 1).text, "w");
+    assert_eq!(out.cell(5, 1).style.bg, Color::Indexed(1));
+    assert_eq!(out.cell(9, 2).style.bg, Color::Indexed(1));
+    assert_eq!(out.cell(10, 2), grid.cell(10, 2));
+    let info = &scene.list()[0];
+    assert_eq!(info.panel, Some(ColorSpec(Color::Indexed(4))));
+
+    // In front: clipped the same way.
+    let mut front = v.clone();
+    front["layer"] = json!("front");
+    front["panel"] = json!("blue");
+    let mut scene = Scene::new();
+    scene.add(1, spec(front), ms(0)).unwrap();
+    let out = render(&mut scene, &mock, &grid, 0);
+    assert_eq!(out.cell(3, 1), grid.cell(3, 1));
+    assert_eq!(out.cell(5, 1).text, "#");
+
+    // A glaze on the panel is mixed with the colour laid there.
+    let mut glaze = v.clone();
+    glaze["panel"] = json!("blue");
+    glaze["alpha"] = json!(0.5);
+    glaze["content"] = json!({"rows": rows, "opaque": true, "style": {"bg": "#ffffff"}});
+    glaze["layer"] = json!(-1);
+    let mut under = v;
+    under["panel"] = json!("blue");
+    under["layer"] = json!(-2);
+    under["content"] = json!({"rows": rows, "opaque": true, "style": {"bg": "#000000"}});
+    let mut scene = Scene::new();
+    scene.add(1, spec(under), ms(0)).unwrap();
+    scene.add(1, spec(glaze), ms(0)).unwrap();
+    let out = render(&mut scene, &mock, &grid, 0);
+    assert_eq!(out.cell(6, 2).style.bg, Color::Rgb(128, 128, 128));
+}
+
+#[test]
+fn a_back_glyph_fades_on_an_inverse_cell() {
+    let mock = Mock::new();
+    let mut grid = base();
+    let mut bar = Style {
+        fg: Color::Rgb(0, 0, 200),
+        ..Style::default()
+    };
+    bar.attrs.insert(Attrs::INVERSE);
+    grid.put(2, 0, Cell::narrow(" ", bar));
+    let v = json!({
+        "anchor": {"at": [2, 0]}, "alpha": 0.5,
+        "content": {"rows": ["#"], "style": {"fg": "#ffffff"}},
+    });
+    let mut scene = Scene::new();
+    scene.add(1, spec(v), ms(0)).unwrap();
+    let got = render(&mut scene, &mock, &grid, 0).cell(2, 0).clone();
+    // Still inverse on the bar's colour; the glyph half way to white.
+    assert_eq!(got.text, "#");
+    assert!(got.style.attrs.contains(Attrs::INVERSE));
+    assert_eq!(got.style.fg, Color::Rgb(0, 0, 200));
+    assert_eq!(got.style.bg, Color::Rgb(128, 128, 228));
+}
+
+#[test]
+fn a_client_declares_layer_names() {
+    let mut scene = Scene::new();
+    scene.define_layer("stage", -50).unwrap();
+    scene.define_layer("lights", 50).unwrap();
+    scene.define_layer("stage", -40).unwrap();
+    let names: Vec<(String, i32)> = scene.layers();
+    let names: Vec<(&str, i32)> = names.iter().map(|(n, z)| (n.as_str(), *z)).collect();
+    assert_eq!(
+        names,
+        [
+            ("wallpaper", -100),
+            ("stage", -40),
+            ("back", -1),
+            ("front", 1),
+            ("lights", 50),
+            ("hud", 100)
+        ]
+    );
+    for (name, z) in [
+        ("app", 3),
+        ("stage", 0),
+        ("back", -1),
+        ("12", 4),
+        ("", 1),
+        ("a b", 1),
+    ] {
+        assert!(scene.define_layer(name, z).is_err(), "{name} {z}");
+    }
+    // On the wire a declared name becomes its integer; others are left.
+    let mut v = json!({"content": {"rows": ["x"]}, "layer": "stage"});
+    scene.name_layer(&mut v);
+    assert_eq!(spec(v).layer, Some(Layer(-40)));
+    let mut v = json!({"layer": "front"});
+    scene.name_layer(&mut v);
+    assert_eq!(v, json!({"layer": "front"}));
 }

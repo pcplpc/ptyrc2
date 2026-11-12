@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Brick: a brick breaker that plays alone, around the words.
+"""Bricks: a brick breaker that plays alone, around the words.
 
     ptyrc run vim long-file.txt      # or less, man
-    ptyrc-app brick
-    ptyrc-app brick -r -b            # rules and bonuses
-    ptyrc-app brick -a               # the arcade
+    ptyrc-app bricks
+    ptyrc-app bricks -r -b           # rules and bonuses
+    ptyrc-app bricks -a              # the arcade
 
 What it shows:
 
@@ -896,20 +896,25 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     frame = _cli.pick(pilot, args.frame)
     # Its own dice: the particles do not change the game of a seed.
     stage = _bricks.Stage(pilot, frame, random.Random(args.seed), args.effects)
+    # The walls are read when the driver says the text changed or the
+    # view moved (topic `text`), not at each step.
+    sight = _cli.Sight(pilot, frame)
+    walls: set[Cell] = set()
     for _ in _cli.ticks(1.0 / args.speed, seconds):
-        if not _cli.on_screen(frame):
+        if not sight.look():
             continue
         box = view(frame)
-        with _cli.in_sight():
-            game.step(box, walls_of(frame.text(), box[0], box[1]))
-        with _cli.in_sight(), pilot.batch():
+        if sight.changed:
+            walls = walls_of(sight.rows, box[0], box[1])
+        game.step(box, walls)
+        with sight.drawing(), pilot.batch():
             stage.show(game, box)
 
 
 def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> int:
     """`seconds`: stop after this long (tests); else until interrupted."""
     out = _cli.parser(
-        "brick", "A brick breaker that plays alone around the words.", frame="largest"
+        "bricks", "A brick breaker that plays alone around the words.", frame="largest"
     )
     out.add_argument(
         "--speed", type=float, default=16.0, help="steps per second [default: 16]"

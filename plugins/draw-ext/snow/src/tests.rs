@@ -121,21 +121,25 @@ fn snow_is_drawn_in_eighths_and_far_flakes_are_faint() {
     let mut snow = make(json!({"rate": 0}));
     look(&mut snow, &TEXT, 0, &[], None);
     run(&mut snow, 8, 0, 0);
-    snow.put(8, 2, 3.0);
-    snow.put(9, 2, 8.0);
+    // A profile within `SLOPE`: it does not slump.
+    snow.put(8, 2, 2.0);
+    snow.put(9, 2, 3.5);
+    snow.put(10, 2, 2.0);
     snow.flakes.push(Flake {
         x: 30.5,
         y: 1.0,
         v: 0.0,
+        drift: 0.0,
         phase: 0.0,
         turn: 0.0,
         far: true,
     });
     let canvas = run(&mut snow, 8, 80, 80);
     let mut want = Canvas::new(40, 8);
-    want.put_faded(30, 1, SPECK, &StyleSpec::fg(PALE), FAINT);
-    want.put(8, 2, "▃", &StyleSpec::fg(WHITE));
-    want.put(9, 2, "█", &StyleSpec::fg(WHITE));
+    want.put_faded(30, 1, SPECKS[0], &StyleSpec::fg(PALE), FAINT);
+    want.put(8, 2, "▂", &StyleSpec::fg(WHITE));
+    want.put(9, 2, "▄", &StyleSpec::fg(WHITE));
+    want.put(10, 2, "▂", &StyleSpec::fg(WHITE));
     assert_eq!(canvas, want);
 }
 
@@ -189,17 +193,21 @@ fn snow_written_over_is_gone_and_snow_let_go_falls() {
     look(&mut snow, &rows, 0, &[], None);
     run(&mut snow, 8, 80, 80);
     assert_eq!(row(&snow, 2, 8, 12), 0.0);
-    assert_eq!(row(&snow, 2, 12, 16), 4.0 * 8.0);
+    assert_eq!(row(&snow, 2, 12, 40), 4.0 * 8.0);
     // The line under the rest goes: it falls, and lies on the floor.
     rows[3] = "";
     look(&mut snow, &rows, 0, &[], None);
     run(&mut snow, 8, 160, 160);
-    assert_eq!(row(&snow, 2, 12, 16), 0.0);
-    assert_eq!(snow.flakes.len(), 16);
+    assert_eq!(row(&snow, 2, 0, 40), 0.0);
+    assert!(snow.flakes.len() >= 11, "{}", snow.flakes.len());
     run(&mut snow, 8, 240, 6000);
     assert!(snow.flakes.is_empty());
-    assert!(snow.lying() >= 28.0 && snow.lying() <= 32.0);
-    assert_eq!(row(&snow, 7, 8, 20) + row(&snow, 6, 8, 20), snow.lying());
+    assert!(
+        snow.lying() >= 28.0 && snow.lying() <= 32.0,
+        "{}",
+        snow.lying()
+    );
+    assert_eq!(row(&snow, 7, 0, 40) + row(&snow, 6, 0, 40), snow.lying());
 }
 
 #[test]
@@ -217,7 +225,7 @@ fn the_snow_scrolls_with_the_text() {
     rows[1] = TEXT[3];
     look(&mut snow, &rows, 2, &[], None);
     run(&mut snow, 8, 80, 80);
-    assert_eq!(row(&snow, 0, 8, 16), 8.0 * 5.0);
+    assert_eq!(row(&snow, 0, 0, 40), 8.0 * 5.0);
     assert_eq!(row(&snow, 5, 8, 16), 0.0);
     assert!(!snow.flakes.is_empty());
     // Away and back: the snow of the line is where it was.
@@ -225,7 +233,7 @@ fn the_snow_scrolls_with_the_text() {
     run(&mut snow, 8, 160, 160);
     look(&mut snow, &TEXT, 0, &[], None);
     run(&mut snow, 8, 240, 240);
-    assert_eq!(row(&snow, 2, 8, 16), 8.0 * 5.0);
+    assert_eq!(row(&snow, 2, 0, 40), 8.0 * 5.0);
     // Far away: forgotten.
     look(&mut snow, &[""; 8], 100_000, &[], None);
     assert!(snow.lying.is_empty());
@@ -268,4 +276,22 @@ fn tuned_checked_and_ended() {
     assert!(late.render(Duration::from_millis(0), &mut canvas));
     assert!(late.render(Duration::from_secs(3600), &mut canvas));
     assert!(late.flakes.len() <= 10);
+}
+
+#[test]
+fn a_shift_moves_the_snow_of_its_rows() {
+    let mut snow = make(json!({"rate": 0}));
+    look(&mut snow, &TEXT, 0, &[], None);
+    run(&mut snow, 8, 0, 0);
+    for x in 8..16 {
+        snow.put(x, 2, 5.0);
+    }
+    // Two rows are spliced in above the line: it is two rows lower.
+    snow.shift(1, 100, 2);
+    let mut rows = [""; 8];
+    rows[5] = TEXT[3];
+    look(&mut snow, &rows, 0, &[], None);
+    run(&mut snow, 8, 80, 80);
+    assert_eq!(row(&snow, 4, 0, 40), 8.0 * 5.0);
+    assert_eq!(row(&snow, 2, 8, 16), 0.0);
 }

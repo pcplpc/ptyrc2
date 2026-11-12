@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 
@@ -158,10 +159,20 @@ class Locator:
             width = self._pilot.size[0] - col
         return self._pilot.text(rect=[col, row, width, 1])[0]
 
-    def click(self, button: str = "left") -> None:
-        """Click on the place, as the app's mouse mode wants it."""
+    def click(
+        self,
+        button: str = "left",
+        *,
+        mods: Iterable[str] = (),
+        count: int = 1,
+        to: Locator | tuple[int, int] | None = None,
+    ) -> None:
+        """Click on the place, as the app's mouse mode wants it: see
+        `Pilot.click`. `to`: drag to that place or screen cell."""
         col, row = self._cell()
-        self._pilot.click(col, row, button)
+        if isinstance(to, Locator):
+            to = to._cell()
+        self._pilot.click(col, row, button, mods=mods, count=count, to=to)
 
     def draw(self, rows: Any = None, **kw: Any) -> Sprite:
         """A sprite at the place, fixed in the frame: it scrolls with the
@@ -204,7 +215,8 @@ class Tape:
 
     def seek(self, t: float) -> dict[str, Any]:
         """Run to tape time `t` without waiting, then pause. Past the end
-        of the tape, time passes and nothing is fed."""
+        of the tape, time passes and nothing is fed. Back in time: the
+        tape is replayed from its start, and the sprites are gone."""
         return self._pilot.call("tape.seek", t=t)
 
     def play(self, speed: float | None = None) -> dict[str, Any]:
@@ -297,10 +309,75 @@ class Tools:
             ignore_case=ignore_case,
         )
 
-    def click(self, x: int, y: int, button: str = "left") -> None:
+    def click(
+        self,
+        x: int,
+        y: int,
+        button: str = "left",
+        *,
+        mods: Iterable[str] = (),
+        count: int = 1,
+        to: tuple[int, int] | None = None,
+    ) -> None:
         """Click on a screen cell: `left`, `middle`, `right`, `wheel-up`,
-        `wheel-down`. Refused when the app did not ask for the mouse."""
-        self.call("input.click", x=x, y=y, button=button)
+        `wheel-down`, `wheel-left`, `wheel-right`. `mods`: `shift`,
+        `alt`, `ctrl` held. `count`: 2 is a double click. `to`: a drag,
+        released on that cell. Refused when the app did not ask for the
+        mouse."""
+        params: dict[str, Any] = {"x": x, "y": y, "button": button}
+        if mods := list(mods):
+            params["mods"] = mods
+        if count != 1:
+            params["count"] = count
+        if to is not None:
+            params["to"] = list(to)
+        self.call("input.click", **params)
+
+    def clicks(
+        self, *sprites: Any, timeout: float | None = None, presses: bool = True
+    ) -> Iterator[dict[str, Any]]:
+        """Clicks of the host mouse on sprites, as they come: `{"sprite",
+        "button", "action", "mods", "at", "x", "y", "frame", "pos"}`;
+        `at` is the cell in the sprite, `pos` the one in `frame`. Those
+        on `sprites` (sprites or ids), or on any. `presses`: only the
+        button going down; else releases, drags and the wheel too.
+        Silence for `timeout` seconds ends it.
+
+        The driver asks the host terminal for mouse reports while a
+        client listens; a click that is on no sprite goes to the app.
+
+            for click in pilot.clicks(button):
+                button.update(content=["[ ok ]"])
+        """
+        ids = {getattr(sprite, "id", sprite) for sprite in sprites}
+        self.subscribe("mouse")
+        while (event := self.event(timeout)) is not None:
+            topic, data = event
+            if topic != "mouse" or (ids and data["sprite"] not in ids):
+                continue
+            if presses and data["action"] != "press":
+                continue
+            yield data
+
+    def on_click(
+        self, sprite: Any, handler: Callable[[dict[str, Any]], Any]
+    ) -> threading.Thread:
+        """Call `handler(click)` for each press on `sprite`, from a thread
+        of its own, until the session ends or `handler` returns False.
+        The events of this pilot are read by that thread: use another
+        pilot for other topics."""
+
+        def run() -> None:
+            try:
+                for click in self.clicks(sprite):
+                    if handler(click) is False:
+                        return
+            except PtyrcError:
+                pass
+
+        thread = threading.Thread(target=run, name="ptyrc-clicks", daemon=True)
+        thread.start()
+        return thread
 
     def grab(self, *keys: str, escape: str = "ctrl+]") -> None:
         """Take keys of the host keyboard before the app: those named, or

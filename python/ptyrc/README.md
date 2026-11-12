@@ -35,7 +35,7 @@ with Pilot.spawn(["vim", "notes.md"], size=(100, 30)) as pilot:
 | read | `text`, `cells`, `find`, `cursor`, `wait_for`, `info`, `size` |
 | type | `send`, `keys`, `paste`, `write` |
 | frames | `frames`, `panes`, `frame`, `frame_at`; `Frame.text`, `known`, `find`, `heat`, `heat_classes`, `idle`, `check_idle`, `is_idle`, `to_screen`, `to_frame`, `draw` |
-| draw | `draw`, `put`, `effect`, `ext`, `sprites`, `clear`; `Sprite.set`, `ext`, `move`, `update`, `info`, `remove` |
+| draw | `draw`, `put`, `effect`, `ext`, `sprites`, `clear`; `Sprite.set`, `ext`, `move`, `update`, `tune`, `info`, `remove` |
 | other | `batch`, `events`, `event`, `subscribe`, `resize`, `debug_overlay`, `dump`, `call` |
 | tools | `locator`, `Frame.locator`, `click`, `grab`, `release`, `shown`, `snapshot`; `spawn(record=)`, `Pilot.replay`, `tape` |
 

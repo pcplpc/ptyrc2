@@ -8,7 +8,7 @@ import threading
 import time
 
 import pytest
-from ptyrc import Pilot, PtyrcError
+from ptyrc import Pilot, PtyrcError, Sprite
 from ptyrc_apps import snow
 
 DRIFT = "▁▂▃▄▅▆▇█"
@@ -24,6 +24,21 @@ def test_gust() -> None:
     winds = [snow.gust(1.0, rng) for _ in range(200)]
     assert all(-1.0 <= w <= 2.0 and w != 0 for w in winds)
     assert sum(w > 0 for w in winds) > 130 and any(w < 0 for w in winds)
+
+
+def test_gusts() -> None:
+    """The beats of `_cli.follow`: a wait first, then a wind a beat."""
+
+    winds: list[float] = []
+
+    class Vane:
+        def tune(self, **params: float) -> None:
+            winds.append(params["wind"])
+
+    beats = snow.gusts(Vane(), 1.0, random.Random(4))  # type: ignore[arg-type]
+    lo, hi = snow.GUST
+    assert lo <= next(beats) <= hi and winds == []
+    assert lo <= next(beats) <= hi and len(winds) == 1
 
 
 def test_snow(session: Pilot) -> None:
@@ -53,18 +68,11 @@ def test_snow(session: Pilot) -> None:
         # The effect is tuned in place: the snow stays; a bad value is
         # refused by the effect, with its words.
         (sprite,) = session.sprites()
-        session.call(
-            "draw.update",
-            id=sprite["id"],
-            effect={"name": "snow", "params": {"rate": 0}},
-        )
+        flakes = Sprite(session, sprite["id"])
+        flakes.tune(rate=0)
         assert lying(session)[3] >= 20
         with pytest.raises(PtyrcError, match="wind is out of range"):
-            session.call(
-                "draw.update",
-                id=sprite["id"],
-                effect={"name": "snow", "params": {"wind": 99}},
-            )
+            flakes.tune(wind=99)
         # The line changes: its snow melts; the floor keeps its own.
         session.send("clear; printf '\\n\\n\\n\\n          %040d\\n' 1\n")
         session.wait_for("0" * 39 + "1", frame="raw")

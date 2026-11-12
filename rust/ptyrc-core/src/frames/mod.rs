@@ -2236,6 +2236,20 @@ impl Surfaces for Frames {
         Some((best.0, best.1))
     }
 
+    fn ink_row(&self, id: FrameId, y: i64, x: i64, w: u16) -> Option<Vec<bool>> {
+        let stored = self.panes.get(&id)?.ext.lines.get(&y)?;
+        let mut ink = vec![false; w as usize];
+        for (k, ch) in stored.line.text.chars().enumerate() {
+            let col = stored.x0 + stored.line.col_of(k) as i64 - x;
+            for col in col..col + if is_wide(ch) { 2 } else { 1 } {
+                if ch != ' ' && col >= 0 && col < w as i64 {
+                    ink[col as usize] = true;
+                }
+            }
+        }
+        Some(ink)
+    }
+
     fn cursor(&self) -> (u16, u16) {
         (self.cursor.col, self.cursor.row)
     }

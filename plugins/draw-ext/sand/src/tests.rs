@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use super::*;
-use ptyrc_vt::Grid;
+use ptyrc_core::types::{
+    CursorSample, FrameId, FrameSel, Prefer, SurfaceInfo, Surfaces, TextMatch, TextQuery,
+};
+use ptyrc_vt::{Grid, Rect};
 use serde_json::json;
 
 fn make(params: serde_json::Value) -> Sand {
@@ -394,6 +397,7 @@ fn sand_out_of_sight_is_bounded() {
         sand.set(0, 0, Dot::Grain(0, false));
         sand.set(0, 4, Dot::Grain(0, false));
         look_at(&mut sand, &["", "####"], 2 * k + 2);
+        run(&mut sand, 4, 2, 0, 0);
     }
     assert_eq!(sand.attic.len(), ATTIC);
     // The nearest rows are the ones kept.
@@ -459,4 +463,141 @@ fn a_heavy_stream_spreads_and_does_not_choke() {
     run(&mut light, 60, 20, 0, 4800);
     let rows = super::tests::rows(&light);
     assert!(rows[19].trim().len() < 30, "{rows:#?}");
+}
+
+/// A frame that remembers rows of text, by frame row.
+struct Memory(Vec<(i64, &'static str)>);
+
+impl Surfaces for Memory {
+    fn info(&self, _id: FrameId) -> Option<SurfaceInfo> {
+        None
+    }
+    fn resolve(&self, _sel: &FrameSel) -> Option<FrameId> {
+        None
+    }
+    fn find(&self, _id: FrameId, _query: &TextQuery, _known: bool) -> Vec<TextMatch> {
+        Vec::new()
+    }
+    fn place(&self, _: FrameId, _: u16, _: u16, _: Prefer, _: &[Rect]) -> Option<(u16, u16)> {
+        None
+    }
+    fn ink_row(&self, _id: FrameId, y: i64, x: i64, w: u16) -> Option<Vec<bool>> {
+        let (_, text) = self.0.iter().find(|(row, _)| *row == y)?;
+        let ink = |col: i64| text.chars().nth(col as usize).is_some_and(|c| c != ' ');
+        Some((x..x + w as i64).map(|col| col >= 0 && ink(col)).collect())
+    }
+    fn cursor(&self) -> (u16, u16) {
+        (0, 0)
+    }
+    fn cursor_trail(&self) -> Vec<CursorSample> {
+        Vec::new()
+    }
+}
+
+/// `look_at`, the canvas at the frame column `ox` too.
+fn look_xy(sand: &mut Sand, rows: &[&str], at: (i64, i64)) {
+    let grid = Grid::from_lines(64, rows);
+    let mut under = Under::of(&grid);
+    under.origin = at;
+    sand.look(&under);
+}
+
+#[test]
+fn a_sideways_scroll_keeps_the_grains() {
+    let text = ["", "", "", "################"];
+    let mut sand = make(json!({"rate": 100}));
+    look_xy(&mut sand, &text, (0, 0));
+    run(&mut sand, 16, 4, 0, 2400);
+    sand.params.rate = 0.0;
+    run(&mut sand, 16, 4, 2400, 4800);
+    let (before, all) = (rows(&sand), sand.grains());
+    assert!(all > 100);
+
+    // Ten columns to the right: the left of the pile is out, and kept.
+    look_xy(&mut sand, &text, (10, 0));
+    run(&mut sand, 16, 4, 4800, 4800);
+    let part = sand.grains();
+    assert!(part > 0 && part < all, "{part} of {all}");
+    assert_eq!(rows(&sand)[2][..6], before[2][10..]);
+    // Further, then back: all of it, where it was.
+    look_xy(&mut sand, &text, (40, 0));
+    run(&mut sand, 16, 4, 4800, 4800);
+    assert_eq!(sand.grains(), 0);
+    look_xy(&mut sand, &text, (0, 0));
+    run(&mut sand, 16, 4, 4800, 4800);
+    assert_eq!(sand.grains(), all);
+    assert_eq!(rows(&sand)[..3], before[..3]);
+    assert!(sand.attic.is_empty());
+}
+
+#[test]
+fn a_row_out_of_sight_is_bounded_in_width() {
+    let mut sand = make(json!({"rate": 0}));
+    look_xy(&mut sand, &["", ""], (0, 0));
+    run(&mut sand, 4, 2, 0, 0);
+    for k in 1..400 {
+        sand.set(0, 7, Dot::Grain(0, false));
+        look_xy(&mut sand, &["", ""], (4 * k, 0));
+        run(&mut sand, 4, 2, 0, 0);
+    }
+    let strip = &sand.attic[&1];
+    assert!(strip.w > WIDE / 2 && strip.w <= WIDE, "{}", strip.w);
+    assert!(strip.x0 > 0);
+}
+
+#[test]
+fn a_shift_moves_the_grains_of_its_rows() {
+    let text = ["", "", "", "   ##########", "", ""];
+    let mut sand = make(json!({"rate": 100}));
+    look_at(&mut sand, &text, 0);
+    run(&mut sand, 16, 6, 0, 2880);
+    sand.params.rate = 0.0;
+    run(&mut sand, 16, 6, 2880, 4800);
+    let before = rows(&sand);
+
+    // Two rows are spliced in over the text: rows 1.. are two lower.
+    Effect::shift(&mut sand, 1, 100, 2);
+    look_at(&mut sand, &["", "", "", "", "", "   ##########"], 0);
+    run(&mut sand, 16, 6, 4800, 4800);
+    let after = rows(&sand);
+    assert_eq!(after[4], before[2]);
+    assert_eq!(after[3], before[1]);
+    // Rows out of the canvas too.
+    Effect::shift(&mut sand, 1, 100, 40);
+    look_at(&mut sand, &[""], 0);
+    run(&mut sand, 16, 6, 4800, 4800);
+    assert_eq!(sand.attic.keys().next(), Some(&43));
+}
+
+#[test]
+fn sand_falls_out_of_sight_onto_remembered_text() {
+    // The frame remembers three rows under the view; the second is text.
+    let memory = Memory(vec![(4, ""), (5, "################"), (6, "")]);
+    let grid = Grid::from_lines(64, &["", "", "", ""]);
+    let mut sand = make(json!({"rate": 100}));
+    let below = Grid::from_lines(64, &["", "################", "", ""]);
+    let look = |sand: &mut Sand, oy: i64| {
+        let grid = if oy == 0 { &grid } else { &below };
+        let mut under = Under::of(grid).with_frame(&memory, 1);
+        under.origin = (0, oy);
+        sand.look(&under);
+    };
+    look(&mut sand, 0);
+    for k in 0..40 {
+        run(&mut sand, 16, 4, k * 48, k * 48);
+        look(&mut sand, 0);
+    }
+    // The world is the view and the three rows; the pile is on row 4,
+    // over the text of row 5, not on the bottom of the view.
+    assert_eq!((sand.h, sand.top, sand.ch), (7, 0, 4));
+    assert!(count(&sand, 4, 0, 16) > 20, "{:#?}", rows(&sand));
+    assert_eq!(count(&sand, 6, 0, 16), 0);
+
+    // The view goes down four rows: the pile is there.
+    let pile = rows(&sand)[4].clone();
+    sand.params.rate = 0.0;
+    look(&mut sand, 4);
+    run(&mut sand, 16, 4, 1920, 1920);
+    assert_eq!(sand.top, 0);
+    assert_eq!(rows(&sand)[0], pile);
 }

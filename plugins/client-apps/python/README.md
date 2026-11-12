@@ -14,15 +14,14 @@ python -m ptyrc_apps.clock -s NAME
 | `confetti` | a native effect started with one call, behind the text; `--bursts N` at once at random offsets, each on a cold spot of the heatmap; persistent sprites: the app exits, the driver plays them; `--party`: a round every 3 s |
 | `clock` | automatic placement, the front layer, a sprite updated in place, a draw extension |
 | `flower` | flowers of random size and colours planted on cold cells next to the matches of a word (`--count N`, 0: all), the word bolded with a tint; `-a`: anywhere, next to `--count` words drawn from the screen (default 5; 0: 10 to 30, redrawn each minute), one renewed every 10 s, no bold; grown by the client, swayed by the driver; frame coordinates |
-| `fishes` | sprites in frame coordinates: they scroll with the text; one scrolled out of the view goes after a few seconds and comes back behind the text; half of them shy, hiding behind the text; the cursor read each tick, the text once a second; one batch per tick. `-d`: decorations standing on the text, behind or in front of the fishes; `-b`: bubbles, each one request with a `motion`; `-r`: random species, events (a creature crossing, an object sinking, a hook); `-a`: all. Populated areas are remembered in frame cells (`_reef.Reef`) |
-| `snake` | the screen read as a map: glyphs are walls; one sprite redrawn in place each step. `-e`: particles, each one request with a `motion`, golden apples, a shaded body; `-x`: foes that bite the tail off; `-l`: beams from wall to wall that burn what they cross; `-a`: all (`_arcade`) |
-| `brick` | a brick breaker on the screen read as a map: the ball bounces off the glyphs, the sides of the view and the bricks; the top and the bottom are open. One racket, `[===]`, moved in two dimensions and hit on either side: it foresees where the ball leaves and gets in its way. Bricks in frame cells, most under a line of text, remembered when scrolled away; a view short of bricks gets a new area; a ball out: the score at 0. `-r`: hard, loose, bumper and bomb bricks; `-b`: capsules (wide, small, twin, three balls, fast, fire); `-m`: two rackets, two scores; `-e`: particles, a trail, a best score; `-a`: all (`_bricks`) |
-| `blocks` | falling pieces on the screen read as a map: a line is a run of free cells between two walls or sides of the view; full, it goes. Braille as sub-cells: a block is `⣿`, a piece falls a dot at a time. One sprite for the heap, one a piece; frame coordinates. The computer plays (a breadth-first search over the positions and turns of a piece). `--sideways`: from the right, lines are columns; `--count N` pieces at once; `--cursor`: the nearest piece lands under the cursor; `--chains`: a broken block breaks those of its colour that touch it; `--effects`: particles; `--score`: shown, and the game speeds up with it; `-a`: the last three (`_blocks`) |
+| `fishes` | sprites in frame coordinates: they scroll with the text; one scrolled out of the view goes after a few seconds and comes back behind the text; half of them shy, hiding behind the text; the cursor and the text told by the driver (`_cli.Sight`), not asked; one batch per tick. `-d`: decorations standing on the text, behind or in front of the fishes; `-b`: bubbles, each one request with a `motion`; `-r`: random species, events (a creature crossing, an object sinking, a hook); `-a`: all. Populated areas are remembered in frame cells (`_reef.Reef`) |
+| `snake` | the screen read as a map: glyphs are walls, read again when the topic `text` says so (`_cli.Sight`); one sprite redrawn in place each step. `-e`: particles, each one request with a `motion`, golden apples, a shaded body, the score; `-x`: foes that bite the tail off; `-l`: beams from wall to wall that burn what they cross; `-a`: all (`_arcade`) |
+| `bricks` | a brick breaker on the screen read as a map: the ball bounces off the glyphs, the sides of the view and the bricks; the top and the bottom are open. One racket, `[===]`, moved in two dimensions and hit on either side: it foresees where the ball leaves and gets in its way. Bricks in frame cells, most under a line of text, remembered when scrolled away; a view short of bricks gets a new area; a ball out: the score at 0. `-r`: hard, loose, bumper and bomb bricks; `-b`: capsules (wide, small, twin, three balls, fast, fire); `-m`: two rackets, two scores; `-e`: particles, a trail, a best score; `-a`: all (`_bricks`) |
 | `sand` | `Pilot.wait_idle` to choose a pane; a native simulation from a draw extension that reads the pane's cells, its walls, by itself; the pile is fixed on frame rows and scrolls with the text; `--cursor` pours on the cursor's column |
 | `cat` | an app driven by events (`idle`, `cursor`, `screen`, `frames`), asleep on the socket between two things to do; it stands on lines of text in frame coordinates (`cat.ledges`), sleeps when the pane is idle, and jumps away from the cursor, from text written over it (`covered`) and back into the view after a scroll (`visible`) |
 | `marks` | a highlighter: one tint per match of each pattern (`-e` regex, `-i`), in frame coordinates and on remembered lines too (`find(known=True)`), so the driver scrolls them with the text; searches of a look in one batch; topic `draw`; a display of the counts placed by the driver |
 | `rain` | a native effect from a draw extension that sees the text: drops fall behind it and splash on the top of its lines, on the cursor and on the floor; less rain on columns that changed in the last 10 s (the heat, given to the effect) |
-| `snow` | a native effect that sees cells and heat: snow lies over the lines of text, a cell away from the words of its own row, and on the floor; it melts where the screen changed lately and around the cursor; it lies on frame rows, so it scrolls with the text; the wind is tuned in place (`Sprite.update(effect=...)`), the effect keeps its state |
+| `snow` | a native effect that sees cells and heat: snow lies over the lines of text, a cell away from the words of its own row, and on the floor, in smooth piles; it melts where the screen changed lately and around the cursor; it lies on frame rows, so it scrolls with the text; the wind is tuned in place (`Sprite.tune(wind=...)`), the effect keeps its state |
 
 `scripts/demo-apps.sh` runs them on a scrolling vim buffer;
 `scripts/demo-frames.sh` gives each pane of a tmux session its own
@@ -66,7 +65,7 @@ What to know:
 - **When the frame leaves**: a pane out of sight (another tmux window)
   keeps its sprites; drawing on it answers `not-usable`. A loop starts
   each step with `_cli.on_screen(frame)` and wraps it in
-  `_cli.in_sight()`.
+  `_cli.in_sight()`; or with `sight.look()` and `sight.drawing()`.
 - **Idle**: `frame.is_idle` is true once 80 % of a pane has been still
   for 10 s. A big animation waits for it (`pilot.wait_idle`, `sand.py`);
   topic `idle` says when it comes and goes (`cat.py`).
@@ -86,12 +85,23 @@ What to know:
   the origin after a scroll; a row that scrolls into view is not a
   change. Topic `cursor` tells the cursor in frame cells (`frame`,
   `pos`).
+- **A game on a tick, a map on events**: `_cli.Sight(pilot, frame)`
+  subscribes to `frames`, `text` and, when asked, `cursor`. Each tick
+  starts with `sight.look()`: it takes the events waiting and reads
+  the text of the view again only when told (`sight.changed`,
+  `sight.rows`, `sight.cursor`). A quiet screen costs no read
+  (`snake.py`, `bricks.py`, `fishes.py`, `flower.py`).
 - **A frame replaced**: a pane keeps its frame through a resize, a
   nearly empty one too when it is the only such pane. Otherwise it gets
-  a new frame, and the sprites stay with the old, inactive one.
-  `sand.follow` waits on the topic `frames`, `sand.heir` finds the new
-  pane in the event's data; `Sprite.update(frame=...)` moves the
-  sprite, state kept.
+  a new frame, and the sprites stay with the old one.
+  `_cli.follow` waits on the topic `frames`, `_cli.heir` finds the new
+  pane in the event's data, in proportion of the resize;
+  `Sprite.update(frame=...)` moves the sprite, state kept. Its `beats`
+  are the app's own work between two events (`snow.py`).
+- **An effect tuned**: `Sprite.tune(wind=2)` gives a running effect
+  new parameters; it keeps its state (`snow.py`).
+- **A score**: `_arcade.Board`, one sprite in view cells with opaque
+  blanks, sent when it changes.
 - **What**: `rows` (a space is transparent), `cells` (styled runs),
   `frames` (an animation the driver plays alone), `effect` (a native
   generator), `pilot.ext(...)` (a draw extension).
@@ -111,10 +121,11 @@ What to know:
   or a dict filled when the batch is sent (`marks.py`).
 
 `_cli.ticks(period)` paces a loop and yields the measured step;
-`_cli.hold(pilot)` keeps an app with nothing to send connected.
+`_cli.hold(pilot)` keeps an app with nothing to send connected;
+`_cli.follow` does, and follows a frame replaced.
 
 Read `confetti.py`, `clock.py` and `rain.py` first, then `marks.py`,
-`cat.py`, `flower.py`, `fishes.py`, `snake.py`, `brick.py`, `blocks.py`,
+`cat.py`, `flower.py`, `fishes.py`, `snake.py`, `bricks.py`,
 `sand.py`.
 
 ## Tests

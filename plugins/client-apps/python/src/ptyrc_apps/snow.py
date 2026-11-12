@@ -9,30 +9,30 @@ What it shows:
 - A native effect from a draw extension (`plugins/draw-ext/snow`): one
   request starts it, the driver plays it; the app only stays connected.
 - An effect that sees the cells under it: snow lies over a line of
-  text, a cell away from the words of its own row, and on the floor;
-  flakes pass behind the text.
+  text, a cell away from the words of its own row, and on the floor,
+  in smooth piles; flakes pass behind the text.
 - An effect that sees the heat: the snow melts where the screen
   changed lately, and around the cursor. Type, and it goes.
 - Frame rows: the snow lies on the rows of the frame, so it scrolls
   with the text; snow that lost its line falls again.
 - An effect tuned in place: every few seconds the app sends a new
-  wind (`Sprite.update(effect=...)`); the flakes in the air and the
-  snow on the lines stay.
+  wind (`Sprite.tune(wind=...)`); the flakes in the air and the snow
+  on the lines stay.
+- `_cli.follow`: the app sleeps on the socket between two gusts, and
+  follows its frame when a resize replaces it.
 """
 
 from __future__ import annotations
 
 import argparse
 import random
-import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 
 from ptyrc import Frame, Pilot, Sprite
 
 from . import _cli
-from .sand import heir
 
-__all__ = ["gust", "main", "snow"]
+__all__ = ["gust", "gusts", "main", "snow"]
 
 GUST = (6.0, 15.0)  # seconds between two winds
 
@@ -49,37 +49,18 @@ def gust(wind: float, rng: random.Random) -> float:
     return round(way * wind * rng.uniform(0.2, 2.0), 2)
 
 
+def gusts(sprite: Sprite, wind: float, rng: random.Random) -> Iterator[float]:
+    """The beats of `_cli.follow`: a wait, then another wind."""
+    while True:
+        yield rng.uniform(*GUST)
+        sprite.tune(wind=gust(wind, rng))
+
+
 def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
-    """As `sand.follow`, with a gust now and then."""
-    rng = random.Random()
     frame = _cli.pick(pilot, args.frame)
     sprite = snow(pilot, frame, args.rate, args.wind)
-    end = None if seconds is None else time.monotonic() + seconds
-    blow = time.monotonic() + rng.uniform(*GUST) if args.wind else None
-    pilot.subscribe("frames", "exit")
-    while True:
-        now = time.monotonic()
-        if end is not None and now >= end:
-            return
-        if blow is not None and now >= blow:
-            blow = now + rng.uniform(*GUST)
-            params = {"wind": gust(args.wind, rng)}
-            sprite.update(effect={"name": "snow", "params": params})
-        waits = [t - now for t in (end, blow) if t is not None]
-        event = pilot.event(timeout=min(waits) if waits else None)
-        if event is None:
-            continue
-        if event[0] == "exit":
-            return
-        if event[0] != "frames" or frame.kind == "raw":
-            continue
-        frames = [Frame(pilot, info) for info in event[1]["frames"]]
-        mine = next((f for f in frames if f.id == frame.id), None)
-        if mine is not None and mine.state != "inactive":
-            continue  # in sight, or settling: the driver keeps the sprite
-        if (new := heir(frame, frames)) is not None:
-            sprite.update(frame=new.id)
-            frame = new
+    beats = gusts(sprite, args.wind, random.Random()) if args.wind else None
+    _cli.follow(pilot, frame, sprite, seconds, beats)
 
 
 def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> int:
@@ -88,14 +69,14 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
     out.add_argument(
         "--rate",
         type=float,
-        default=14.0,
-        help="flakes per second over 80 columns [default: 14]",
+        default=7.0,
+        help="flakes per second over 80 columns [default: 7]",
     )
     out.add_argument(
         "--wind",
         type=float,
-        default=0.6,
-        help="drift to the right, columns per second; it gusts; 0: none [default: 0.6]",
+        default=-1.0,
+        help="drift, columns per second, < 0 to the left; it gusts; 0: none [default: -1]",
     )
     return _cli.run(
         lambda pilot, args: app(pilot, args, seconds), _cli.parse(out, argv)

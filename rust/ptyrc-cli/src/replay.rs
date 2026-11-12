@@ -31,9 +31,12 @@ pub struct Replay {
     /// Pause at the end of the tape in place of leaving
     #[arg(long)]
     hold: bool,
-    /// Generic heuristics only: no per-app preset
+    /// Generic heuristics only: no per-app preset [default: as recorded]
     #[arg(long)]
     no_presets: bool,
+    /// With the per-app presets, whatever the tape says
+    #[arg(long, conflicts_with = "no_presets")]
+    presets: bool,
     /// Print a snapshot at each `--at` as JSON, then leave
     #[arg(long)]
     snap: bool,
@@ -91,7 +94,7 @@ pub fn replay(args: Replay) -> Done {
         headless: true,
         ..Default::default()
     };
-    let presets = !args.no_presets;
+    let presets = args.presets || (!args.no_presets && tape.header.presets);
     if !snaps {
         let replay = ptyrc_server::Replay {
             tape,
@@ -100,7 +103,8 @@ pub fn replay(args: Replay) -> Done {
             paused: args.step,
             hold: args.hold,
         };
-        let status = ptyrc_server::replay(config, replay, plugins::engine(false, presets))?;
+        let factory = Box::new(move || plugins::engine(false, presets));
+        let status = ptyrc_server::replay(config, replay, factory)?;
         return Ok(ExitCode::from(status.clamp(0, 255) as u8));
     }
 
@@ -159,7 +163,8 @@ pub fn replay(args: Replay) -> Done {
         hold: true,
     };
     let driver = std::thread::spawn(move || {
-        ptyrc_server::replay(config, replay, plugins::engine(false, presets))
+        let factory = Box::new(move || plugins::engine(false, presets));
+        ptyrc_server::replay(config, replay, factory)
     });
     let socket = session::socket_path(&name);
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -298,7 +303,8 @@ pub enum TapeVerb {
         #[arg(default_value_t = 1)]
         records: u64,
     },
-    /// Run to a tape time without waiting, then pause: seconds, `end`, `end+N`
+    /// Run to a tape time without waiting, then pause: seconds, `end`,
+    /// `end+N`; back in time: from the start of the tape
     Seek { t: String },
     /// Go on, at SPEED tape seconds per second (0: no waiting)
     Play { speed: Option<f64> },

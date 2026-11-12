@@ -49,6 +49,8 @@ pub(crate) struct Player {
     pub status: i32,
     /// Requests answered at the next pause.
     pub waiters: Vec<Token>,
+    /// A seek went back: the session starts again, from an empty screen.
+    rewound: bool,
 }
 
 impl Player {
@@ -65,7 +67,17 @@ impl Player {
             hold: replay.hold,
             status: 0,
             waiters: Vec::new(),
+            rewound: false,
         }
+    }
+
+    pub fn tape(&self) -> &Tape {
+        &self.tape
+    }
+
+    /// Whether a seek went back since the last call.
+    pub fn take_rewound(&mut self) -> bool {
+        std::mem::take(&mut self.rewound)
     }
 
     fn fast(&self) -> bool {
@@ -150,27 +162,30 @@ impl Player {
         Some(at.saturating_sub(self.now()).div_f64(self.speed))
     }
 
-    /// Run to tape time `to` without waiting, then pause.
-    pub fn seek(&mut self, to: Duration) -> Result<(), String> {
-        let now = self.now();
+    /// Run to tape time `to` without waiting, then pause. Back in time:
+    /// from the start of the tape.
+    pub fn seek(&mut self, to: Duration) {
+        let mut now = self.now();
         if to < now {
-            return Err(format!(
-                "a tape goes forward: it is at {:.3} s",
-                now.as_secs_f64()
-            ));
+            now = Duration::ZERO;
+            self.next = 0;
+            self.status = 0;
+            self.rewound = true;
         }
         self.base = now;
         self.paused = false;
         self.mark = Some(to);
         self.rush = true;
-        Ok(())
     }
 
     /// Run through the next `records` records, then pause.
     pub fn step_records(&mut self, records: usize) -> Result<(), String> {
         let last = (self.next + records.max(1) - 1).min(self.tape.records.len().saturating_sub(1));
         match self.tape.records.get(last) {
-            Some((t, _)) if self.next < self.tape.records.len() => self.seek(*t),
+            Some((t, _)) if self.next < self.tape.records.len() => {
+                self.seek(*t);
+                Ok(())
+            }
             _ => Err("the tape is over".into()),
         }
     }
@@ -217,8 +232,12 @@ mod tests {
             )
         };
         Tape {
-            size: (80, 24),
-            argv: vec![],
+            header: crate::record::Header {
+                size: (80, 24),
+                argv: vec![],
+                host_colors: None,
+                presets: true,
+            },
             records: vec![at(10, "a"), at(20, "b"), at(500, "c")],
         }
     }
@@ -264,15 +283,27 @@ mod tests {
         assert_eq!(run(&mut player), ("ab".into(), false));
         assert!(player.paused());
         assert_eq!(player.now(), Duration::from_millis(100));
-        assert!(player.seek(Duration::from_millis(50)).is_err());
         player.step_records(1).unwrap();
         assert_eq!(run(&mut player), ("c".into(), false));
         assert_eq!(player.now(), Duration::from_millis(500));
         assert!(player.step_records(1).is_err());
         // Past the end: time passes, nothing is fed.
-        player.seek(Duration::from_secs(3)).unwrap();
+        player.seek(Duration::from_secs(3));
         assert_eq!(run(&mut player), (String::new(), false));
         assert_eq!(player.now(), Duration::from_secs(3));
+        assert!(!player.take_rewound());
+    }
+
+    #[test]
+    fn a_seek_back_starts_again() {
+        let mut player = replay(0.0, None, false, true);
+        assert_eq!(run(&mut player), ("abc".into(), false));
+        player.seek(Duration::from_millis(15));
+        assert!(player.take_rewound());
+        assert!(!player.take_rewound());
+        assert_eq!(run(&mut player), ("a".into(), false));
+        assert_eq!(player.now(), Duration::from_millis(15));
+        assert_eq!(player.status_json()["next"], 1);
     }
 
     #[test]

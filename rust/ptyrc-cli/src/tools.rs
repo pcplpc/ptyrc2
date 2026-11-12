@@ -36,12 +36,35 @@ fn special_key(what: &str, key: &str) -> Result<Vec<u8>, Fail> {
     }
 }
 
+/// The private modes of the app that this terminal takes while attached:
+/// its keys and its mouse are then written as the app wants them.
+const MIRRORED: [u16; 7] = [1, 9, 1000, 1002, 1003, 1006, 2004];
+
+/// The modes of `MIRRORED` that are on, from `session.info`.
+fn modes_on(info: &Value) -> Vec<u16> {
+    let modes = &info["modes"];
+    let mut on = Vec::new();
+    if modes["app_cursor"] == true {
+        on.push(1);
+    }
+    let mouse = modes["mouse"].as_array().into_iter().flatten();
+    on.extend(mouse.filter_map(|m| m.as_u64()).map(|m| m as u16));
+    if modes["mouse_sgr"] == true {
+        on.push(1006);
+    }
+    if modes["bracketed_paste"] == true {
+        on.push(2004);
+    }
+    on
+}
+
 #[derive(Args)]
 pub struct Attach {
-    /// The key that leaves; it is not sent
+    /// The key that leaves; it is not sent [ctrl+] when not given]
     #[arg(long, value_name = "KEY", default_value = "ctrl+]")]
     detach: String,
-    /// Give the session the size of this terminal (headless sessions)
+    /// Give the session the size of this terminal, and again when this
+    /// terminal is resized (headless sessions)
     #[arg(long)]
     resize: bool,
     /// Show the sprites too
@@ -52,7 +75,9 @@ pub struct Attach {
 /// The remote screen here, and the keys of this terminal there.
 ///
 /// The remote size is left alone unless `--resize`; a larger remote
-/// screen is cut at this terminal's size.
+/// screen is cut at this terminal's size. This terminal is given the
+/// cursor-key, mouse and paste modes of the app, looked at with each
+/// redraw: arrows, clicks and pastes are typed as the app reads them.
 pub fn attach(common: &Common, args: Attach) -> Done {
     let detach = special_key("--detach", &args.detach)?;
     if !std::io::stdin().is_terminal() {
@@ -66,7 +91,8 @@ pub fn attach(common: &Common, args: Attach) -> Done {
     let name = client.hello()["session"].as_str().unwrap_or("").to_string();
     // Raw mode; restored when `host` goes, and on a panic.
     let host = Host::terminal()?;
-    let local = host.size().unwrap_or((80, 24));
+    let mut local = host.size().unwrap_or((80, 24));
+    let mut mirrored: Vec<u16> = Vec::new();
     if args.resize {
         client.call("session.resize", json!({"size": [local.0, local.1]}))?;
     }
@@ -102,7 +128,26 @@ pub fn attach(common: &Common, args: Attach) -> Done {
     let _ = out.write_all(b"\x1b[?1049h");
     let result = (|| -> Result<bool, Fail> {
         loop {
-            let size = client.call("session.info", json!({}))?["size"].clone();
+            // This terminal was resized: the cut follows, and the
+            // session with --resize.
+            let now = host.size().unwrap_or(local);
+            if now != local {
+                local = now;
+                if args.resize {
+                    client.call("session.resize", json!({"size": [local.0, local.1]}))?;
+                }
+            }
+            let info = client.call("session.info", json!({}))?;
+            let size = info["size"].clone();
+            let wanted = modes_on(&info);
+            let mut frame = String::new();
+            if wanted != mirrored {
+                for mode in MIRRORED {
+                    let set = if wanted.contains(&mode) { 'h' } else { 'l' };
+                    let _ = write!(frame, "\x1b[?{mode}{set}");
+                }
+                mirrored = wanted;
+            }
             let cut = |i: usize, local: u16| size[i].as_u64().unwrap_or(1).min(local as u64);
             let rect = [0, 0, cut(0, local.0), cut(1, local.1)];
             let screen = client.call(
@@ -110,7 +155,7 @@ pub fn attach(common: &Common, args: Attach) -> Done {
                 json!({"ansi": true, "rect": rect, "sprites": args.sprites}),
             )?;
             let cursor = client.call("screen.cursor", json!({}))?;
-            let mut frame = String::from("\x1b[?25l\x1b[H");
+            frame.push_str("\x1b[?25l\x1b[H");
             let lines = screen["lines"].as_array().map_or(&[][..], Vec::as_slice);
             for (i, line) in lines.iter().enumerate() {
                 frame.push_str(line.as_str().unwrap_or(""));
@@ -130,6 +175,7 @@ pub fn attach(common: &Common, args: Attach) -> Done {
             out.write_all(frame.as_bytes()).and_then(|_| out.flush())?;
             // Wait for a change, then let a burst of them pass.
             let mut changed = false;
+            let mut quiet = 0;
             while !changed {
                 if leave.load(Ordering::Relaxed) {
                     return Ok(false);
@@ -137,8 +183,18 @@ pub fn attach(common: &Common, args: Attach) -> Done {
                 match client.next_event(Some(Duration::from_millis(50))) {
                     Ok(Some(event)) if event.event == "exit" => return Ok(true),
                     Ok(Some(_)) => changed = true,
-                    // Sprites move without an event.
-                    Ok(None) => changed = args.sprites,
+                    // Sprites move without an event; so does the size
+                    // of this terminal.
+                    Ok(None) => {
+                        quiet += 1;
+                        changed = args.sprites || host.size().is_some_and(|s| s != local);
+                        // A mode set with nothing drawn comes with no
+                        // event: looked at four times a second.
+                        if !changed && quiet % 5 == 0 {
+                            let info = client.call("session.info", json!({}))?;
+                            changed = modes_on(&info) != mirrored;
+                        }
+                    }
                     Err(ClientError::Closed) => return Ok(true),
                     Err(e) => return Err(e.into()),
                 }
@@ -150,6 +206,9 @@ pub fn attach(common: &Common, args: Attach) -> Done {
             }
         }
     })();
+    for mode in MIRRORED {
+        let _ = write!(out, "\x1b[?{mode}l");
+    }
     let _ = out.write_all(b"\x1b[?25h\x1b[?1049l");
     let _ = out.flush();
     drop(host);
@@ -214,9 +273,30 @@ pub struct Click {
     /// With --text: the match to click, from 0
     #[arg(long, default_value_t = 0, requires = "text")]
     nth: usize,
-    /// left, middle, right, wheel-up, wheel-down
+    /// left, middle, right, wheel-up, wheel-down, wheel-left, wheel-right
     #[arg(short, long, default_value = "left")]
     button: String,
+    /// Drag: release on this screen cell
+    #[arg(long, value_name = "X,Y")]
+    to: Option<String>,
+    /// A modifier held: shift, alt, ctrl (repeatable)
+    #[arg(short, long = "mod", value_name = "NAME")]
+    mods: Vec<String>,
+    /// Clicks in a row: 2 is a double click
+    #[arg(long, default_value_t = 1, value_name = "N")]
+    count: u8,
+}
+
+fn cell_of(text: &str) -> Result<(u16, u16), Fail> {
+    let cell = text
+        .split_once(',')
+        .and_then(|(x, y)| Some((x.trim().parse::<u16>().ok()?, y.trim().parse::<u16>().ok()?)));
+    cell.ok_or_else(|| {
+        Fail::usage(
+            format!("not a cell: {text}"),
+            "X,Y from 0, as in 12,3; text on the screen with --text",
+        )
+    })
 }
 
 pub fn click(common: &Common, args: Click) -> Done {
@@ -249,23 +329,16 @@ pub fn click(common: &Common, args: Click) -> Done {
             }
         }
     } else {
-        let cell = args.target.split_once(',').and_then(|(x, y)| {
-            Some((x.trim().parse::<u16>().ok()?, y.trim().parse::<u16>().ok()?))
-        });
-        match cell {
-            Some((x, y)) => json!([x, y]),
-            None => {
-                return Err(Fail::usage(
-                    format!("not a cell: {}", args.target),
-                    "X,Y from 0, as in 12,3; text on the screen with --text",
-                ));
-            }
-        }
+        let (x, y) = cell_of(&args.target)?;
+        json!([x, y])
     };
-    client.call(
-        "input.click",
-        json!({"x": cell[0], "y": cell[1], "button": args.button}),
-    )?;
+    let mut params = json!({"x": cell[0], "y": cell[1], "button": args.button,
+                            "mods": args.mods, "count": args.count});
+    if let Some(to) = &args.to {
+        let (x, y) = cell_of(to)?;
+        params["to"] = json!([x, y]);
+    }
+    client.call("input.click", params)?;
     if common.json {
         print_json(&json!({"x": cell[0], "y": cell[1]}), false);
     }
@@ -289,6 +362,10 @@ pub struct Shot {
     /// What the host shows: the sprites over the app
     #[arg(long)]
     sprites: bool,
+    /// Leave the cursor out (--svg, --html: a visible cursor is an
+    /// inverse cell)
+    #[arg(long)]
+    no_cursor: bool,
     /// Write there in place of stdout
     #[arg(short, long, value_name = "FILE")]
     output: Option<PathBuf>,
@@ -320,7 +397,19 @@ pub fn shot(common: &Common, args: Shot) -> Done {
             bg: host("bg", [0, 0, 0]),
         };
         let cells = client.call("screen.cells", view)?;
-        let rows = picture(&cells["rows"], theme);
+        let mut rows = picture(&cells["rows"], theme);
+        if !args.no_cursor {
+            let cursor = client.call("screen.cursor", json!({}))?;
+            let cell = |key: &str, i: usize| {
+                let origin = cells["rect"][i].as_u64()?;
+                (cursor[key].as_u64()? as usize).checked_sub(origin as usize)
+            };
+            if let (Some(true), Some(x), Some(y)) =
+                (cursor["visible"].as_bool(), cell("x", 0), cell("y", 1))
+            {
+                mark_cursor(&mut rows, x, y, theme);
+            }
+        }
         let cols = cells["size"][0].as_u64().unwrap_or(0) as usize;
         if args.html {
             html(&rows, theme)
@@ -424,6 +513,60 @@ fn picture(rows: &Value, theme: Theme) -> Vec<Vec<Piece>> {
         out.push(pieces);
     }
     out
+}
+
+/// The cursor: the cell at `(x, y)` of the picture in inverse, alone in
+/// its piece. Outside the picture: nothing.
+fn mark_cursor(rows: &mut [Vec<Piece>], x: usize, y: usize, theme: Theme) {
+    let Some(row) = rows.get_mut(y) else {
+        return;
+    };
+    let Some(index) = row.iter().position(|p| p.x <= x && x < p.x + p.w) else {
+        return;
+    };
+    let piece = row.remove(index);
+    // Glyphs of the piece with their cells: a mark stays with its base.
+    let mut glyphs: Vec<(usize, String)> = Vec::new();
+    for c in piece.text.chars() {
+        match (ptyrc_vt::char_width(c), glyphs.last_mut()) {
+            (0, Some((_, glyph))) => glyph.push(c),
+            (w, _) => glyphs.push((w.max(1), String::from(c))),
+        }
+    }
+    let part = |x: usize, w: usize, text: String, cursor: bool| Piece {
+        x,
+        w,
+        text,
+        fg: if cursor {
+            piece.bg.unwrap_or(theme.bg)
+        } else {
+            piece.fg
+        },
+        bg: if cursor { Some(piece.fg) } else { piece.bg },
+        bold: piece.bold,
+        dim: piece.dim && !cursor,
+        italic: piece.italic,
+        underline: piece.underline,
+        strike: piece.strike,
+    };
+    let mut parts = Vec::new();
+    let (mut at, mut start, mut text) = (piece.x, piece.x, String::new());
+    for (w, glyph) in glyphs {
+        if at <= x && x < at + w {
+            if !text.is_empty() {
+                parts.push(part(start, at - start, std::mem::take(&mut text), false));
+            }
+            parts.push(part(at, w, glyph, true));
+            start = at + w;
+        } else {
+            text.push_str(&glyph);
+        }
+        at += w;
+    }
+    if !text.is_empty() {
+        parts.push(part(start, at - start, text, false));
+    }
+    row.splice(index..index, parts);
 }
 
 fn hex([r, g, b]: Rgb) -> String {
@@ -604,6 +747,40 @@ mod tests {
         // Inverse: the default colours change places.
         assert_eq!((rows[1][0].fg, rows[1][0].bg), (THEME.bg, Some(THEME.fg)));
         assert_eq!(rows[1][1].fg, [0x10, 0x20, 0x30]);
+    }
+
+    #[test]
+    fn the_cursor_is_an_inverse_cell() {
+        let mut rows = picture(&rows(), THEME);
+        mark_cursor(&mut rows, 1, 0, THEME);
+        mark_cursor(&mut rows, 5, 0, THEME);
+        mark_cursor(&mut rows, 30, 0, THEME);
+        mark_cursor(&mut rows, 0, 9, THEME);
+        let shape: Vec<(usize, usize, &str)> = rows[0]
+            .iter()
+            .map(|p| (p.x, p.w, p.text.as_str()))
+            .collect();
+        assert_eq!(
+            shape,
+            [
+                (0, 1, "a"),
+                (1, 1, "<"),
+                (2, 2, "b "),
+                (4, 2, "日"),
+                (6, 1, "x"),
+                (7, 2, "  ")
+            ]
+        );
+        let red = palette::xterm(1);
+        assert_eq!((rows[0][1].fg, rows[0][1].bg), (THEME.bg, Some(red)));
+        assert_eq!((rows[0][0].fg, rows[0][0].bg), (red, None));
+        // On a wide glyph: both its cells.
+        assert_eq!(rows[0][3].fg, palette::xterm(21));
+        assert_eq!(rows[0][3].bg, Some(THEME.fg));
+        // A mark stays with its base.
+        mark_cursor(&mut rows, 4, 1, THEME);
+        assert_eq!(rows[1][1].text, "é́");
+        assert!(rows[1][1].bg.is_some());
     }
 
     #[test]

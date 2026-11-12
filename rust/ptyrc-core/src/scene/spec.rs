@@ -474,6 +474,10 @@ pub struct SpriteSpec {
     pub layer: Option<Layer>,
     #[serde(default)]
     pub blend: Blend,
+    /// The sprite is on the app's panel of that backdrop: drawn in its
+    /// cells only; behind the app, its opaque `bg` replaces the colour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panel: Option<ColorSpec>,
     /// Opacity, `0..=1`. Absent: opaque, colours are written as given.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alpha: Option<f32>,
@@ -516,6 +520,8 @@ pub struct SpritePatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend: Option<Blend>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panel: Option<ColorSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alpha: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub z: Option<i32>,
@@ -544,6 +550,8 @@ pub struct SpriteInfo {
     pub style: Option<StyleSpec>,
     pub layer: i32,
     pub blend: Blend,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panel: Option<ColorSpec>,
     #[serde(default = "one")]
     pub alpha: f32,
     pub z: i32,

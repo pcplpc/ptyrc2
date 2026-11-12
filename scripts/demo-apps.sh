@@ -6,8 +6,7 @@
 #
 #   scripts/demo-apps.sh              watch; scroll with ^E ^Y ^D ^U, :q ends
 #   scripts/demo-apps.sh snake        the snake instead of the fishes
-#   scripts/demo-apps.sh brick        the brick breaker, all of it
-#   scripts/demo-apps.sh blocks       the falling pieces, all of it
+#   scripts/demo-apps.sh bricks       the brick breaker, all of it
 #   scripts/demo-apps.sh snow         snow in place of the rain and the fishes
 #   scripts/demo-apps.sh --check      self-test, detached
 set -u
@@ -35,10 +34,8 @@ if [ "${1:-}" = snow ]; then
     demo_app snow --rate 40
 elif [ "${1:-}" = snake ]; then
     demo_app snake
-elif [ "${1:-}" = brick ]; then
-    demo_app brick -a
-elif [ "${1:-}" = blocks ]; then
-    demo_app blocks -a
+elif [ "${1:-}" = bricks ]; then
+    demo_app bricks -a
 else
     demo_app fishes --count 7
     [ "${1:-}" = --check ] || demo_app confetti --party --sparkle

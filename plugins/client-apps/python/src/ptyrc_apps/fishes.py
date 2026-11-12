@@ -10,7 +10,10 @@ What it shows:
 
 - `space="frame"`: a fish holds a position of the frame, not of the
   window. Scroll the file and the fishes scroll with the text.
-- `pilot.cursor()`: fishes flee the cursor, farther when it moves.
+- Events, not polls (`_cli.Sight`): the topic `cursor` tells where the
+  cursor is, in frame cells: fishes flee it, farther when it moves.
+  The topic `text` tells when the text changed or scrolled: the
+  hideouts are looked for again then.
 - `pilot.batch()`: all the moves of a tick go out in one request and
   show in one repaint.
 - The back layer: fishes swim behind the text, between the words.
@@ -20,8 +23,7 @@ N). A shy fish swims to the nearest spot of the view where the text
 hides all of it but a cell at most (`hideouts`), out of reach of the
 cursor, slows down and stays there 4 to 10 s; then it goes to another
 spot, drawn at random among those at least two lengths away (`lure`).
-Fear comes first. The text is read once a second, or when the view
-moved.
+Fear comes first.
 
 A fish left out of the view by a scroll stays where it was. After a
 random `WAIT` it goes, one fish a tick at most, and comes back in the
@@ -83,7 +85,7 @@ CALM, FEAR = 6.0, 30.0  # cells per second
 NEAR, NEAR_MOVING = 8.0, 16.0  # fear radius, in columns; rows count double
 WAIT = (2.0, 5.0)  # seconds out of view before a fish goes
 STAY = (4.0, 10.0)  # seconds a shy fish stays in a hiding place
-READ = 1.0  # seconds between two reads of the text
+STILL = 1.0  # seconds without a scroll: the view is still
 
 Box = tuple[int, int, int, int]
 
@@ -363,25 +365,32 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     before = None
     rows: list[str] = []
     spots: dict[int, list[tuple[int, int]]] = {}  # hideouts, by length
-    read: tuple[Box, float] | None = None  # view and time of the last read
+    surveyed: Box | None = None  # the view at the last look at the reef
+    settle: float | None = None  # time of a second look, the view still
     reef = Reef()
     events = Events(reef, time.monotonic(), rng) if args.random else None
+    # Told by the driver (`_cli.Sight`): the text of the view when it
+    # changed or scrolled, the cursor when it moved. Nothing is asked.
+    sight = _cli.Sight(pilot, frame, cursor=True)
     for dt in _cli.ticks(TICK, seconds):
-        # Refreshed each tick: the origin moves when the content scrolls.
-        if not _cli.on_screen(frame):
+        if not sight.look():
             continue
         box = view(frame)
-        at = pilot.cursor()
-        cursor = frame.to_frame(at.x, at.y) if at.visible else None
+        cursor = sight.cursor
         moving, before = cursor != before, cursor
         cells = [fish.cell[:2] for fish in school]
         now = time.monotonic()
         due, going = tide(cells, due, box, now, rng, [f.length for f in school])
-        with _cli.in_sight():
-            if read is None or read[0] != box or now - read[1] >= READ:
-                still = read is not None and read[0] == box
-                rows, read = pad(frame.text(), box[2] - box[0]), (box, now)
-                spots = {}
+        with sight.drawing():
+            # The reef is looked at when the text is read, and once
+            # more `STILL` after a scroll: the view is still then.
+            if sight.changed or (settle is not None and now >= settle):
+                still = surveyed == box
+                settle = None if still else now + STILL
+                surveyed = box
+                if sight.changed:
+                    rows = pad(sight.rows, box[2] - box[0])
+                    spots = {}
                 with pilot.batch():
                     reef.prune(rows, box)
                     if args.decorate:

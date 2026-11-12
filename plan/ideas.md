@@ -196,18 +196,12 @@ Gaps met while writing the apps; none fixed in the core.
   shaded body, foes that bite the tail off, beams that burn
   (`_arcade.py`, see `design.md`). Left: a particle is drawn over the
   head for a moment; the snake does not fight back; no score shown.
-- Built: brick, a brick breaker that plays alone; `-r`, `-b`, `-m`,
-  `-e`, `-a` (`brick.py`, `_bricks.py`, see `design.md`). Left: the
+- Built: bricks, a brick breaker that plays alone; `-r`, `-b`, `-m`,
+  `-e`, `-a` (`bricks.py`, `_bricks.py`, see `design.md`). Left: the
   terrain dies with the app; a racket crossing the first row shows
   through the gaps of the score; on a blank view a ball is juggled
   from edge to edge; capsules sink only down; the two rackets do not
   fight for a ball.
-- Built: blocks, falling pieces in braille that play alone; `--sideways`,
-  `--count`, `--cursor`, `--chains`, `--effects`, `--score`, `-a`
-  (`blocks.py`, `_blocks.py`, see `design.md`). Left: the heap dies
-  with the app, its blocks scrolled out of sight are forgotten; pieces cross each other; a piece
-  whose way is cut by another is lost; the cursor gives a place, not
-  a turn; a gap of one cell between two words is a line.
 - Built: sand in braille, one stream, avalanches, strata, kept across
   resizes and text changes, `--cursor` (see `design.md`). No cursor, or
   on column 0: the spout of a sand without `--cursor`. Built in the
@@ -372,13 +366,8 @@ Left:
 Built: host colours (OSC 10, 11), `alpha`, `wallpaper` and `hud` (see
 `design.md`). Left:
 
-- The named layers are a fixed table; a client cannot declare names.
-- An opaque back colour is still hidden under an app panel; only a
-  glaze shows there. A back glyph on an inverse app cell does not fade.
 - A lone ESC as the last byte of a read is forwarded, not held: a reply
   split exactly there reaches the app.
-- No event when the host colours change; no method to set them at run
-  time.
 - Draw extensions and effects take `alpha` only through the sprite
   fields. Mixes are linear in sRGB.
 
@@ -419,7 +408,7 @@ connection; `_cli.parse` intermixed (see `design.md`). Left:
   gone.
 - Topic `text` compares the text of view rows by hash, in the server:
   a change of style is not told; a frame back from inactive is compared
-  with what it showed when it left. `snake`, `brick`, `blocks`,
+  with what it showed when it left. `snake`, `bricks`,
   `fishes`, `flower` still read the text on a period; `rain` and
   `sand` read it in the driver.
 - No snapshot for `screen`, `text`, `draw`, `input`, `exit`.
@@ -470,6 +459,50 @@ attach, input interception, mouse clicks, screenshots, selectors. Left:
   a deliberate change of the heuristics needs `scripts/record-tapes.sh
   --snap` and a read of the diff.
 
+## Tools, fifth session, second round
+
+Built (`design.md`, "Tools"): a seek back (the tape replayed from its
+start by a new engine); the tape header, version 2 (host colours,
+presets; colours told later are a record); a paused replay holds a
+`screen.wait` to the real clock; tapes of vim, htop, ranger; host mouse
+reports parsed (SGR, X10) while a client listens to `mouse`: a click on
+a sprite is an event, any other is the app's, in its own form;
+`input.click` with `mods`, `count`, `to`; `Locator.click` options,
+`Pilot.clicks`, `Pilot.on_click`, `scripts/click-sprite.py`; `attach`
+takes the app's cursor-key, mouse and paste modes and follows the size
+of its terminal; `shot` draws the cursor. Left:
+
+- A rewind drops the sprites and refuses the pending waits; no event
+  says so. A client that draws on a replay draws again after a seek
+  back.
+- `replay` takes the colours of the tape as an option would
+  (`host_colors.from`: `option`); no `--host-fg` / `--host-bg` on
+  `replay`.
+- Paused, `stable_ms` and `idle` waits can only time out: they count
+  tape time.
+- Tapes: vim's `ctrl+f` (two rows of overlap) is read as a jump, each
+  page an island; the tape uses `ctrl+d`. htop is run on one process
+  (`-p 1`): a full list holds user names and paths. ranger's top bar
+  holds the user and the host: `scrub` replaces them, same length. No
+  tape of an agent TUI, none per e2e flake.
+- Host mouse: the hit is the sprite's box, not its ink; effects are
+  not clicked. No hover event unless the app asked for 1003 (the host
+  is asked for 1002). A report cut by a read is not seen; modes 1005
+  and 1015 are not read. While a client listens, the host terminal's
+  own selection needs shift, as under any app that takes the mouse.
+  The driver asks again after every burst that sets a private mode:
+  some bytes more per burst, while listened to.
+- `input.click`: a drag is one move; no path, no hold time.
+- `attach`: a mode the app sets with nothing drawn is seen within
+  250 ms, not at once; a key typed in between goes in the old mode.
+  The detach key cut by a read is still not seen. `--resize` on a
+  session with a host terminal is refused at the first resize.
+- `shot`: `--ansi` has no cursor; one cursor shape (a block). No PNG:
+  text in a bitmap needs a font and a rasterizer, a heavy dependency;
+  an SVG is converted outside (`rsvg-convert`, a browser).
+- `ptyrc events` without a topic leaves `mouse` out: listening changes
+  what the host terminal does.
+
 ## Effects, fifth session
 
 Built: `Under` in cells, over the canvas rect, with the heat on
@@ -492,7 +525,6 @@ on the heat; `snow` (see `design.md`, "Effects"). Left:
   (`reach`), a liquid more than a sand above 1000 a second.
 - The heat shown to an effect is the whole view's (`HeatView`, five
   vectors), copied every 200 ms per effect that asks.
-- `tune` on `confetti` and `sparkle`: refused, not implemented.
 - `draw.list` does not show the parameters of an effect.
 - Snow: a flake born on row 0 does not settle there; no snow next to a
   word of its own row, so a ragged right margin holds little; `▁`..`█`
@@ -502,3 +534,97 @@ on the heat; `snow` (see `design.md`, "Effects"). Left:
   `snow.py` repeats the loop of `sand.follow` to send its gusts between
   two events. `Sprite.tune(params)` in the Python pilot
   would spare `update(effect={"name": ..., "params": ...})`.
+
+## Effects and layers, fifth session, second round
+
+Built (see `design.md`, "Rendering", "Effects", "Layers"):
+
+- `Effect::shift`; `Under::row` over `Surfaces::ink_row`: the rows a
+  frame remembers out of the view. Sand: a world of the canvas and up
+  to 16 remembered rows on each side, simulated; grains kept by frame
+  cell when they leave by any side (1024 rows of 1024 cells). Snow:
+  `shift`, a bound in columns.
+- `panel`: a sprite clipped to a backdrop, its opaque `bg` laid on it.
+  A back glyph fades on an inverse cell. `layer.define`, `layer.list`.
+- `session.colors`, topic `colors`.
+- A scroll unpaints only the rows that leave for the scrollback.
+  `scripts/e2e-render.sh flicker`: per effect the host log replayed,
+  cells written against cells changed (`E2E_VERBOSE=1` prints them).
+  Measured, 3 s at 60x16: static, 0 wasted of 274 to 7849 written for
+  sand, rain, snow, confetti; scrolling at 20 lines a second, sand
+  1297 wasted of 5371 before, 0 of 4338 after; confetti 17 of 7925
+  (cells of the row that leaves). Nothing out of an update.
+
+Left:
+
+- No anchor relative to a panel (its rectangle): a sprite on a panel
+  is a view-sized canvas clipped to it. `panel` cannot be unset by
+  `draw.update`. No `--panel` in the CLI, no `Sprite` field in the
+  Python pilot; nor `layer.define` and `session.colors` there
+  (`Pilot.call`).
+- `ink_row` is text only: a remembered underline or line drawn by
+  attribute is not ink. The raw frame remembers nothing. Rows of the
+  view are not in the buffer until committed: `Under::row` gives them
+  from the screen only inside the canvas.
+- Sand: the margin costs steps (a world up to 32 rows taller). Beyond
+  it grains are frozen. Forgotten rows (`FrameEvent::Forgotten`) keep
+  their grains in the attic until it overflows. Rain does nothing
+  with `shift` (it keeps nothing on rows).
+- A declared layer name is not in `draw.list` (the integer is); names
+  are not saved in a tape.
+- `session.colors {ask}` in a host that never answers waits 1 s, as at
+  start; a tape does not record the change.
+- A view-fixed sprite over a scroll is still erased where the scroll
+  took it and painted again: inherent to pass-through.
+- Mixes in linear light: not tried.
+
+## Apps, fifth session, second round
+
+Built (see `design.md`, "Python"):
+
+- `Sprite.tune(**params)`; `tune` for `confetti` (`duration_ms`,
+  `origin`) and `sparkle` (`count`, `colors`, `life_ms`,
+  `duration_ms`). `_cli.follow(..., beats)`: one loop for `sand`,
+  `rain` and `snow`; the gusts of the snow are its beats.
+- `_cli.Sight`: `snake`, `bricks`, `fishes`, `flower` on the
+  topics `text`, `frames`, `cursor`. The text of the view is read when
+  the driver says it changed or scrolled; the game ticks stay. On a
+  quiet screen an app asks nothing: before, per second, the snake made
+  24 requests besides its drawing, the fishes 21.
+- `sand.heir` is needed, and was wrong. Two stacked tmux panes with
+  little text, the host resized from 100x30 to 100x20: both frames are
+  replaced, every time; a sprite left on an old frame stays out of
+  sight. The lower pane's new place overlapped its old rectangle by 4
+  rows of 9: under the half asked, so the sand was not moved. `heir`
+  now scales the old rectangle by the growth of the screen
+  (`test_sand_follows_two_panes_resized`, on a real tmux). Side by
+  side, 100x30 to 70x30 keeps both frames; to 40x12 one of the two is
+  replaced.
+- Snake: with `-e` a score (length, longest); the snake's sprite is
+  over its particles. Bricks, snake: one `_arcade.Board`, its
+  blanks opaque: the racket no longer shows through the score.
+- Blocks, since dropped: the blank between two words was made a wall.
+- Audit of the app tests: each one that compares the host after an
+  app's thread ends waits for `sprites() == []` first; none changed.
+
+Left:
+
+- The driver takes the base of the topic `text` at the tick after the
+  first `subscribe`: a `Sight` relies on that tick coming before its
+  first read is answered (it does: `subscribe` asks for one).
+- A `Sight` whose frame is replaced (the resize above) waits for ever:
+  the games draw in frame cells of the old frame. `heir` would give the
+  new one; the sprites would have to be made again there.
+- While its frame is not usable a `Sight` asks `frame.get` at each
+  tick: the raw frame alone becomes usable with no `frames` event.
+- `flower` still reads `frame.heat` twice a second while it has a
+  flower to plant and no cold place for it: the heat is not a topic.
+- `follow` notes the size of the screen when its frame and the raw
+  frame are both stable; a resize in two steps closer than the settle
+  time is scaled from the first size.
+- Bricks: on a blank view a ball is juggled from edge to edge; capsules
+  sink only down; the two rackets do not fight for a ball; the terrain
+  dies with the app. Snake: it does not fight back. Not
+  reached in this round.
+- `tune` of `confetti` cannot change `count`, `colors`, `spread`: the
+  pieces are thrown at the start.

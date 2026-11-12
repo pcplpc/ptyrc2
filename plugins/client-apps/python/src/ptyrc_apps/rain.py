@@ -13,11 +13,11 @@ What it shows:
   of text, on the cursor and on the bottom of the pane; they fall
   behind the text between two lines.
 - The back layer: the rain shows where the app shows nothing.
-- Stillness: the effect notes where the text changes. It rains less
-  on columns that changed in the last ten seconds, so the rain keeps
-  away from where someone types.
+- An effect that sees the heat: it rains less on columns that changed
+  in the last ten seconds, so the rain keeps away from where someone
+  types.
 - A frame replaced by a resize: the sprite is moved to the pane that
-  took its place (`sand.follow`), on an event of the topic `frames`.
+  took its place (`_cli.follow`), on an event of the topic `frames`.
 """
 
 from __future__ import annotations
@@ -29,7 +29,6 @@ from collections.abc import Sequence
 from ptyrc import Frame, Pilot, Sprite
 
 from . import _cli
-from .sand import follow
 
 __all__ = ["main", "pour"]
 
@@ -42,7 +41,7 @@ def pour(pilot: Pilot, frame: Frame, rate: float) -> Sprite:
 
 def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
     frame = _cli.pick(pilot, args.frame)
-    follow(pilot, frame, pour(pilot, frame, args.rate), seconds)
+    _cli.follow(pilot, frame, pour(pilot, frame, args.rate), seconds)
 
 
 def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> int:

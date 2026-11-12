@@ -10,7 +10,7 @@ use crate::keys;
 use crate::mouse;
 use crate::player::{Player, Replay, Step};
 use crate::pty::{self, Pty};
-use crate::record::{Record, Recorder};
+use crate::record::{Header, Record, Recorder};
 use crate::start::{self, RunError, RunErrorKind};
 use ptyrc_proto::envelope::{event, response};
 use ptyrc_proto::session::{self, ENV_SESSION, ENV_SOCKET};
@@ -70,6 +70,8 @@ pub struct Config {
     pub record: Option<PathBuf>,
     /// Record what is typed into the app too.
     pub record_input: bool,
+    /// Whether the engine has the per-app presets: written on the tape.
+    pub presets: bool,
 }
 
 impl Default for Config {
@@ -86,6 +88,7 @@ impl Default for Config {
             ask_host_colors: true,
             record: None,
             record_input: false,
+            presets: true,
         }
     }
 }
@@ -166,6 +169,12 @@ struct Driver {
     replies: Replies,
     /// When to stop waiting for the host's colours.
     replies_until: Option<Duration>,
+    /// The host was asked for mouse reports, for a client.
+    host_mouse: bool,
+    /// A press went to this sprite: so do the moves and the release.
+    mouse_held: Option<Value>,
+    /// A replay: makes the engine again when the tape is rewound.
+    factory: Option<Box<dyn FnMut() -> Box<dyn Engine>>>,
 }
 
 /// Name the session and listen on its socket.
@@ -221,16 +230,24 @@ fn bind_session(cfg: &Config) -> Result<(String, PathBuf, UnixListener), RunErro
 /// (128 + signal when killed).
 pub fn run(cfg: Config, mut engine: Box<dyn Engine>) -> Result<i32, RunError> {
     let mut driver = Driver::start(cfg)?;
-    let result = driver.serve(engine.as_mut());
+    let result = driver.serve(&mut engine);
     let status = driver.finish(engine.as_mut(), result.as_ref().ok().copied());
     result.and(Ok(status)).map_err(RunError::from)
 }
 
 /// Replay a tape in place of an app: a headless session whose clock is
 /// the tape's. Returns the status the tape ended with.
-pub fn replay(cfg: Config, replay: Replay, mut engine: Box<dyn Engine>) -> Result<i32, RunError> {
+/// `factory` makes the engine: once at the start, and again each time the
+/// tape is rewound.
+pub fn replay(
+    cfg: Config,
+    replay: Replay,
+    mut factory: Box<dyn FnMut() -> Box<dyn Engine>>,
+) -> Result<i32, RunError> {
     let mut driver = Driver::start_replay(cfg, replay)?;
-    let result = driver.serve(engine.as_mut());
+    let mut engine = factory();
+    driver.factory = Some(factory);
+    let result = driver.serve(&mut engine);
     let status = driver.finish(engine.as_mut(), result.as_ref().ok().copied());
     result.and(Ok(status)).map_err(RunError::from)
 }
@@ -289,17 +306,21 @@ impl Driver {
             if std::env::var_os("TERM").is_none() {
                 env.push(("TERM".to_string(), "xterm-256color".to_string()));
             }
+            let header = Header {
+                size: (cols, rows),
+                argv: cfg.argv.clone(),
+                host_colors: Some(Known::new(cfg.host_fg, cfg.host_bg).colors),
+                presets: cfg.presets,
+            };
             let recorder = match &cfg.record {
-                Some(path) => Some(
-                    Recorder::create(path, (cols, rows), &cfg.argv, cfg.record_input).map_err(
-                        |e| {
-                            RunError::new(
-                                RunErrorKind::Usage,
-                                format!("no tape {}: {}", path.display(), start::describe(&e)),
-                            )
-                        },
-                    )?,
-                ),
+                Some(path) => Some(Recorder::create(path, &header, cfg.record_input).map_err(
+                    |e| {
+                        RunError::new(
+                            RunErrorKind::Usage,
+                            format!("no tape {}: {}", path.display(), start::describe(&e)),
+                        )
+                    },
+                )?),
                 None => None,
             };
             let pty = pty::spawn(&cfg.argv, &env, cols, rows)
@@ -349,6 +370,9 @@ impl Driver {
             colors,
             replies: Replies::default(),
             replies_until: None,
+            host_mouse: false,
+            mouse_held: None,
+            factory: None,
         })
     }
 
@@ -361,17 +385,17 @@ impl Driver {
                 return Err(e.into());
             }
         };
-        let (cols, rows) = replay.tape.size;
+        let (cols, rows) = replay.tape.header.size;
         let info = SessionInfo {
             name,
             socket,
-            argv: replay.tape.argv.clone(),
+            argv: replay.tape.header.argv.clone(),
             pid: 0,
             cols,
             rows,
             headless: true,
         };
-        let colors = Known::new(cfg.host_fg, cfg.host_bg);
+        let colors = Self::tape_colors(&cfg, &replay.tape.header);
         Ok(Driver {
             stdin_open: false,
             cfg,
@@ -397,7 +421,53 @@ impl Driver {
             colors,
             replies: Replies::default(),
             replies_until: None,
+            host_mouse: false,
+            mouse_held: None,
+            factory: None,
         })
+    }
+
+    /// The colours a replay starts with: the options, else the tape's.
+    fn tape_colors(cfg: &Config, header: &Header) -> Known {
+        let tape = header.host_colors;
+        Known::new(
+            cfg.host_fg.or(tape.map(|c| c.fg)),
+            cfg.host_bg.or(tape.map(|c| c.bg)),
+        )
+    }
+
+    /// The tape was rewound: a new engine, the session as at its start.
+    /// Sprites are gone; requests the old engine held are refused.
+    fn rewind(&mut self, engine: &mut Box<dyn Engine>) {
+        let Some(player) = &self.player else {
+            return;
+        };
+        let header = player.tape().header.clone();
+        let held: Vec<Token> = self
+            .pending
+            .keys()
+            .filter(|token| !player.waiters.contains(token))
+            .copied()
+            .collect();
+        for token in held {
+            if let Some((conn, id)) = self.pending.remove(&token) {
+                let error = RpcError::new(ErrorCode::NotUsable, "the tape was rewound")
+                    .with_hint("ask again: the session started over");
+                self.respond(conn, &id, Err(error));
+            }
+        }
+        if let Some(factory) = &mut self.factory {
+            *engine = factory();
+        }
+        (self.info.cols, self.info.rows) = header.size;
+        self.colors = Self::tape_colors(&self.cfg, &header);
+        self.grab = None;
+        hook!(self, Duration::ZERO, |ctx| engine.on_start(ctx));
+        let colors = self.colors.colors;
+        hook!(self, Duration::ZERO, |ctx| engine
+            .on_host_colors(colors, ctx));
+        self.emit("size", json!({"size": [header.size.0, header.size.1]}));
+        self.repaint = true;
     }
 
     /// Monotonic time: since the start, or the tape's in a replay.
@@ -421,6 +491,11 @@ impl Driver {
                     hook!(self, now, |ctx| engine.on_burst(&burst, now, &mut out, ctx));
                 }
                 Step::Feed(Record::Resize(cols, rows)) => self.resize(engine, cols, rows)?,
+                Step::Feed(Record::HostColors(colors)) => {
+                    self.colors.learn(0, colors.fg);
+                    self.colors.learn(1, colors.bg);
+                    self.colors_changed(engine);
+                }
                 Step::Feed(_) => {}
                 Step::Paused => {
                     let status = player.status_json();
@@ -455,12 +530,16 @@ impl Driver {
     }
 
     /// The loop. Returns the exit status of the app.
-    fn serve(&mut self, engine: &mut dyn Engine) -> io::Result<i32> {
+    fn serve(&mut self, engine: &mut Box<dyn Engine>) -> io::Result<i32> {
         hook!(self, self.now(), |ctx| engine.on_start(ctx));
         let colors = self.colors.colors;
         hook!(self, self.now(), |ctx| engine.on_host_colors(colors, ctx));
         self.ask_host_colors()?;
         loop {
+            if self.player.as_mut().is_some_and(Player::take_rewound) {
+                self.rewind(engine);
+            }
+            let engine = engine.as_mut();
             self.play_tape(engine)?;
             // Tick: deadline passed, or repaint asked.
             let now = self.now();
@@ -498,6 +577,11 @@ impl Driver {
                     Some(at) if !player.paused() => {
                         Some(player.sleep_until(at).unwrap_or(Duration::ZERO))
                     }
+                    // The clock stands still: what waits on it is held
+                    // to the real one.
+                    _ if player.paused() => engine
+                        .stall_wake()
+                        .map(|at| at.saturating_duration_since(Instant::now())),
                     _ => None,
                 }
             } else {
@@ -509,6 +593,9 @@ impl Driver {
                 wake.map(|w| w.saturating_sub(now))
             };
             let ready = self.wait(timeout)?;
+            if self.player.as_ref().is_some_and(Player::paused) {
+                hook!(self, self.now(), |ctx| engine.on_stall(ctx));
+            }
 
             if ready.signal {
                 self.signals.drain();
@@ -682,6 +769,10 @@ impl Driver {
         }
         let mut out = Vec::with_capacity(burst.len() + 256);
         hook!(self, now, |ctx| engine.on_burst(&burst, now, &mut out, ctx));
+        if self.host_mouse && burst.windows(3).any(|w| w == b"\x1b[?") {
+            // The app may have set the mouse of the host: ours again.
+            out.extend_from_slice(mouse::HOST_ON);
+        }
         self.host.write(&out)?;
         Ok(true)
     }
@@ -713,11 +804,7 @@ impl Driver {
                     self.replies_until = None;
                 }
                 if changed {
-                    let colors = self.colors.colors;
-                    hook!(self, self.now(), |ctx| {
-                        engine.on_host_colors(colors, ctx);
-                        ctx.request_repaint();
-                    });
+                    self.colors_changed(engine);
                 }
                 self.forward_input(&fed.forward, engine);
             }
@@ -727,8 +814,86 @@ impl Driver {
         Ok(())
     }
 
+    /// Ask the host for mouse reports while a client listens to `mouse`;
+    /// give it back the modes of the app after.
+    fn sync_host_mouse(&mut self, engine: &dyn Engine) {
+        let wanted = self.host.interactive && self.topics.contains("mouse");
+        if wanted == self.host_mouse {
+            return;
+        }
+        self.host_mouse = wanted;
+        let _ = if wanted {
+            self.host.write(mouse::HOST_ON)
+        } else {
+            self.mouse_held = None;
+            let mut out = mouse::HOST_OFF.to_vec();
+            out.extend(engine.mouse_mode().set_sequence());
+            self.host.write(&out)
+        };
+    }
+
+    /// Take the mouse reports out of keyboard bytes: one on a sprite is
+    /// a `mouse` event; another is written again as the app asked, or
+    /// dropped when it did not.
+    fn sort_mouse(&mut self, bytes: &[u8], engine: &dyn Engine) -> Vec<u8> {
+        let mut out = Vec::with_capacity(bytes.len());
+        let mut rest = bytes;
+        while let Some(start) = mouse::find(rest) {
+            out.extend_from_slice(&rest[..start]);
+            rest = &rest[start..];
+            let Some((report, len)) = mouse::parse(rest) else {
+                out.extend_from_slice(&rest[..3]);
+                rest = &rest[3..];
+                continue;
+            };
+            rest = &rest[len..];
+            let hit = match self.mouse_held.clone() {
+                // Held: the sprite of the press, the cell of the report.
+                Some(mut held) if !report.press() => {
+                    let at = engine.sprite_at(report.x, report.y);
+                    let same = at.as_ref().is_some_and(|at| at["sprite"] == held["sprite"]);
+                    match at {
+                        Some(at) if same => Some(at),
+                        _ => {
+                            held["x"] = json!(report.x);
+                            held["y"] = json!(report.y);
+                            held["at"] = Value::Null;
+                            held["frame"] = Value::Null;
+                            held["pos"] = Value::Null;
+                            Some(held)
+                        }
+                    }
+                }
+                _ => engine.sprite_at(report.x, report.y),
+            };
+            match hit {
+                Some(mut data) => {
+                    if report.press() {
+                        self.mouse_held = Some(data.clone());
+                    } else if report.release {
+                        self.mouse_held = None;
+                    }
+                    data["button"] = json!(report.button());
+                    data["action"] = json!(report.action());
+                    data["mods"] = json!(report.mods());
+                    self.emit("mouse", data);
+                }
+                None => out.extend(report.encode(engine.mouse_mode()).unwrap_or_default()),
+            }
+        }
+        out.extend_from_slice(rest);
+        out
+    }
+
     /// Keyboard bytes on their way to the app.
     fn forward_input(&mut self, bytes: &[u8], engine: &mut dyn Engine) {
+        let sorted;
+        let bytes = if self.host_mouse {
+            sorted = self.sort_mouse(bytes, engine);
+            &sorted[..]
+        } else {
+            bytes
+        };
         let held;
         let bytes = match &self.grab {
             Some(grab) => {
@@ -762,18 +927,65 @@ impl Driver {
         }
     }
 
+    /// The host colours changed: the engine mixes with them in the next
+    /// repaint; topic `colors`.
+    fn colors_changed(&mut self, engine: &mut dyn Engine) {
+        let (colors, data) = (self.colors.colors, self.colors.json());
+        let now = self.now();
+        if let Some(recorder) = &mut self.recorder {
+            recorder.host_colors(now, colors);
+        }
+        hook!(self, now, |ctx| {
+            engine.on_host_colors(colors, ctx);
+            ctx.emit("colors", data);
+            ctx.request_repaint();
+        });
+    }
+
+    /// `session.colors {fg, bg, ask}`: set the host colours; `ask`: ask
+    /// the host again for those not given. The colours as they are now.
+    fn session_colors(
+        &mut self,
+        params: &Value,
+        engine: &mut dyn Engine,
+    ) -> Result<Value, RpcError> {
+        use crate::hostcolors::{Change, Source};
+        let change = Change::parse(params).map_err(RpcError::bad_params)?;
+        let mut changed = false;
+        for (which, rgb) in change.colors.into_iter().enumerate() {
+            if let Some(rgb) = rgb {
+                changed |= self.colors.set(which, rgb, Source::Client);
+            }
+        }
+        let asked = change.ask
+            && self
+                .ask_host(change.colors[0].is_none(), change.colors[1].is_none())
+                .map_err(|e| RpcError::new(ErrorCode::Internal, e.to_string()))?;
+        if changed {
+            self.colors_changed(engine);
+        }
+        let mut out = self.colors.json();
+        out["asked"] = json!(asked);
+        Ok(out)
+    }
+
     /// Ask the host terminal for the default colours nobody gave. The
     /// replies come with the keys.
     fn ask_host_colors(&mut self) -> io::Result<()> {
         use crate::hostcolors::Source;
         let ask = |source: Source| source == Source::Default;
         let (fg, bg) = (ask(self.colors.from[0]), ask(self.colors.from[1]));
+        self.ask_host(fg, bg).map(|_| ())
+    }
+
+    /// Ask the host for its foreground, its background. Whether asked.
+    fn ask_host(&mut self, fg: bool, bg: bool) -> io::Result<bool> {
         if !self.cfg.ask_host_colors
             || !self.host.interactive
             || !rustix::termios::isatty(rustix::stdio::stdout())
             || !(fg || bg)
         {
-            return Ok(());
+            return Ok(false);
         }
         self.replies.expect(fg, bg);
         self.replies_until = Some(self.now() + HOST_COLORS_WAIT);
@@ -783,7 +995,7 @@ impl Driver {
         if bg {
             self.host.write(QUERY_BG)?;
         }
-        Ok(())
+        Ok(true)
     }
 
     /// Type queued bytes into the app, as much as the pty takes.
@@ -942,6 +1154,7 @@ impl Driver {
         Some(match method {
             "session.info" => Ok(self.session_info(engine)),
             "session.resize" => self.session_resize(&params, engine),
+            "session.colors" => self.session_colors(&params, engine),
             "subscribe" => self.subscribe(conn, &params, engine),
             "input.send" => self.input_send(&params, engine),
             "input.click" => self.input_click(&params, engine),
@@ -992,10 +1205,10 @@ impl Driver {
         engine: &mut dyn Engine,
     ) -> Result<Value, RpcError> {
         if !self.info.headless {
-            return Err(RpcError::new(
-                ErrorCode::BadRequest,
-                "the host terminal sets the size",
-            ));
+            return Err(
+                RpcError::new(ErrorCode::BadRequest, "the host terminal sets the size")
+                    .with_hint("only a headless session is resized: ptyrc run --headless"),
+            );
         }
         let size = params
             .get("size")
@@ -1058,6 +1271,7 @@ impl Driver {
             conn.topics.extend(topics);
         }
         self.refresh_topics();
+        self.sync_host_mouse(engine);
         // A tick, so that the engine sees the new topics.
         self.repaint = true;
         Ok(json!({}))
@@ -1143,19 +1357,61 @@ impl Driver {
         let (Some(x), Some(y)) = (cell("x"), cell("y")) else {
             return Err(RpcError::bad_params("x, y: a screen cell"));
         };
-        if x >= self.info.cols || y >= self.info.rows {
-            return Err(RpcError::bad_params(format!(
-                "{x},{y} is off the screen ({}x{})",
-                self.info.cols, self.info.rows
-            )));
+        let on_screen = |x: u16, y: u16| {
+            if x >= self.info.cols || y >= self.info.rows {
+                return Err(RpcError::bad_params(format!(
+                    "{x},{y} is off the screen ({}x{})",
+                    self.info.cols, self.info.rows
+                )));
+            }
+            Ok((x, y))
+        };
+        let at = on_screen(x, y)?;
+        let to = match params.get("to") {
+            None | Some(Value::Null) => None,
+            Some(to) => {
+                let cell = |i: usize| to.get(i).and_then(Value::as_u64);
+                let cell = |i: usize| cell(i).and_then(|n| u16::try_from(n).ok());
+                match (cell(0), cell(1)) {
+                    (Some(x), Some(y)) => Some(on_screen(x, y)?),
+                    _ => return Err(RpcError::bad_params("to: [x, y], a screen cell")),
+                }
+            }
+        };
+        let mut mods = 0;
+        if let Some(list) = params.get("mods").filter(|m| !m.is_null()) {
+            let names = list.as_array().map(|a| a.iter().map(Value::as_str));
+            for name in names.ok_or_else(|| RpcError::bad_params("mods: array of names"))? {
+                let name = name.unwrap_or("");
+                mods |= mouse::mod_bits(name).ok_or_else(|| {
+                    RpcError::bad_params(format!("mods: no such modifier: {name}")).with_hint(
+                        format!(
+                            "{}modifiers: {}",
+                            suggest::did_you_mean(name, mouse::MODS),
+                            mouse::MODS.join(", ")
+                        ),
+                    )
+                })?;
+            }
         }
+        let count = match params.get("count") {
+            None | Some(Value::Null) => 1,
+            Some(count) => match count.as_u64() {
+                Some(n @ 1..=3) => n as u8,
+                _ => return Err(RpcError::bad_params("count: 1, 2 or 3 clicks")),
+            },
+        };
         let button = params
             .get("button")
             .map_or(Some("left"), Value::as_str)
             .filter(|b| mouse::BUTTONS.contains(b))
             .ok_or_else(|| {
-                RpcError::bad_params("button: no such button")
-                    .with_hint(format!("buttons: {}", mouse::BUTTONS.join(", ")))
+                let given = params.get("button").and_then(Value::as_str).unwrap_or("");
+                RpcError::bad_params("button: no such button").with_hint(format!(
+                    "{}buttons: {}",
+                    suggest::did_you_mean(given, mouse::BUTTONS),
+                    mouse::BUTTONS.join(", ")
+                ))
             })?;
         let mode = engine.mouse_mode();
         if !mode.on {
@@ -1165,7 +1421,14 @@ impl Driver {
             )
             .with_hint("it asked for no mouse reports (modes 9, 1000, 1002, 1003)"));
         }
-        let bytes = mouse::click(mode, button, x, y).ok_or_else(|| {
+        let gesture = mouse::Gesture {
+            button,
+            mods,
+            at,
+            to,
+            count,
+        };
+        let bytes = mouse::gesture(mode, gesture).ok_or_else(|| {
             RpcError::new(
                 ErrorCode::NotUsable,
                 "the app's mouse mode (X10) cannot tell a cell past 222",
@@ -1254,7 +1517,10 @@ impl Driver {
                 return Some(Ok(player.status_json()));
             }
             "tape.seek" => match seconds("t") {
-                Some(t) => player.seek(Duration::from_secs_f64(t)),
+                Some(t) => {
+                    player.seek(Duration::from_secs_f64(t));
+                    Ok(())
+                }
                 None => Err("t: seconds of tape time".to_string()),
             },
             "tape.step" => {
@@ -1354,6 +1620,7 @@ impl Driver {
             self.grab.take_if(|g| g.conn == id);
             self.pending.retain(|_, (conn, _)| *conn != id);
             self.refresh_topics();
+            self.sync_host_mouse(engine);
             hook!(self, self.now(), |ctx| engine.on_disconnect(id, ctx));
         }
     }
@@ -1366,6 +1633,9 @@ impl Driver {
             recorder.exit(self.start.elapsed(), status);
         }
         let mut out = Vec::new();
+        if self.host_mouse {
+            out.extend_from_slice(mouse::HOST_OFF);
+        }
         hook!(self, self.now(), |ctx| engine.on_exit(&mut out, ctx));
         let _ = self.host.write(&out);
         self.emit("exit", json!({"status": status}));

@@ -71,12 +71,21 @@ def test_locator_on_a_frame_draws_in_frame_cells(vim: Pilot) -> None:
 
 def test_click(spawn: Spawn) -> None:
     script = f"printf 'one two\\r\\n\\033[?1000h\\033[?1006h'; {SHOW_KEYS}"
-    pilot = spawn(["sh", "-c", script], size=(100, 6))
+    pilot = spawn(["sh", "-c", script], size=(200, 6))
     two = pilot.locator("two").wait()
     until(lambda: _clicks(two))
     pilot.wait_for("^[[<0;5;1M^[[<0;5;1m")
     pilot.click(0, 3, "right")
     pilot.wait_for("^[[<2;1;4M^[[<2;1;4m")
+    # Modifiers, a double click, a drag (press and release: the app did
+    # not ask for the moves).
+    two.click(mods=["shift", "ctrl"], count=2)
+    pilot.wait_for("^[[<20;5;1M^[[<20;5;1m^[[<20;5;1M^[[<20;5;1m")
+    pilot.locator("one").click("middle", to=two)
+    pilot.wait_for("^[[<1;1;1M^[[<1;5;1m")
+    with pytest.raises(PtyrcError) as err:
+        pilot.click(0, 0, mods=["meta"])
+    assert "shift, alt, ctrl" in err.value.hint
     with pytest.raises(PtyrcError) as err:
         pilot.click(0, 0, "fourth")
     assert "wheel-up" in err.value.hint
@@ -141,8 +150,11 @@ def test_record_and_replay(spawn: Spawn, tmp_path: Path) -> None:
         with pytest.raises(PtyrcError) as err:
             replay.send("x")
         assert "a replay takes no input" in err.value.message
-        with pytest.raises(PtyrcError):
-            replay.tape.seek(0.0)
+        # Back: the tape is replayed from its start.
+        assert replay.tape.seek(0.0)["next"] == 0
+        assert replay.text()[0] == ""
+        replay.tape.seek(end)
+        assert replay.snapshot() == now
         # Sprites are drawn on a replay as on a live session.
         sprite = replay.locator("two").nth(-1).right(2).draw(["!"], layer="front")
         replay.tape.seek(end + 1.0)
@@ -244,3 +256,44 @@ def test_arrows_move_a_sprite_and_vim_does_not_see_them(long_file: Path) -> None
         pilot.close()
     finally:
         host.close()
+
+
+def test_a_sprite_is_clicked(long_file: Path) -> None:
+    name = f"click-{os.getpid()}"
+    binary = os.environ["PTYRC_BIN"]
+    argv = [binary, "run", "--name", name, "--", VIM, "-u", "NONE", "-i", "NONE"]
+    host = Host([*argv, long_file.name], long_file.parent)
+    try:
+        until(lambda: name in __import__("ptyrc").live_sessions())
+        pilot = Pilot(name)
+        pilot.wait_for("line 001")
+        script = runpy.run_path(str(ROOT / "scripts" / "click-sprite.py"))
+        button = threading.Thread(target=script["main"], args=(name,), daemon=True)
+        button.start()
+        col, row = until(lambda: _shown_at(pilot, "[clicks:0]"))
+        until(lambda: b"\x1b[?1002h" in host.seen)
+        report = f"\x1b[<0;{col + 3};{row + 1}".encode()
+        host.type(report + b"M" + report + b"m")
+        until(lambda: _shown_at(pilot, "[clicks:1]"))
+        host.type(report + b"M" + report + b"m")
+        until(lambda: _shown_at(pilot, "[clicks:2]"))
+        # Elsewhere: not a click on the button; vim did not ask.
+        host.type(b"\x1b[<0;1;3M\x1b[<0;1;3mj")
+        until(lambda: pilot.cursor().y == 1)
+        assert _shown_at(pilot, "[clicks:2]")
+        # A right click ends it; the host mouse is given back.
+        host.type(report.replace(b"<0", b"<2") + b"M")
+        button.join(timeout=5)
+        assert not button.is_alive()
+        until(lambda: not pilot.sprites())
+        until(lambda: b"\x1b[?1002l" in host.seen)
+        pilot.close()
+    finally:
+        host.close()
+
+
+def _shown_at(pilot: Pilot, text: str) -> tuple[int, int] | None:
+    for row, line in enumerate(pilot.shown()):
+        if (col := line.find(text)) >= 0:
+            return col, row
+    return None
