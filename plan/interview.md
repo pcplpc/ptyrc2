@@ -71,3 +71,5 @@ Supersedes `--spawn --rate` above.
 - No `--seconds` ("stop after this many seconds") in any default app.
 - Fishes: 8 by default. Those left out of the screen by a scroll despawn
   slowly, and respawn behind the text.
+- Fishes: by default half of them, drawn at random at birth, are
+  attracted by text and hide behind it.
