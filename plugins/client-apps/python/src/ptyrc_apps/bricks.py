@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Brick: a brick breaker that plays alone, around the words.
+"""Bricks: a brick breaker that plays alone, around the words.
 
     ptyrc run vim long-file.txt      # or less, man
-    ptyrc-app brick
-    ptyrc-app brick -r -b            # rules and bonuses
-    ptyrc-app brick -a               # the arcade
+    ptyrc-app bricks
+    ptyrc-app bricks -r -b           # rules and bonuses
+    ptyrc-app bricks -a              # the arcade
 
 What it shows:
 
@@ -909,7 +909,7 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
 def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> int:
     """`seconds`: stop after this long (tests); else until interrupted."""
     out = _cli.parser(
-        "brick", "A brick breaker that plays alone around the words.", frame="largest"
+        "bricks", "A brick breaker that plays alone around the words.", frame="largest"
     )
     out.add_argument(
         "--speed", type=float, default=16.0, help="steps per second [default: 16]"

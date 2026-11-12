@@ -196,18 +196,12 @@ Gaps met while writing the apps; none fixed in the core.
   shaded body, foes that bite the tail off, beams that burn
   (`_arcade.py`, see `design.md`). Left: a particle is drawn over the
   head for a moment; the snake does not fight back; no score shown.
-- Built: brick, a brick breaker that plays alone; `-r`, `-b`, `-m`,
-  `-e`, `-a` (`brick.py`, `_bricks.py`, see `design.md`). Left: the
+- Built: bricks, a brick breaker that plays alone; `-r`, `-b`, `-m`,
+  `-e`, `-a` (`bricks.py`, `_bricks.py`, see `design.md`). Left: the
   terrain dies with the app; a racket crossing the first row shows
   through the gaps of the score; on a blank view a ball is juggled
   from edge to edge; capsules sink only down; the two rackets do not
   fight for a ball.
-- Built: blocks, falling pieces in braille that play alone; `--sideways`,
-  `--count`, `--cursor`, `--chains`, `--effects`, `--score`, `-a`
-  (`blocks.py`, `_blocks.py`, see `design.md`). Left: the heap dies
-  with the app, its blocks scrolled out of sight are forgotten; pieces cross each other; a piece
-  whose way is cut by another is lost; the cursor gives a place, not
-  a turn; a gap of one cell between two words is a line.
 - Built: sand in braille, one stream, avalanches, strata, kept across
   resizes and text changes, `--cursor` (see `design.md`). No cursor, or
   on column 0: the spout of a sand without `--cursor`. Built in the
@@ -360,7 +354,7 @@ connection; `_cli.parse` intermixed (see `design.md`). Left:
   gone.
 - Topic `text` compares the text of view rows by hash, in the server:
   a change of style is not told; a frame back from inactive is compared
-  with what it showed when it left. `snake`, `brick`, `blocks`,
+  with what it showed when it left. `snake`, `bricks`,
   `fishes`, `flower` still read the text on a period; `rain` and
   `sand` read it in the driver.
 - No snapshot for `screen`, `text`, `draw`, `input`, `exit`.
