@@ -2,6 +2,8 @@
 //! Terminal model: bytes to `Grid`, and the repair painter. See
 //! `plan/design.md`.
 
+pub mod event;
 pub mod grid;
 
+pub use event::{Cursor, VtEvent};
 pub use grid::{Attrs, Cell, Color, Grid, Rect, Style};
