@@ -63,6 +63,7 @@ __all__ = [
     "Foe",
     "Game",
     "main",
+    "room",
     "route",
     "walls_of",
 ]
@@ -112,6 +113,106 @@ def route(start: Cell, goal: Cell, free) -> Cell | None:
                 first[there] = first.get(here, there)
                 queue.append(there)
     return None
+
+
+def room(box: Box, walls: set[Cell], start: Cell | None, need: int) -> list[Cell]:
+    """Cells of `box` free of `walls`, in the region of `start` (the
+    largest region if None), out of the dead ends; `start` left out.
+
+    A dead end: a cell no cycle passes through, nor leads to (a
+    corridor one cell wide to nowhere: no way to turn back in it); or
+    a side of a bridge (a cut one cell wide) of the rest holding fewer
+    than `need` cells, the other side `need` or more. All the region
+    but `start` when nothing is left."""
+    x0, y0, x1, y1 = box
+
+    def free(c: Cell) -> bool:
+        return x0 <= c[0] < x1 and y0 <= c[1] < y1 and c not in walls
+
+    def near(c: Cell) -> list[Cell]:
+        return [n for n in ((c[0] + dx, c[1] + dy) for dx, dy in STEPS) if free(n)]
+
+    def region(c: Cell) -> list[Cell]:
+        out, seen = [c], {c}
+        for here in out:
+            for there in near(here):
+                if there not in seen:
+                    seen.add(there)
+                    out.append(there)
+        return out
+
+    if start is not None:
+        cells = region(start) if free(start) else []
+    else:
+        cells, seen = [], set()
+        for c in ((x, y) for y in range(y0, y1) for x in range(x0, x1)):
+            if c not in seen and free(c):
+                one = region(c)
+                seen.update(one)
+                cells = max(cells, one, key=len)
+    # Off the hanging trees: what is left has a cycle through each cell.
+    degree = {c: len(near(c)) for c in cells}
+    leaves = [c for c in cells if degree[c] < 2]
+    gone = set(leaves)
+    for c in leaves:
+        for n in near(c):
+            degree[n] -= 1
+            if degree[n] < 2 and n not in gone:
+                gone.add(n)
+                leaves.append(n)
+    core = [c for c in cells if c not in gone]
+    fallback = [c for c in cells if c != start]
+    if not core:
+        return fallback
+    kept = set(core)
+
+    def inner(c: Cell):
+        return (n for n in near(c) if n in kept)
+
+    # Bridges, depth first without recursion (Tarjan). Cells are
+    # numbered in preorder: a subtree is an interval of numbers.
+    root = core[0]
+    disc = {root: 0}
+    low = {root: 0}
+    order = [root]
+    parent: dict[Cell, Cell] = {}
+    cuts: list[tuple[int, int]] = []  # far side of a bridge: first, size
+    stack = [(root, inner(root))]
+    while stack:
+        here, todo = stack[-1]
+        for there in todo:
+            if there not in disc:
+                disc[there] = low[there] = len(order)
+                order.append(there)
+                parent[there] = here
+                stack.append((there, inner(there)))
+                break
+            if there != parent.get(here):
+                low[here] = min(low[here], disc[there])
+        else:
+            stack.pop()
+            if stack:
+                up = stack[-1][0]
+                low[up] = min(low[up], low[here])
+                if low[here] > disc[up]:
+                    cuts.append((disc[here], len(order) - disc[here]))
+    n = len(order)
+    marks = [0] * (n + 1)
+    for first, size in cuts:
+        if size < need <= n - size:
+            marks[first] += 1
+            marks[first + size] -= 1
+        elif n - size < need <= size:
+            marks[0] += 1
+            marks[first] -= 1
+            marks[first + size] += 1
+            marks[n] -= 1
+    out, depth = [], 0
+    for i, c in enumerate(order):
+        depth += marks[i]
+        if depth == 0 and c != start:
+            out.append(c)
+    return out or fallback
 
 
 @dataclass(eq=False)
@@ -176,6 +277,23 @@ class Game:
                 return cell
         return None
 
+    def spot(self, box: Box, walls: set[Cell], taken: set[Cell]) -> Cell | None:
+        """A cell for the apple, or for a new snake: in `room` of the
+        head (the largest region with no snake), out of `taken` and the
+        body; a pocket must hold the snake twice, grown, else any size.
+        Any free cell when there is none."""
+        head = self.body[0] if self.body else None
+        body = set(self.body)
+        for need in (2 * (len(self.body) + self.grow + 5), 0):
+            cells = [
+                c
+                for c in room(box, walls, head, need)
+                if c not in taken and c not in body
+            ]
+            if cells:
+                return self.rng.choice(cells)
+        return self.free_cell(box, taken)
+
     def step(self, box: Box, walls: set[Cell]) -> None:
         """One move inside `box` (x0, y0, x1, y1: the view, frame cells)."""
         x0, y0, x1, y1 = box
@@ -197,8 +315,8 @@ class Game:
             self._burn(box, walls, inside)
         self.lumps = [i + 2 for i in self.lumps if i + 2 < len(self.body)]
 
-    def _plant(self, box: Box, taken: set[Cell]) -> None:
-        self.apple = self.free_cell(box, taken)
+    def _plant(self, box: Box, walls: set[Cell], taken: set[Cell]) -> None:
+        self.apple = self.spot(box, walls, taken)
         self.golden = self.fancy and self.rng.random() < GOLDEN
 
     def _cut(self, i: int) -> None:
@@ -228,11 +346,13 @@ class Game:
 
         if not self.body or not inside(self.body[0]) or self.body[0] in walls:
             # Start, or scrolled out of sight, or text written on its head.
-            start = self.free_cell(box, taken)
+            self.body = deque()
+            start = self.spot(box, walls, taken)
             self.body = deque([start] if start else [])
             self.grow = 3
+            self.apple = None  # maybe out of its reach
         if self.apple is None or not inside(self.apple) or self.apple in walls:
-            self._plant(box, taken)
+            self._plant(box, walls, taken)
         if not self.body:
             return
         head = self.body[0]

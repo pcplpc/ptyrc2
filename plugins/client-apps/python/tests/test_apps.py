@@ -676,6 +676,41 @@ def test_snake_game() -> None:
     assert len(game.body) <= 2 and 200 <= game.body[0][1] < 205
 
 
+def test_snake_room() -> None:
+    """Apples go where the head can reach, never in a dead end."""
+    rows = [
+        "          #         ",
+        "########  #  ###### ",
+        "       #  #  #    # ",
+        "       #  #  #### # ",
+        "       #  #       # ",
+        "########  ######### ",
+        "                    ",
+    ]
+    walls = snake.walls_of(rows)
+    box = (0, 0, 20, 7)
+    ok = set(snake.room(box, walls, (0, 6), 10))
+    assert {(8, 0), (9, 5), (11, 1), (19, 3), (15, 6)} <= ok
+    assert (0, 6) not in ok  # the head
+    assert not ok & {(0, 2), (6, 4)}  # shut in
+    # One cell wide to nowhere: no way to turn back.
+    assert not ok & {(0, 0), (7, 6), (14, 2), (13, 4)}
+    # A long snake: out of a two wide pocket behind a bridge, too.
+    long = set(snake.room(box, walls, (0, 6), 30))
+    assert (11, 1) not in long and (8, 0) not in long and (19, 3) in long
+    # No start: the largest region. Shut in: all of it.
+    assert set(snake.room(box, walls, None, 10)) == ok
+    shut = set(snake.room(box, walls, (0, 2), 10))
+    assert len(shut) == 20 and (6, 4) in shut and (8, 0) not in shut
+    assert snake.room(box, walls, (0, 1), 10) == []
+    game = snake.Game(random.Random(1))
+    for _ in range(300):
+        game.step(box, walls)
+        if game.apple is not None:
+            assert game.apple in snake.room(box, walls, None, 1)
+    assert game.eaten >= 5
+
+
 def test_snake_arcade(session: Pilot) -> None:
     page(session, "", "", "words in the way", "", "   more words here")
     settle(session)
