@@ -10,6 +10,7 @@ __all__ = ["APPS"]
 
 #: Name of each app and what it does; the module is `ptyrc_apps.<name>`.
 APPS = {
+    "cat": "a cat on the text; it sleeps when nothing moves",
     "clock": "a floating clock in a quiet corner",
     "confetti": "a burst of confetti; a party with --party",
     "fishes": "fishes behind the text, afraid of the cursor",
