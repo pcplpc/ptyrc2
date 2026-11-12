@@ -467,6 +467,10 @@ Front layers go over whatever is below, app text included: a space is
 transparent unless `opaque`; a glyph without `bg` keeps the colour
 below it. A front `tint` recolours the app's glyphs.
 
+The reference apps follow: confetti and sparkles fall behind the text
+(`ptyrc-app confetti --front` brings the confetti over it), the clock is
+in front.
+
 A scene of four layers:
 
 ```
