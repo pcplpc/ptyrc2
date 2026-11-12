@@ -54,6 +54,12 @@ ptyrc-apps   -> ptyrc (Python, stdlib only)
 App bytes reach the host unmodified. With no sprite the driver writes
 nothing of its own: it is transparent.
 
+Host colours: at start the driver asks the host terminal for its default
+foreground and background (OSC 10, OSC 11), unless given (`--host-fg`,
+`--host-bg`), headless or transparent. The first reply to each within
+1 s is taken out of the keyboard stream; later replies are the app's
+and are read on the way. No answer: `#e5e5e5` on `#000000`.
+
 The driver holds two `Vt`:
 
 - `app`: fed with app bytes only. What the app means to show.
@@ -157,6 +163,10 @@ pub enum VtEvent {
 }
 pub fn repair(host: &mut Vt, desired: &Grid, out: &mut Vec<u8>);
 ```
+
+`palette`: `xterm(n)`, `rgb(color, default)`, `mix(under, over, alpha)`
+(linear in sRGB), `parse_color_spec` (`rgb:R/G/B` with 1 to 4 digits,
+`rgba:`, `#RRGGBB`).
 
 The parser is the crate's own (a `Vt` is `Clone`, and `in_ground` is
 exact). `repair` also reprints the glyph the cursor follows, so a REP or a
@@ -436,8 +446,15 @@ impl Scene {
     pub fn next_wake(&self) -> Option<Duration>;
     pub fn compose(&self, base: &Grid, surfaces: &dyn Surfaces) -> Grid;
     pub fn register_effect(&mut self, name: &str, make: EffectFactory);
+    pub fn set_host_colors(&mut self, host: HostColors);
 }
 ```
+
+`set_host_colors`: what `Color::Default` shows; `#e5e5e5` on `#000000`
+until told. `alpha`: opacity, `0..=1`; absent: opaque, colours written
+as given. Under 1 the colours are mixed with those below and written as
+RGB (palette colours through the xterm table, `default` through the
+host colours).
 
 Sprite, as JSON (the wire form; serde on the core types):
 
@@ -450,6 +467,7 @@ Sprite, as JSON (the wire form; serde on the core types):
   "loop": true,
   "layer": "back",
   "blend": "normal",
+  "alpha": 1.0,
   "z": 0,
   "ttl_ms": null,
   "persist": false,
@@ -520,7 +538,9 @@ is not there yet, they wait. `ttl_ms` counts from the add in any case.
 A sandwich. The app is layer 0. Sprites of negative layers are behind
 it, sprites of positive layers in front. Paint order is `(layer, z,
 id)`. The default is behind: the app's text stays in front of what is
-drawn.
+drawn. Names: `wallpaper` (-100), `back` (-1), `front` (1), `hud` (100);
+an integer between two names is a layer between them; `app` and 0 are
+refused.
 
 Background and foreground are those of `ptyrc-vt`: `Cell::has_ink()`,
 `Cell::backdrop()`.
@@ -541,6 +561,11 @@ layers behind it), then seen through the app, cell by cell:
   status bar, inverse video. A back glyph is still seen through its
   cells without ink, on the app's colour; a back `bg` is not seen there.
 - A `tint` behind the app is a colour of background only.
+- With `alpha`, a back `bg` is a glaze: mixed with the opaque back
+  colour or the host's default where the app left the background, with
+  the app's backdrop where it chose one (a panel); inverse cells stay
+  the app's. A back glyph's `fg` is mixed with the background it stands
+  on.
 
 With back layers alone, every app cell with ink keeps its glyph, its
 foreground and its attributes, and every backdrop the app chose is kept
@@ -548,7 +573,11 @@ foreground and its attributes, and every backdrop the app chose is kept
 
 Front layers go over whatever is below, app text included: a space is
 transparent unless `opaque`; a glyph without `bg` keeps the colour
-below it. A front `tint` recolours the app's glyphs.
+below it. A front `tint` recolours the app's glyphs. With `alpha`, a
+front glyph's `bg` is mixed with the background below and its `fg` with
+the result; a blank with a `bg` is glass: the glyph below stays, both
+its colours mixed. A `tint` mixes each colour with the one it replaces.
+A wide front glyph without `bg` over two backdrops is not drawn.
 
 The reference apps follow: confetti and sparkles fall behind the text
 (`ptyrc-app confetti --front` brings the confetti over it), the clock is
@@ -561,6 +590,7 @@ ptyrc draw text --layer -2 --bg 17 --opaque ...    static background
 ptyrc draw text --at 4,2 '<*//><'                  a drawing in front of it
                                                    the app's text
 ptyrc draw text --layer front --auto top-right ... a display in front of all
+ptyrc draw text --layer wallpaper --bg '#804000' --opaque --alpha 0.4 ...
 ```
 
 ## Plugins
@@ -632,7 +662,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 
 | method | params | result |
 |---|---|---|
-| `session.info` | | hello data, `alt_screen`, `title`, `driver_pid`, `headless` |
+| `session.info` | | hello data, `alt_screen`, `title`, `driver_pid`, `headless`, `"host_colors":{"fg","bg","from":{"fg","bg"}}` (`from`: `host`, `option`, `default`) |
 | `session.resize` | `size`: `[c, r]` | `{}`; headless only |
 | `screen.text` | `frame`, `rect`, `ansi` | `{"lines":[...],"size":[c,r],"rect":[x,y,w,h]}` |
 | `screen.cells` | `frame`, `rect` | `{"rows":[[run,...],...]}` |
@@ -687,7 +717,8 @@ form exists.
 
 ```
 ptyrc run [--name N] [--headless --size CxR] [--host-log F]
-          [--transparent] [--no-presets] [--coalesce-ms N] [--] CMD...
+          [--transparent] [--no-presets] [--coalesce-ms N]
+          [--host-fg COLOR] [--host-bg COLOR] [--] CMD...
 ptyrc ls                          sessions
 ptyrc text [-f FRAME] [--ansi]    screen as plain text
 ptyrc find [-E] [-i] PATTERN      matches with coordinates
@@ -746,7 +777,8 @@ events), `Frame`, `Sprite` handles; mirrors the protocol one to one, plus
 tests. `Frame.check_idle()` is the idle score, `Frame.is_idle` the
 boolean; both ask the driver when read. `Pilot.wait_idle(frame, timeout)`
 and `Frame.wait_idle(timeout)`: one `screen.wait {idle}`, no polling.
-`Sprite.visible`. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
+`Sprite.visible`. `Pilot.host_colors`; `spawn(host_fg=, host_bg=)`;
+`alpha=` in `sprite_spec` and `draw`. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
 `python -m ptyrc_apps.<name>` and `ptyrc-app <name>`. Every app takes
 `-s SESSION` and `-f FRAME` and runs until interrupted or the session
 ends (no time limit option; tests pass `main(argv, seconds=...)`); its

@@ -16,7 +16,6 @@ Backlog. Not a commitment; moved to `design.md` when taken.
 - Screenshot verbs: `ptyrc text --ansi > shot.ans`, SVG export.
 - Selectors à la playwright: `frame("vim").text("TODO").right(2)`.
 - Reactive sprites: hide on hover of the cursor, dodge typed text.
-- Colour blending on RGB hosts: `tint` with alpha.
 - Scrollbar or percentage indicators as a generic view hint.
 - A heatmap persisted per app across sessions.
 
@@ -25,8 +24,7 @@ Backlog. Not a commitment; moved to `design.md` when taken.
 - Layer sandwich with transparency: background layers behind the app's
   text (the default), layers in front of it, ordered; the app's text is
   one layer among them. Today: `blend` (`over`, `behind`, `tint`) and `z`.
-  Missing: `behind` as the default, a named layer order where the app text
-  has a place, per-cell alpha.
+  Built: back by default, named layers around the app, `alpha`.
 - Showcase apps: sprite handling and scrollable frames, on vim, less, more.
 - Built, then superseded by `--party`: confetti `--spawn --rate N` (per
   minute; default 20).
@@ -76,19 +74,12 @@ Notes, not commitments. They extend "background against foreground" above.
 
 Built: see `design.md`, "Layers". Left:
 
-- Alpha. A back `bg` under a panel of the app is hidden; a blend of the
-  two needs RGB on both sides, and the default background of the host is
-  not known to the driver (OSC 11 would tell). `alpha` per sprite, on
-  RGB colours only, once that is.
-- Named layers beyond `back` and `front` (`"hud"`, `"wallpaper"`): only
-  integers today.
 - A panel as a surface: a back sprite clipped to a panel of the app, or
   placed on it by name of colour.
 - A drawing next to a word (`--near`) is hidden where the app has text,
   as any back sprite; `covered` in `draw.list` tells a client.
 - `Grid::put` gives the spacer of a wide glyph the style of its head;
-  the scene relies on it. The front layers do not check that a wide
-  sprite glyph lands on one backdrop.
+  the scene relies on it.
 - An effect made by a draw extension cannot be redrawn in place
   (`draw.ext` with `id` replaces content and frames only).
 
@@ -267,3 +258,18 @@ place); rows under an overlay do not vote; `Tuning.monitor`. Left:
 - `scripts/lib-e2e.sh` cannot pass `--no-presets`: the monitor scenario
   runs with the htop preset on. An `E2E_RUN_ARGS` would test the
   generic path.
+
+## Layers, third session
+
+Built: host colours (OSC 10, 11), `alpha`, `wallpaper` and `hud` (see
+`design.md`). Left:
+
+- The named layers are a fixed table; a client cannot declare names.
+- An opaque back colour is still hidden under an app panel; only a
+  glaze shows there. A back glyph on an inverse app cell does not fade.
+- A lone ESC as the last byte of a read is forwarded, not held: a reply
+  split exactly there reaches the app.
+- No event when the host colours change; no method to set them at run
+  time.
+- Draw extensions and effects take `alpha` only through the sprite
+  fields. Mixes are linear in sRGB.
