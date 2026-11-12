@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import time
+from typing import Any
 
 from ptyrc import Pilot, PtyrcError, sprite_spec
 from tests_support import until
@@ -235,3 +236,30 @@ def test_debug_overlay(vim: Pilot) -> None:
     until(lambda: shown(vim) == vim.text())
     dump = vim.dump()
     assert dump["same_state"] is True and dump["size"] == [60, 20]
+
+
+def test_alpha_and_named_layers(spawn: Any, tmp_path: Any) -> None:
+    assert sprite_spec(["a"], alpha=0.5, layer="hud")["alpha"] == 0.5
+    log = tmp_path / "host.log"
+    pilot = spawn(["env", "PS1=$ ", "sh"], host_log=log, host_bg="#141428")
+    colors = pilot.host_colors
+    assert colors["bg"] == "#141428" and colors["from"]["bg"] == "option"
+    assert colors["fg"] == "#e5e5e5" and colors["from"]["fg"] == "default"
+
+    # Half red on the host's background: written as RGB.
+    veil = pilot.draw(["  "], at=(40, 5), bg="#ff0000", opaque=True, alpha=0.5)
+    until(lambda: b"48;2;138;10;20" in log.read_bytes())
+    assert veil.info()["alpha"] == 0.5
+    veil.update(alpha=1)
+    until(lambda: b"48;2;255;0;0" in log.read_bytes())
+
+    wall = pilot.draw(["w"], at=(0, 5), layer="wallpaper")
+    hud = pilot.draw(["h"], at=(0, 5), layer="hud")
+    assert (wall.info()["layer"], hud.info()["layer"]) == (-100, 100)
+    until(lambda: shown(pilot)[5].startswith("h"))
+    for bad in (-1, 1.5):
+        try:
+            pilot.draw(["x"], alpha=bad)
+            raise AssertionError("alpha is 0 to 1")
+        except PtyrcError as exc:
+            assert exc.code == "bad-params"
