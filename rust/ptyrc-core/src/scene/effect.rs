@@ -227,6 +227,34 @@ fn parse<T: Default + serde::de::DeserializeOwned>(
     }
 }
 
+/// The fields of `params` a running effect takes, each one of `keys`.
+fn tunable<'a>(
+    name: &str,
+    params: &'a serde_json::Value,
+    keys: &[&str],
+) -> Result<&'a serde_json::Map<String, serde_json::Value>, String> {
+    let Some(new) = params.as_object() else {
+        return Err(format!("{name}: params: an object is needed"));
+    };
+    match new.keys().find(|k| !keys.contains(&k.as_str())) {
+        Some(k) => Err(format!("{name}: {k} cannot be changed while it runs")),
+        None => Ok(new),
+    }
+}
+
+/// `new[key]` when given, else `old`.
+fn tuned<T: serde::de::DeserializeOwned>(
+    name: &str,
+    new: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    old: T,
+) -> Result<T, String> {
+    match new.get(key) {
+        Some(v) => serde_json::from_value(v.clone()).map_err(|e| format!("{name}: {key}: {e}")),
+        None => Ok(old),
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(default)]
 struct ConfettiParams {
@@ -344,8 +372,28 @@ impl Effect for Confetti {
         alive
     }
 
+    /// `duration_ms`, `origin`: the pieces thrown keep their flight.
+    fn tune(&mut self, params: &serde_json::Value) -> Result<(), String> {
+        let new = tunable("confetti", params, &["duration_ms", "origin"])?;
+        let duration_ms = tuned("confetti", new, "duration_ms", self.params.duration_ms)?;
+        let origin = tuned("confetti", new, "origin", self.params.origin)?;
+        finite_origin(origin)?;
+        self.params.duration_ms = duration_ms;
+        self.params.origin = origin;
+        Ok(())
+    }
+
     fn period(&self) -> Duration {
         Duration::from_millis(33)
+    }
+}
+
+fn finite_origin(origin: Option<[f64; 2]>) -> Result<(), String> {
+    match origin {
+        Some([x, y]) if !(x.is_finite() && y.is_finite()) => {
+            Err("confetti: origin is not finite".into())
+        }
+        _ => Ok(()),
     }
 }
 
@@ -359,11 +407,7 @@ pub fn confetti(params: &serde_json::Value) -> Result<Box<dyn Effect>, String> {
     if !params.spread.is_finite() {
         return Err("confetti: spread is not finite".into());
     }
-    if let Some([x, y]) = params.origin
-        && !(x.is_finite() && y.is_finite())
-    {
-        return Err("confetti: origin is not finite".into());
-    }
+    finite_origin(params.origin)?;
     Ok(Box::new(Confetti::new(params)))
 }
 
@@ -439,6 +483,26 @@ impl Effect for Sparkle {
         true
     }
 
+    /// `count`, `colors`, `life_ms`, `duration_ms`: nothing is kept
+    /// between two renders but the seed.
+    fn tune(&mut self, params: &serde_json::Value) -> Result<(), String> {
+        let keys = ["count", "colors", "life_ms", "duration_ms"];
+        let new = tunable("sparkle", params, &keys)?;
+        let old = &self.params;
+        let colors = tuned("sparkle", new, "colors", old.colors.clone())?;
+        if colors.is_empty() {
+            return Err("sparkle: colors is empty".into());
+        }
+        self.params = SparkleParams {
+            count: tuned("sparkle", new, "count", old.count)?,
+            colors,
+            life_ms: tuned("sparkle", new, "life_ms", old.life_ms)?,
+            duration_ms: tuned("sparkle", new, "duration_ms", old.duration_ms)?,
+            seed: old.seed,
+        };
+        Ok(())
+    }
+
     fn period(&self) -> Duration {
         Duration::from_millis(self.params.life_ms.max(7) / TWINKLE.len() as u64)
             .clamp(Duration::from_millis(33), Duration::from_millis(250))
@@ -453,4 +517,63 @@ pub fn sparkle(params: &serde_json::Value) -> Result<Box<dyn Effect>, String> {
         return Err("sparkle: colors is empty".into());
     }
     Ok(Box::new(Sparkle { params }))
+}
+
+#[cfg(test)]
+mod tune_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn drawn(effect: &mut dyn Effect, ms: u64) -> Option<usize> {
+        let mut canvas = Canvas::new(40, 12);
+        let alive = effect.render(Duration::from_millis(ms), &mut canvas);
+        let slots = (0..12).flat_map(|y| (0..40).map(move |x| (x, y)));
+        alive.then(|| {
+            slots
+                .filter(|&(x, y)| *canvas.slot(x, y) != super::super::raster::Slot::Empty)
+                .count()
+        })
+    }
+
+    #[test]
+    fn confetti_tuned_keeps_its_pieces() {
+        let mut fx = confetti(&json!({"count": 30, "duration_ms": 1000})).unwrap();
+        assert!(drawn(&mut *fx, 300).is_some());
+        for bad in [
+            json!({"count": 3}),
+            json!({"seed": 2}),
+            json!({"origin": "here"}),
+            json!([1]),
+        ] {
+            assert!(fx.tune(&bad).is_err(), "{bad}");
+        }
+        assert_eq!(drawn(&mut *fx, 1000), None);
+        // Longer: the same pieces, later in a longer life.
+        fx.tune(&json!({"duration_ms": 4000})).unwrap();
+        assert!(drawn(&mut *fx, 1000).is_some());
+        // Moved out of the canvas: alive, nothing shown.
+        fx.tune(&json!({"origin": [500.0, 2.0]})).unwrap();
+        assert_eq!(drawn(&mut *fx, 300), Some(0));
+        fx.tune(&json!({"origin": null})).unwrap();
+        assert!(drawn(&mut *fx, 300).unwrap() > 0);
+    }
+
+    #[test]
+    fn sparkle_tuned() {
+        let mut fx = sparkle(&json!({"count": 4, "life_ms": 700})).unwrap();
+        let few = drawn(&mut *fx, 100).unwrap();
+        assert!((1..=4).contains(&few));
+        for bad in [
+            json!({"seed": 2}),
+            json!({"colors": []}),
+            json!({"count": -1}),
+        ] {
+            assert!(fx.tune(&bad).is_err(), "{bad}");
+        }
+        assert_eq!(drawn(&mut *fx, 100), Some(few));
+        fx.tune(&json!({"count": 120, "colors": [9]})).unwrap();
+        assert!(drawn(&mut *fx, 100).unwrap() > few);
+        fx.tune(&json!({"duration_ms": 50})).unwrap();
+        assert_eq!(drawn(&mut *fx, 100), None);
+    }
 }

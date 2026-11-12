@@ -6,7 +6,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from ptyrc import Pilot, PtyrcError, sprite_spec
+from ptyrc import Pilot, PtyrcError, Sprite, sprite_spec
 from tests_support import until
 
 
@@ -164,6 +164,37 @@ def test_animation_and_ttl(shell: Pilot) -> None:
     until(lambda: shown(shell)[3][60:63] == "ttl")
     until(lambda: brief.info() is None)
     assert shown(shell)[3][60:63].strip() == ""
+
+
+def test_tune(shell: Pilot) -> None:
+    """`Sprite.tune`: the running effect takes new parameters in place."""
+    stars = shell.effect("sparkle", {"count": 2}, layer="front")
+
+    def count() -> int:
+        return sum(c in "❋✦*·" for c in "".join(shown(shell)))
+
+    until(lambda: 0 < count() <= 2)
+    stars.tune(count=200)
+    until(lambda: count() > 20)
+    assert stars.info()["kind"] == "effect:sparkle"
+    try:
+        stars.tune(seed=3)
+    except PtyrcError as exc:
+        assert exc.code == "bad-params" and "seed" in exc.message
+    else:
+        raise AssertionError("seed tuned")
+    # A handle that did not start the effect asks its name.
+    other = Sprite(shell, stars.id)
+    other.tune(duration_ms=1)
+    until(lambda: stars.info() is None)
+    # Not an effect.
+    text = shell.draw(["x"])
+    try:
+        text.tune(count=1)
+    except PtyrcError as exc:
+        assert exc.code == "bad-params"
+    else:
+        raise AssertionError("a text tuned")
 
 
 def test_effects_and_extensions(shell: Pilot) -> None:

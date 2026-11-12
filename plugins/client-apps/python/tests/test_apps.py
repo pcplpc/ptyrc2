@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import itertools
+import os
 import random
 import re
+import shutil
+import subprocess
 import threading
 import time
 from collections import deque
@@ -681,15 +684,64 @@ def test_snake_arcade(session: Pilot) -> None:
 
     def look(host: str) -> bool:
         seen.update(host)
-        # The snake, an apple, a foe, a beam announced, a beam firing.
+        # The snake, an apple, a foe, a beam announced, a beam firing,
+        # the score.
         return (
             "@" in seen
+            and "◆" in seen
             and "●" in seen
             and bool(seen & {"x", "+"})
             and (bool(seen & {"╌", "╎"}) and bool(seen & {"━", "┃"}))
         )
 
     watch(session, lambda: snake.main(args, seconds=4), look)
+
+
+def test_snake_over_its_particles(session: Pilot) -> None:
+    page(session, "", "", "words in the way")
+    settle(session)
+    args = ["-s", session.session, "--seed", "4", "--speed", "60", "-e"]
+    status: list[int] = []
+    thread = threading.Thread(target=lambda: status.append(snake.main(args, seconds=3)))
+    thread.start()
+    sparks = best = 0
+    while thread.is_alive():
+        sprites = session.sprites()
+        long = [s for s in sprites if s["z"] == snake.SNAKE_Z]
+        sparks += sum(s["kind"] == "animation" and s["z"] == 3 for s in sprites)
+        for row in session.dump()["host"][:1]:
+            if found := re.search(r"◆ (\d+)  best (\d+)", row):
+                assert int(found[1]) <= int(found[2])
+                best = max(best, int(found[2]))
+        assert len(long) <= 1
+        time.sleep(0.05)
+    thread.join()
+    assert status == [0] and best >= 5
+    # Particles were seen: they are under the snake.
+    assert sparks and snake.SNAKE_Z > 3
+    assert until(lambda: session.sprites() == [], 3)
+    assert session.dump()["host"] == session.text()
+
+
+def test_board_hides_what_passes_under(session: Pilot) -> None:
+    """A score has gaps; a racket under them does not show through."""
+    frame = session.frame("raw")
+    session.draw(["[=================]"], at=(-20, 0), layer="back", z=2)
+    board = _arcade.Board(session, frame)
+    with session.batch():
+        board.show(_arcade.tally(7, 12))
+
+    def top() -> str:
+        return session.dump()["host"][0]
+
+    assert until(lambda: top().endswith("=◆ 7  best 12"), 2), top()
+    sent = board.shown
+    with session.batch():
+        board.show(_arcade.tally(7, 12))  # the same: nothing sent
+        assert board.shown is sent
+        board.show(_arcade.tally(8, 12))
+    assert until(lambda: top().endswith("=◆ 8  best 12"), 2), top()
+    assert len(session.sprites()) == 2
 
 
 def test_snake_rules() -> None:
@@ -1044,7 +1096,7 @@ class Wire:
         self.todo = deque(events)
         self.calls: list[tuple[str, dict[str, object]]] = []
 
-    def subscribe(self, *topics: str) -> None:
+    def subscribe(self, *topics: str, snapshot: bool = False) -> None:
         self.calls.append(("subscribe", {"topics": list(topics)}))
 
     def event(self, timeout: float | None = None) -> tuple[str, object] | None:
@@ -1064,6 +1116,11 @@ def test_sand_heir() -> None:
     assert sand.heir(frame, [settling, right]) is None
     other = Frame(None, pane_info(7, [0, 0, 30, 24]) | {"key": "tmux:1"})
     assert sand.heir(frame, [other]) is None
+    # The lower of two panes, the screen cut from 30 rows to 20.
+    low = Frame(None, pane_info(4, [0, 15, 100, 14], "inactive"))
+    new = [Frame(None, pane_info(i, [0, y, 100, 9])) for i, y in ((7, 0), (8, 10))]
+    assert sand.heir(low, new) is None
+    assert sand.heir(low, new, (1.0, 20 / 30)) is new[1]
 
 
 def test_sand_follows_its_frame() -> None:
@@ -1086,6 +1143,90 @@ def test_sand_follows_its_frame() -> None:
         ("subscribe", {"topics": ["frames", "exit"]}),
         ("draw.update", {"id": 5, "frame": 7}),
     ]
+
+
+@pytest.mark.skipif(shutil.which("tmux") is None, reason="needs tmux")
+def test_sand_follows_two_panes_resized() -> None:
+    """Why `heir` exists. Two stacked tmux panes with little text, the
+    host resized from 30 rows to 20: the driver cannot tell which pane
+    is which and allocates new frames. A sprite left alone on an old
+    frame is out of sight for good; the sand follows."""
+    sock = f"ptyrc-apps-{os.getpid()}"
+    tmux = ["tmux", "-L", sock, "-f", "/dev/null"]
+    shell = ["env", "PS1=$ ", "sh"]
+
+    def panes() -> list[Frame]:
+        return [f for f in pilot.frames() if f.kind == "pane" and f.usable]
+
+    with Pilot.spawn([*tmux, "new-session", *shell], size=(100, 30)) as pilot:
+        try:
+            pilot.wait_for("$ ")
+            subprocess.run([*tmux, "split-window", "-v", *shell], check=True)
+            assert until(lambda: len(panes()) == 2, 6)
+            top, bottom = sorted(panes(), key=lambda f: f.rect[1])
+            alone = pilot.effect("sparkle", frame=top.id, layer="back")
+            args = ["-s", pilot.session, "-f", str(bottom.id), "--now"]
+            status: list[int] = []
+            thread = threading.Thread(
+                target=lambda: status.append(sand.main(args, seconds=9))
+            )
+            thread.start()
+
+            def poured() -> dict[str, object] | None:
+                mine = [s for s in pilot.sprites() if s["id"] != alone.id]
+                return mine[0] if mine and mine[0]["visible"] else None
+
+            assert until(lambda: poured() is not None, 3)
+            assert poured()["frame"] == bottom.id
+            pilot.resize(100, 20)
+            assert until(lambda: len(panes()) == 2, 6)
+            new = {f.id: f for f in panes()}
+            assert not {top.id, bottom.id} & set(new), "the frames were kept"
+            # The sand is on the pane now where its own was.
+            assert until(lambda: poured() is not None, 3)
+            heir = new[poured()["frame"]]
+            assert heir.rect == (0, 10, 100, 9) and poured()["size"] == [100, 9]
+            # Nothing brings the other back.
+            assert alone.info()["visible"] is False
+            thread.join()
+            assert status == [0]
+        finally:
+            subprocess.run([*tmux, "kill-server"], check=False)
+
+
+def test_sight(session: Pilot) -> None:
+    """`_cli.Sight`: the text is read when the driver tells, the cursor
+    is told, and nothing is asked on a quiet screen."""
+    page(session, "one")
+    asked: list[str] = []
+    with Pilot(session.session) as pilot:
+        frame = pilot.frame("raw")
+        sight = _cli.Sight(pilot, frame, cursor=True)
+        request = pilot._request
+        pilot._request = lambda method, *a, **kw: (
+            asked.append(method) or request(method, *a, **kw)
+        )
+        assert sight.look() and sight.changed
+        assert sight.rows[0] == "one" and asked[-1] == "screen.text"
+        asked.clear()
+        # Quiet: the looks cost nothing.
+        time.sleep(0.3)
+        assert sight.look() and not sight.changed and asked == []
+        assert until(lambda: sight.look() and sight.cursor == (2, 1), 2)
+        # Text written: read again, once the driver has told.
+        session.send("echo t''wo\n")
+        session.wait_for("two")
+        assert until(lambda: sight.look() and sight.changed, 2)
+        assert "two" in sight.rows[2] and sight.cursor == (2, 3)
+        assert set(asked) == {"screen.text"} and len(asked) <= 3
+        # A resize: the frame settles; the sight asks while it waits,
+        # then reads.
+        session.resize(60, 20)
+        assert until(lambda: sight.look() and frame.size == (60, 20), 4)
+        assert len(sight.rows) == 20
+        with sight.drawing():
+            pilot.draw(["x"], frame=frame.id)
+        assert sight.look()
 
 
 def test_options_between_the_words() -> None:

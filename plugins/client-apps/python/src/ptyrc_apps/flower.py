@@ -7,9 +7,11 @@
     ptyrc-app flower -a                    # anywhere: 5 words of the view
     ptyrc-app flower -a --count 0          # anywhere: 10 to 30 words
 
-The client reads the view twice a second: the matches of `--word`
-(`Frame.find`) and the heat classes (`Frame.heat_classes`). A match
-without a flower gets one, while there are fewer than `--count`. It is
+The driver tells when the text of the view changed or scrolled (topic
+`text`, `_cli.Sight`): the client then looks for the matches of `--word`
+again (`Frame.find`), and not before. Twice a second it tends the
+garden: a match without a flower gets one, while there are fewer than
+`--count`, where the heat classes (`Frame.heat_classes`) allow. It is
 planted at the nearest spot (`place`) where its root is 3 to 10 columns
 from the word and 1 to 3 rows above or below it, and where each of its
 cells is cold: free and still. The match is redrawn in bold over the
@@ -64,7 +66,7 @@ __all__ = [
 GAP = (3, 10)  # columns from the word to the root
 RISE = (1, 3)  # rows from the word to the root
 LIFE = (20.0, 40.0)  # seconds, while matches are left without a flower
-SCAN = 0.5  # seconds between two reads of the view
+SCAN = 0.5  # seconds between two looks at the garden
 STEP = 0.35  # seconds between two growth steps
 HEARTS = "o@*"
 POOL = 5  # words, with `-a`
@@ -420,6 +422,8 @@ class Garden:
     size: int = 0  # of the pool
     swap: float = 0.0  # time the oldest word leaves
     recount: float = 0.0  # time `size` is drawn anew, with `--count 0`
+    sought: tuple[str, bool] | None = None  # the pattern last looked for
+    found: list[Match] = field(default_factory=list)  # its matches
 
 
 def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
@@ -431,34 +435,38 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
         args.count = POOL if args.anywhere else 1
     frame = _cli.pick(pilot, args.frame)
     garden = Garden(size=args.count, swap=time.monotonic() + SWAP)
+    sight = _cli.Sight(pilot, frame)
     scanned = -math.inf
     for _ in _cli.ticks(0.05, seconds):
         now = time.monotonic()
-        with _cli.in_sight(), pilot.batch():
+        with sight.drawing(), pilot.batch():
             garden.flowers = [
                 f for f in garden.flowers if f.dies is None or f.dies > now
             ]
             for flower in garden.flowers:
                 grow(flower, now, rng)
-        if now - scanned < SCAN or not _cli.on_screen(frame):
+        if now - scanned < SCAN or not sight.look():
             continue
         scanned = now
-        with _cli.in_sight():
-            scan(pilot, frame, garden, args, layer, now, rng)
+        with sight.drawing():
+            scan(pilot, sight, garden, args, layer, now, rng)
 
 
 def scan(
     pilot: Pilot,
-    frame: Frame,
+    sight: _cli.Sight,
     garden: Garden,
     args: argparse.Namespace,
     layer: str,
     now: float,
     rng: random.Random,
 ) -> None:
-    """Wilt the flowers that lost their place, plant one if wanted."""
+    """Wilt the flowers that lost their place, plant one if wanted.
+    The matches are looked for when the text changed (`sight.changed`)
+    or the words did."""
+    frame = sight.frame
     origin = frame.origin
-    rows = frame.text()
+    rows = sight.rows
     if args.anywhere:
         if args.count == 0 and now >= garden.recount:
             garden.size = rng.randint(*CROWD)
@@ -471,10 +479,14 @@ def scan(
         if not garden.words:
             return
         words = "|".join(map(re.escape, garden.words))
-        found = frame.find(rf"\b(?:{words})\b", regex=True, ignore_case=True)
+        sought = (rf"\b(?:{words})\b", True)
     else:
-        found = frame.find(args.word, ignore_case=True)
-    matches = [m for m in found if m.screen]
+        sought = (args.word, False)
+    if sight.changed or sought != garden.sought:
+        garden.sought = None  # void, should the frame leave meanwhile
+        garden.found = frame.find(sought[0], regex=sought[1], ignore_case=True)
+        garden.sought = sought
+    matches = [m for m in garden.found if m.screen]
     by_key = {(m.x, m.y, m.text): m for m in matches}
     living = [f for f in garden.flowers if f.dies is None]
     spare = len(matches) > len(living)
