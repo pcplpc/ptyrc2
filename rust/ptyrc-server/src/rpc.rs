@@ -555,17 +555,17 @@ fn set_overlay(engine: &mut ScreenEngine, params: Value, now: Duration) -> Res {
     Ok(json!({}))
 }
 
-/// Background of a cell of the heat overlay, 256-colour palette. Red:
-/// hot, brighter when busier. Light blue: text that does not move. Green:
-/// free. Violet: a panel. The last three brighten until the cell is
-/// static.
+/// Background of a cell of the heat overlay, 256-colour palette, dark
+/// shades only (channels at most 135). Red: hot, brighter when busier.
+/// Blue: text that does not move. Green: free. Violet: a panel. The last
+/// three brighten until the cell is static.
 fn heat_bg(class: HeatClass, activity: f32, still: f32) -> u8 {
     let calm = (still / IDLE_SECS).clamp(0.0, 1.0);
     let (ramp, level) = match class {
-        HeatClass::Hot => ([52, 88, 124, 160, 196], activity),
-        HeatClass::Text => ([24, 31, 38, 75, 117], calm),
-        HeatClass::Panel => ([53, 53, 54, 54, 97], calm),
-        HeatClass::Free => ([22, 28, 34, 40, 46], calm),
+        HeatClass::Hot => ([52, 52, 52, 88, 88], activity),
+        HeatClass::Text => ([17, 17, 23, 23, 24], calm),
+        HeatClass::Panel => ([53, 53, 53, 54, 54], calm),
+        HeatClass::Free => ([22, 22, 22, 28, 28], calm),
     };
     ramp[((level * 4.0).floor() as usize).min(4)]
 }
