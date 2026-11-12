@@ -436,12 +436,28 @@ fn draw_ext(engine: &mut ScreenEngine, conn: ConnId, params: Value, now: Duratio
         .draw(&function, &ext_params)
         .map_err(RpcError::bad_params)?;
     // The remaining members are sprite fields laid over what the
-    // extension made: frame, anchor, z, blend...
+    // extension made: frame, anchor, layer, z...
     let mut merged =
         serde_json::to_value(&spec).map_err(|e| RpcError::bad_params(e.to_string()))?;
+    let update = fields.contains_key("id");
     if let Value::Object(target) = &mut merged {
         target.retain(|_, v| !v.is_null());
+        if update {
+            // In place: what the extension drew replaces what the sprite
+            // shows; the sprite keeps the rest unless given here.
+            if target.contains_key("effect") {
+                return Err(RpcError::bad_params(
+                    "id: an effect cannot replace the content of a sprite",
+                ));
+            }
+            target.retain(|k, _| matches!(k.as_str(), "content" | "frames" | "loop"));
+        }
         target.extend(fields);
+    }
+    if update {
+        let id = merged["id"].clone();
+        draw_update(engine, merged, now)?;
+        return Ok(json!({"id": id}));
     }
     draw_put(engine, conn, merged, now)
 }
@@ -532,7 +548,7 @@ pub(crate) fn refresh_overlay(engine: &mut ScreenEngine, now: Duration) {
         let spec = json!({
             "frame": info.id, "anchor": {"at": [-1, 0], "space": "view"},
             "content": {"rows": [label], "style": {"fg": fg, "bg": bg}, "opaque": true},
-            "z": 9001, "persist": true,
+            "layer": "front", "z": 9001, "persist": true,
         });
         if let Ok(spec) = serde_json::from_value::<SpriteSpec>(spec) {
             // The label goes on the raw frame: it must show on candidates
@@ -565,6 +581,7 @@ fn debug_dump(engine: &ScreenEngine) -> Res {
         "size": [engine.app.cols(), engine.app.rows()],
         "desired": desired.text(),
         "host_ansi": render_ansi(engine.host().grid(), None),
+        "desired_ansi": render_ansi(&desired, None),
         "host_is_desired": *engine.host().grid() == desired,
         "host_cursor": {"x": host_cursor.col, "y": host_cursor.row,
                         "visible": host_cursor.visible,

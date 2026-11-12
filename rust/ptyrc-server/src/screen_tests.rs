@@ -152,7 +152,7 @@ fn count(haystack: &[u8], needle: &[u8]) -> usize {
 }
 
 fn text_at(x: i64, y: i64, text: &str) -> Value {
-    json!({"anchor": {"at": [x, y], "space": "view"}, "content": {"rows": [text]}})
+    json!({"anchor": {"at": [x, y], "space": "view"}, "content": {"rows": [text]}, "layer": "front"})
 }
 
 #[test]
