@@ -1,0 +1,10 @@
+[package]
+name = "ptyrc-draw-bigtext"
+description = "ptyrc: draw extension: bigtext"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ptyrc-core.workspace = true
+serde_json.workspace = true
