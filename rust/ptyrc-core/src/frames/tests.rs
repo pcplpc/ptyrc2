@@ -2091,17 +2091,17 @@ fn presets_are_not_looked_for_on_every_key() {
     };
     s.settle(&screen("$"));
     assert_eq!(s.pane().support, None);
-    // Keys echoed on one row, 10 ms apart: nothing is asked.
+    // Keys echoed on one row, 10 ms apart: asked on the first, the
+    // last time being two seconds ago, then not.
+    s.feed(&screen("$ w"), 10);
     let before = calls.load(Ordering::Relaxed);
     for n in 1..=20 {
         s.feed(&screen(&format!("$ {}", "x".repeat(n))), 10);
     }
     assert_eq!(calls.load(Ordering::Relaxed), before);
-    // A second later one key asks again: the screen, and the pane when
-    // it is not the whole screen.
+    // A second later one key asks again, once for the screen.
     s.feed(&screen("$ y"), 1100);
-    let after = calls.load(Ordering::Relaxed);
-    assert!(after > before && after <= before + 2, "{before} {after}");
+    assert_eq!(calls.load(Ordering::Relaxed), before + 1);
     // An app that paints several rows is seen in the same burst.
     let mut g = screen("$ y");
     put(&mut g, 0, 0, "APP header                  ");
