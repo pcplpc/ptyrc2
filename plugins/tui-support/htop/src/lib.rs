@@ -7,7 +7,7 @@
 //! of the table, not a bar. The two panes are keyed: a refresh that
 //! rewrites them whole leaves their frames in place.
 
-use ptyrc_core::plugin::{Chrome, PaneView, TuiSupport};
+use ptyrc_core::plugin::{Chrome, PaneView, TuiSupport, Tuning};
 use ptyrc_vt::{Color, Grid, Rect};
 
 pub struct Htop;
@@ -115,6 +115,14 @@ impl TuiSupport for Htop {
     }
 
     /// Meters, header, table, function bar.
+    /// Meters and table are repainted in place.
+    fn tuning(&self) -> Tuning {
+        Tuning {
+            monitor: true,
+            ..Tuning::default()
+        }
+    }
+
     fn segment(&self, screen: &PaneView) -> Option<Vec<Rect>> {
         let look = Look::of(screen.grid, screen.rect)?;
         let a = look.area;
