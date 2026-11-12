@@ -465,7 +465,11 @@ Sprite, as JSON (the wire form; serde on the core types):
   with the layer `front` or `back` when none is given.
 - `z`: order inside a layer.
 - `effect`: a native generator in place of `content`; it owns the sprite's
-  cells every tick. Built in: `confetti`. Plugins add more.
+  cells every tick. Built in: `confetti`. Plugins add more. An effect that
+  asks (`Effect::looks`) is given, before each render on a usable frame,
+  what the app shows under it (`Effect::look`, `Under`): the rows of the
+  frame's view and the cursor as a canvas cell. Exact when the canvas is
+  the view (no `size`, default anchor).
 - A sprite belongs to the connection that added it and dies with it unless
   `persist`. `ttl_ms` bounds its life in any case.
 
@@ -704,11 +708,30 @@ sprites die with its connection, but for the bursts of a confetti round.
 | `flower` | `largest` | client: every 0.5 s, `find` the word (case ignored) in the view and wilt the flowers whose match left it or whose cells show text; while fewer than `--count` (1; 0: one per match), plant one on a random match without a flower, at most one a scan. Random size (3 shapes, 3 to 7 rows; a smaller one where it does not fit) and colours (256-colour petals, two-tone at times, heart, stem). Root 3 to 10 columns from an end of the word, 1 to 3 rows above or below; every cell of the shape cold (`heat_classes` `.`), in the view, off the other flowers and a cell away from every match; nearest first, rows counting double, ties at random. The match is redrawn bold with a `tint` sprite. Growth: two or so steps 0.35 s apart, sent by the client; then a sway animation played by the driver, random phase and pace; wilting: a finite animation, removed by the driver. With matches to spare, a flower wilts after 20 to 40 s. No cell of a flower between two cells that are not cold: never in the gap between two words. `-a` (`--anywhere`): in place of `--word`, a pool of 3 to 5 words of 4 letters or more drawn from the view, matched whole (`\b`, one regex `find`); a word leaves the pool when it leaves the view, or when none of its matches has a flower or room for one, and another is drawn; matches of the words with the fewest flowers first; `--count` defaults to the pool size; no bold. Frame coordinates; back layer unless `--front` |
 | `fishes` | `largest` | 8 fishes, back layer; positions in frame coordinates, computed by the client, one batch every 100 ms; flee the cursor. Half of them, rounded down and drawn at random at birth, are shy (`--shy N`: N); a shy fish heads for the nearest spot of the view where the text hides at least 5 of its 6 cells, out of reach of the cursor (`hideouts`), slows down there, stays 4 to 10 s, then heads for a random spot at least 12 cells away (`lure`); fear first. The view's text is read once a second or when the view moved. A fish out of the view stays still; after a random 2 to 5 s it goes, at most one a tick (`tide`), and comes back in the view at the spot where the text hides most of it, ties at random, a side of the view when there is no text (`entry`). Back in view before its time, it carries on |
 | `snake` | `largest` | client: breadth-first search over the free cells of the view, one batch per move (12 a second); frame coordinates |
-| `sand` | `idle` | native effect `sand` (draw extension `sand`), walls sent once; the client polls the pane's text every 0.5 s, removes the sand when it changes and pours again once `is_idle` |
+| `sand` | `idle` | native effect `sand` (draw extension `sand`), one request; the client polls `is_idle` every 0.5 s until the pane is idle (`--now`: at once), then looks every 0.5 s: when its frame is inactive and a usable pane of the same key covers half of it (a resize of a pane with little text), the sprite is moved there (`heir`). `--rate`; `--cursor`: the stream falls on the cursor's column |
 
-Draw extension `sand`: effect `sand`, params `walls` (rows of text; a
-cell that is not a space holds the sand), `rate` (grains per second,
-30), `colors`, `duration_ms`, `seed`. 20 steps a second.
+Draw extension `sand`: effect `sand`. Grains are braille dots, 2 x 4 a
+cell, one step every 12 ms, a render every 48 ms.
+
+- Walls: the cells of the view that are not a space, seen through
+  `Effect::look`. A cell that gets text loses its grains; one that loses
+  its text lets them fall. A resize keeps the grains, top-left fixed;
+  those outside are lost.
+- Spout: one stream, from the topmost free cell of a column: the nearest
+  to the middle that lands on text, away from the ends of the run it
+  lands on. Kept while it stays so; moved when the pile reaches it.
+  `cursor`: the cursor's column, unless the cursor is outside the canvas
+  or on column 0.
+- A grain falls; held from below, awake, it slides down a diagonal or
+  rolls two dots aside, and may stop on a one-dot drop; asleep, it
+  topples only off a drop of three dots. A grain that moves wakes the
+  three above it: avalanches.
+- Colour: the stream goes around `colors`, `color_ms` (20000) from one
+  to the next, in 16 shades: strata. A cell has one colour: the mean
+  of its grains.
+- Params: `rate` (grains per second, 120; above 166 the stream widens),
+  `cursor`, `colors`, `color_ms`, `walls` (rows standing for the app's
+  until it is seen), `duration_ms`, `seed`.
 
 `scripts/demo-apps.sh [snake] [--check]`: the apps on a scrolling vim
 buffer. `scripts/demo-frames.sh [--check]`: a tmux session of two

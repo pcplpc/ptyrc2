@@ -196,10 +196,9 @@ Other:
 
 Gaps met while writing the apps; none fixed in the core.
 
-- An effect cannot see the screen: `Effect::render` gets a canvas and a
-  time. The sand takes the pane's text as a `walls` parameter and is
-  started again when the text changes. An effect given the app cells
-  under its canvas would let it react by itself.
+- Built: an effect sees the screen (`Effect::look`: rows of the view,
+  cursor). The sand reads its walls there. Left: text only, no styles;
+  rows of the view, not of the canvas, when the two differ.
 - vim splits inside a tmux window are one pane. Reproduce:
   `scripts/demo-frames.sh`, window 1 (`vim -u NONE -N -O a b` in a full
   tmux window, 120x36). Expected: two panes, key `tmux:1:...`. Observed:
@@ -212,8 +211,7 @@ Gaps met while writing the apps; none fixed in the core.
   view: a 7-row flower next to a word on the first rows loses its top.
   An anchor that slides to stay whole would help.
 - `Frame.refresh` lists every frame to update one: use `frame.get`.
-- No event for idle or for a frame's text change: `sand` polls twice a
-  second.
+- No event for idle: `sand` polls twice a second until it starts.
 - `quietest` and `idle` name a pane at the time the sprite is added; an
   app that waits for idle has to ask again (`sand` does).
 - Party mode behind busy text (120x40, two cells of three inked, one
@@ -235,3 +233,14 @@ Gaps met while writing the apps; none fixed in the core.
   fish a tick at most; the jump after a `less` page down is gone.
 - Built: fishes, half of them shy (`--shy N`): each hides behind the
   nearest text, 4 to 10 s, then swims to another spot; fear first.
+- Built: sand in braille, one stream, avalanches, strata, kept across
+  resizes and text changes, `--cursor` (see `design.md`). No cursor, or
+  on column 0: the spout of a sand without `--cursor`. Left: the pile
+  does not scroll with the text; at `--rate` 400 the pile under the
+  spout is a column, the stream outruns the slides.
+- A pane with little text gets a new frame at a resize (identity is
+  by content): its sprites stay on the inactive frame. Reproduce: `sh`
+  with an empty screen, 60x14, a sprite on the pane, resize to 40x10.
+  Expected: same frame id. Observed: frame 1 inactive, frame 2 new, the
+  sprite hidden. `sand` moves its sprite itself (`heir`); the core
+  could fall back to the overlap alone when nothing else claims it.

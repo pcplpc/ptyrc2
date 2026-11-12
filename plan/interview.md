@@ -73,6 +73,13 @@ Supersedes `--spawn --rate` above.
   slowly, and respawn behind the text.
 - Fishes: by default half of them, drawn at random at birth, are
   attracted by text and hide behind it.
+- Sand: braille dots, not blocks. One thin stream from a free place
+  near the middle of the top, chosen to fall on text; a pile that
+  stacks, then falls by gravity; small physics, avalanches. Colours
+  change very slowly, so the stream lays strata. A resize eats the sand
+  it covers, the rest stays. Text written on the sand clears those
+  cells only. `--cursor`: the stream falls in the cursor's column; no
+  cursor, or on the first column: out of scope.
 
 ## Flower, third session
 
