@@ -8,6 +8,7 @@
 #   scripts/demo-apps.sh snake        the snake instead of the fishes
 #   scripts/demo-apps.sh brick        the brick breaker, all of it
 #   scripts/demo-apps.sh blocks       the falling pieces, all of it
+#   scripts/demo-apps.sh snow         snow in place of the rain and the fishes
 #   scripts/demo-apps.sh --check      self-test, detached
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib-demo.sh"
@@ -29,8 +30,10 @@ demo_app flower --word flower
 demo_app clock
 demo_app cat
 demo_app marks 'lazy dog' fox
-demo_app rain
-if [ "${1:-}" = snake ]; then
+[ "${1:-}" = snow ] || demo_app rain
+if [ "${1:-}" = snow ]; then
+    demo_app snow --rate 40
+elif [ "${1:-}" = snake ]; then
     demo_app snake
 elif [ "${1:-}" = brick ]; then
     demo_app brick -a
