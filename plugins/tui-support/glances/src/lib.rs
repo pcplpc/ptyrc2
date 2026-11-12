@@ -134,7 +134,7 @@ impl TuiSupport for Glances {
         if part(pane).is_some() { 0.9 } else { 0.0 }
     }
 
-    /// Not split: all above the last rule.
+    /// Asked whole (the core split nothing): all above the last rule.
     fn chrome(&self, pane: &PaneView) -> Option<Chrome> {
         let (look, part) = part(pane)?;
         Some(match part {

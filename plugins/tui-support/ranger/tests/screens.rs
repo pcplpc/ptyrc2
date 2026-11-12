@@ -133,7 +133,7 @@ fn empty_directory() {
     );
 }
 
-/// ranger in a pane of another app: known, not split.
+/// ranger in an area of the screen, asked whole: known.
 #[test]
 fn nested() {
     let inner = screen(include_str!("screens/home.ans"));

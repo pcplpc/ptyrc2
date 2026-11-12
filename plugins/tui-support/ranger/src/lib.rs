@@ -173,7 +173,7 @@ impl TuiSupport for Ranger {
         }
     }
 
-    /// Not split (inside another app's pane): the title and status rows.
+    /// Asked whole (the core split nothing): the title and status rows.
     fn chrome(&self, pane: &PaneView) -> Option<Chrome> {
         match part(pane)?.1 {
             Part::Whole => Some(Chrome {

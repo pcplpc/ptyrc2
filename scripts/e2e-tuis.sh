@@ -248,10 +248,16 @@ a_ranger() {
         'len(P) == 3 and all(f["support"] == "ranger" and f["rect"][1] == 1 and f["rect"][3] == H - 2 for f in P) and [f["rect"] for f in C] == [[0, 0, W, 1], [0, H - 1, W, 1]]'
     check "ranger: the main column is keyed by its directory" \
         '[f["key"] for f in P] == [None, "ranger:/usr/share/doc", None]'
-    local main
+    local main preview
     main=$(frames_json | python3 -c 'import json, sys; print(next(f["id"] for f in json.load(sys.stdin)["frames"] if f["key"]))')
+    preview=$(frames_json | python3 -c '
+import json, sys
+print(max((f for f in json.load(sys.stdin)["frames"] if f["kind"] == "pane" and f["state"] != "inactive"),
+          key=lambda f: f["rect"][0])["id"])')
     e2e_keys down; quiet; e2e_keys down; quiet; e2e_keys up; quiet
     same_text ranger
+    check "ranger: the preview is a monitor: the same frame, at its origin" \
+        "P[2][\"id\"] == $preview and P[2][\"origin\"] == [0, 0]"
     e2e_keys pagedown; quiet 1
     check "ranger: the main column scrolls in its frame" \
         "P[1][\"id\"] == $main and P[1][\"origin\"][1] > 0 and P[1][\"usable\"]"

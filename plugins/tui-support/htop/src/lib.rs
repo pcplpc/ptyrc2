@@ -92,7 +92,7 @@ impl TuiSupport for Htop {
         if part(pane).is_some() { 0.9 } else { 0.0 }
     }
 
-    /// Not split (inside another app's pane): all but the table. A pane
+    /// Asked whole (the core split nothing): all but the table. A pane
     /// of the split has none: no row of the table is learned as chrome.
     fn chrome(&self, pane: &PaneView) -> Option<Chrome> {
         let (look, part) = part(pane)?;
@@ -211,7 +211,7 @@ mod tests {
         assert_eq!(Htop.segment(&pane(&g, g.rect())), None);
     }
 
-    /// In a pane of another app: known, not split, the table scrolls.
+    /// An area of the screen asked whole: known, chrome around the table.
     #[test]
     fn nested() {
         let inner = screen(BAR);
