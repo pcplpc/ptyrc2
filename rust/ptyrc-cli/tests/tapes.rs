@@ -56,7 +56,8 @@ fn pager_tape_keeps_its_frames() {
     );
     assert!(origins[5] > 1000, "G is a jump: an island");
     assert_eq!(origins[6], 0, "g: the first page is found again");
-    assert_eq!(pane(6)["extent"], json!([0, 48]));
+    // The rows of the file; the prompt row is chrome.
+    assert_eq!(pane(6)["extent"], json!([0, 47]));
 }
 
 /// tmux: a split, a second window, back to the first.
