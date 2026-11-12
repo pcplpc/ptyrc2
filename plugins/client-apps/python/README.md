@@ -16,7 +16,7 @@ python -m ptyrc_apps.clock -s NAME
 | `flower` | flowers of random size and colours planted on cold cells next to the matches of a word (`--count N`, 0: all), the word bolded with a tint; `-a`: next to 3 to 5 words drawn from the screen, no bold; grown by the client, swayed by the driver; frame coordinates |
 | `fishes` | sprites in frame coordinates: they scroll with the text; one scrolled out of the view goes after a few seconds and comes back behind the text; half of them shy, hiding behind the text; the cursor read each tick, the text once a second; one batch per tick |
 | `snake` | the screen read as a map: glyphs are walls; one sprite redrawn in place each step |
-| `sand` | `Frame.is_idle` to choose a pane; a native simulation from a draw extension, with the pane's text as walls |
+| `sand` | `Frame.is_idle` to choose a pane; a native simulation from a draw extension that reads the pane's text, its walls, by itself; `--cursor` pours on the cursor's column |
 
 `scripts/demo-apps.sh` runs them on a scrolling vim buffer;
 `scripts/demo-frames.sh` gives each pane of a tmux session its own
@@ -62,8 +62,11 @@ What to know:
   each step with `_cli.on_screen(frame)` and wraps it in
   `_cli.in_sight()`.
 - **Idle**: `frame.is_idle` is true once 80 % of a pane has been still
-  for 10 s. A big animation waits for it, and leaves when the text
-  changes (`sand.py`).
+  for 10 s. A big animation waits for it (`sand.py`).
+- **A frame replaced**: a pane keeps its frame through a resize when the
+  driver knows its text again; a nearly empty one gets a new frame, and
+  the sprites stay with the old, inactive one. `sand.heir` finds the
+  new pane; `Sprite.update(frame=...)` moves the sprite, state kept.
 - **What**: `rows` (a space is transparent), `cells` (styled runs),
   `frames` (an animation the driver plays alone), `effect` (a native
   generator), `pilot.ext(...)` (a draw extension).

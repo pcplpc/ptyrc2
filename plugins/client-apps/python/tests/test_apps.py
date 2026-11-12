@@ -485,29 +485,83 @@ def test_fishes_come_back_after_a_scroll(tmp_path: Path) -> None:
         assert status == [0]
 
 
+def grains(row: str) -> int:
+    """Cells of `row` holding sand: braille."""
+    return sum("\u2801" <= c <= "\u28ff" for c in row)
+
+
 def test_sand(session: Pilot) -> None:
     page(session, "", "", "", "", "", "", "", "", "      a shelf of words")
     args = ["-s", session.session, "--now", "--rate", "400"]
     status: list[int] = []
     thread = threading.Thread(target=lambda: status.append(sand.main(args, seconds=4)))
     thread.start()
-    piled = swept = False
+    piled = stayed = False
     typed = 0.0
     while thread.is_alive():
         dump = session.dump()
         for app, host in zip(dump["app"], dump["host"], strict=True):
             for a, h in zip(app, host.ljust(len(app)), strict=False):
                 assert a == " " or a == h, (app, host)  # never on the text
-        if not piled and "▒" in dump["host"][7][6:22]:
+        on_shelf = grains(dump["host"][7][6:22])
+        if not piled and on_shelf > 3:
             piled = True  # grains rest on the words
+            assert all(grains(row) <= 3 for row in dump["host"][:5])  # a stream
             session.send("echo busy\n")
             typed = time.monotonic()
-        if piled and time.monotonic() - typed > 0.2 and not session.sprites():
-            swept = True  # the pane is used: the sand is gone
+        if piled and time.monotonic() - typed > 0.5 and "busy" in dump["host"][10]:
+            # The pane is used: the pile stays, the stream goes on.
+            stayed = stayed or (on_shelf > 3 and len(session.sprites()) == 1)
         time.sleep(0.02)
     thread.join()
-    assert status == [0] and piled and swept
+    assert status == [0] and piled and stayed
     assert session.dump()["host"] == session.text()
+
+
+def test_sand_survives_a_resize(session: Pilot) -> None:
+    page(session, "top")
+    args = ["-s", session.session, "--now", "--rate", "400"]
+    status: list[int] = []
+    thread = threading.Thread(target=lambda: status.append(sand.main(args, seconds=8)))
+    thread.start()
+    resized = kept = False
+    back = 0.0
+    while thread.is_alive():
+        floor = session.dump()["host"][-1]
+        if not resized and grains(floor[34:46]) >= 10:
+            resized = True  # a pile under the spout, mid-screen
+            session.resize(50, 24)
+        elif resized and not back:
+            # A pane this empty is a new frame after a resize: the app
+            # follows it.
+            sprites = session.sprites()
+            if sprites and sprites[0]["screen"] and sprites[0]["size"] == [50, 24]:
+                back = time.monotonic()
+        elif back and time.monotonic() - back < 1.0:
+            # The pile is there, but for what was cut off; the new
+            # stream has not reached the floor yet.
+            kept = kept or (len(floor) <= 50 and grains(floor[34:46]) >= 10)
+        time.sleep(0.02)
+    thread.join()
+    assert status == [0] and resized and kept
+
+
+def test_sand_cursor(session: Pilot) -> None:
+    page(session, "top", "", "", "")
+    session.send("printf 'here: '\n")
+    session.wait_for(r"^here: \$", regex=True)
+    column = session.cursor().x
+    assert column == 8
+    args = ["-s", session.session, "--now", "--cursor"]
+    watch(
+        session,
+        lambda: sand.main(args, seconds=1.5),
+        lambda host: (
+            (rows := host.split("\n"))
+            and all(grains(r) == grains(r[column : column + 1]) for r in rows)
+            and sum(grains(r) for r in rows[:4]) >= 3
+        ),
+    )
 
 
 def test_snake(session: Pilot) -> None:
