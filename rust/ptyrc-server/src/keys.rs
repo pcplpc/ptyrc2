@@ -1,13 +1,113 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Key names to bytes, and base64.
 
-/// Bytes of a key of `input.send`. A string that names no key is sent as
-/// text. `app_cursor`: the app is in application cursor-key mode.
-pub fn encode_key(key: &str, app_cursor: bool) -> Vec<u8> {
-    match named(key, app_cursor) {
-        Some(bytes) => bytes,
-        None => key.as_bytes().to_vec(),
+use ptyrc_proto::suggest;
+
+/// The key names, as listed in an error.
+pub const KEY_NAMES: &str = "enter tab esc space backspace delete insert up down left right \
+home end pageup pagedown f1..f12 shift+tab ctrl+<a-z @ [ \\ ] ^ _ ? space> alt+<key>";
+
+const NAMED: [&str; 16] = [
+    "enter",
+    "tab",
+    "esc",
+    "space",
+    "backspace",
+    "delete",
+    "insert",
+    "up",
+    "down",
+    "left",
+    "right",
+    "home",
+    "end",
+    "pageup",
+    "pagedown",
+    "shift+tab",
+];
+
+/// Names people try, and the name that is meant.
+const ALIASES: [(&str, &str); 17] = [
+    ("return", "enter"),
+    ("cr", "enter"),
+    ("escape", "esc"),
+    ("bs", "backspace"),
+    ("del", "delete"),
+    ("ins", "insert"),
+    ("pgup", "pageup"),
+    ("pgdn", "pagedown"),
+    ("pgdown", "pagedown"),
+    ("page-up", "pageup"),
+    ("page-down", "pagedown"),
+    ("page_up", "pageup"),
+    ("page_down", "pagedown"),
+    ("prior", "pageup"),
+    ("next", "pagedown"),
+    ("backtab", "shift+tab"),
+    ("spc", "space"),
+];
+
+/// A string that was meant as a key and is not one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KeyError {
+    pub message: String,
+    pub hint: String,
+}
+
+fn key_error(key: &str, meant: Option<&str>) -> KeyError {
+    let hint = match meant {
+        Some(name) => format!("did you mean {name}? text goes through `text` (ptyrc send)"),
+        None => format!("keys: {KEY_NAMES}"),
+    };
+    KeyError {
+        message: format!("not a key: {key}"),
+        hint,
     }
+}
+
+/// Bytes of a key of `input.send`. `app_cursor`: the app is in
+/// application cursor-key mode.
+///
+/// A string that names no key is sent as text, unless it was plainly
+/// meant as a key: a modifier prefix, an `f<n>` out of range, a key name
+/// in another case, a common alias (`return`, `escape`, `pgdn`).
+pub fn encode_key(key: &str, app_cursor: bool) -> Result<Vec<u8>, KeyError> {
+    if let Some(bytes) = named(key, app_cursor) {
+        return Ok(bytes);
+    }
+    let lower = key.to_ascii_lowercase();
+    if lower != key && named(&lower, app_cursor).is_some() {
+        return Err(key_error(key, Some(&lower)));
+    }
+    if let Some((_, name)) = ALIASES.iter().find(|(alias, _)| *alias == lower) {
+        return Err(key_error(key, Some(name)));
+    }
+    let function = lower
+        .strip_prefix('f')
+        .is_some_and(|n| !n.is_empty() && n.len() <= 2 && n.bytes().all(|b| b.is_ascii_digit()));
+    if function {
+        return Err(key_error(key, None));
+    }
+    for prefix in [
+        "ctrl+", "alt+", "shift+", "control+", "meta+", "ctrl-", "alt-",
+    ] {
+        if let Some(rest) = lower.strip_prefix(prefix)
+            && !rest.is_empty()
+        {
+            let meant = match prefix {
+                "control+" | "ctrl-" => Some(format!("ctrl+{rest}")),
+                "meta+" | "alt-" => Some(format!("alt+{rest}")),
+                "alt+" => suggest::nearest(rest, NAMED).map(|n| format!("alt+{n}")),
+                _ => None,
+            };
+            let meant = meant.filter(|m| named(m, app_cursor).is_some());
+            return Err(key_error(key, meant.as_deref()));
+        }
+    }
+    if matches!(lower.as_str(), "ctrl+" | "alt+" | "shift+") {
+        return Err(key_error(key, None));
+    }
+    Ok(key.as_bytes().to_vec())
 }
 
 fn named(key: &str, app_cursor: bool) -> Option<Vec<u8>> {
@@ -20,6 +120,7 @@ fn named(key: &str, app_cursor: bool) -> Option<Vec<u8>> {
         "space" => b" ".to_vec(),
         "backspace" => b"\x7f".to_vec(),
         "delete" => tilde(3),
+        "insert" => tilde(2),
         "up" => cursor(b'A'),
         "down" => cursor(b'B'),
         "right" => cursor(b'C'),
@@ -50,7 +151,12 @@ fn named(key: &str, app_cursor: bool) -> Option<Vec<u8>> {
                     return None;
                 }
                 let mut bytes = vec![0x1b];
-                bytes.extend(encode_key(rest, app_cursor));
+                // A named key, or one character.
+                match named(rest, app_cursor) {
+                    Some(key) => bytes.extend(key),
+                    None if rest.chars().count() == 1 => bytes.extend(rest.as_bytes()),
+                    None => return None,
+                }
                 return Some(bytes);
             }
             return None;
@@ -131,25 +237,57 @@ pub fn base64_decode(text: &str) -> Option<Vec<u8>> {
 mod tests {
     use super::*;
 
+    fn key(name: &str, app_cursor: bool) -> Vec<u8> {
+        encode_key(name, app_cursor).unwrap()
+    }
+
     #[test]
     fn keys() {
-        assert_eq!(encode_key("enter", false), b"\r");
-        assert_eq!(encode_key("up", false), b"\x1b[A");
-        assert_eq!(encode_key("up", true), b"\x1bOA");
-        assert_eq!(encode_key("end", true), b"\x1bOF");
-        assert_eq!(encode_key("ctrl+c", false), b"\x03");
-        assert_eq!(encode_key("ctrl+[", false), b"\x1b");
-        assert_eq!(encode_key("ctrl+space", false), b"\0");
-        assert_eq!(encode_key("alt+x", false), b"\x1bx");
-        assert_eq!(encode_key("alt+enter", false), b"\x1b\r");
-        assert_eq!(encode_key("shift+tab", false), b"\x1b[Z");
-        assert_eq!(encode_key("f5", false), b"\x1b[15~");
-        assert_eq!(encode_key("f12", false), b"\x1b[24~");
-        assert_eq!(encode_key("pagedown", false), b"\x1b[6~");
+        assert_eq!(key("enter", false), b"\r");
+        assert_eq!(key("up", false), b"\x1b[A");
+        assert_eq!(key("up", true), b"\x1bOA");
+        assert_eq!(key("end", true), b"\x1bOF");
+        assert_eq!(key("ctrl+c", false), b"\x03");
+        assert_eq!(key("ctrl+[", false), b"\x1b");
+        assert_eq!(key("ctrl+space", false), b"\0");
+        assert_eq!(key("alt+x", false), b"\x1bx");
+        assert_eq!(key("alt+enter", false), b"\x1b\r");
+        assert_eq!(key("shift+tab", false), b"\x1b[Z");
+        assert_eq!(key("f5", false), b"\x1b[15~");
+        assert_eq!(key("f12", false), b"\x1b[24~");
+        assert_eq!(key("pagedown", false), b"\x1b[6~");
+        assert_eq!(key("insert", false), b"\x1b[2~");
         // Not a key: text.
-        assert_eq!(encode_key(":wq", false), b":wq");
-        assert_eq!(encode_key("ctrl+xx", false), b"ctrl+xx");
-        assert_eq!(encode_key("Enter", false), b"Enter");
+        assert_eq!(key(":wq", false), b":wq");
+        assert_eq!(key("q", false), b"q");
+        assert_eq!(key("fn", false), b"fn");
+        assert_eq!(key("c-x", false), b"c-x");
+        assert_eq!(key("a+b", false), b"a+b");
+    }
+
+    #[test]
+    fn near_keys_are_errors() {
+        let meant = |name: &str| encode_key(name, false).unwrap_err().hint;
+        assert!(meant("Enter").starts_with("did you mean enter?"));
+        assert!(meant("return").starts_with("did you mean enter?"));
+        assert!(meant("escape").starts_with("did you mean esc?"));
+        assert!(meant("PgDn").starts_with("did you mean pagedown?"));
+        assert!(meant("control+c").starts_with("did you mean ctrl+c?"));
+        assert!(meant("ctrl-c").starts_with("did you mean ctrl+c?"));
+        assert!(meant("alt+entr").starts_with("did you mean alt+enter?"));
+        for bad in [
+            "ctrl+xx",
+            "ctrl+",
+            "ctrl+shift+x",
+            "f13",
+            "f0",
+            "shift+up",
+            "alt+",
+        ] {
+            let e = encode_key(bad, false).unwrap_err();
+            assert_eq!(e.message, format!("not a key: {bad}"));
+            assert!(e.hint.starts_with("keys: enter tab"), "{bad}: {}", e.hint);
+        }
     }
 
     #[test]

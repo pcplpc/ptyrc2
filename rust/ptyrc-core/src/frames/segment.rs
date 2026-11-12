@@ -98,29 +98,31 @@ impl Segmenter<'_> {
             .any(|d| d.bar == bar && d.until > self.now && contains(&d.area, r))
     }
 
-    /// Share of filled cells and dominant paint of a row span.
+    /// Dominant paint of a row span and the number of cells that show it.
     fn row_fill(&self, r: &Rect, row: u16) -> (u16, u16) {
-        let (mut filled, mut key, mut votes) = (0u16, 0u16, 0i32);
+        let (mut key, mut votes) = (0u16, 0i32);
         for c in r.x..r.right() {
             let p = self.paint(c, row);
-            if p != 0 {
-                filled += 1;
-                if votes == 0 {
-                    key = p;
-                    votes = 1;
-                } else if key == p {
-                    votes += 1;
-                } else {
-                    votes -= 1;
-                }
+            if votes == 0 {
+                key = p;
+                votes = 1;
+            } else if key == p {
+                votes += 1;
+            } else {
+                votes -= 1;
             }
         }
-        (filled, key)
+        let count = (r.x..r.right())
+            .filter(|&c| self.paint(c, row) == key)
+            .count() as u16;
+        (count, key)
     }
 
+    /// The backdrop of a bar row: one colour, not the default, across the
+    /// span.
     fn is_bar_row(&self, r: &Rect, row: u16) -> Option<u16> {
-        let (filled, key) = self.row_fill(r, row);
-        (filled as u32 * 10 >= r.w as u32 * 9).then_some(key)
+        let (count, key) = self.row_fill(r, row);
+        (key != 0 && count as u32 * 10 >= r.w as u32 * 9).then_some(key)
     }
 
     /// Kind of horizontal separator at `row` of `r`: `Some(bar)`.
@@ -140,7 +142,7 @@ impl Segmenter<'_> {
         }
         if r.h >= 2
             && Some(row) != self.cursor_row
-            && !self.distrusted(true, r)
+            && !self.distrusted(true, &Rect::new(r.x, row, r.w, 1))
             && let Some(key) = self.is_bar_row(r, row)
         {
             let same = |other: u16| self.is_bar_row(r, other) == Some(key);
@@ -254,10 +256,105 @@ impl Segmenter<'_> {
             return;
         }
         // Boxes floating inside.
-        for b in self.boxes(&r) {
+        let boxes = self.boxes(&r);
+        for b in &boxes {
             self.split(Rect::new(b.x + 1, b.y + 1, b.w - 2, b.h - 2), depth + 1);
         }
+        // Panels floating inside: no border, another backdrop.
+        for p in self.panels(&r) {
+            if !boxes.iter().any(|b| b.intersects(&p)) {
+                self.split(p, depth + 1);
+            }
+        }
         self.leaf(r);
+    }
+
+    /// The most frequent paint of `r`: its backdrop.
+    fn backdrop(&self, r: &Rect) -> u16 {
+        let mut counts: Vec<(u16, u32)> = Vec::new();
+        for row in r.y..r.bottom() {
+            let mut c = r.x;
+            while c < r.right() {
+                let p = self.paint(c, row);
+                let mut e = c + 1;
+                while e < r.right() && self.paint(e, row) == p {
+                    e += 1;
+                }
+                match counts.iter_mut().find(|(k, _)| *k == p) {
+                    Some((_, n)) => *n += (e - c) as u32,
+                    None => counts.push((p, (e - c) as u32)),
+                }
+                c = e;
+            }
+        }
+        counts
+            .into_iter()
+            .max_by_key(|&(k, n)| (n, std::cmp::Reverse(k)))
+            .map_or(0, |(k, _)| k)
+    }
+
+    /// Panels inside `r`: rectangles of one backdrop that is not `r`'s,
+    /// at least a pane in size, narrower than `r`. A row belongs to a
+    /// panel when it shows the panel's colour at both edges and nothing of
+    /// `r`'s backdrop between them: a highlighted entry inside stays in.
+    /// Largest first, disjoint.
+    fn panels(&self, r: &Rect) -> Vec<Rect> {
+        let mut found: Vec<Rect> = Vec::new();
+        if r.w <= self.min_cols || r.h < self.min_rows {
+            return found;
+        }
+        let back = self.backdrop(r);
+        // Open spans `(x0, x1, key, first row)`, extended row by row.
+        let mut open: Vec<(u16, u16, u16, u16)> = Vec::new();
+        let mut done: Vec<Rect> = Vec::new();
+        for row in r.y..=r.bottom() {
+            let mut spans: Vec<(u16, u16, u16)> = Vec::new();
+            if row < r.bottom() {
+                let mut c = r.x;
+                while c < r.right() {
+                    let key = self.paint(c, row);
+                    if key == back || (c > r.x && self.paint(c - 1, row) == key) {
+                        c += 1;
+                        continue;
+                    }
+                    // As far as `back` does not show; the span ends at the
+                    // last cell of `key` in there.
+                    let (mut e, mut last) = (c, c);
+                    while e < r.right() && self.paint(e, row) != back {
+                        if self.paint(e, row) == key {
+                            last = e;
+                        }
+                        e += 1;
+                    }
+                    let x1 = last + 1;
+                    if x1 - c >= self.min_cols && x1 - c < r.w {
+                        spans.push((c, x1, key));
+                    }
+                    c += 1;
+                }
+            }
+            open.retain(|&(x0, x1, key, first)| {
+                if spans.contains(&(x0, x1, key)) {
+                    return true;
+                }
+                if row - first >= self.min_rows {
+                    done.push(Rect::new(x0, first, x1 - x0, row - first));
+                }
+                false
+            });
+            for (x0, x1, key) in spans {
+                if !open.iter().any(|o| (o.0, o.1, o.2) == (x0, x1, key)) {
+                    open.push((x0, x1, key, row));
+                }
+            }
+        }
+        done.sort_by_key(|p| std::cmp::Reverse(p.w as u32 * p.h as u32));
+        for p in done {
+            if !found.iter().any(|f| f.intersects(&p)) {
+                found.push(p);
+            }
+        }
+        found
     }
 
     /// Closed boxes of border glyphs inside `r`, outermost first, disjoint.
@@ -314,9 +411,14 @@ impl Segmenter<'_> {
     }
 }
 
-/// Separators that moved with their surroundings between two
-/// segmentations: content, not structure. `prev` and `next` are the row
-/// texts before and after.
+/// Separators that are content, not structure, from two segmentations.
+/// `prev` and `next` are the row texts before and after. The `parent` of
+/// each is the area where separators of its kind are not to be believed.
+///
+/// - A separator that moved with its surroundings: it scrolled.
+/// - A bar that moved without its text: the highlight of a list (a
+///   selected process, a menu entry), on another entry now. Its area is
+///   the list: the rows between the nearest separators that did not move.
 pub(crate) fn scrolled_seps(
     old: &[Sep],
     new: &[Sep],
@@ -359,7 +461,189 @@ pub(crate) fn scrolled_seps(
                 out.push(*o);
                 break;
             }
+            // A status line takes its text along; a highlight lands on
+            // another entry.
+            let was = Screen::hash_of(&prev(o.pos), o.a, o.b);
+            let is = Screen::hash_of(&next(n.pos), o.a, o.b);
+            if o.bar && o.parent == n.parent && is != super::screen::BLANK && was != is {
+                let (lo, hi) = (o.pos.min(n.pos), o.pos.max(n.pos));
+                let fixed = |s: &&Sep| {
+                    s.a == o.a
+                        && s.b == o.b
+                        && old
+                            .iter()
+                            .any(|x| x.pos == s.pos && x.a == s.a && x.b == s.b && x.bar == s.bar)
+                };
+                let top = new
+                    .iter()
+                    .filter(fixed)
+                    .filter(|s| s.pos < lo)
+                    .map(|s| s.pos + 1)
+                    .max()
+                    .unwrap_or(o.parent.y);
+                let bottom = new
+                    .iter()
+                    .filter(fixed)
+                    .filter(|s| s.pos > hi)
+                    .map(|s| s.pos)
+                    .min()
+                    .unwrap_or(o.parent.bottom());
+                out.push(Sep {
+                    parent: Rect::new(o.a, top, o.b - o.a, bottom - top),
+                    ..*o
+                });
+                break;
+            }
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ptyrc_vt::{Cell, Color, Grid, Style};
+
+    const BACK: u8 = 235;
+    const PANEL: u8 = 238;
+    const PICK: u8 = 60;
+
+    fn fill(grid: &mut Grid, r: Rect, bg: u8) {
+        for y in r.y..r.bottom() {
+            for x in r.x..r.right() {
+                grid.cell_mut(x, y).style.bg = Color::Indexed(bg);
+            }
+        }
+    }
+
+    fn text(grid: &mut Grid, x: u16, y: u16, s: &str) {
+        for (i, ch) in s.chars().enumerate() {
+            let style: Style = grid.cell(x + i as u16, y).style;
+            grid.put(x + i as u16, y, Cell::narrow(&ch.to_string(), style));
+        }
+    }
+
+    fn leaves(grid: &Grid, distrust: &[Distrust]) -> (Vec<(Rect, u8)>, Vec<Sep>) {
+        let mut screen = Screen::default();
+        screen.scan(grid);
+        let (leaves, seps) = Segmenter {
+            screen: &screen,
+            cursor_row: None,
+            min_rows: 3,
+            min_cols: 8,
+            distrust,
+            now: Duration::ZERO,
+            leaves: Vec::new(),
+            seps: Vec::new(),
+        }
+        .run();
+        (leaves.iter().map(|l| (l.rect(), l.kind)).collect(), seps)
+    }
+
+    /// A screen painted whole, as themed TUIs do, with a modal panel and
+    /// its highlighted entry.
+    fn modal(pick: u16) -> Grid {
+        let mut g = Grid::new(60, 20);
+        fill(&mut g, Rect::new(0, 0, 60, 20), BACK);
+        fill(&mut g, Rect::new(15, 4, 30, 10), PANEL);
+        fill(&mut g, Rect::new(16, pick, 28, 1), PICK);
+        for y in 5..13 {
+            text(&mut g, 17, y, &format!("entry {y}"));
+        }
+        g
+    }
+
+    #[test]
+    fn a_painted_screen_has_no_bar() {
+        let mut g = Grid::new(60, 20);
+        fill(&mut g, Rect::new(0, 0, 60, 20), BACK);
+        text(&mut g, 2, 3, "hello");
+        let (l, seps) = leaves(&g, &[]);
+        assert_eq!(l, vec![(Rect::new(0, 0, 60, 20), 0)]);
+        assert!(seps.is_empty());
+        // A status line of another colour is one.
+        fill(&mut g, Rect::new(0, 19, 60, 1), PICK);
+        let (l, _) = leaves(&g, &[]);
+        assert_eq!(
+            l,
+            vec![(Rect::new(0, 0, 60, 19), 0), (Rect::new(0, 19, 60, 1), 1)]
+        );
+    }
+
+    #[test]
+    fn a_row_of_mixed_backdrops_is_not_a_bar() {
+        // Half the row in one colour, half in another: the entry of a
+        // panel, seen from the screen.
+        let (l, seps) = leaves(&modal(7), &[]);
+        assert!(seps.iter().all(|s| s.parent != Rect::new(0, 0, 60, 20)));
+        assert!(l.contains(&(Rect::new(0, 0, 60, 20), 0)), "{l:?}");
+    }
+
+    #[test]
+    fn a_panel_is_a_pane() {
+        let mut g = Grid::new(60, 20);
+        fill(&mut g, Rect::new(0, 0, 60, 20), BACK);
+        fill(&mut g, Rect::new(15, 4, 30, 10), PANEL);
+        text(&mut g, 17, 6, "inside");
+        let (l, _) = leaves(&g, &[]);
+        assert_eq!(
+            l,
+            vec![(Rect::new(0, 0, 60, 20), 0), (Rect::new(15, 4, 30, 10), 0)]
+        );
+        // A sidebar: the full height, not the full width.
+        let mut g = Grid::new(60, 20);
+        fill(&mut g, Rect::new(40, 0, 20, 20), PANEL);
+        let (l, _) = leaves(&g, &[]);
+        assert!(l.contains(&(Rect::new(40, 0, 20, 20), 0)), "{l:?}");
+        // Too small, or as wide as the screen: not a panel.
+        let mut g = Grid::new(60, 20);
+        fill(&mut g, Rect::new(10, 2, 5, 10), PANEL);
+        fill(&mut g, Rect::new(30, 2, 20, 2), PANEL);
+        fill(&mut g, Rect::new(0, 8, 60, 4), PANEL);
+        let (l, _) = leaves(&g, &[]);
+        assert_eq!(l, vec![(Rect::new(0, 0, 60, 20), 0)]);
+    }
+
+    #[test]
+    fn a_highlight_that_moves_is_not_a_bar() {
+        let panel = Rect::new(15, 4, 30, 10);
+        // First seen, the entry cuts the panel.
+        let (l, old) = leaves(&modal(7), &[]);
+        assert!(l.contains(&(Rect::new(15, 7, 30, 1), 1)), "{l:?}");
+        // It moves and the text does not, even when the entries change
+        // in the same burst (a table re-sorted at each key): a list.
+        let (a, mut b) = (modal(7), modal(9));
+        text(&mut b, 17, 7, "ENTRY");
+        text(&mut b, 17, 9, "ENTRY");
+        let (_, new) = leaves(&b, &[]);
+        let line = |g: &Grid, r: u16| Line::from_cells(g.row(r));
+        let moved = scrolled_seps(&old, &new, &|r| line(&a, r), &|r| line(&b, r));
+        assert_eq!(moved.len(), 1);
+        assert!(moved[0].bar);
+        assert_eq!(moved[0].parent, panel);
+        let distrust = [Distrust {
+            bar: true,
+            area: moved[0].parent,
+            until: Duration::from_secs(1),
+        }];
+        let (l, seps) = leaves(&b, &distrust);
+        assert_eq!(l, vec![(Rect::new(0, 0, 60, 20), 0), (panel, 0)]);
+        assert!(seps.is_empty());
+    }
+
+    #[test]
+    fn a_bar_that_takes_its_text_along_is_still_a_bar() {
+        // A status line that jumps from the bottom to the top.
+        let screen = |row: u16| {
+            let mut g = Grid::new(60, 20);
+            fill(&mut g, Rect::new(0, row, 60, 1), PICK);
+            text(&mut g, 0, row, "status");
+            g
+        };
+        let (a, b) = (screen(19), screen(0));
+        let (_, old) = leaves(&a, &[]);
+        let (_, new) = leaves(&b, &[]);
+        let line = |g: &Grid, r: u16| Line::from_cells(g.row(r));
+        assert!(scrolled_seps(&old, &new, &|r| line(&a, r), &|r| line(&b, r)).is_empty());
+    }
 }

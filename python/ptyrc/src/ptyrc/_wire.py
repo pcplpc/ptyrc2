@@ -17,12 +17,23 @@ PROTOCOL = 1
 
 
 class PtyrcError(Exception):
-    """An error reply of the driver, or a transport failure (`gone`)."""
+    """An error reply of the driver, or a transport failure (`gone`).
 
-    def __init__(self, code: str, message: str = "") -> None:
-        super().__init__(f"{code}: {message}" if message else code)
+    `code` and `message` are the driver's; `hint`, when there is one, says
+    what to try: the valid values, the nearest one."""
+
+    def __init__(self, code: str, message: str = "", hint: str | None = None) -> None:
+        text = f"{code}: {message}" if message else code
+        super().__init__(f"{text}\n  {hint}" if hint else text)
         self.code = code
         self.message = message
+        self.hint = hint
+
+    @classmethod
+    def from_wire(cls, err: dict[str, Any] | None) -> PtyrcError:
+        """The `error` member of a response."""
+        err = err or {}
+        return cls(err.get("code", "internal"), err.get("message", ""), err.get("hint"))
 
 
 def runtime_dir() -> Path:
@@ -63,13 +74,27 @@ def socket_path(session: str | None = None) -> Path:
             return Path(direct)
         session = os.environ.get("PTYRC_SESSION")
     if session is not None:
-        return runtime_dir() / f"{session}.sock"
+        path = runtime_dir() / f"{session}.sock"
+        if not _alive(path):
+            live = live_sessions()
+            raise PtyrcError(
+                "gone",
+                f"no such session: {session}",
+                f"running: {', '.join(live)}"
+                if live
+                else f"start it: ptyrc run --name {session} -- CMD",
+            )
+        return path
     live = live_sessions()
     if len(live) == 1:
         return runtime_dir() / f"{live[0]}.sock"
     if not live:
-        raise PtyrcError("gone", "no live session")
-    raise PtyrcError("bad-request", "several sessions: " + ", ".join(live))
+        raise PtyrcError("gone", "no session", "start one: ptyrc run -- CMD")
+    raise PtyrcError(
+        "bad-request",
+        f"{len(live)} sessions, none chosen",
+        f"pick one with session= or PTYRC_SESSION: {', '.join(live)}",
+    )
 
 
 class Connection:
@@ -179,8 +204,7 @@ class Connection:
         if msg is None:
             raise PtyrcError("gone", "connection closed")
         if "error" in msg:
-            err = msg["error"] or {}
-            raise PtyrcError(err.get("code", "internal"), err.get("message", ""))
+            raise PtyrcError.from_wire(msg["error"])
         return msg.get("result")
 
     def close(self) -> None:

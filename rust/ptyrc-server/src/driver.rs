@@ -6,9 +6,11 @@ use crate::engine::{ConnId, Ctx, Effects, Engine, Reply, SessionInfo, Token};
 use crate::host::Host;
 use crate::keys;
 use crate::pty::{self, Pty};
+use crate::start::{self, RunError, RunErrorKind};
 use ptyrc_proto::envelope::{event, response};
 use ptyrc_proto::session::{self, ENV_SESSION, ENV_SOCKET};
-use ptyrc_proto::{ErrorCode, PROTOCOL, Request, RpcError, SERVER};
+use ptyrc_proto::suggest;
+use ptyrc_proto::{ErrorCode, PROTOCOL, Request, RpcError, SERVER, TOPICS};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 use rustix::io::Errno;
 use rustix::process::{Pid, Signal, kill_process_group};
@@ -134,11 +136,11 @@ struct Driver {
 
 /// Run a session to its end: spawn the app, serve, return its exit status
 /// (128 + signal when killed).
-pub fn run(cfg: Config, mut engine: Box<dyn Engine>) -> io::Result<i32> {
+pub fn run(cfg: Config, mut engine: Box<dyn Engine>) -> Result<i32, RunError> {
     let mut driver = Driver::start(cfg)?;
     let result = driver.serve(engine.as_mut());
     let status = driver.finish(engine.as_mut(), result.as_ref().ok().copied());
-    result.and(Ok(status))
+    result.and(Ok(status)).map_err(RunError::from)
 }
 
 /// Run an engine hook with a `Ctx`, then apply what it asked for.
@@ -161,32 +163,54 @@ macro_rules! hook {
 }
 
 impl Driver {
-    fn start(cfg: Config) -> io::Result<Driver> {
-        if cfg.argv.is_empty() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "no command"));
-        }
+    fn start(cfg: Config) -> Result<Driver, RunError> {
+        let Some(program) = cfg.argv.first() else {
+            return Err(RunError::new(RunErrorKind::Usage, "no command")
+                .with_hint("ptyrc run -- CMD [ARG...]"));
+        };
+        start::check_command(program)?;
         let name = cfg
             .name
             .clone()
             .unwrap_or_else(|| std::process::id().to_string());
         if !session::valid_name(&name) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("bad session name: {name}"),
-            ));
+            return Err(
+                RunError::new(RunErrorKind::Usage, format!("bad session name: {name}")).with_hint(
+                    "a name is made of letters, digits, `.`, `_`, `-`, and does not start with `.`",
+                ),
+            );
         }
-        session::ensure_runtime_dir()?;
+        let dir = session::ensure_runtime_dir().map_err(|e| {
+            RunError::new(
+                RunErrorKind::Session,
+                format!(
+                    "no socket directory {}: {}",
+                    session::runtime_dir().display(),
+                    start::describe(&e)
+                ),
+            )
+            .with_hint("XDG_RUNTIME_DIR must be a directory of yours, closed to others")
+        })?;
         let socket = session::socket_path(&name);
         if socket.exists() {
             if session::is_live(&socket) {
-                return Err(io::Error::new(
-                    io::ErrorKind::AddrInUse,
-                    format!("session exists: {name}"),
-                ));
+                return Err(RunError::new(
+                    RunErrorKind::Session,
+                    format!("session {name} is already running"),
+                )
+                .with_hint(format!(
+                    "choose another --name, or pilot it: ptyrc -s {name} text"
+                )));
             }
             fs::remove_file(&socket)?;
         }
-        let listener = UnixListener::bind(&socket)?;
+        let bind = |e: io::Error| {
+            RunError::new(
+                RunErrorKind::Session,
+                format!("no socket in {}: {}", dir.display(), start::describe(&e)),
+            )
+        };
+        let listener = UnixListener::bind(&socket).map_err(bind)?;
         fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))?;
         listener.set_nonblocking(true)?;
 
@@ -216,8 +240,9 @@ impl Driver {
             if std::env::var_os("TERM").is_none() {
                 env.push(("TERM".to_string(), "xterm-256color".to_string()));
             }
-            let pty = pty::spawn(&cfg.argv, &env, cols, rows)?;
-            Ok::<_, io::Error>((signals, host, pty, cols, rows))
+            let pty = pty::spawn(&cfg.argv, &env, cols, rows)
+                .map_err(|e| start::exec_error(program, &e))?;
+            Ok::<_, RunError>((signals, host, pty, cols, rows))
         })();
         let (signals, host, pty, cols, rows) = match built {
             Ok(parts) => parts,
@@ -708,6 +733,15 @@ impl Driver {
                     .collect::<Option<Vec<_>>>()
             })
             .ok_or_else(|| RpcError::bad_params("topics: array of strings"))?;
+        if let Some(bad) = topics.iter().find(|t| !TOPICS.contains(&t.as_str())) {
+            return Err(
+                RpcError::bad_params(format!("no such topic: {bad}")).with_hint(format!(
+                    "{}topics: {}",
+                    suggest::did_you_mean(bad, TOPICS),
+                    TOPICS.join(", ")
+                )),
+            );
+        }
         if let Some(conn) = self.conns.get_mut(&conn) {
             conn.topics.extend(topics);
         }
@@ -752,7 +786,9 @@ impl Driver {
                 let key = key
                     .as_str()
                     .ok_or_else(|| RpcError::bad_params("keys: array of strings"))?;
-                bytes.extend(keys::encode_key(key, app_cursor));
+                let key = keys::encode_key(key, app_cursor)
+                    .map_err(|e| RpcError::bad_params(e.message).with_hint(e.hint))?;
+                bytes.extend(key);
             }
             given = true;
         }

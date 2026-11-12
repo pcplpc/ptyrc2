@@ -213,8 +213,9 @@ fn exit_status_is_the_apps() {
     assert_eq!(run(&["true"]), Some(0));
     // Killed by SIGTERM: 128 + 15.
     assert_eq!(run(&["sh", "-c", "kill -TERM $$"]), Some(143));
-    // Not found.
-    assert_eq!(run(&["/nonexistent/program"]), Some(2));
+    // Not found, not executable: as a shell.
+    assert_eq!(run(&["/nonexistent/program"]), Some(127));
+    assert_eq!(run(&["/"]), Some(126));
 }
 
 #[test]
@@ -288,7 +289,7 @@ fn session_discovery() {
 
     // Two sessions and no name: refused, both listed.
     let out = sb.ptyrc().args(["call", "session.info"]).output().unwrap();
-    assert_eq!(out.status.code(), Some(2));
+    assert_eq!(out.status.code(), Some(3));
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("a, b"), "{err}");
 
@@ -316,7 +317,7 @@ fn session_discovery() {
         .args(["-s", "nope", "call", "session.info"])
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(2));
+    assert_eq!(out.status.code(), Some(3));
 
     // A second driver under a live name is refused.
     let out = sb
@@ -324,7 +325,7 @@ fn session_discovery() {
         .args(["run", "--name", "a", "--headless", "--", "true"])
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(2));
+    assert_eq!(out.status.code(), Some(3));
     assert!(sb.socket("a").exists());
 
     for name in ["a", "b"] {

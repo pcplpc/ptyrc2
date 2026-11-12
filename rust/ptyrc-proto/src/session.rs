@@ -108,24 +108,54 @@ pub fn list() -> Vec<Session> {
 pub enum SelectError {
     /// No live session.
     None,
-    /// The named session is not live.
-    NotFound(String),
+    /// Not a session name.
+    BadName(String),
+    /// The named session is not live; the live ones.
+    NotFound(String, Vec<String>),
+    /// The named session left its socket behind: the driver is gone.
+    Dead(String),
     /// Several live sessions and none named.
     Ambiguous(Vec<String>),
+}
+
+impl SelectError {
+    /// What to try.
+    pub fn hint(&self) -> String {
+        match self {
+            SelectError::None => "start one: ptyrc run -- CMD".into(),
+            SelectError::BadName(_) => {
+                "a name is made of letters, digits, `.`, `_`, `-`; list sessions: ptyrc ls".into()
+            }
+            SelectError::NotFound(name, live) if live.is_empty() => {
+                format!("no session is running; start it: ptyrc run --name {name} -- CMD")
+            }
+            SelectError::NotFound(name, live) => format!(
+                "{}running: {}",
+                crate::suggest::did_you_mean(name, live.iter().map(String::as_str)),
+                live.join(", ")
+            ),
+            SelectError::Dead(name) => {
+                format!("start it again: ptyrc run --name {name} -- CMD")
+            }
+            SelectError::Ambiguous(names) => format!(
+                "pick one with -s NAME or {ENV_SESSION}: {}",
+                names.join(", ")
+            ),
+        }
+    }
 }
 
 impl fmt::Display for SelectError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            SelectError::None => f.write_str("no ptyrc session; start one with `ptyrc run`"),
-            SelectError::NotFound(name) => write!(f, "no such session: {name}"),
-            SelectError::Ambiguous(names) => {
-                write!(
-                    f,
-                    "several sessions, pick one with --session: {}",
-                    names.join(", ")
-                )
-            }
+            SelectError::None => f.write_str("no session"),
+            SelectError::BadName(name) => write!(f, "bad session name: {name}"),
+            SelectError::NotFound(name, _) => write!(f, "no such session: {name}"),
+            SelectError::Dead(name) => write!(
+                f,
+                "session {name} is dead: its driver is gone, the stale socket was removed"
+            ),
+            SelectError::Ambiguous(names) => write!(f, "{} sessions, none chosen", names.len()),
         }
     }
 }
@@ -137,11 +167,21 @@ impl std::error::Error for SelectError {}
 pub fn select(explicit: Option<&str>) -> Result<Session, SelectError> {
     let env = std::env::var(ENV_SESSION).ok().filter(|s| !s.is_empty());
     if let Some(name) = explicit.map(str::to_string).or(env) {
-        let path = socket_path(&name);
-        if valid_name(&name) && is_live(&path) {
-            return Ok(Session { name, path });
+        if !valid_name(&name) {
+            return Err(SelectError::BadName(name));
         }
-        return Err(SelectError::NotFound(name));
+        let path = socket_path(&name);
+        return match UnixStream::connect(&path) {
+            Ok(_) => Ok(Session { name, path }),
+            Err(e) if e.kind() == io::ErrorKind::ConnectionRefused => {
+                let _ = fs::remove_file(&path);
+                Err(SelectError::Dead(name))
+            }
+            Err(_) => {
+                let live = list().into_iter().map(|s| s.name).collect();
+                Err(SelectError::NotFound(name, live))
+            }
+        };
     }
     let mut live = list();
     match live.len() {

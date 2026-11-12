@@ -5,7 +5,7 @@ mod plugins;
 mod verbs;
 
 use clap::{Args, Parser, Subcommand};
-use ptyrc_proto::{Client, ClientError, session};
+use ptyrc_proto::{Client, ClientError, TOPICS, session};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -132,7 +132,85 @@ fn parse_size(text: &str) -> Result<(u16, u16), String> {
     }
 }
 
-const TOPICS: [&str; 6] = ["screen", "cursor", "frames", "input", "size", "exit"];
+/// A verb that failed: what, what to try, the exit status.
+///
+/// Statuses: 1 a negative answer (`find` without a match, `wait` timed
+/// out), 2 usage or a request that is wrong, 3 no session to talk to,
+/// 4 the request names something that is not there (frame, sprite),
+/// 5 the connection or the system; `run` adds 126 and 127, as a shell.
+#[derive(Debug)]
+pub struct Fail {
+    pub status: u8,
+    pub message: String,
+    pub hint: Option<String>,
+}
+
+impl Fail {
+    /// A usage error: status 2.
+    pub fn usage(message: impl Into<String>, hint: impl Into<String>) -> Fail {
+        Fail {
+            status: 2,
+            message: message.into(),
+            hint: Some(hint.into()),
+        }
+    }
+}
+
+impl From<String> for Fail {
+    fn from(message: String) -> Fail {
+        Fail {
+            status: 2,
+            message,
+            hint: None,
+        }
+    }
+}
+
+impl From<&str> for Fail {
+    fn from(message: &str) -> Fail {
+        Fail::from(message.to_string())
+    }
+}
+
+impl From<std::io::Error> for Fail {
+    fn from(e: std::io::Error) -> Fail {
+        Fail {
+            status: 5,
+            message: e.to_string(),
+            hint: None,
+        }
+    }
+}
+
+impl From<ClientError> for Fail {
+    fn from(e: ClientError) -> Fail {
+        Fail {
+            status: e.exit_status(),
+            hint: e.hint(),
+            message: e.to_string(),
+        }
+    }
+}
+
+impl From<ptyrc_server::RunError> for Fail {
+    fn from(e: ptyrc_server::RunError) -> Fail {
+        Fail {
+            status: e.exit_status(),
+            message: e.message,
+            hint: e.hint,
+        }
+    }
+}
+
+/// A JSON argument of the command line.
+pub fn json_arg(what: &str, text: &str) -> Result<Value, Fail> {
+    serde_json::from_str(text).map_err(|e| {
+        Fail::usage(
+            format!("{what} is not JSON: {e}"),
+            format!("quote it for the shell, as in '{{\"r\": 4}}'; got: {text}"),
+        )
+    })
+}
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -142,21 +220,24 @@ fn main() -> ExitCode {
     }
     match run(cli) {
         Ok(code) => code,
-        Err(message) => {
-            eprintln!("ptyrc: {message}");
-            ExitCode::from(2)
+        Err(fail) => {
+            eprintln!("ptyrc: {}", fail.message);
+            if let Some(hint) = fail.hint.filter(|h| !h.is_empty()) {
+                eprintln!("  {hint}");
+            }
+            ExitCode::from(fail.status)
         }
     }
 }
 
-fn run(cli: Cli) -> Result<ExitCode, String> {
+fn run(cli: Cli) -> Result<ExitCode, Fail> {
     let common = cli.common;
     match cli.verb {
         Verb::Run(args) => verb_run(args),
         Verb::Ls => verb_ls(&common),
         Verb::Call { method, params } => {
             let params = match params {
-                Some(text) => serde_json::from_str(&text).map_err(|e| format!("params: {e}"))?,
+                Some(text) => json_arg("params", &text)?,
                 None => json!({}),
             };
             let result = call(&common, &method, params)?;
@@ -189,15 +270,13 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
     }
 }
 
-pub fn connect(common: &Common) -> Result<Client, String> {
-    Client::connect_session(common.session.as_deref()).map_err(|e| e.to_string())
+pub fn connect(common: &Common) -> Result<Client, Fail> {
+    Ok(Client::connect_session(common.session.as_deref())?)
 }
 
 /// One request on a fresh connection.
-pub fn call(common: &Common, method: &str, params: Value) -> Result<Value, String> {
-    connect(common)?
-        .call(method, params)
-        .map_err(|e| e.to_string())
+pub fn call(common: &Common, method: &str, params: Value) -> Result<Value, Fail> {
+    Ok(connect(common)?.call(method, params)?)
 }
 
 pub fn print_json(value: &Value, pretty: bool) {
@@ -209,7 +288,7 @@ pub fn print_json(value: &Value, pretty: bool) {
     println!("{}", text.expect("a Value serialises"));
 }
 
-fn verb_run(args: Run) -> Result<ExitCode, String> {
+fn verb_run(args: Run) -> Result<ExitCode, Fail> {
     let argv = if args.command.is_empty() {
         vec![
             std::env::var("SHELL")
@@ -233,12 +312,11 @@ fn verb_run(args: Run) -> Result<ExitCode, String> {
             args.coalesce_ms
         },
     };
-    let status = ptyrc_server::run(config, plugins::engine(args.transparent, !args.no_presets))
-        .map_err(|e| e.to_string())?;
+    let status = ptyrc_server::run(config, plugins::engine(args.transparent, !args.no_presets))?;
     Ok(ExitCode::from(status.clamp(0, 255) as u8))
 }
 
-fn verb_ls(common: &Common) -> Result<ExitCode, String> {
+fn verb_ls(common: &Common) -> Result<ExitCode, Fail> {
     let mut rows = Vec::new();
     for s in session::list() {
         // A session that dies between the listing and the hello is skipped.
@@ -257,7 +335,9 @@ fn verb_ls(common: &Common) -> Result<ExitCode, String> {
         .max()
         .unwrap_or(0)
         .max(7);
-    if !rows.is_empty() {
+    if rows.is_empty() {
+        eprintln!("ptyrc: no session\n  start one: ptyrc run -- CMD");
+    } else {
         println!("{:width$}  {:>7}  {:>7}  COMMAND", "SESSION", "PID", "SIZE");
     }
     for row in rows {
@@ -279,14 +359,14 @@ fn verb_ls(common: &Common) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn verb_events(common: &Common, topics: Vec<String>) -> Result<ExitCode, String> {
+fn verb_events(common: &Common, topics: Vec<String>) -> Result<ExitCode, Fail> {
     let mut client = connect(common)?;
     let topics: Vec<&str> = if topics.is_empty() {
         TOPICS.to_vec()
     } else {
         topics.iter().map(String::as_str).collect()
     };
-    client.subscribe(&topics).map_err(|e| e.to_string())?;
+    client.subscribe(&topics)?;
     loop {
         match client.next_event(None) {
             Ok(Some(event)) => {
@@ -298,7 +378,7 @@ fn verb_events(common: &Common, topics: Vec<String>) -> Result<ExitCode, String>
             }
             Ok(None) => {}
             Err(ClientError::Closed) => return Ok(ExitCode::SUCCESS),
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(e.into()),
         }
     }
 }

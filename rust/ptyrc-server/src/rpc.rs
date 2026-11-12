@@ -647,7 +647,12 @@ pub(crate) fn handle(
         "screen.cells" => screen_cells(engine, params),
         "screen.find" => screen_find(engine, params),
         "screen.cursor" => screen_cursor(engine, params),
-        "screen.wait" => return screen_wait(engine, conn, token, params, ctx),
+        "screen.wait" => {
+            return match screen_wait(engine, conn, token, params, ctx) {
+                Reply::Err(e) => Reply::Err(crate::hints::explain(engine, e)),
+                reply => reply,
+            };
+        }
         "frame.list" => {
             Ok(json!({"frames": engine.frames.list_at(now), "layout": engine.frames.layout()}))
         }
@@ -688,13 +693,13 @@ pub(crate) fn handle(
         "draw.exts" => draw_exts(engine),
         "debug.overlay" => set_overlay(engine, params, now),
         "debug.dump" => debug_dump(engine),
-        _ => return Reply::Err(RpcError::unknown_method(method)),
+        _ => return Reply::Err(crate::hints::unknown_method(method)),
     };
     if method.starts_with("draw.") || method == "debug.overlay" {
         ctx.request_repaint();
     }
     match result {
         Ok(value) => Reply::Ok(value),
-        Err(e) => Reply::Err(e),
+        Err(e) => Reply::Err(crate::hints::explain(engine, e)),
     }
 }

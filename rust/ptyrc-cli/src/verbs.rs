@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Client verbs on the screen, the frames and the scene.
 
-use crate::{Common, call, connect, print_json};
+use crate::{Common, Fail, call, connect, print_json};
 use clap::{Args, Subcommand};
 use ptyrc_proto::ClientError;
 use serde_json::{Map, Value, json};
@@ -9,7 +9,7 @@ use std::io::Write;
 use std::process::ExitCode;
 use std::time::Duration;
 
-type Done = Result<ExitCode, String>;
+type Done = Result<ExitCode, Fail>;
 
 fn frame_value(frame: &str) -> Value {
     frame
@@ -145,7 +145,10 @@ pub struct Wait {
 /// Exit status 1 on timeout.
 pub fn wait(common: &Common, args: Wait) -> Done {
     if args.pattern.is_none() && args.stable.is_none() {
-        return Err("wait: a PATTERN or --stable is required".into());
+        return Err(Fail::usage(
+            "wait: nothing to wait for",
+            "give a PATTERN, or --stable MS for a screen that stopped changing",
+        ));
     }
     let mut params = Map::new();
     params.insert("frame".into(), frame_value(&args.frame));
@@ -158,14 +161,24 @@ pub fn wait(common: &Common, args: Wait) -> Done {
     if let Some(ms) = args.stable {
         params.insert("stable_ms".into(), json!(ms));
     }
+    let what = match (params.get("pattern").and_then(Value::as_str), args.gone) {
+        (Some(pattern), true) => format!("{pattern:?} is still shown"),
+        (Some(pattern), false) => format!("{pattern:?} is not shown"),
+        (None, _) => "the screen is still changing".to_string(),
+    };
     let result = call(common, "screen.wait", Value::Object(params))?;
     if common.json {
         print_json(&result, false);
     }
-    Ok(if result["matched"] == true {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::from(1)
+    if result["matched"] == true {
+        return Ok(ExitCode::SUCCESS);
+    }
+    Err(Fail {
+        status: 1,
+        message: format!("wait: timed out after {} ms: {what}", args.timeout),
+        hint: Some(
+            "see the screen: ptyrc text; wait longer: --timeout MS; a pattern: -E".to_string(),
+        ),
     })
 }
 
@@ -229,16 +242,12 @@ pub fn frames(common: &Common, args: Frames) -> Done {
             print_frames(result)
         }
     };
-    let mut result = client
-        .call("frame.list", json!({}))
-        .map_err(|e| e.to_string())?;
+    let mut result = client.call("frame.list", json!({}))?;
     show(&mut result);
     if !args.watch {
         return Ok(ExitCode::SUCCESS);
     }
-    client
-        .subscribe(&["frames", "exit"])
-        .map_err(|e| e.to_string())?;
+    client.subscribe(&["frames", "exit"])?;
     loop {
         match client.next_event(None) {
             Ok(Some(event)) if event.event == "frames" => {
@@ -249,7 +258,7 @@ pub fn frames(common: &Common, args: Frames) -> Done {
             Ok(Some(event)) if event.event == "exit" => return Ok(ExitCode::SUCCESS),
             Ok(_) => {}
             Err(ClientError::Closed) => return Ok(ExitCode::SUCCESS),
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(e.into()),
         }
     }
 }
@@ -326,15 +335,20 @@ pub struct Place {
     ttl: Option<u64>,
 }
 
-fn pair(text: &str) -> Result<(i64, i64), String> {
+fn pair(text: &str) -> Result<(i64, i64), Fail> {
     text.split_once(',')
         .and_then(|(a, b)| Some((a.trim().parse().ok()?, b.trim().parse().ok()?)))
-        .ok_or_else(|| format!("expected X,Y: {text}"))
+        .ok_or_else(|| {
+            Fail::usage(
+                format!("not a position: {text}"),
+                "two integers X,Y as in 10,2; negative counts from the right and bottom: -1,-1",
+            )
+        })
 }
 
 impl Place {
     /// Sprite fields. A sprite made by the CLI outlives its connection.
-    fn fields(&self) -> Result<Map<String, Value>, String> {
+    fn fields(&self) -> Result<Map<String, Value>, Fail> {
         let anchor = if let Some(text) = &self.near {
             json!({"text": text, "side": self.side})
         } else if let Some(prefer) = &self.auto {
@@ -443,9 +457,9 @@ pub enum Draw {
     Clear,
 }
 
-fn json_arg(text: Option<String>) -> Result<Value, String> {
+fn json_arg(text: Option<String>) -> Result<Value, Fail> {
     match text {
-        Some(text) => serde_json::from_str(&text).map_err(|e| format!("params: {e}")),
+        Some(text) => crate::json_arg("params", &text),
         None => Ok(json!({})),
     }
 }
@@ -526,9 +540,7 @@ pub fn draw(common: &Common, verb: Draw) -> Done {
         Draw::Rm { ids } => {
             let mut client = connect(common)?;
             for id in ids {
-                client
-                    .call("draw.remove", json!({"id": id}))
-                    .map_err(|e| e.to_string())?;
+                client.call("draw.remove", json!({"id": id}))?;
             }
             Ok(ExitCode::SUCCESS)
         }
@@ -570,26 +582,20 @@ pub fn draw(common: &Common, verb: Draw) -> Done {
 /// Live mirror of the remote screen, until the session ends or ^C.
 pub fn show(common: &Common) -> Done {
     let mut client = connect(common)?;
-    client
-        .subscribe(&["screen", "cursor", "size", "exit"])
-        .map_err(|e| e.to_string())?;
+    client.subscribe(&["screen", "cursor", "size", "exit"])?;
     let mut out = std::io::stdout().lock();
     // Alternate screen, cursor hidden; restored on the way out.
     let _ = out.write_all(b"\x1b[?1049h\x1b[?25l");
-    let result = (|| -> Result<(), String> {
+    let result = (|| -> Result<(), Fail> {
         loop {
-            let screen = client
-                .call("screen.text", json!({"ansi": true}))
-                .map_err(|e| e.to_string())?;
+            let screen = client.call("screen.text", json!({"ansi": true}))?;
             let mut frame = String::from("\x1b[H");
             for line in strings(&screen["lines"]) {
                 frame.push_str(line);
                 frame.push_str("\x1b[0m\x1b[K\r\n");
             }
             frame.push_str("\x1b[J");
-            out.write_all(frame.as_bytes())
-                .and_then(|_| out.flush())
-                .map_err(|e| e.to_string())?;
+            out.write_all(frame.as_bytes()).and_then(|_| out.flush())?;
             // Wait for a change, then let a burst of them pass.
             loop {
                 match client.next_event(None) {
@@ -597,7 +603,7 @@ pub fn show(common: &Common) -> Done {
                     Ok(Some(_)) => break,
                     Ok(None) => {}
                     Err(ClientError::Closed) => return Ok(()),
-                    Err(e) => return Err(e.to_string()),
+                    Err(e) => return Err(e.into()),
                 }
             }
             while let Ok(Some(event)) = client.next_event(Some(Duration::from_millis(15))) {

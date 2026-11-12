@@ -145,3 +145,48 @@ Built: see "Heatmap" in `design.md`. Left:
   the buffer. Right for drawings fixed on the text, wrong as a history.
 - `scripts/e2e-frames.sh monitor` (htop) fails about one run in two on a
   loaded machine, before this work too: a pane stays candidate.
+
+## Real TUIs, second session
+
+Found with `scripts/e2e-tuis.sh` (120x36); `KNOWN` lines there point here.
+Fixed in the segmentation: a row is a bar only when one backdrop covers
+it; a highlight that moves without its text is a list entry; a panel of
+another backdrop is a pane; the agent preset knows the `┃ ... ╹▀▀▀` box.
+
+Open, in the frames (`frames/mod.rs`, `frames/ext.rs`):
+
+- htop, glances: panes are re-allocated at each refresh until the monitor
+  rule holds. Keys: none, wait. Expected: pane ids fixed from the first
+  layout, usable after `settle_ms`. Observed: htop ids 3,6 -> 7,8 -> 9,10
+  (usable at 5.6 s instead of 1.8 s); glances a new id for the stats pane
+  and for the table every 2 s for 7 s, again at 11.7 s. A sprite on such
+  a pane is hidden at each change. The chrome around changes too (uptime,
+  clock), so the "jump when the chrome is unchanged" rule never applies.
+- htop: `down down pagedown`, wait 6 s. Expected: the table pane keeps
+  rows 11..35. Observed: it shrinks, once to 11..34 (the key bar, right)
+  and in one run to 20..34: rows of the re-sorted table that stayed are
+  learned as chrome.
+- htop: the selected row is a bar until it first moves (rows 10 and 11
+  are chrome, the table starts at 12). A list highlight could be told at
+  once from a bar by its place: not at an edge, not next to a rule.
+- opencode: `ctrl+p` (palette, a centred panel). Expected: the pane under
+  it keeps its origin; the panel is an overlay. Observed: the pane jumps
+  to an island (origin 0,100000). The cells under a nested pane should
+  not vote in the parent's scroll detection.
+- opencode: the session view (transcript, sidebar) was not seen: it
+  needs a prompt submitted to a model. The preset is checked on the home
+  screen only. Messages of a transcript are panels too: expect candidate
+  panes that come and go while it scrolls.
+- ranger: one pane. The three columns have no border and no backdrop;
+  only a preset can tell them (`plugins/tui-support/ranger`): column
+  widths from the `column_ratios` look of the status rows.
+- less, man: open and segment as one pane; the prompt row is not chrome.
+  Paging is in `scripts/e2e-frames.sh`.
+
+Other:
+
+- `draw ext shapes circle '{"r":"x"}'` is accepted: a draw extension
+  ignores a parameter of the wrong type.
+- `Pilot.frame()` raises its own `no-frame` without the driver's hint.
+- The method list for "did you mean" and the frame names live in
+  `ptyrc-server/src/hints.rs`: add new ones there.
