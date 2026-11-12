@@ -233,3 +233,5 @@ Gaps met while writing the apps; none fixed in the core.
 - Built: fishes, 8 by default. One left out of the view by a scroll
   waits 2 to 5 s, then comes back where the text hides most of it, one
   fish a tick at most; the jump after a `less` page down is gone.
+- Built: fishes, half of them shy (`--shy N`): each hides behind the
+  nearest text, 4 to 10 s, then swims to another spot; fear first.

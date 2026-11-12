@@ -306,6 +306,83 @@ def test_fishes_entry() -> None:
     }
 
 
+def test_fishes_shy() -> None:
+    rng = random.Random(3)
+    box = (0, 100, 80, 123)
+    # A block of text, rows 105 to 109, columns 40 to 69; the rest empty.
+    rows = [" " * 40 + "x" * 30 if 5 <= y < 10 else "" for y in range(24)]
+    spots = fishes.hideouts(rows, box)
+    assert set(spots) == {(x, y) for x in range(39, 66) for y in range(105, 110)}
+
+    def school(shy: bool) -> list[fishes.Fish]:
+        return [
+            fishes.Fish(x=x, y=y, vx=fishes.CALM, color="cyan", shy=shy)
+            for x, y in [(20.0, 102.0), (74.0, 123.0), (0.0, 100.0)]
+        ]
+
+    def tick(fish: fishes.Fish, cursor: tuple[int, int] | None = None) -> None:
+        fishes.lure(fish, spots, cursor, 0.1, rng)
+        fishes.swim(fish, 0.1, box, cursor, False, rng)
+
+    # Shy: over the text within 8 s, and still there after; it moves on.
+    for fish in school(True):
+        homes = set()
+        for t in range(400):
+            tick(fish)
+            homes.add(fish.home)
+            if t >= 80:
+                assert fish.cell[:2] in spots, (t, fish)
+        assert len(homes) > 2
+    # Bold: no home, never slows down.
+    for fish in school(False):
+        for _ in range(400):
+            tick(fish)
+            assert fish.home is None and abs(fish.vx) >= fishes.CALM / 2
+    # Scared: it flees first, even with a safe home ahead.
+    fish = fishes.Fish(x=30.0, y=105.0, vx=fishes.CALM, color="cyan", shy=True)
+    tick(fish, (38, 105))
+    assert fish.home in spots
+    assert fishes.reach(*fish.home, (38, 105)) >= fishes.NEAR_MOVING
+    assert fish.vx == -fishes.FEAR
+    # A home in the cursor's reach is given up.
+    fish = fishes.Fish(x=40.0, y=105.0, vx=0.0, color="cyan", shy=True)
+    fish.home = (40, 105)
+    assert fishes.lure(fish, spots, (43, 106), 0.1, rng) != (40, 105)
+    assert fishes.lure(fish, [(40, 105)], (43, 106), 0.1, rng) is None
+
+
+def test_fishes_hide_behind_text(
+    session: Pilot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Text on the right of rows 0 to 7; the rest of the screen empty.
+    page(session, *[" " * 40 + "o" * 39] * 8)
+    settle(session)
+    born: list[fishes.Fish] = []
+    real = fishes.Fish
+
+    def fish(**kw: object) -> fishes.Fish:
+        born.append(real(**kw))  # type: ignore[arg-type]
+        return born[-1]
+
+    monkeypatch.setattr(fishes, "Fish", fish)
+    args = ["-s", session.session, "--seed", "6"]
+    status: list[int] = []
+    thread = threading.Thread(
+        target=lambda: status.append(fishes.main(args, seconds=12))
+    )
+    thread.start()
+    time.sleep(10)
+    frame = session.frame("largest")
+    cover = fishes.cover(frame.text(), fishes.view(frame))
+    shy = [f for f in born if f.shy]
+    hidden = [f for f in shy if f.shown and cover.get(f.shown[:2], 0) >= 5]
+    assert len(born) == 8 and len(shy) == 4
+    assert len(hidden) >= 3, [(f.shown, f.home) for f in shy]
+    assert len(session.sprites()) == 8
+    thread.join()
+    assert status == [0]
+
+
 def test_fishes_come_back_after_a_scroll(tmp_path: Path) -> None:
     text = tmp_path / "long.txt"
     text.write_text("".join(f"line {i}: the quick brown fox\n" for i in range(300)))
