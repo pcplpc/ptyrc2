@@ -907,6 +907,7 @@ impl Frames {
         p.fresh = true;
         p.reattach = true;
         p.hashes_valid = false;
+        p.support_at = None;
         ev.push(FrameEvent::Attached { frame: id });
     }
 
