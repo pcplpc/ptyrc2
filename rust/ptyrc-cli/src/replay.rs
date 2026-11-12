@@ -303,7 +303,8 @@ pub enum TapeVerb {
         #[arg(default_value_t = 1)]
         records: u64,
     },
-    /// Run to a tape time without waiting, then pause: seconds, `end`, `end+N`
+    /// Run to a tape time without waiting, then pause: seconds, `end`,
+    /// `end+N`; back in time: from the start of the tape
     Seek { t: String },
     /// Go on, at SPEED tape seconds per second (0: no waiting)
     Play { speed: Option<f64> },

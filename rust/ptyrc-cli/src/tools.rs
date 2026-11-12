@@ -362,6 +362,10 @@ pub struct Shot {
     /// What the host shows: the sprites over the app
     #[arg(long)]
     sprites: bool,
+    /// Leave the cursor out (--svg, --html: a visible cursor is an
+    /// inverse cell)
+    #[arg(long)]
+    no_cursor: bool,
     /// Write there in place of stdout
     #[arg(short, long, value_name = "FILE")]
     output: Option<PathBuf>,
@@ -393,7 +397,19 @@ pub fn shot(common: &Common, args: Shot) -> Done {
             bg: host("bg", [0, 0, 0]),
         };
         let cells = client.call("screen.cells", view)?;
-        let rows = picture(&cells["rows"], theme);
+        let mut rows = picture(&cells["rows"], theme);
+        if !args.no_cursor {
+            let cursor = client.call("screen.cursor", json!({}))?;
+            let cell = |key: &str, i: usize| {
+                let origin = cells["rect"][i].as_u64()?;
+                (cursor[key].as_u64()? as usize).checked_sub(origin as usize)
+            };
+            if let (Some(true), Some(x), Some(y)) =
+                (cursor["visible"].as_bool(), cell("x", 0), cell("y", 1))
+            {
+                mark_cursor(&mut rows, x, y, theme);
+            }
+        }
         let cols = cells["size"][0].as_u64().unwrap_or(0) as usize;
         if args.html {
             html(&rows, theme)
@@ -497,6 +513,60 @@ fn picture(rows: &Value, theme: Theme) -> Vec<Vec<Piece>> {
         out.push(pieces);
     }
     out
+}
+
+/// The cursor: the cell at `(x, y)` of the picture in inverse, alone in
+/// its piece. Outside the picture: nothing.
+fn mark_cursor(rows: &mut [Vec<Piece>], x: usize, y: usize, theme: Theme) {
+    let Some(row) = rows.get_mut(y) else {
+        return;
+    };
+    let Some(index) = row.iter().position(|p| p.x <= x && x < p.x + p.w) else {
+        return;
+    };
+    let piece = row.remove(index);
+    // Glyphs of the piece with their cells: a mark stays with its base.
+    let mut glyphs: Vec<(usize, String)> = Vec::new();
+    for c in piece.text.chars() {
+        match (ptyrc_vt::char_width(c), glyphs.last_mut()) {
+            (0, Some((_, glyph))) => glyph.push(c),
+            (w, _) => glyphs.push((w.max(1), String::from(c))),
+        }
+    }
+    let part = |x: usize, w: usize, text: String, cursor: bool| Piece {
+        x,
+        w,
+        text,
+        fg: if cursor {
+            piece.bg.unwrap_or(theme.bg)
+        } else {
+            piece.fg
+        },
+        bg: if cursor { Some(piece.fg) } else { piece.bg },
+        bold: piece.bold,
+        dim: piece.dim && !cursor,
+        italic: piece.italic,
+        underline: piece.underline,
+        strike: piece.strike,
+    };
+    let mut parts = Vec::new();
+    let (mut at, mut start, mut text) = (piece.x, piece.x, String::new());
+    for (w, glyph) in glyphs {
+        if at <= x && x < at + w {
+            if !text.is_empty() {
+                parts.push(part(start, at - start, std::mem::take(&mut text), false));
+            }
+            parts.push(part(at, w, glyph, true));
+            start = at + w;
+        } else {
+            text.push_str(&glyph);
+        }
+        at += w;
+    }
+    if !text.is_empty() {
+        parts.push(part(start, at - start, text, false));
+    }
+    row.splice(index..index, parts);
 }
 
 fn hex([r, g, b]: Rgb) -> String {
@@ -677,6 +747,40 @@ mod tests {
         // Inverse: the default colours change places.
         assert_eq!((rows[1][0].fg, rows[1][0].bg), (THEME.bg, Some(THEME.fg)));
         assert_eq!(rows[1][1].fg, [0x10, 0x20, 0x30]);
+    }
+
+    #[test]
+    fn the_cursor_is_an_inverse_cell() {
+        let mut rows = picture(&rows(), THEME);
+        mark_cursor(&mut rows, 1, 0, THEME);
+        mark_cursor(&mut rows, 5, 0, THEME);
+        mark_cursor(&mut rows, 30, 0, THEME);
+        mark_cursor(&mut rows, 0, 9, THEME);
+        let shape: Vec<(usize, usize, &str)> = rows[0]
+            .iter()
+            .map(|p| (p.x, p.w, p.text.as_str()))
+            .collect();
+        assert_eq!(
+            shape,
+            [
+                (0, 1, "a"),
+                (1, 1, "<"),
+                (2, 2, "b "),
+                (4, 2, "日"),
+                (6, 1, "x"),
+                (7, 2, "  ")
+            ]
+        );
+        let red = palette::xterm(1);
+        assert_eq!((rows[0][1].fg, rows[0][1].bg), (THEME.bg, Some(red)));
+        assert_eq!((rows[0][0].fg, rows[0][0].bg), (red, None));
+        // On a wide glyph: both its cells.
+        assert_eq!(rows[0][3].fg, palette::xterm(21));
+        assert_eq!(rows[0][3].bg, Some(THEME.fg));
+        // A mark stays with its base.
+        mark_cursor(&mut rows, 4, 1, THEME);
+        assert_eq!(rows[1][1].text, "é́");
+        assert!(rows[1][1].bg.is_some());
     }
 
     #[test]

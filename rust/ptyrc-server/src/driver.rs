@@ -1168,10 +1168,10 @@ impl Driver {
         engine: &mut dyn Engine,
     ) -> Result<Value, RpcError> {
         if !self.info.headless {
-            return Err(RpcError::new(
-                ErrorCode::BadRequest,
-                "the host terminal sets the size",
-            ));
+            return Err(
+                RpcError::new(ErrorCode::BadRequest, "the host terminal sets the size")
+                    .with_hint("only a headless session is resized: ptyrc run --headless"),
+            );
         }
         let size = params
             .get("size")

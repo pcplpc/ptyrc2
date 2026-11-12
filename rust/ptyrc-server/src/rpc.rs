@@ -190,7 +190,8 @@ fn screen_cells(engine: &ScreenEngine, params: Value) -> Res {
             row_runs(&cells)
         })
         .collect();
-    Ok(json!({"rows": rows, "size": [rect.w, rect.h]}))
+    Ok(json!({"rows": rows, "size": [rect.w, rect.h],
+              "rect": [rect.x, rect.y, rect.w, rect.h]}))
 }
 
 #[derive(Deserialize)]

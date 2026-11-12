@@ -316,6 +316,10 @@ fn pictures_of_the_screen() {
             "<rect x=\"0.0\" y=\"18.0\" width=\"25.2\" height=\"18.0\" fill=\"#0000ee\"/>"
         )
     );
+    // The cursor, after `bar`: an inverse cell.
+    let cursor = "<rect x=\"25.2\" y=\"18.0\" width=\"8.4\" height=\"18.0\" fill=\"#e5e5e5\"/>";
+    assert!(svg.contains(cursor), "{svg}");
+    assert!(!shot(&["--no-cursor"]).contains(cursor));
     let html = shot(&["--html"]);
     assert!(
         html.contains("<span style=\"color:#cd0000;\">red</span> &lt;plain&gt;\n"),
