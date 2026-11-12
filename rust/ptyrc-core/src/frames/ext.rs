@@ -112,10 +112,6 @@ impl Ext {
         (lo, hi)
     }
 
-    pub fn has_hash(&self, hash: u64) -> bool {
-        self.index.contains_key(&hash)
-    }
-
     fn fresh(&self, o: &Obs, i: usize) -> Row {
         Row { hash: o.hashes[i], since: o.now, committed: false, line: (o.line)(i) }
     }

@@ -18,7 +18,7 @@ use crate::types::*;
 use ext::{Ext, Obs, Outcome};
 use heat::Heat;
 use ptyrc_vt::{Cursor, Grid, Rect, VtEvent};
-use screen::{BLANK, Line, Screen, fnv};
+use screen::{Line, Screen, fnv};
 use segment::{Distrust, Leaf, Segmenter, Sep, r4, scrolled_seps};
 use serde::Serialize;
 use std::cell::RefCell;
@@ -65,7 +65,7 @@ impl Default for FrameConfig {
             min_pane_rows: 3,
             min_pane_cols: 8,
             replace_ms: 2000,
-            replace_margin: 0.15,
+            replace_margin: 0.05,
             max_lines: 50_000,
             max_inactive: 64,
             trail: 256,
@@ -177,11 +177,6 @@ impl Pane {
         FramePos { x: self.ext.ox, y: self.ext.oy + self.top() as i64 }
     }
 
-    /// Pane columns of the content: `[a, b)` on screen.
-    fn cols(&self) -> (u16, u16) {
-        let c = self.content();
-        (c.x, c.right())
-    }
 }
 
 struct Placed {
@@ -559,6 +554,11 @@ impl Frames {
                 let y = first + r as i64;
                 let i = (y - p.ext.oy) as usize;
                 match p.ext.rows.get(i) {
+                    // The remembered line may be wider than the view.
+                    Some(row) if known && row.committed && p.ext.lines.contains_key(&y) => {
+                        let s = &p.ext.lines[&y];
+                        scan(&s.line, s.x0, y, &info)
+                    }
                     Some(row) => scan(&row.line, p.ext.ox, y, &info),
                     None => scan(&self.screen.lines[(c.y + r) as usize].slice(c.x, c.right()), p.ext.ox, y, &info),
                 }
@@ -1181,6 +1181,3 @@ impl Surfaces for Frames {
         self.trail.iter().copied().collect()
     }
 }
-
-#[allow(dead_code)]
-const _: u64 = BLANK;

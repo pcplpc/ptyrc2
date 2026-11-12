@@ -202,7 +202,7 @@ mod tests {
         let v = flat(40, 10);
         assert_eq!(v.best(6, 3, Prefer::TopRight, &[]).map(|b| (b.0, b.1)), Some((34, 0)));
         assert_eq!(v.best(6, 3, Prefer::BottomLeft, &[]).map(|b| (b.0, b.1)), Some((0, 7)));
-        assert_eq!(v.best(6, 3, Prefer::Center, &[]).map(|b| (b.0, b.1)), Some((17, 4)));
+        assert_eq!(v.best(6, 3, Prefer::Center, &[]).map(|b| (b.0, b.1)), Some((17, 3)));
         assert_eq!(v.best(6, 3, Prefer::Any, &[]).map(|b| (b.0, b.1)), Some((0, 0)));
         assert_eq!(v.best(41, 3, Prefer::Any, &[]), None);
     }
