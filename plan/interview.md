@@ -73,3 +73,14 @@ Supersedes `--spawn --rate` above.
   slowly, and respawn behind the text.
 - Fishes: by default half of them, drawn at random at birth, are
   attracted by text and hide behind it.
+
+## Flower, third session
+
+- No `--side`: a flower is planted in the nearest cold spot, its root 3
+  to 10 columns from the word and 1 to 3 rows off its row, so it is seen.
+- The match is redrawn in bold over the text.
+- No `--nth`: flowers spawn next to random matches, new ones as they
+  come and go. `--count N` (default 1): N matches get a flower; 0, all.
+- No `--color`: random sizes and colours.
+- `-a`, `--anywhere`: a pool of words seen on the screen, 3 to 5, and
+  flowers next to their matches. No bold then.

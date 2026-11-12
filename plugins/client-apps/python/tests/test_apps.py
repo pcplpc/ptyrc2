@@ -191,28 +191,92 @@ def page(pilot: Pilot, *lines: str) -> None:
 
 
 def test_flower(session: Pilot) -> None:
-    page(session, "", "", "", "", "", "a flower", "", "", "")
-    args = ["-s", session.session]
-    stages: set[str] = set()
+    page(session, "", "", "", "", "", "", "", "", "a flower", "", "", "")
+    args = ["-s", session.session, "--seed", "1"]
+    bold: list[dict[str, object]] = []
 
     def seen(host: str) -> bool:
         rows = host.split("\n")
-        # Right of the word, one cell away, centred on its row.
-        if rows[5].startswith("a flower  ( o )"):
-            stages.add("bud")
-        if rows[4].startswith("          ) o (") and rows[5].startswith("a flower ( /"):
-            stages.add("open")
-        return stages == {"bud", "open"}
+        # Planted off the word's row, the word bold over the text.
+        tints = [s for s in session.sprites() if s.get("blend") == "tint"]
+        bold.extend(tints)
+        return rows[8] == "a flower" and any("|" in r for r in rows[:8] + rows[9:])
 
-    watch(session, lambda: flower.main(args, seconds=1.6), seen)
+    watch(session, lambda: flower.main(args, seconds=2.0), seen)
+    assert bold
+
+
+def test_flower_place() -> None:
+    rng = random.Random(1)
+    small = flower.SHAPES["small"]
+    cold = ["." * 40] * 20
+    x0, y0 = flower.place(cold, (10, 10, 6), small, set(), rng)
+    # The nearest root: 3 columns past an end of the word, a row off it.
+    root = (x0 + small.root, y0 + small.h - 1)
+    assert root in {(7, 9), (7, 11), (18, 9), (18, 11)}
+    # Each cell must be cold and free.
+    hot = [row[:17] + "h" * 23 for row in cold]
+    x0, y0 = flower.place(hot, (10, 10, 6), small, set(), rng)
+    assert x0 + small.root == 7
+    taken = {(7, 9), (7, 11)}
+    x0, y0 = flower.place(hot, (10, 10, 6), small, taken, rng)
+    assert x0 + small.root < 7 and abs(y0 + small.h - 1 - 10) in (1, 2, 3)
+    assert flower.place(["t" * 40] * 20, (10, 10, 6), small, set(), rng) is None
+    # Out of the view: none.
+    assert flower.place(cold[:2], (0, 0, 6), flower.SHAPES["large"], set(), rng) is None
+
+
+def test_flower_anywhere(session: Pilot) -> None:
+    page(session, "", "", "", "", "", "", "", "", "garden of stones", "", "", "")
+    args = ["-s", session.session, "-a", "--seed", "1"]
+    tints: list[dict[str, object]] = []
+
+    def seen(host: str) -> bool:
+        rows = host.split("\n")
+        tints.extend(s for s in session.sprites() if s.get("blend") == "tint")
+        return any("|" in r for r in rows[:8] + rows[9:])
+
+    watch(session, lambda: flower.main(args, seconds=2.0), seen)
+    assert not tints  # no bold with -a
+
+
+def test_flower_pool() -> None:
+    rng = random.Random(1)
+    rows = ["the quick brown fox, Quick!", "a jumps 1234 over"]
+    words = flower.pool(rows, [], 3, rng)
+    assert len(words) == 3 and set(words) <= {"quick", "brown", "jumps", "over"}
+    # Kept while in view, the rest drawn anew.
+    assert flower.pool(rows, ["over", "gone"], 2, rng)[0] == "over"
+    assert flower.pool(rows, ["over", "gone"], 2, rng)[1] != "gone"
+    assert flower.pool([""], ["over"], 3, rng) == []
+
+
+def test_flower_not_between_words() -> None:
+    rng = random.Random(1)
+    small = flower.SHAPES["small"]
+    # Free cells one column wide between words: no room there.
+    gaps = ["tt.tt.tt.tt.tt.tt.tt.tt.tt.tt"] * 12
+    assert flower.place(gaps, (10, 6, 3), small, set(), rng) is None
+
+
+def test_flower_shapes() -> None:
+    for shape in flower.SHAPES.values():
+        steps = (*shape.grow, *shape.sway)
+        assert all(len(rows) == shape.h for rows in steps)
+        assert all(len(row) == shape.w for rows in steps for row in rows)
+        assert all(rows[-1][shape.root] != " " for rows in steps)  # the root
 
 
 def test_flower_paint() -> None:
-    rows = flower.paint(flower.SWAY[1], "red")
+    colors = flower.Colors(petals=1, alt=2, heart=3, stem=4)
+    rows = flower.paint(flower.SHAPES["large"].sway[1], colors, 5)
     assert len(rows) == 7 and all(len(row) == 7 for row in rows)
-    assert rows[2][3] == {"t": "o", "fg": "bright-yellow", "bold": True}
-    assert rows[0][1]["fg"] == "red" and rows[6][3]["fg"] == "green"
-    assert all(len(set(map(len, frame))) == 1 for frame in flower.SWAY)
+    assert rows[2][3] == {"t": "o", "fg": 3, "bold": True}
+    assert rows[0][1]["fg"] == 1 and rows[0][2]["fg"] == 2
+    assert rows[6][3] == {"t": "|", "fg": 4} and rows[0][0] == {"t": " "}
+    assert all(
+        r.get("dim") for row in flower.paint(["ab"], colors, 1, True) for r in row
+    )
 
 
 def until(ok: Callable[[], bool], seconds: float) -> bool:
