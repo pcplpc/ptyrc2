@@ -2809,3 +2809,35 @@ fn a_preset_splits_a_pane_of_another_app() {
     s.settle(&g);
     assert_eq!(s.rects(), vec![[0, 0, 30, 20], [31, 0, 29, 20]]);
 }
+
+/// A paint cut in two bursts: the rows, then the one row a preset is
+/// known by (a ruler), and nothing after.
+#[test]
+fn preset_sign_alone_in_a_second_burst() {
+    let mut s = Sim::with(FrameConfig::default(), vec![Box::new(Fake)]);
+    let d = doc(100);
+    s.settle(&view(&d, 0, 0, &[""; 20]));
+    assert_eq!(s.pane().support, None);
+    s.feed(&view(&d, 0, 20, &[]), 50);
+    assert_eq!(s.pane().support, None);
+    s.feed(&view(&d, 0, 19, &["FAKE a.txt 0"]), 20);
+    assert_eq!(s.pane().support.as_deref(), Some("fake"));
+    assert_eq!(s.pane().key.as_deref(), Some("a.txt"));
+    s.idle(3000);
+    assert_eq!(s.pane().support.as_deref(), Some("fake"));
+}
+
+/// The same in three: a row alone, then the sign alone on another.
+#[test]
+fn preset_sign_after_another_lone_row() {
+    let mut s = Sim::with(FrameConfig::default(), vec![Box::new(Fake)]);
+    let d = doc(100);
+    s.settle(&view(&d, 0, 0, &[""; 20]));
+    s.feed(&view(&d, 0, 18, &["", ""]), 50);
+    let mut g = view(&d, 0, 18, &["", ""]);
+    put(&mut g, 0, 18, "a row alone");
+    s.feed(&g, 20);
+    put(&mut g, 0, 19, "FAKE a.txt 0");
+    s.feed(&g, 20);
+    assert_eq!(s.pane().support.as_deref(), Some("fake"));
+}

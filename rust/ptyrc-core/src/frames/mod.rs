@@ -183,6 +183,8 @@ struct Pane {
     /// Last answer of `detect`, and when it was asked.
     found: Option<usize>,
     found_at: Option<Duration>,
+    /// The only row that had changed then, if one.
+    found_row: Option<u16>,
     suspended: bool,
     /// New or attached again: not observed yet.
     fresh: bool,
@@ -280,6 +282,10 @@ type PlaceCache = HashMap<(FrameId, u16, u16, u8), Vec<Placed>>;
 /// Pane of a preset, by rectangle: the area the preset segmented.
 type Areas = HashMap<segment::Rect4, segment::Rect4>;
 
+/// Presets found on a rectangle: when asked, the only row that had
+/// changed then, the presets.
+type Nested = (Duration, Option<u16>, Vec<usize>);
+
 /// How long a rectangle no longer reached keeps its presets.
 const NESTED_KEEP: Duration = Duration::from_secs(10);
 
@@ -313,6 +319,7 @@ pub struct Frames {
     /// Confidence of every preset on the whole screen, and when asked.
     screen_conf: Vec<f32>,
     screen_conf_at: Option<Duration>,
+    screen_conf_row: Option<u16>,
     title_changed: bool,
     /// Preset answers for the leaves of the pending layout.
     advice: HashMap<segment::Rect4, Advice>,
@@ -321,16 +328,17 @@ pub struct Frames {
     areas: Areas,
     /// Presets found on the rectangles the segmentation reached, and when
     /// asked.
-    nested: RefCell<HashMap<segment::Rect4, (Duration, Vec<usize>)>>,
+    nested: RefCell<HashMap<segment::Rect4, Nested>>,
     placed: RefCell<PlaceCache>,
 }
 
 /// Replacements closer than this are in a row.
 const CHURN: Duration = Duration::from_secs(3);
 
-/// A preset is looked for again on a change of one row only this long
-/// after the last time. A change of two rows or more, of the title or of
-/// the layout asks at once.
+/// A preset is looked for again on a change of the one row that had
+/// changed alone the last time only this long after. A change of two
+/// rows or more, of another row (a paint that comes in pieces), of the
+/// title or of the layout asks at once.
 const DETECT_EVERY: Duration = Duration::from_secs(1);
 
 /// A repaint that follows a clear may come in several bursts, this long.
@@ -459,6 +467,7 @@ impl Frames {
             screen_key: None,
             screen_conf: Vec::new(),
             screen_conf_at: None,
+            screen_conf_row: None,
             title_changed: false,
             advice: HashMap::new(),
             areas: HashMap::new(),
@@ -512,9 +521,11 @@ impl Frames {
         if !self.supports.is_empty() && (self.screen.any_change || title_changed) {
             let all = Rect::new(0, 0, self.screen.cols, self.screen.rows);
             let pv = self.pane_view(input, all);
-            if resized || alt_changed || self.detect_due(all, self.screen_conf_at, now) {
+            let last = (self.screen_conf_at, self.screen_conf_row);
+            if resized || alt_changed || self.detect_due(all, last, now) {
                 self.screen_conf = self.supports.iter().map(|s| s.detect(&pv)).collect();
                 self.screen_conf_at = Some(now);
+                self.screen_conf_row = self.lone_row(all);
             }
             screen_presets = self.screen_conf.iter().any(|c| *c >= 0.5);
             self.screen_key = self
@@ -960,15 +971,25 @@ impl Frames {
         }
     }
 
-    /// Is it time to look for presets again over `rect`, last asked at
-    /// `at`.
-    fn detect_due(&self, rect: Rect, at: Option<Duration>, now: Duration) -> bool {
+    /// The row of `rect` that changed, when it is the only one.
+    fn lone_row(&self, rect: Rect) -> Option<u16> {
+        let mut dirty = (rect.y..rect.bottom()).filter(|r| self.screen.row_dirty[*r as usize]);
+        let first = dirty.next()?;
+        dirty.next().is_none().then_some(first)
+    }
+
+    /// Is it time to look for presets again over `rect`: `last` is when
+    /// they were, and the row that had changed alone then. The same row
+    /// alone again waits (typing); another row is a paint that goes on.
+    fn detect_due(&self, rect: Rect, last: (Option<Duration>, Option<u16>), now: Duration) -> bool {
+        let mut dirty = (rect.y..rect.bottom()).filter(|r| self.screen.row_dirty[*r as usize]);
         self.title_changed
-            || at.is_none_or(|t| now >= t + DETECT_EVERY)
-            || (rect.y..rect.bottom())
-                .filter(|r| self.screen.row_dirty[*r as usize])
-                .nth(1)
-                .is_some()
+            || last.0.is_none_or(|t| now >= t + DETECT_EVERY)
+            || match (dirty.next(), dirty.next()) {
+                (Some(_), Some(_)) => true,
+                (Some(row), None) => last.1 != Some(row),
+                _ => false,
+            }
     }
 
     fn detect(&self, pv: &PaneView) -> Option<usize> {
@@ -1044,18 +1065,18 @@ impl Frames {
             ..self.pane_view(input, rect)
         };
         let mut nested = self.nested.borrow_mut();
-        let at = nested.get(&r4(rect)).map(|n| n.0);
-        if self.detect_due(rect, at, now) {
+        let last = nested.get(&r4(rect)).map_or((None, None), |n| (Some(n.0), n.1));
+        if self.detect_due(rect, last, now) {
             let found = (0..self.supports.len())
                 .filter(|i| self.supports[*i].detect(&pv) >= 0.5)
                 .collect();
             if nested.len() >= 64 {
                 nested.retain(|_, n| now < n.0 + NESTED_KEEP);
             }
-            nested.insert(r4(rect), (now, found));
+            nested.insert(r4(rect), (now, self.lone_row(rect), found));
         }
         nested[&r4(rect)]
-            .1
+            .2
             .iter()
             .find_map(|i| self.supports[*i].segment(&pv))
             .map(|rects| self.preset_leaves(rects, rect))
@@ -1179,6 +1200,7 @@ impl Frames {
                 cleared: None,
                 found: None,
                 found_at: None,
+                found_row: None,
                 suspended: false,
                 fresh: true,
                 reattach: false,
@@ -1579,9 +1601,11 @@ impl Frames {
             // Looked for on every change; once found, a preset is kept
             // through `SUPPORT_HOLD` of not being seen (a command line
             // hides the ruler vim is known by).
-            if p.fresh || !p.hashes_valid || self.detect_due(p.rect, p.found_at, now) {
+            let last = (p.found_at, p.found_row);
+            if p.fresh || !p.hashes_valid || self.detect_due(p.rect, last, now) {
                 p.found = self.detect(&pv);
                 p.found_at = Some(now);
+                p.found_row = self.lone_row(p.rect);
             }
             let found = p.found;
             let held = p.support.is_some() && p.support_at.is_some_and(|t| now < t + SUPPORT_HOLD);
