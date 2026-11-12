@@ -413,6 +413,28 @@ impl HeatView {
         }
     }
 
+    /// Seconds until the view is idle if nothing changes on screen;
+    /// `None` when it is idle now.
+    pub fn idle_in(&self) -> Option<f32> {
+        let n = self.still.len();
+        let need = (IDLE_SHARE * n as f32).ceil() as usize;
+        let mut left: Vec<f32> = self
+            .still
+            .iter()
+            .zip(&self.class)
+            .filter(|(still, class)| **still < IDLE_SECS || **class == HeatClass::Hot)
+            .map(|(still, _)| (IDLE_SECS - still).max(0.0))
+            .collect();
+        let calm = n - left.len();
+        if n == 0 || self.idle().idle {
+            return None;
+        }
+        // The cell whose turn makes the share.
+        let k = need.saturating_sub(calm).clamp(1, left.len()) - 1;
+        left.select_nth_unstable_by(k, f32::total_cmp);
+        Some(left[k])
+    }
+
     /// `safe` as digits 0 to 9, one string per row.
     pub fn digits(&self) -> Vec<String> {
         self.safe

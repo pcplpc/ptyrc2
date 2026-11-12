@@ -326,3 +326,26 @@ fn attach_mirrors_and_types() {
         seen(&host)
     );
 }
+
+#[test]
+fn events_start_with_the_state_when_asked() {
+    use std::io::{BufRead, BufReader};
+    let sb = Sandbox::new("evsnap");
+    let _driver = sb.headless("e", "30x5", &["cat"]);
+    let mut events = Proc(
+        sb.ptyrc()
+            .args(["-s", "e", "events", "size", "cursor", "--snapshot"])
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let mut lines = BufReader::new(events.0.stdout.take().unwrap()).lines();
+    let first: Value = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+    assert_eq!(first, json!({"event": "size", "data": {"size": [30, 5]}}));
+    let second: Value = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+    assert_eq!(second["event"], "cursor");
+    assert_eq!(
+        (&second["data"]["x"], &second["data"]["y"]),
+        (&json!(0), &json!(0))
+    );
+}

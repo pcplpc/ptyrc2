@@ -220,11 +220,7 @@ fn screen_cursor(engine: &ScreenEngine, params: Value) -> Res {
         .get("trail")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let cursor = engine.app.cursor();
-    let frame = engine.frames.at(cursor.col, cursor.row).map(|(id, _)| id);
-    let mut out = json!({
-        "x": cursor.col, "y": cursor.row, "visible": cursor.visible, "frame": frame,
-    });
+    let mut out = engine.cursor_json();
     if trail {
         let samples: Vec<Value> = engine
             .frames
@@ -327,6 +323,9 @@ fn screen_wait(
     match check_wait(engine, &wait, now) {
         Some(result) => Reply::Ok(result),
         None => {
+            if wait.idle {
+                engine.idle_due = Some(now);
+            }
             engine.waits.push(wait);
             ctx.request_repaint();
             Reply::Pending

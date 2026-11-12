@@ -59,13 +59,29 @@ class Match:
 
 @dataclass(frozen=True)
 class Cursor:
-    """Screen cursor. `trail`: `(ms, x, y)` samples, oldest first."""
+    """Screen cursor. `frame`, `pos`: the innermost frame showing it and
+    its position there, in frame cells. `trail`: `(ms, x, y)` samples,
+    oldest first."""
 
     x: int
     y: int
     visible: bool
     frame: int | None
     trail: tuple[tuple[int, int, int], ...] = ()
+    pos: tuple[int, int] | None = None
+
+    @classmethod
+    def from_wire(cls, raw: dict[str, Any]) -> Cursor:
+        """From `screen.cursor`, or from the data of a `cursor` event."""
+        pos = raw.get("pos")
+        return cls(
+            x=raw["x"],
+            y=raw["y"],
+            visible=raw.get("visible", True),
+            frame=raw.get("frame"),
+            trail=tuple(tuple(s) for s in raw.get("trail") or ()),
+            pos=tuple(pos) if pos else None,
+        )
 
 
 def find_binary() -> str:
@@ -258,8 +274,16 @@ class Sprite:
     def info(self) -> dict[str, Any] | None:
         """Its entry in `draw.list`. `screen`: its top-left cell, None
         while hidden; `visible`: some of it is in the view; `covered`:
-        share of a back sprite under the app's text."""
-        return next((s for s in self._pilot.sprites() if s["id"] == self.id), None)
+        share of a back sprite under the app's text; `style`: the one
+        it was given. Inside `batch()`: a dict, filled when the batch
+        is sent, left empty when the sprite is gone."""
+        out: dict[str, Any] = {}
+
+        def fill(res: Any) -> None:
+            out.update(next((s for s in res["sprites"] if s["id"] == self.id), {}))
+
+        res = self._pilot._request("draw.list", {}, fill)
+        return out if res is None else (out or None)
 
     @property
     def visible(self) -> bool:
@@ -469,7 +493,9 @@ class Pilot(Tools):
 
     def call(self, method: str, **params: Any) -> Any:
         """Raw request: `pilot.call("screen.text", frame=1)`. Inside
-        `batch()` it is queued and returns None."""
+        `batch()` it is queued and returns None; the methods that read
+        (`text`, `find`, `sprites`, `Sprite.info`) return a list or a
+        dict that is filled when the batch is sent."""
         return self._request(method, params)
 
     def _request(
@@ -558,7 +584,10 @@ class Pilot(Tools):
         self, frame: int | str | None = None, rect: Sequence[int] | None = None
     ) -> list[str]:
         """Plain text of the screen or of a frame's view, one string per row."""
-        return self.call("screen.text", **_opt(frame=frame, rect=rect))["lines"]
+        out: list[str] = []
+        params = _opt(frame=frame, rect=rect)
+        self._request("screen.text", params, lambda res: out.extend(res["lines"]))
+        return out
 
     def cells(
         self, frame: int | str | None = None, rect: Sequence[int] | None = None
@@ -584,18 +613,18 @@ class Pilot(Tools):
             params["ignore_case"] = True
         if known:
             params["known"] = True
-        res = self.call("screen.find", pattern=pattern, **params)
-        return [Match.from_wire(m) for m in res["matches"]]
+        out: list[Match] = []
+        self._request(
+            "screen.find",
+            {"pattern": pattern, **params},
+            lambda res: out.extend(Match.from_wire(m) for m in res["matches"]),
+        )
+        return out
 
     def cursor(self, trail: bool = False) -> Cursor:
-        res = self.call("screen.cursor", trail=trail)
-        return Cursor(
-            x=res["x"],
-            y=res["y"],
-            visible=res.get("visible", True),
-            frame=res.get("frame"),
-            trail=tuple(tuple(s) for s in res.get("trail") or ()),
-        )
+        if self._batch is not None:
+            raise RuntimeError("cursor inside a batch")
+        return Cursor.from_wire(self.call("screen.cursor", trail=trail))
 
     def wait_for(
         self,
@@ -719,7 +748,10 @@ class Pilot(Tools):
         return self.draw(effect={"name": name, "params": params or {}}, **kw)
 
     def sprites(self) -> list[dict[str, Any]]:
-        return self.call("draw.list")["sprites"]
+        """Every sprite of the session, as `draw.list` tells them."""
+        out: list[dict[str, Any]] = []
+        self._request("draw.list", {}, lambda res: out.extend(res["sprites"]))
+        return out
 
     def clear(self, all: bool = False) -> int:
         """Remove this connection's sprites, or every sprite with `all`."""
@@ -728,32 +760,48 @@ class Pilot(Tools):
 
     # -- events and debug -------------------------------------------------
 
-    def subscribe(self, *topics: str) -> None:
-        """Ask for events: `screen`, `cursor`, `frames`, `idle` (a frame
-        became idle, or busy), `draw` (sprites removed with the rows or
-        the frame they were on), `input`, `size`, `exit`."""
-        self.call("subscribe", topics=list(topics))
+    def subscribe(self, *topics: str, snapshot: bool = False) -> None:
+        """Ask for events: `screen` (screen rows written), `text` (per
+        frame: the frame rows whose text changed, the origin after a
+        scroll), `cursor`, `frames`, `idle` (a frame became idle, or
+        busy), `draw` (sprites removed with the rows or the frame they
+        were on), `input`, `size`, `exit`.
+
+        `snapshot`: the state now comes first, as events: `idle` of each
+        frame on screen, `cursor`, `frames`, `size`. No poll at start."""
+        params: dict[str, Any] = {"topics": list(topics)}
+        if snapshot:
+            params["snapshot"] = True
+        self.call("subscribe", **params)
+
+    def event(self, timeout: float | None = None) -> tuple[str, Any] | None:
+        """The next event, `(topic, data)`; None after `timeout` seconds
+        of silence. Raises `PtyrcError` (`gone`) when the connection is
+        closed and nothing is left to read."""
+        try:
+            msg = self._conn.events.get(timeout=timeout)
+        except queue.Empty:
+            return None
+        if msg is None:
+            self._conn.events.put(None)  # for the next reader
+            raise PtyrcError("gone", "connection closed")
+        return msg["event"], msg.get("data")
 
     def events(
-        self, *topics: str, timeout: float | None = None
+        self, *topics: str, timeout: float | None = None, snapshot: bool = False
     ) -> Iterator[tuple[str, Any]]:
         """Subscribe to `topics` and yield `(topic, data)` as they come.
-        Ends when the driver goes away, or after `timeout` seconds of
-        silence.
+        Silence ends it: `timeout` seconds without an event. A closed
+        connection does not: it raises `PtyrcError` (`gone`), as any
+        call would.
 
             for topic, data in pilot.events("cursor"):
                 print(data["x"], data["y"])
         """
         if topics:
-            self.subscribe(*topics)
-        while True:
-            try:
-                msg = self._conn.events.get(timeout=timeout)
-            except queue.Empty:
-                return
-            if msg is None:
-                return
-            yield msg["event"], msg.get("data")
+            self.subscribe(*topics, snapshot=snapshot)
+        while (event := self.event(timeout)) is not None:
+            yield event
 
     def debug_overlay(self, what: str = "frames") -> None:
         """Show `frames` or `heat` on the host; `off` hides it."""

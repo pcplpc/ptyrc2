@@ -77,7 +77,8 @@ def frame_arg(value: str) -> int | str:
 def parse(
     out: argparse.ArgumentParser, argv: Sequence[str] | None
 ) -> argparse.Namespace:
-    args = out.parse_args(argv)
+    # Options between the words: `marks ERROR -i WARN`.
+    args = out.parse_intermixed_args(argv)
     args.frame = frame_arg(args.frame)
     return args
 
@@ -107,7 +108,8 @@ def ticks(period: float, seconds: float | None = None) -> Iterator[float]:
 
 def hold(pilot: Pilot, seconds: float | None = None) -> None:
     """Stay connected with nothing to send: until the session ends, or
-    for `seconds`. Sprites live as long as the connection."""
+    for `seconds`. Sprites live as long as the connection. A session
+    that ends without a word raises `gone`: `run` takes it for an end."""
     for _ in pilot.events("exit", timeout=seconds):
         return
 

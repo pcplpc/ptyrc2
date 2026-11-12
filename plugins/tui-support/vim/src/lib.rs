@@ -206,6 +206,7 @@ mod tests {
         PaneView {
             grid,
             rect: grid.rect(),
+            area: grid.rect(),
             cursor: None,
             title,
             alt_screen: true,
@@ -258,6 +259,7 @@ mod tests {
         let pane = |y, h| PaneView {
             grid: &grid,
             rect: ptyrc_vt::Rect::new(0, y, 40, h),
+            area: ptyrc_vt::Rect::new(0, y, 40, h),
             cursor: None,
             title: "",
             alt_screen: true,

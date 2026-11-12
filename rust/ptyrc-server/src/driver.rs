@@ -156,6 +156,8 @@ struct Driver {
     /// Union of the topics clients subscribed to.
     topics: HashSet<String>,
     pending: HashMap<Token, (ConnId, Value)>,
+    /// Messages to send once the request being answered is.
+    after: Vec<(ConnId, Value)>,
     next_conn: u64,
     next_token: u64,
     repaint: bool,
@@ -339,6 +341,7 @@ impl Driver {
             conns: BTreeMap::new(),
             topics: HashSet::new(),
             pending: HashMap::new(),
+            after: Vec::new(),
             next_conn: 1,
             next_token: 1,
             repaint: false,
@@ -374,6 +377,7 @@ impl Driver {
             cfg,
             info,
             start: Instant::now(),
+            after: Vec::new(),
             pty: None,
             recorder: None,
             player: Some(Player::new(replay)),
@@ -903,7 +907,14 @@ impl Driver {
                 params,
             } = request;
             match self.dispatch(id, &method, params, engine, false) {
-                Some(result) => self.respond(id, &request_id, result),
+                Some(result) => {
+                    self.respond(id, &request_id, result);
+                    for (to, message) in std::mem::take(&mut self.after) {
+                        if let Some(conn) = self.conns.get_mut(&to) {
+                            conn.send(&message);
+                        }
+                    }
+                }
                 None => {
                     // The engine holds the token allocated last.
                     self.pending
@@ -931,7 +942,7 @@ impl Driver {
         Some(match method {
             "session.info" => Ok(self.session_info(engine)),
             "session.resize" => self.session_resize(&params, engine),
-            "subscribe" => self.subscribe(conn, &params),
+            "subscribe" => self.subscribe(conn, &params, engine),
             "input.send" => self.input_send(&params, engine),
             "input.click" => self.input_click(&params, engine),
             "input.grab" => self.input_grab(conn, &params),
@@ -1002,7 +1013,12 @@ impl Driver {
         Ok(json!({}))
     }
 
-    fn subscribe(&mut self, conn: ConnId, params: &Value) -> Result<Value, RpcError> {
+    fn subscribe(
+        &mut self,
+        conn: ConnId,
+        params: &Value,
+        engine: &mut dyn Engine,
+    ) -> Result<Value, RpcError> {
         let topics = params
             .get("topics")
             .and_then(Value::as_array)
@@ -1020,6 +1036,23 @@ impl Driver {
                     TOPICS.join(", ")
                 )),
             );
+        }
+        let snapshot = match params.get("snapshot") {
+            None => false,
+            Some(Value::Bool(snapshot)) => *snapshot,
+            Some(_) => return Err(RpcError::bad_params("snapshot: true or false")),
+        };
+        if snapshot {
+            // Sent after the answer, to this client only.
+            let now = self.now();
+            for topic in &topics {
+                let state = match topic.as_str() {
+                    "size" => vec![json!({"size": [self.info.cols, self.info.rows]})],
+                    topic => engine.snapshot(topic, now),
+                };
+                let events = state.into_iter().map(|data| event(topic, data));
+                self.after.extend(events.map(|message| (conn, message)));
+            }
         }
         if let Some(conn) = self.conns.get_mut(&conn) {
             conn.topics.extend(topics);

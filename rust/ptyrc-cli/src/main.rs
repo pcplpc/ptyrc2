@@ -108,8 +108,12 @@ enum Verb {
     Debug(verbs::Debug),
     /// Print events, one JSON object per line
     Events {
-        /// screen, cursor, frames, input, size, exit [default: all]
+        /// screen, cursor, frames, text, idle, draw, input, size, exit
+        /// [default: all]
         topics: Vec<String>,
+        /// The state now as the first events (cursor, frames, idle, size)
+        #[arg(long)]
+        snapshot: bool,
     },
 }
 
@@ -314,7 +318,7 @@ fn run(cli: Cli) -> Result<ExitCode, Fail> {
         Verb::Replay(args) => replay::replay(args),
         Verb::Tape { verb } => replay::tape(&common, verb),
         Verb::Debug(verb) => verbs::debug(&common, verb),
-        Verb::Events { topics } => verb_events(&common, topics),
+        Verb::Events { topics, snapshot } => verb_events(&common, topics, snapshot),
     }
 }
 
@@ -413,14 +417,14 @@ fn verb_ls(common: &Common) -> Result<ExitCode, Fail> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn verb_events(common: &Common, topics: Vec<String>) -> Result<ExitCode, Fail> {
+fn verb_events(common: &Common, topics: Vec<String>, snapshot: bool) -> Result<ExitCode, Fail> {
     let mut client = connect(common)?;
     let topics: Vec<&str> = if topics.is_empty() {
         TOPICS.to_vec()
     } else {
         topics.iter().map(String::as_str).collect()
     };
-    client.subscribe(&topics)?;
+    client.call("subscribe", json!({"topics": topics, "snapshot": snapshot}))?;
     loop {
         match client.next_event(None) {
             Ok(Some(event)) => {

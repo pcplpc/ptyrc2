@@ -172,6 +172,12 @@ pub trait Engine {
     /// tells others.
     fn on_host_colors(&mut self, _colors: ptyrc_core::scene::HostColors, _ctx: &mut Ctx) {}
 
+    /// `subscribe {snapshot}`: the state of `topic` now, as the data of
+    /// the events a subscriber would have been sent to know it.
+    fn snapshot(&mut self, _topic: &str, _now: Duration) -> Vec<Value> {
+        Vec::new()
+    }
+
     /// Members merged into the `session.info` result (an object, or null).
     fn session_extras(&self) -> Value {
         Value::Null

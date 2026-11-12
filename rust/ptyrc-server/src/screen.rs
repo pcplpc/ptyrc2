@@ -10,9 +10,10 @@ use ptyrc_core::plugin::{DrawExt, TuiSupport};
 use ptyrc_core::scene::Scene;
 use ptyrc_core::{FrameId, FrameSel, OwnerId, TextQuery};
 use ptyrc_proto::{ErrorCode, RpcError};
-use ptyrc_vt::{Grid, Vt, VtEvent, repair};
+use ptyrc_vt::{Grid, Rect, Vt, VtEvent, repair};
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
 /// Begin and end of a synchronized update.
@@ -23,8 +24,36 @@ const ESU: &[u8] = b"\x1b[?2026l";
 pub(crate) const DEBUG_OWNER: OwnerId = u64::MAX;
 /// Refresh period of the debug overlay.
 const DEBUG_PERIOD: Duration = Duration::from_millis(400);
-/// Period of the idle watch: `idle` events and `screen.wait {idle}`.
+/// The idle watch (`idle` events, `screen.wait {idle}`) looks at most
+/// this often while the screen changes. A quiet screen is looked at when
+/// the heat says a frame can turn idle, not before.
 const IDLE_PERIOD: Duration = Duration::from_millis(250);
+/// Least delay to a look the heat asked for.
+const IDLE_STEP: Duration = Duration::from_millis(20);
+
+/// The cursor as told: screen cell, frame, frame position.
+type Told = (u16, u16, Option<FrameId>, Option<(i64, i64)>);
+
+/// What a frame showed at the last look of the `text` topic.
+struct Shown {
+    rect: Rect,
+    origin: (i64, i64),
+    /// Hash of the text of each row of the view.
+    rows: Vec<u64>,
+}
+
+fn row_hash(grid: &Grid, rect: Rect, row: u16) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for cell in &grid.row(row)[rect.x as usize..(rect.x + rect.w) as usize] {
+        if cell.has_ink() {
+            cell.text.as_str().hash(&mut hasher);
+        } else {
+            " ".hash(&mut hasher);
+        }
+        cell.width.hash(&mut hasher);
+    }
+    hasher.finish()
+}
 
 /// A `screen.wait` left pending.
 pub(crate) struct Wait {
@@ -67,13 +96,18 @@ pub struct ScreenEngine {
     pub(crate) waits: Vec<Wait>,
     /// Last time the app grid changed.
     pub(crate) last_change: Duration,
-    last_cursor: (u16, u16),
+    /// Cursor as last told: screen cell, frame, frame position.
+    last_cursor: Option<Told>,
     pub(crate) overlay: Overlay,
     overlay_due: Duration,
     /// A client subscribed to `idle`, as of the last hook.
     idle_watch: bool,
-    /// Next look of the idle watch.
-    idle_due: Duration,
+    /// Next look of the idle watch; `None`: when the screen changes.
+    pub(crate) idle_due: Option<Duration>,
+    /// Last look of the idle watch.
+    idle_looked: Duration,
+    /// The `text` topic: what each frame showed.
+    shown: HashMap<FrameId, Shown>,
     /// `idle` of each frame on screen at the last look.
     idle_seen: HashMap<FrameId, bool>,
     /// Bytes of our own written to the host, for `debug.dump`.
@@ -107,11 +141,13 @@ impl ScreenEngine {
             exts,
             waits: Vec::new(),
             last_change: Duration::ZERO,
-            last_cursor: (0, 0),
+            last_cursor: None,
             overlay: Overlay::Off,
             overlay_due: Duration::ZERO,
             idle_watch: false,
-            idle_due: Duration::ZERO,
+            idle_due: Some(Duration::ZERO),
+            idle_looked: Duration::ZERO,
+            shown: HashMap::new(),
             idle_seen: HashMap::new(),
             injected: 0,
             bursts: 0,
@@ -145,6 +181,9 @@ impl ScreenEngine {
             events,
         };
         let changes = self.frames.update(&input, now);
+        if !changes.is_empty() {
+            self.idle_poke(now);
+        }
         self.shift_sprites(&changes, ctx);
         if !changes.is_empty() && ctx.has_subscribers("frames") {
             ctx.emit("frames", json!({"frames": self.frames.list()}));
@@ -247,26 +286,52 @@ impl ScreenEngine {
         }
     }
 
+    /// The screen or the layout changed: the idle watch looks again,
+    /// `IDLE_PERIOD` after its last look at the earliest.
+    fn idle_poke(&mut self, now: Duration) {
+        let at = now.max(self.idle_looked + IDLE_PERIOD);
+        self.idle_due = Some(self.idle_due.map_or(at, |due| due.min(at)));
+    }
+
+    /// The idle watch has someone to tell.
+    fn idle_watched(&self) -> bool {
+        self.idle_watch || self.waits.iter().any(|w| w.idle)
+    }
+
     /// The `idle` topic: one event per frame on screen whose `idle`
     /// changed since the last look. Frames are not idle until seen so.
+    /// The next look is when the first busy frame can be idle; a frame
+    /// leaves idleness by a change on screen only (`idle_poke`).
     fn watch_idle(&mut self, now: Duration, ctx: &mut Ctx) {
-        self.idle_watch = ctx.has_subscribers("idle");
-        if now < self.idle_due {
-            return;
+        let watch = ctx.has_subscribers("idle");
+        if watch != self.idle_watch {
+            self.idle_watch = watch;
+            self.idle_due = Some(now);
         }
-        self.idle_due = now + IDLE_PERIOD;
         if !self.idle_watch {
             self.idle_seen.clear();
+        }
+        if !self.idle_watched() || self.idle_due.is_none_or(|due| now < due) {
             return;
         }
+        self.idle_looked = now;
+        self.idle_due = None;
         let mut seen = HashMap::new();
         for info in self.frames.list() {
             if info.state == ptyrc_core::FrameState::Inactive {
                 continue;
             }
-            let Some(idle) = self.frames.idle(info.id, now) else {
+            let Some(heat) = self.frames.heat_at(info.id, now) else {
                 continue;
             };
+            let idle = heat.idle();
+            if let Some(left) = heat.idle_in() {
+                let at = now + Duration::from_secs_f32(left).max(IDLE_STEP);
+                self.idle_due = Some(self.idle_due.map_or(at, |due| due.min(at)));
+            }
+            if !self.idle_watch {
+                continue;
+            }
             let was = self.idle_seen.get(&info.id).copied().unwrap_or(false);
             if idle.idle != was {
                 ctx.emit(
@@ -277,6 +342,79 @@ impl ScreenEngine {
             seen.insert(info.id, idle.idle);
         }
         self.idle_seen = seen;
+    }
+
+    /// The `text` topic: per frame on screen, the frame rows in view
+    /// whose text is not what the frame showed there at the last look,
+    /// and the origin when it moved. One event per frame and burst.
+    fn watch_text(&mut self, ctx: &mut Ctx) {
+        if !ctx.has_subscribers("text") {
+            self.shown.clear();
+            return;
+        }
+        let grid = self.app.grid();
+        let mut shown = HashMap::new();
+        for info in self.frames.list() {
+            if info.state == ptyrc_core::FrameState::Inactive {
+                if let Some(was) = self.shown.remove(&info.id) {
+                    shown.insert(info.id, was);
+                }
+                continue;
+            }
+            let [x, y, w, h] = info.rect;
+            let rect = Rect::new(x, y, w, h);
+            if rect.x + rect.w > grid.cols() || rect.y + rect.h > grid.rows() {
+                continue;
+            }
+            let origin = (info.origin[0], info.origin[1]);
+            let rows: Vec<u64> = (rect.y..rect.y + rect.h)
+                .map(|row| row_hash(grid, rect, row))
+                .collect();
+            if let Some(was) = self.shown.get(&info.id) {
+                let same_columns = was.rect.w == rect.w && was.origin.0 == origin.0;
+                let changed: Vec<i64> = rows
+                    .iter()
+                    .enumerate()
+                    .filter(|&(i, hash)| {
+                        // The frame row, where it was in the last view.
+                        let k = origin.1 + i as i64 - was.origin.1;
+                        let before = usize::try_from(k).ok().and_then(|k| was.rows.get(k));
+                        before.is_some_and(|b| b != hash || !same_columns)
+                    })
+                    .map(|(i, _)| origin.1 + i as i64)
+                    .collect();
+                if !changed.is_empty() || was.origin != origin || was.rect != rect {
+                    ctx.emit(
+                        "text",
+                        json!({
+                            "frame": info.id,
+                            "rows": changed,
+                            "origin": [origin.0, origin.1],
+                            "rect": [rect.x, rect.y, rect.w, rect.h],
+                        }),
+                    );
+                }
+            }
+            shown.insert(info.id, Shown { rect, origin, rows });
+        }
+        self.shown = shown;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn shown_is_empty(&self) -> bool {
+        self.shown.is_empty()
+    }
+
+    /// The cursor as events and `screen.cursor` tell it: screen cell,
+    /// frame, and position in that frame's cells.
+    pub(crate) fn cursor_json(&self) -> Value {
+        let cursor = self.app.cursor();
+        let at = self.frames.at(cursor.col, cursor.row);
+        json!({
+            "x": cursor.col, "y": cursor.row, "visible": cursor.visible,
+            "frame": at.map(|(id, _)| id),
+            "pos": at.map(|(_, pos)| [pos.x, pos.y]),
+        })
     }
 
     /// Answer the waits that are satisfied or expired.
@@ -300,13 +438,26 @@ impl ScreenEngine {
         if !changed_rows.is_empty() {
             ctx.emit("screen", json!({"rows": changed_rows}));
         }
+        self.emit_cursor(ctx);
+        self.watch_text(ctx);
+    }
+
+    /// Topic `cursor`: when the cursor moved on the screen or in its
+    /// frame (a scroll under a cursor that stays).
+    fn emit_cursor(&mut self, ctx: &mut Ctx) {
         let cursor = self.app.cursor();
-        if (cursor.col, cursor.row) != self.last_cursor {
-            self.last_cursor = (cursor.col, cursor.row);
-            ctx.emit(
-                "cursor",
-                json!({"x": cursor.col, "y": cursor.row, "visible": cursor.visible}),
-            );
+        let at = self.frames.at(cursor.col, cursor.row);
+        let told = Some((
+            cursor.col,
+            cursor.row,
+            at.map(|(id, _)| id),
+            at.map(|(_, pos)| (pos.x, pos.y)),
+        ));
+        if told != self.last_cursor {
+            self.last_cursor = told;
+            if ctx.has_subscribers("cursor") {
+                ctx.emit("cursor", self.cursor_json());
+            }
         }
     }
 
@@ -391,6 +542,7 @@ impl Engine for ScreenEngine {
             };
         if !changed_rows.is_empty() {
             self.last_change = now;
+            self.idle_poke(now);
         }
         self.observe(&events, now, ctx);
         self.paint(now, out);
@@ -421,8 +573,16 @@ impl Engine for ScreenEngine {
         self.ticks += 1;
         let changes = self.frames.tick(now);
         self.shift_sprites(&changes, ctx);
-        if !changes.is_empty() && ctx.has_subscribers("frames") {
-            ctx.emit("frames", json!({"frames": self.frames.list()}));
+        if !changes.is_empty() {
+            self.idle_poke(now);
+            if ctx.has_subscribers("frames") {
+                ctx.emit("frames", json!({"frames": self.frames.list()}));
+            }
+            self.emit_cursor(ctx);
+            self.watch_text(ctx);
+        } else if self.shown.is_empty() && ctx.has_subscribers("text") {
+            // A first subscriber: what the frames show now is the base.
+            self.watch_text(ctx);
         }
         self.paint(now, out);
         self.close_sync(out);
@@ -441,8 +601,8 @@ impl Engine for ScreenEngine {
         if self.overlay != Overlay::Off {
             merge(Some(self.overlay_due));
         }
-        if self.idle_watch || self.waits.iter().any(|w| w.idle) {
-            merge(Some(self.idle_due));
+        if self.idle_watched() {
+            merge(self.idle_due);
         }
         for wait in &self.waits {
             merge(Some(wait.deadline));
@@ -463,9 +623,12 @@ impl Engine for ScreenEngine {
     fn on_resize(&mut self, cols: u16, rows: u16, now: Duration, out: &mut Vec<u8>, ctx: &mut Ctx) {
         self.resize(cols, rows);
         self.last_change = now;
+        self.idle_poke(now);
         self.observe(&[], now, ctx);
         self.paint(now, out);
         self.close_sync(out);
+        self.emit_cursor(ctx);
+        self.watch_text(ctx);
     }
 
     fn on_exit(&mut self, out: &mut Vec<u8>, _ctx: &mut Ctx) {
@@ -521,6 +684,24 @@ impl Engine for ScreenEngine {
 
     fn on_host_colors(&mut self, colors: ptyrc_core::scene::HostColors, _ctx: &mut Ctx) {
         self.scene.set_host_colors(colors);
+    }
+
+    fn snapshot(&mut self, topic: &str, now: Duration) -> Vec<Value> {
+        match topic {
+            "cursor" => vec![self.cursor_json()],
+            "frames" => vec![json!({"frames": self.frames.list()})],
+            "idle" => self
+                .frames
+                .list()
+                .into_iter()
+                .filter(|info| info.state != ptyrc_core::FrameState::Inactive)
+                .filter_map(|info| {
+                    let idle = self.frames.idle(info.id, now)?;
+                    Some(json!({"frame": info.id, "idle": idle.idle, "score": idle.score, "free": idle.free}))
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
     }
 
     fn session_extras(&self) -> Value {
