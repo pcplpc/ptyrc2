@@ -7,7 +7,6 @@ import os
 import time
 
 import pytest
-
 from ptyrc import Pilot, PtyrcError, live_sessions, runtime_dir, socket_path
 from tests_support import pid_alive
 

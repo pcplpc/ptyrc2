@@ -5,9 +5,8 @@ from __future__ import annotations
 
 import time
 
-from tests_support import until
-
 from ptyrc import Pilot, PtyrcError, sprite_spec
+from tests_support import until
 
 
 def shown(pilot: Pilot) -> list[str]:

@@ -4,9 +4,8 @@
 from __future__ import annotations
 
 from conftest import wait_pane
-from tests_support import until
-
 from ptyrc import Pilot
+from tests_support import until
 
 
 def test_pane_follows_scrolling(vim: Pilot) -> None:

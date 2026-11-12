@@ -12,13 +12,12 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
-
 from ptyrc import Pilot
 
 # `tests_support` is imported by the test modules.
 sys.path.insert(0, str(Path(__file__).parent))
 
-from tests_support import until  # noqa: E402
+from tests_support import until
 
 ROOT = Path(__file__).resolve().parents[3]
 VIM = "/usr/bin/vim"
