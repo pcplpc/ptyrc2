@@ -5,7 +5,7 @@
 # SKIP per check; exit status 1 if a check failed.
 #
 #   scripts/e2e-frames.sh [SCENARIO...]     default: all
-#   scenarios: vim vim-nu vim-nowrap vim-splits tmux shell pager agent resize
+#   scenarios: vim vim-nu vim-nowrap vim-splits tmux shell pager agent monitor resize
 
 cd "$(dirname "$0")/.." || exit 2
 . scripts/lib-e2e.sh
@@ -321,6 +321,19 @@ sys.exit(0 if steps == [f"● step {i:03d}: reading file_{i}.rs and thinking abo
     e2e_stop
 }
 
+s_monitor() {
+    have htop || { echo "SKIP  monitor"; return; }
+    e2e_start fr-monitor 100x30 htop || return
+    settle 6
+    local before; before=$(e2e_p frames --json | python3 -c '
+import json, sys
+print(sorted(f["id"] for f in json.load(sys.stdin)["frames"] if f["state"] != "inactive"))')
+    check "monitor: a screen repainted every second settles" 'len(P) >= 1 and all(f["usable"] for f in P)'
+    settle 4
+    check "monitor: and keeps its frames" "sorted(F) == $before"
+    e2e_stop
+}
+
 s_resize() {
     have $VIM || { echo "SKIP  resize"; return; }
     e2e_start fr-resize 100x30 $VIM -u NONE -N -n "$WORK/long.txt" || return
@@ -338,7 +351,7 @@ s_resize() {
 [ -x "$PTYRC" ] || { echo "no binary at $PTYRC: cargo build -p ptyrc-cli" >&2; exit 2; }
 have tmux || { echo "tmux is required as the host" >&2; exit 2; }
 
-for scenario in "${@:-vim vim-nu vim-nowrap vim-splits tmux shell pager agent resize}"; do
+for scenario in "${@:-vim vim-nu vim-nowrap vim-splits tmux shell pager agent monitor resize}"; do
     for one in $scenario; do
         case $one in
             vim) s_vim ;;
@@ -349,6 +362,7 @@ for scenario in "${@:-vim vim-nu vim-nowrap vim-splits tmux shell pager agent re
             shell) s_shell ;;
             pager) s_pager ;;
             agent) s_agent ;;
+            monitor) s_monitor ;;
             resize) s_resize ;;
             *) echo "unknown scenario: $one" >&2; exit 2 ;;
         esac

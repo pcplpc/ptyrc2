@@ -1370,6 +1370,49 @@ fn a_pager_page_is_not_trusted_as_a_scroll() {
 }
 
 #[test]
+fn a_monitor_is_rewritten_in_place() {
+    // A pane repainted whole every second under a status line that ticks:
+    // two frames are spent, then it is one frame, stable.
+    let mut s = Sim::new();
+    let screen = |n: usize| {
+        let lines: Vec<String> = (0..23)
+            .map(|i| {
+                format!(
+                    "{:5} proc-{} {}.{}%",
+                    n * 97 + i * 13,
+                    (n * 7 + i * 3) % 50,
+                    n + i,
+                    n % 10
+                )
+            })
+            .collect();
+        let mut refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let status = format!("load {n}");
+        refs.push(&status);
+        let mut g = Grid::from_lines(COLS, &refs);
+        bg(&mut g, Rect::new(0, 23, COLS, 1), 2);
+        g
+    };
+    s.settle(&screen(0));
+    let mut seen = vec![s.pane().id];
+    for n in 1..12 {
+        s.feed(&screen(n), 1000);
+        seen.push(s.pane().id);
+    }
+    seen.dedup();
+    assert!(seen.len() <= 3, "{seen:?}");
+    assert!(s.pane().usable, "stable after the churn");
+    // A lone switch later is still a switch.
+    s.idle(5000);
+    let id = s.pane().id;
+    let d = doc(100);
+    let mut g = view(&d, 0, 23, &["other window"]);
+    bg(&mut g, Rect::new(0, 23, COLS, 1), 2);
+    s.feed(&g, 10);
+    assert_ne!(s.pane().id, id);
+}
+
+#[test]
 fn wire_forms() {
     let mut s = Sim::new();
     s.settle(&view(&doc(30), 0, 20, &[]));
@@ -1404,7 +1447,8 @@ fn ids_are_never_reused_and_inactive_frames_are_capped() {
         let d: Vec<String> = (0..30).map(|k| format!("window {i} row {k}")).collect();
         let mut g = view(&d, 0, 20, &[&format!("status {i}")]);
         bg(&mut g, Rect::new(0, 20, COLS, 1), 4);
-        s.feed(&g, 300);
+        // Slower than a monitor repaints: these are switches.
+        s.feed(&g, 4000);
         let id = s.pane().id;
         assert!(!seen.contains(&id));
         seen.push(id);

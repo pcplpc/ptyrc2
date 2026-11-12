@@ -173,6 +173,9 @@ struct Pane {
     cursor_seen: Duration,
     /// Born on the alternate screen.
     alt: bool,
+    /// Replacements in a row over whole-pane changes that led to this
+    /// frame, and the time of the last.
+    churn: Option<(Duration, u8)>,
     left: u16,
     right: u16,
     gutter_cand: (u16, u8),
@@ -266,6 +269,9 @@ pub struct Frames {
     advice: HashMap<segment::Rect4, Advice>,
     placed: RefCell<PlaceCache>,
 }
+
+/// Replacements closer than this are in a row.
+const CHURN: Duration = Duration::from_secs(3);
 
 /// How long a preset outlives its last detection.
 const SUPPORT_HOLD: Duration = Duration::from_secs(4);
@@ -914,6 +920,7 @@ impl Frames {
                 last_active: now,
                 cursor_seen: Duration::ZERO,
                 alt: self.alt,
+                churn: None,
                 left: 0,
                 right: 0,
                 gutter_cand: (0, 0),
@@ -1422,9 +1429,28 @@ impl Frames {
             self.deactivate(id, now, ev);
             self.attach(other, leaf.rect(), now, ev);
             Some(other)
+        } else if !key_changed
+            && !other_doc
+            && self.panes[&id]
+                .churn
+                .is_some_and(|(t, n)| n >= 2 && now < t + CHURN)
+        {
+            // Replaced twice in a row and whole again: a pane that repaints
+            // itself (a monitor), not documents taking turns. Rewritten in
+            // place from now on.
+            let p = self.panes.get_mut(&id).unwrap();
+            p.churn = Some((now, 2));
+            p.ext.reset_view();
+            p.fresh = true;
+            None
         } else if key_changed || other_doc || (chrome_changed && !same_key) {
+            let before = self.panes[&id]
+                .churn
+                .filter(|(t, _)| now < *t + CHURN)
+                .map_or(0, |(_, n)| n);
             self.deactivate(id, now, ev);
             let fresh = self.new_pane(&leaf, now);
+            self.panes.get_mut(&fresh).unwrap().churn = Some((now, before + 1));
             ev.push(FrameEvent::Added { frame: fresh });
             Some(fresh)
         } else {
