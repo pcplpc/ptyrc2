@@ -103,6 +103,7 @@ def sprite_spec(
     frames: Sequence[Any] | None = None,
     frame_ms: int = 100,
     loop: bool | int = True,
+    layer: int | str | None = None,
     blend: str | None = None,
     z: int | None = None,
     ttl: float | None = None,
@@ -129,9 +130,13 @@ def sprite_spec(
     `ms`; `loop` True, False or a count), `effect` (a native generator,
     drawing on `size` cells or on the whole view).
 
-    Style keywords (`fg`, `bg`, `bold`...) extend `style`. `blend`: `over`,
-    `behind` (text stays on top), `tint`. `ttl` is in seconds. A sprite
-    dies with its connection unless `persist`.
+    Style keywords (`fg`, `bg`, `bold`...) extend `style`. `layer`: `"back"`
+    (the default: behind the app's text, seen where the app shows none),
+    `"front"`, or an integer; the app is 0, negative layers are behind
+    it, `z` orders inside a layer. `blend="tint"` keeps the glyph below
+    and applies the style; it is in front unless `layer` says otherwise.
+    `ttl` is in seconds. A sprite dies with its connection unless
+    `persist`.
     """
     unknown = set(style_kw) - set(_STYLE_KEYS)
     if unknown:
@@ -194,6 +199,8 @@ def sprite_spec(
     else:
         raise TypeError("one of rows, cells, frames, effect is required")
 
+    if layer is not None:
+        spec["layer"] = layer
     if blend is not None:
         spec["blend"] = blend
     if z is not None:
@@ -218,7 +225,7 @@ class Sprite:
         self.id = sprite_id
 
     def update(self, **patch: Any) -> None:
-        """Patch wire fields: `anchor`, `content`, `frames`, `z`, `blend`..."""
+        """Patch wire fields: `anchor`, `content`, `frames`, `layer`, `z`..."""
         self._pilot.call("draw.update", id=self.id, **patch)
 
     def set(self, rows: Any = None, **kw: Any) -> None:
@@ -226,6 +233,12 @@ class Sprite:
         spec = sprite_spec(rows, **kw)
         keys = ("content", "frames", "loop")
         self.update(**{k: spec[k] for k in keys if k in spec})
+
+    def ext(self, name: str, function: str, params: Any = None, **patch: Any) -> None:
+        """Redraw in place with an extension: what it draws replaces the
+        content; frame, anchor and layer are kept unless in `patch`."""
+        request = {"name": name, "function": function, "params": params or {}}
+        self._pilot.call("draw.ext", id=self.id, **request, **patch)
 
     def move(self, x: int, y: int, space: str = "view") -> None:
         self.update(anchor={"at": [x, y], "space": space})
@@ -306,7 +319,29 @@ class Frame:
         return self._pilot.find(pattern, frame=self.id, **kw)
 
     def heat(self) -> list[str]:
+        """Safety of each cell of the view, digits: 9 free and still, 0
+        busy."""
         return self._pilot.call("frame.heat", frame=self.id)["rows"]
+
+    def heat_classes(self) -> list[str]:
+        """Class of each cell of the view: `h` hot (changed within 10 s),
+        `t` static text, `p` panel (background of another colour), `.`
+        free."""
+        return self._pilot.call("frame.heat", frame=self.id)["classes"]
+
+    def idle(self) -> dict[str, Any]:
+        """`score`: share of the view static for 10 s; `idle`: score >=
+        0.8; `free`: share static and without text."""
+        return self._pilot.call("frame.idle", frame=self.id)
+
+    def check_idle(self) -> float:
+        """Share of the view that is static, 0 to 1. Asked now."""
+        return float(self.idle()["score"])
+
+    @property
+    def is_idle(self) -> bool:
+        """At least 80 % of the view is static. Asked now."""
+        return bool(self.idle()["idle"])
 
     def draw(self, rows: Any = None, **kw: Any) -> Sprite:
         return self._pilot.draw(rows, frame=self.id, **kw)
@@ -571,7 +606,7 @@ class Pilot:
 
     def frame(self, sel: int | str = "raw") -> Frame:
         """A frame by id or name: `raw`, `active` (the pane holding the
-        cursor), `largest`, `quietest`."""
+        cursor), `largest`, `quietest`, `idle` (the most static pane)."""
         frames = self.frames(inactive=True)
         if isinstance(sel, int) or sel.isdigit():
             fid = int(sel)
@@ -604,7 +639,7 @@ class Pilot:
         self, name: str, function: str, params: Any = None, **sprite: Any
     ) -> Sprite:
         """Draw with an extension: `pilot.ext("shapes", "circle", {"r": 4})`.
-        `sprite` takes wire sprite fields (`frame`, `anchor`, `z`...)."""
+        `sprite` takes wire sprite fields (`frame`, `anchor`, `layer`...)."""
         request = {"name": name, "function": function, "params": params or {}}
         return self._sprite("draw.ext", {**request, **sprite})
 

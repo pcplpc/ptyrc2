@@ -10,8 +10,10 @@ mod screen;
 mod segment;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_heat;
 
-pub use heat::HeatView;
+pub use heat::{HeatClass, HeatView, IDLE_SECS, IDLE_SHARE, Idle};
 
 use crate::plugin::{Chrome, PaneView, TuiSupport, ViewHint};
 use crate::types::*;
@@ -137,7 +139,7 @@ pub enum FrameEvent {
 }
 
 /// A frame, as on the wire.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct FrameInfo {
     pub id: FrameId,
     pub kind: FrameKind,
@@ -151,6 +153,10 @@ pub struct FrameInfo {
     pub extent: [i64; 2],
     pub key: Option<String>,
     pub support: Option<String>,
+    /// Share of the view static for `IDLE_SECS`, `0..=1`.
+    pub idle: f32,
+    /// `idle >= IDLE_SHARE`.
+    pub is_idle: bool,
 }
 
 struct Pane {
@@ -503,10 +509,10 @@ impl Frames {
 
         // Heat.
         let all = Rect::new(0, 0, self.screen.cols, self.screen.rows);
-        self.raw_heat.update(&self.screen, all, now, true);
+        self.raw_heat.update(&self.screen, all, now);
         for id in &self.active {
             let p = self.panes.get_mut(id).unwrap();
-            p.heat.update(&self.screen, p.rect, now, true);
+            p.heat.update(&self.screen, p.rect, now);
         }
         self.promote(now, &mut ev);
         self.screen.settle();
@@ -536,10 +542,10 @@ impl Frames {
             }
         }
         let all = Rect::new(0, 0, self.screen.cols, self.screen.rows);
-        self.raw_heat.update(&self.screen, all, now, false);
+        self.raw_heat.update(&self.screen, all, now);
         for id in &self.active {
             let p = self.panes.get_mut(id).unwrap();
-            p.heat.update(&self.screen, p.rect, now, false);
+            p.heat.update(&self.screen, p.rect, now);
         }
         self.promote(now, &mut ev);
         ev
@@ -575,6 +581,13 @@ impl Frames {
 
     /// Every frame, on screen or remembered, by id.
     pub fn list(&self) -> Vec<FrameInfo> {
+        self.list_at(self.now)
+    }
+
+    /// `list`, with `idle` as it stands at `now`.
+    pub fn list_at(&self, now: Duration) -> Vec<FrameInfo> {
+        let idle = |id| self.idle(id, now).unwrap_or_default();
+        let raw_idle = idle(RAW);
         let mut out = vec![FrameInfo {
             id: RAW,
             kind: FrameKind::Raw,
@@ -589,6 +602,8 @@ impl Frames {
             extent: [0, (self.screen.rows as i64 - 1).max(0)],
             key: None,
             support: None,
+            idle: raw_idle.score,
+            is_idle: raw_idle.idle,
         }];
         for p in self.panes.values() {
             let c = p.content();
@@ -598,6 +613,7 @@ impl Frames {
             } else {
                 (o.y, o.y + c.h as i64 - 1)
             };
+            let calm = idle(p.id);
             out.push(FrameInfo {
                 id: p.id,
                 kind: p.kind,
@@ -608,6 +624,8 @@ impl Frames {
                 extent: [lo, hi],
                 key: p.key.clone(),
                 support: p.support.map(|s| self.supports[s].name().to_string()),
+                idle: calm.score,
+                is_idle: calm.idle,
             });
         }
         out
@@ -666,20 +684,36 @@ impl Frames {
             .collect()
     }
 
-    /// Heatmap of the frame's view.
+    /// Heatmap of the frame's view, as of the last update or tick.
     pub fn heat(&self, id: FrameId) -> Option<HeatView> {
+        self.heat_at(id, self.now)
+    }
+
+    /// Heatmap of the frame's view at `now`: time passes without a tick.
+    pub fn heat_at(&self, id: FrameId, now: Duration) -> Option<HeatView> {
+        let now = now.max(self.now);
         if id == RAW {
             return Some(
                 self.raw_heat
-                    .view(Rect::new(0, 0, self.screen.cols, self.screen.rows)),
+                    .view(Rect::new(0, 0, self.screen.cols, self.screen.rows), now),
             );
         }
         let p = self.panes.get(&id)?;
+        if !self.active.contains(&id) {
+            // Not on screen: nothing is known of it now.
+            return Some(Heat::default().view(Rect::new(0, 0, p.rect.w, p.rect.h), now));
+        }
+        Some(p.heat.view(self.heat_rect(p), now))
+    }
+
+    fn heat_rect(&self, p: &Pane) -> Rect {
         let c = p.content();
-        Some(
-            p.heat
-                .view(Rect::new(c.x - p.rect.x, c.y - p.rect.y, c.w, c.h)),
-        )
+        Rect::new(c.x - p.rect.x, c.y - p.rect.y, c.w, c.h)
+    }
+
+    /// How much of the frame is static at `now`.
+    pub fn idle(&self, id: FrameId, now: Duration) -> Option<Idle> {
+        self.heat_at(id, now).map(|h| h.idle())
     }
 
     /// The innermost pane showing a screen cell, and the frame position
@@ -1703,6 +1737,17 @@ impl Surfaces for Frames {
                             .unwrap_or(std::cmp::Ordering::Equal)
                     })
                     .map_or(RAW, |p| p.id),
+            ),
+            "idle" => Some(
+                panes()
+                    .filter(|p| self.usable(p))
+                    .map(|p| (p.heat.view(self.heat_rect(p), self.now).idle(), p))
+                    .max_by(|(a, x), (b, y)| {
+                        (a.score, a.free, area(x))
+                            .partial_cmp(&(b.score, b.free, area(y)))
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .map_or(RAW, |(_, p)| p.id),
             ),
             other => {
                 let id: FrameId = other.parse().ok()?;

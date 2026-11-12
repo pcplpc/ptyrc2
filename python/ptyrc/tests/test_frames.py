@@ -71,3 +71,27 @@ def test_frame_list_and_heat(vim: Pilot) -> None:
     # Text is occupied, the right of the pane is free.
     assert int(heat[2][2]) < int(heat[2][-2])
     assert repr(pane).startswith(f"Frame({pane.id}, pane")
+
+
+def test_idle(vim: Pilot) -> None:
+    pane = wait_pane(vim)
+    # Just opened: nothing has been static for 10 s yet.
+    assert pane.check_idle() < 0.8 and not pane.is_idle
+    assert set("".join(pane.heat_classes())) <= set("ht.p")
+    # Left alone, the pane becomes idle; redrawing it as it is changes
+    # nothing.
+    until(lambda: pane.is_idle, timeout=15)
+    vim.keys("ctrl+l")
+    idle = pane.idle()
+    assert idle["idle"] and 0.8 <= idle["score"] <= 1.0
+    assert 0.0 < idle["free"] < idle["score"]
+    assert pane.check_idle() == idle["score"] or pane.is_idle
+    classes = pane.heat_classes()
+    assert classes[2][2] == "t" and classes[2][-2] == "."
+    assert vim.frame("idle").id == pane.id
+    assert pane.refresh().info["is_idle"] is True
+    # Scrolling by three lines: only the digits that differ are hot.
+    vim.keys(*["ctrl+e"] * 3)
+    until(lambda: pane.check_idle() < idle["score"])
+    classes = pane.heat_classes()
+    assert classes[2][7] == "h" and classes[2][2] == "t"

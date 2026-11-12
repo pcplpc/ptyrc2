@@ -293,13 +293,92 @@ impl Default for Anchor {
     }
 }
 
+/// How a sprite cell meets what is below it. `normal`: it replaces it.
+/// `tint`: the glyph below stays, the style is applied.
+///
+/// `over` and `behind` are the names of protocol drafts: `normal`, with
+/// the layer `front` or `back` when the sprite gives none.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Blend {
     #[default]
+    Normal,
+    Tint,
     Over,
     Behind,
-    Tint,
+}
+
+impl Blend {
+    /// Without the draft names.
+    pub fn canonical(self) -> Blend {
+        match self {
+            Blend::Tint => Blend::Tint,
+            _ => Blend::Normal,
+        }
+    }
+
+    /// Layer of a sprite that gives none: a tint recolours the app's
+    /// text, anything else is drawn behind it.
+    pub fn default_layer(self) -> i32 {
+        match self {
+            Blend::Tint | Blend::Over => Layer::FRONT.0,
+            Blend::Normal | Blend::Behind => Layer::BACK.0,
+        }
+    }
+}
+
+/// Place in the stack. The app is layer 0: negative layers are behind its
+/// text, positive ones in front. On the wire an integer other than 0, or
+/// `"back"` (-1) or `"front"` (1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "LayerRepr", into = "i32")]
+pub struct Layer(pub i32);
+
+impl Layer {
+    pub const BACK: Layer = Layer(-1);
+    pub const FRONT: Layer = Layer(1);
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum LayerRepr {
+    Index(i32),
+    Name(String),
+}
+
+impl std::str::FromStr for Layer {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Layer, String> {
+        match s.trim() {
+            "back" => Ok(Layer::BACK),
+            "front" => Ok(Layer::FRONT),
+            other => match other.parse::<i32>() {
+                Ok(0) => Err("layer 0 is the app: use a negative or a positive layer".into()),
+                Ok(n) => Ok(Layer(n)),
+                Err(_) => Err(format!(
+                    "bad layer: {s} (back, front, or an integer other than 0)"
+                )),
+            },
+        }
+    }
+}
+
+impl TryFrom<LayerRepr> for Layer {
+    type Error = String;
+
+    fn try_from(repr: LayerRepr) -> Result<Layer, String> {
+        match repr {
+            LayerRepr::Index(n) => n.to_string().parse(),
+            LayerRepr::Name(s) => s.parse(),
+        }
+    }
+}
+
+impl From<Layer> for i32 {
+    fn from(layer: Layer) -> i32 {
+        layer.0
+    }
 }
 
 /// Velocity (cells per second) and acceleration added to the anchor.
@@ -339,6 +418,9 @@ pub struct SpriteSpec {
     pub frames: Option<Vec<AnimFrame>>,
     #[serde(default, rename = "loop")]
     pub looping: LoopSpec,
+    /// Absent: `back`; `front` for a tint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer: Option<Layer>,
     #[serde(default)]
     pub blend: Blend,
     #[serde(default)]
@@ -372,6 +454,8 @@ pub struct SpritePatch {
     #[serde(default, rename = "loop", skip_serializing_if = "Option::is_none")]
     pub looping: Option<LoopSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer: Option<Layer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend: Option<Blend>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub z: Option<i32>,
@@ -394,6 +478,7 @@ pub struct SpriteInfo {
     pub anchor: Anchor,
     pub kind: String,
     pub size: [u16; 2],
+    pub layer: i32,
     pub blend: Blend,
     pub z: i32,
     pub persist: bool,

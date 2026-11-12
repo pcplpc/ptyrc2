@@ -16,7 +16,9 @@ with Pilot() as pilot:  # the session of $PTYRC_SESSION, or the only one
     pane = pilot.frame("active")  # the pane holding the cursor
     pane.draw(["<3"], near="flower", fg="red")  # follows the word
     pane.draw(["note"], at=(40, 120), space="frame")  # row 120 of the document
-    pilot.draw([" 12:00 "], auto="top-right", bg="blue")  # a quiet corner
+    pilot.draw(
+        [" 12:00 "], auto="top-right", bg="blue", layer="front"
+    )  # a quiet corner
     pilot.effect("confetti")
 ```
 
@@ -32,9 +34,12 @@ with Pilot.spawn(["vim", "notes.md"], size=(100, 30)) as pilot:
 |---|---|
 | read | `text`, `cells`, `find`, `cursor`, `wait_for`, `info`, `size` |
 | type | `send`, `keys`, `paste`, `write` |
-| frames | `frames`, `panes`, `frame`, `frame_at`; `Frame.text`, `known`, `find`, `heat`, `to_screen`, `to_frame`, `draw` |
-| draw | `draw`, `put`, `effect`, `ext`, `sprites`, `clear`; `Sprite.set`, `move`, `update`, `info`, `remove` |
+| frames | `frames`, `panes`, `frame`, `frame_at`; `Frame.text`, `known`, `find`, `heat`, `heat_classes`, `idle`, `check_idle`, `is_idle`, `to_screen`, `to_frame`, `draw` |
+| draw | `draw`, `put`, `effect`, `ext`, `sprites`, `clear`; `Sprite.set`, `ext`, `move`, `update`, `info`, `remove` |
 | other | `batch`, `events`, `subscribe`, `resize`, `debug_overlay`, `dump`, `call` |
+
+Sprites are drawn behind the app's text unless `layer="front"`; the app
+is layer 0, negative layers are behind it.
 
 Errors are `PtyrcError` with a `code` (`no-frame`, `bad-params`, `gone`...);
 `wait_for` raises `TimeoutError`. The wire protocol is in `plan/design.md`.
