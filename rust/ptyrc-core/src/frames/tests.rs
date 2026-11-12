@@ -1323,6 +1323,7 @@ impl TuiSupport for Fake {
         crate::plugin::Tuning {
             settle_ms: Some(1000),
             commit_ms: None,
+            monitor: false,
         }
     }
 }
@@ -1916,6 +1917,52 @@ fn rows_the_emulator_scrolled_are_not_chrome() {
         s.feed(&screen(top), 300);
     }
     assert_eq!(s.pane().rect, [0, 2, COLS, 18]);
+}
+
+struct Declared;
+
+impl TuiSupport for Declared {
+    fn name(&self) -> &'static str {
+        "declared"
+    }
+
+    fn detect(&self, _pane: &PaneView) -> f32 {
+        1.0
+    }
+
+    fn tuning(&self) -> crate::plugin::Tuning {
+        crate::plugin::Tuning {
+            monitor: true,
+            ..Default::default()
+        }
+    }
+}
+
+#[test]
+fn a_preset_declares_a_pane_rewritten_in_place() {
+    // Whole rewrites of other shapes, under a cursor, some of them
+    // shifted: nothing but edits.
+    let mut s = Sim::with(FrameConfig::default(), vec![Box::new(Declared)]);
+    let d = doc(400);
+    s.settle(&view(&d, 0, 20, &[]));
+    let id = s.pane().id;
+    for top in [200, 3, 120, 121, 123, 300] {
+        let ev = s.feed(&view(&d, top, 20, &[]), 700);
+        assert!(
+            !ev.iter().any(|e| matches!(
+                e,
+                FrameEvent::Added { .. }
+                    | FrameEvent::Jump { .. }
+                    | FrameEvent::Scroll { .. }
+                    | FrameEvent::Rect { .. }
+            )),
+            "top {top}: {ev:?}"
+        );
+        let p = s.pane();
+        assert_eq!((p.id, p.origin, p.usable), (id, [0, 0], true));
+    }
+    s.idle(500);
+    assert_eq!(s.f.text(id, 0, 1), vec![d[300].clone()]);
 }
 
 #[test]

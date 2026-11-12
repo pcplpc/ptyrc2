@@ -191,6 +191,8 @@ struct Pane {
     /// Repaints itself: every change is an edit of the rows in view,
     /// until one that is neither in place nor of the same shape.
     monitor: bool,
+    /// Its preset says so: `monitor` without a way out.
+    declared: bool,
     left: u16,
     right: u16,
     gutter_cand: (u16, u8),
@@ -1104,6 +1106,7 @@ impl Frames {
                 alt: self.alt,
                 churn: None,
                 monitor: false,
+                declared: false,
                 left: 0,
                 right: 0,
                 gutter_cand: (0, 0),
@@ -1470,6 +1473,9 @@ impl Frames {
                 p.settle = ms(t.settle_ms.unwrap_or(self.cfg.settle_ms));
                 p.commit = ms(t.commit_ms.unwrap_or(self.cfg.commit_ms));
             }
+            p.declared = advice
+                .support
+                .is_some_and(|s| self.supports[s].tuning().monitor);
             p.support = advice.support;
             p.fixed_tb = advice.chrome.map(|c| (c.top, c.bottom));
             let (l, r) = advice.chrome.map_or((0, 0), |c| (c.left, c.right));
@@ -1664,7 +1670,7 @@ impl Frames {
             }
             all >= 2 && moved * 10 >= all * 9
         };
-        let out = if p.monitor && !p.fresh && !scrolled {
+        let out = if (p.declared || p.monitor && !scrolled) && !p.fresh {
             p.ext.rewrite(&obs)
         } else if p.fresh || dirty || consult || p.ext.rows.is_empty() {
             p.ext.observe(&obs)

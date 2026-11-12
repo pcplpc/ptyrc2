@@ -50,6 +50,10 @@ pub struct ViewHint {
 pub struct Tuning {
     pub settle_ms: Option<u32>,
     pub commit_ms: Option<u32>,
+    /// The pane repaints itself (a table sorted anew, a preview): every
+    /// change is an edit of the rows in view. No scroll, no jump, no
+    /// island, no chrome learned.
+    pub monitor: bool,
 }
 
 /// Per-app knowledge. Consulted for a pane when `detect` is at least 0.5.
