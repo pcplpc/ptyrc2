@@ -312,7 +312,7 @@ a_opencode() {
     same_text opencode
     check "opencode: the palette is one pane, its selection is not a separator" \
         'any(f["rect"][2] >= 40 and f["rect"][3] >= 10 and f["rect"][0] > 0 for f in P)'
-    known "opencode: the pane under the palette keeps its origin (an overlay is read as a jump)" \
+    check "opencode: the pane under the palette keeps its origin" \
         'P[0]["origin"] == [0, 0]'
     e2e_keys esc; sleep 2
     check "opencode: the palette closed, the first layout is back" \

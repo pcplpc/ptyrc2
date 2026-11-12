@@ -193,6 +193,9 @@ struct Pane {
     monitor: bool,
     /// Its preset says so: `monitor` without a way out.
     declared: bool,
+    /// Pane rows `[a, b)` under a smaller pane of the last segmentation
+    /// (a palette, a modal): not read while they are.
+    covered: Vec<(u16, u16)>,
     left: u16,
     right: u16,
     gutter_cand: (u16, u8),
@@ -1107,6 +1110,7 @@ impl Frames {
                 churn: None,
                 monitor: false,
                 declared: false,
+                covered: Vec::new(),
                 left: 0,
                 right: 0,
                 gutter_cand: (0, 0),
@@ -1424,6 +1428,23 @@ impl Frames {
         if p.rect.contains(self.cursor.col, self.cursor.row) {
             p.cursor_seen = now;
         }
+        if p.kind == FrameKind::Pane {
+            let area = |r: Rect| r.w as u32 * r.h as u32;
+            let covered: Vec<(u16, u16)> = self
+                .seg
+                .iter()
+                .flatten()
+                .map(|l| l.rect())
+                .filter(|r| *r != p.rect && area(*r) < area(p.rect))
+                .map(|r| r.intersect(&p.rect))
+                .filter(|x| !x.is_empty())
+                .map(|x| (x.y - p.rect.y, x.bottom() - p.rect.y))
+                .collect();
+            if covered != p.covered {
+                p.covered = covered;
+                p.hashes_valid = false;
+            }
+        }
         let dirty = !p.hashes_valid
             || (p.rect.y..p.rect.bottom()).any(|r| self.screen.row_dirty[r as usize]);
         if p.kind != FrameKind::Pane {
@@ -1557,6 +1578,16 @@ impl Frames {
             for r in 0..p.rect.h {
                 if self.screen.row_dirty[(p.rect.y + r) as usize] {
                     p.hashes[r as usize] = self.screen.row_hash(p.rect.y + r, a, b);
+                }
+            }
+        }
+
+        // Rows under an overlay keep what they showed: they do not vote
+        // for a scroll or a jump, and are not rewritten.
+        if p.ext.rows.len() == p.hashes.len() {
+            for (a, b) in &p.covered {
+                for i in *a as usize..*b as usize {
+                    p.hashes[i] = p.ext.rows[i].hash;
                 }
             }
         }

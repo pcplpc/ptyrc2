@@ -1966,6 +1966,57 @@ fn a_preset_declares_a_pane_rewritten_in_place() {
 }
 
 #[test]
+fn rows_under_an_overlay_do_not_vote() {
+    // A palette opens over the only rows that hold text: the pane under
+    // it does not jump, and finds its rows again when it closes.
+    let mut s = Sim::new();
+    let d = doc(40);
+    let home = || {
+        let mut g = Grid::new(COLS, 24);
+        for (i, l) in d.iter().take(6).enumerate() {
+            put(&mut g, 4, 8 + i as u16, l);
+        }
+        g
+    };
+    let palette = || {
+        let mut g = home();
+        let r = Rect::new(10, 6, 40, 12);
+        for y in r.y..r.bottom() {
+            put(&mut g, r.x, y, &" ".repeat(r.w as usize));
+            put(&mut g, r.x + 2, y, &format!("command {y}"));
+        }
+        bg(&mut g, r, 8);
+        g
+    };
+    s.settle(&home());
+    let under = s.pane();
+    let mut ev = s.feed(&palette(), 1000);
+    ev.extend(s.idle(2000));
+    assert!(
+        !ev.iter().any(|e| matches!(e, FrameEvent::Jump { .. })),
+        "{ev:?}"
+    );
+    let panes = s.panes();
+    assert_eq!(panes.len(), 2, "{panes:#?}");
+    let still = panes.iter().find(|p| p.id == under.id).expect("kept");
+    assert_eq!((still.origin, still.extent), (under.origin, under.extent));
+    assert!(panes.iter().any(|p| p.rect == [10, 6, 40, 12]));
+    // What the palette hides is still known.
+    assert_eq!(s.f.text(under.id, 8, 9)[0].trim(), d[0]);
+    let mut ev = s.feed(&home(), 1000);
+    ev.extend(s.idle(2000));
+    assert!(
+        !ev.iter().any(|e| matches!(e, FrameEvent::Jump { .. })),
+        "{ev:?}"
+    );
+    let back = s.pane();
+    assert_eq!(
+        (back.id, back.origin, back.usable),
+        (under.id, under.origin, true)
+    );
+}
+
+#[test]
 fn wire_forms() {
     let mut s = Sim::new();
     s.settle(&view(&doc(30), 0, 20, &[]));
