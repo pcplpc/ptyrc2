@@ -213,6 +213,16 @@ fn cell_hash(cell: &Cell) -> u32 {
     (h ^ (h >> 32)) as u32
 }
 
+/// Hash of what a cell shows: equal for cells that look alike
+/// (`Cell::looks_like`). `full` is its `cell_hash`.
+fn look_hash(cell: &Cell, full: u32, back: u32) -> u32 {
+    if cell.has_ink() {
+        full | 1
+    } else {
+        back.wrapping_mul(0x9e37_79b1) & !1
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct Screen {
     pub cols: u16,
@@ -220,8 +230,12 @@ pub(crate) struct Screen {
     hash: Vec<u32>,
     pub class: Vec<u16>,
     pub paint: Vec<u16>,
-    pub nonempty: Vec<bool>,
-    pub changed: Vec<bool>,
+    /// What the cell shows; see `look_hash`.
+    pub look: Vec<u32>,
+    /// Foreground: `Cell::has_ink`.
+    pub ink: Vec<bool>,
+    /// Background: colour code of `Cell::backdrop`, 0 for the default.
+    pub back: Vec<u32>,
     pub row_dirty: Vec<bool>,
     pub lines: Vec<Line>,
     /// Lines before the last scan; meaningful for dirty rows only.
@@ -243,8 +257,9 @@ impl Screen {
             self.hash = vec![0; n];
             self.class = vec![0; n];
             self.paint = vec![0; n];
-            self.nonempty = vec![false; n];
-            self.changed = vec![false; n];
+            self.look = vec![0; n];
+            self.ink = vec![false; n];
+            self.back = vec![0; n];
             self.row_dirty = vec![false; rows as usize];
             self.lines = vec![Line::default(); rows as usize];
             self.prev_lines = vec![Line::default(); rows as usize];
@@ -261,7 +276,6 @@ impl Screen {
                 let i = base + c;
                 if h != self.hash[i] || resized {
                     self.hash[i] = h;
-                    self.changed[i] = true;
                     dirty = true;
                     let cl = classify(&cell.text);
                     let p = paint(cell);
@@ -270,9 +284,10 @@ impl Screen {
                         self.paint[i] = p;
                         self.class_change = true;
                     }
-                    self.nonempty[i] = !cell.is_empty();
-                } else {
-                    self.changed[i] = false;
+                    let back = color_code(cell.backdrop());
+                    self.back[i] = back;
+                    self.ink[i] = cell.has_ink();
+                    self.look[i] = look_hash(cell, h, back);
                 }
             }
             self.row_dirty[r] = dirty;
@@ -288,7 +303,6 @@ impl Screen {
     /// Forget the change marks of the last scan.
     pub fn settle(&mut self) {
         if self.any_change {
-            self.changed.fill(false);
             self.row_dirty.fill(false);
             self.any_change = false;
             self.class_change = false;
@@ -349,7 +363,30 @@ mod tests {
         let g2 = Grid::from_lines(4, &["ab", "cx"]);
         s.scan(&g2);
         assert!(s.any_change && s.row_dirty[1] && !s.row_dirty[0]);
-        assert!(s.changed[s.idx(1, 1)] && !s.changed[s.idx(0, 1)]);
         assert_eq!(s.prev_lines[1].text, "cd  ");
+    }
+
+    #[test]
+    fn look_ignores_the_pen_of_a_blank() {
+        let mut grey = Style::default();
+        grey.bg = Color::Indexed(8);
+        let mut bold = grey;
+        bold.attrs.insert(Attrs::BOLD);
+        bold.fg = Color::Indexed(1);
+        let mut g = Grid::new(3, 1);
+        g.put(0, 0, Cell::blank(grey));
+        g.put(1, 0, Cell::narrow("a", grey));
+        let mut s = Screen::default();
+        s.scan(&g);
+        let before = s.look.clone();
+        assert!(!s.ink[0] && s.ink[1] && !s.ink[2]);
+        assert_eq!((s.back[0], s.back[2]), (9, 0));
+        assert_ne!(s.look[0], s.look[2]);
+        g.put(0, 0, Cell::blank(bold));
+        g.put(1, 0, Cell::narrow("a", bold));
+        s.scan(&g);
+        assert!(s.row_dirty[0]);
+        assert_eq!(s.look[0], before[0]);
+        assert_ne!(s.look[1], before[1]);
     }
 }

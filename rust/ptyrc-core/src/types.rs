@@ -19,7 +19,7 @@ pub struct FramePos {
     pub y: i64,
 }
 
-/// A frame id, or a name: `raw`, `active`, `largest`, `quietest`.
+/// A frame id, or a name: `raw`, `active`, `largest`, `quietest`, `idle`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum FrameSel {
