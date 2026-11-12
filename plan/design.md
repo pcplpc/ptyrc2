@@ -273,6 +273,22 @@ Frame events: `layout`, `added`, `attached`, `stable`, `inactive`,
 translates what is fixed on those frame rows. A `scroll` needs nothing:
 the origin has moved.
 
+Further rules, from real apps:
+
+- The alternate screen has its own frames; those of the main screen come
+  back when it is left.
+- A key given by a preset for the whole screen (a tmux window) prefixes
+  the keys of its panes. Presets are looked for on every change and held
+  4 s.
+- When nothing aligns, the emulator's scroll counts are trusted only if
+  rows entered the host scrollback (a shell printing a lot at once).
+- A pane replaced whole twice within 3 s is a monitor (htop): rewritten
+  in place from then on, no island.
+- A hinted view that contradicts what is remembered is another document:
+  another frame; the first is found again by content.
+- `find`: a literal is searched in the row as it is; for a regular
+  expression trailing blanks are not text.
+
 ### Heatmap
 
 Per frame, in view coordinates, per cell: `activity` (EWMA of change
@@ -488,6 +504,8 @@ tests. `plugins/client-apps/python`: `ptyrc-apps`, one module per app,
 
 ## Tests
 
+- `scripts/e2e-frames.sh`: frames on real vim, tmux, less, htop, a shell
+  and a stand-in agent TUI, in a detached tmux.
 - `scripts/e2e-render.sh`: the driver in a detached tmux; what tmux shows
   is compared, text and styles, with the driver's model of the host.
 - `scripts/bench.sh`: throughput and key-echo latency, bare, transparent,
