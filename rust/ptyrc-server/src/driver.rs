@@ -968,6 +968,7 @@ impl Driver {
         let mut info = self.hello();
         let object = info.as_object_mut().expect("hello is an object");
         object.insert("exited".into(), json!(self.exit_status.is_some()));
+        object.insert("grabbed".into(), json!(self.grab.is_some()));
         if let Value::Object(extras) = engine.session_extras() {
             object.extend(extras);
         }

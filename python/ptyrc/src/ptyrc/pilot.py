@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Self
 
 from ._wire import Connection, PtyrcError, live_sessions, runtime_dir, socket_path
+from .tools import Locator, Tools, frame_locator
 
 __all__ = ["Cursor", "Frame", "Match", "Pilot", "Sprite", "find_binary", "sprite_spec"]
 
@@ -317,6 +318,10 @@ class Frame:
         self.info = self._pilot.call("frame.get", frame=self.id)["frame"]
         return self
 
+    def locator(self, pattern: str, **kw: Any) -> Locator:
+        """A place on this frame, by the text there: see `Locator`."""
+        return frame_locator(self, pattern, **kw)
+
     def text(self) -> list[str]:
         """What the view shows."""
         return self._pilot.text(frame=self.id)
@@ -371,7 +376,7 @@ class Frame:
         return f"Frame({self.id}, {self.kind}, {self.state}, rect={self.rect})"
 
 
-class Pilot:
+class Pilot(Tools):
     """Client of one driver session.
 
     `Pilot()` connects to the session named by the environment or the only
@@ -402,12 +407,14 @@ class Pilot:
         host_log: str | Path | None = None,
         host_fg: str | None = None,
         host_bg: str | None = None,
+        record: str | Path | None = None,
         binary: str | None = None,
         timeout: float = 10.0,
     ) -> Pilot:
         """Start `ptyrc run --headless` on `argv` and connect to it. The
         driver is killed by `close()`. `host_fg`, `host_bg`: the default
-        colours of the host that is not there, `"#rrggbb"`."""
+        colours of the host that is not there, `"#rrggbb"`. `record`: write
+        the session to this tape, typed bytes included (`Pilot.replay`)."""
         name = name or f"py-{os.getpid()}-{time.monotonic_ns() % 10**9}"
         if name in live_sessions():
             raise PtyrcError(
@@ -423,6 +430,8 @@ class Pilot:
             cmd += ["--host-fg", host_fg]
         if host_bg is not None:
             cmd += ["--host-bg", host_bg]
+        if record is not None:
+            cmd += ["--record", str(record), "--record-input"]
         cmd += ["--", *argv]
         proc = subprocess.Popen(
             cmd,

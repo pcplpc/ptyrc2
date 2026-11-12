@@ -97,6 +97,25 @@ fn grabbed_keys_do_not_reach_the_app() {
         "the keys back",
     );
 
+    // The CLI: one line per key, until the escape.
+    let grab = sb
+        .ptyrc()
+        .args(["-s", "g", "grab", "--escape", "f12"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_for(
+        || client.call("session.info", json!({})).unwrap()["grabbed"] == true,
+        "the grab",
+    );
+    host.type_in(b"k\x1b[24~");
+    let out = grab.wait_with_output().unwrap();
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        "{\"bytes\":\"aw==\",\"grabbed\":true,\"key\":\"k\"}\n{\"released\":\"escape\"}\n"
+    );
+
     client
         .call("input.send", json!({"keys": ["ctrl+c"]}))
         .unwrap();
