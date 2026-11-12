@@ -118,3 +118,41 @@ Supersedes `--spawn --rate` above.
 - Two or three creative flags as for the fishes, enemies and lasers
   among them: `-x`, `--enemies`; `-l`, `--lasers`.
 - `-a`, `--all`: everything.
+
+## Brick
+
+- `brick`: close to the snake. Plain: an arcade brick breaker, coloured
+  bricks, a ball and a racket, played by the app.
+- A 2D scrollable map: bricks spawn at times on top of words, mostly
+  below them; the racket is hit on any side, both sides are used; the
+  racket works to keep the ball in the screen; the ball bounces off
+  words too.
+- `--rules`: bricks that fall when touched and can kill a racket,
+  bricks with several lives, bricks that bounce the ball in a fancy
+  way, bricks that explode with particles.
+- `--bonuses`: the classics: two rackets, several balls, a faster
+  ball, a ball on fire for 5 s that breaks all on its path.
+- `--multiplayer`: two rackets compete, each has its score.
+- `-a`, `--all`: everything; plain by default, the fanciest with `-a`.
+- Never ending. The score is back to 0 when the ball leaves the
+  screen; new areas spawn on demand when bricks are few; scrolled, the
+  terrain persists.
+- Look: racket `[===]`, 5 cells; `[=]`, 3 cells, on a bad bonus; ball
+  `o`; bricks prettier than dashes, braille.
+
+## Blocks
+
+- `blocks`: falling pieces of four blocks, drawn in braille. Plain by
+  default, as the snake; the computer plays alone.
+- Pieces come from the top; from the right with `--sideways`.
+- A full line between two boundaries (words or the sides of the
+  screen) goes and gives points; lines are rows, columns with
+  `--sideways`.
+- Coloured by default. `--chains`: when a line breaks, the pieces of
+  the same colour touching a block just broken break too, from one to
+  the next: red to red to red, not to the green beside.
+- `--effects`: particles on broken pieces. `--score`: a score is shown;
+  the higher, the faster. `-a`, `--all`: all that is cosmetic.
+- `--cursor`: the falling piece follows the user's cursor: blocks
+  played in vim. `--count`: pieces falling at once, 3 by default; with
+  `--cursor` the player has the closest.
