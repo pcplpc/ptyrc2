@@ -1,2 +1,1186 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Frames: raw, extended, dynamic; heatmap, pool, placement.
+//!
+//! `Frames` is fed the screen once per burst (`update`) and the time
+//! between bursts (`tick`). It holds no clock.
+
+mod ext;
+mod heat;
+mod screen;
+mod segment;
+#[cfg(test)]
+mod tests;
+
+pub use heat::HeatView;
+
+use crate::plugin::{PaneView, TuiSupport};
+use crate::types::*;
+use ext::{Ext, Obs, Outcome};
+use heat::Heat;
+use ptyrc_vt::{Cursor, Grid, Rect, VtEvent};
+use screen::{BLANK, Line, Screen, fnv};
+use segment::{Distrust, Leaf, Segmenter, Sep, r4, scrolled_seps};
+use serde::Serialize;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::time::Duration;
+
+/// Tunables. Times in milliseconds.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FrameConfig {
+    /// A candidate pane is stable after this long without structural change.
+    pub settle_ms: u32,
+    /// A view row is remembered after this long unchanged.
+    pub commit_ms: u32,
+    /// A new segmentation replaces the layout after this long; until then
+    /// the panes it touches are only suspended.
+    pub flap_ms: u32,
+    /// The raw frame is usable this long after a resize or a screen switch.
+    pub raw_settle_ms: u32,
+    pub min_pane_rows: u16,
+    pub min_pane_cols: u16,
+    /// A placed sprite moves when another spot is better by
+    /// `replace_margin` for this long.
+    pub replace_ms: u32,
+    pub replace_margin: f32,
+    /// Remembered lines per frame.
+    pub max_lines: usize,
+    /// Frames kept off screen.
+    pub max_inactive: usize,
+    /// Cursor samples kept.
+    pub trail: usize,
+    /// A kind of separator seen scrolling is ignored this long.
+    pub distrust_ms: u32,
+    /// Share of view rows found in a remembered frame to attach it again.
+    pub identity: f32,
+}
+
+impl Default for FrameConfig {
+    fn default() -> FrameConfig {
+        FrameConfig {
+            settle_ms: 1500,
+            commit_ms: 150,
+            flap_ms: 100,
+            raw_settle_ms: 250,
+            min_pane_rows: 3,
+            min_pane_cols: 8,
+            replace_ms: 2000,
+            replace_margin: 0.15,
+            max_lines: 50_000,
+            max_inactive: 64,
+            trail: 256,
+            distrust_ms: 300_000,
+            identity: 0.5,
+        }
+    }
+}
+
+/// The screen at the end of a burst.
+#[derive(Clone, Copy, Debug)]
+pub struct ScreenInput<'a> {
+    pub grid: &'a Grid,
+    pub cursor: Cursor,
+    pub alt_screen: bool,
+    pub title: &'a str,
+    pub events: &'a [VtEvent],
+}
+
+/// What changed, in order.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum FrameEvent {
+    /// The set of panes changed.
+    Layout { layout: u32 },
+    /// A new frame, candidate.
+    Added { frame: FrameId },
+    /// A remembered frame is on screen again, candidate.
+    Attached { frame: FrameId },
+    Stable { frame: FrameId },
+    /// Left the screen; remembered.
+    Inactive { frame: FrameId },
+    /// Forgotten.
+    Dropped { frame: FrameId },
+    /// The origin moved: the view shows other rows or columns.
+    Scroll { frame: FrameId, dx: i64, dy: i64 },
+    /// The frame rows `[from, to]` moved by `dy` (splice, island merge,
+    /// renumbering). Drawings fixed on those rows move with them.
+    Shift { frame: FrameId, from: i64, to: i64, dy: i64 },
+    /// The view went elsewhere in the frame.
+    Jump { frame: FrameId },
+    /// The content rect changed (chrome learned).
+    Rect { frame: FrameId },
+}
+
+/// A frame, as on the wire.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct FrameInfo {
+    pub id: FrameId,
+    pub kind: FrameKind,
+    pub state: FrameState,
+    pub usable: bool,
+    /// `[x, y, w, h]` on screen.
+    pub rect: [u16; 4],
+    /// Frame position of the top-left cell of `rect`.
+    pub origin: [i64; 2],
+    /// `[y_min, y_max]` of the known rows.
+    pub extent: [i64; 2],
+    pub key: Option<String>,
+    pub support: Option<String>,
+}
+
+struct Pane {
+    id: FrameId,
+    kind: FrameKind,
+    state: FrameState,
+    since: Duration,
+    rect: Rect,
+    ext: Ext,
+    heat: Heat,
+    key: Option<String>,
+    support: Option<usize>,
+    support_at: Option<Duration>,
+    suspended: bool,
+    /// New or attached again: not observed yet.
+    fresh: bool,
+    reattach: bool,
+    last_active: Duration,
+    left: u16,
+    right: u16,
+    gutter_cand: (u16, u8),
+    gutter_row: Option<i64>,
+    fixed_tb: Option<(u16, u16)>,
+    hint: Option<crate::plugin::ViewHint>,
+    hashes: Vec<u64>,
+    hashes_valid: bool,
+    settle: Duration,
+    commit: Duration,
+}
+
+impl Pane {
+    fn content(&self) -> Rect {
+        let (mut t, mut b) = (self.ext.top, self.ext.bottom);
+        if t + b >= self.rect.h {
+            (t, b) = (0, 0);
+        }
+        let (mut l, mut r) = (self.left, self.right);
+        if l + r >= self.rect.w {
+            (l, r) = (0, 0);
+        }
+        Rect::new(self.rect.x + l, self.rect.y + t, self.rect.w - l - r, self.rect.h - t - b)
+    }
+
+    fn top(&self) -> u16 {
+        self.content().y - self.rect.y
+    }
+
+    fn origin(&self) -> FramePos {
+        FramePos { x: self.ext.ox, y: self.ext.oy + self.top() as i64 }
+    }
+
+    /// Pane columns of the content: `[a, b)` on screen.
+    fn cols(&self) -> (u16, u16) {
+        let c = self.content();
+        (c.x, c.right())
+    }
+}
+
+struct Placed {
+    pos: (u16, u16),
+    better_since: Option<Duration>,
+    used: Duration,
+}
+
+/// Every frame of a screen.
+pub struct Frames {
+    cfg: FrameConfig,
+    supports: Vec<Box<dyn TuiSupport>>,
+    screen: Screen,
+    now: Duration,
+    raw_heat: Heat,
+    raw_ready: Duration,
+    panes: BTreeMap<FrameId, Pane>,
+    active: Vec<FrameId>,
+    layout: Vec<Leaf>,
+    layout_id: u32,
+    layouts: Vec<Vec<Leaf>>,
+    pending: Option<(Vec<Leaf>, Duration)>,
+    seg: Option<Vec<Leaf>>,
+    seg_cursor: Option<u16>,
+    seps: Vec<Sep>,
+    distrust: Vec<Distrust>,
+    cursor: Cursor,
+    trail: VecDeque<CursorSample>,
+    next_id: FrameId,
+    title_hash: u64,
+    alt: bool,
+    started: bool,
+    placed: RefCell<HashMap<(FrameId, u16, u16, u8), Vec<Placed>>>,
+}
+
+fn ms(v: u32) -> Duration {
+    Duration::from_millis(v as u64)
+}
+
+impl Frames {
+    pub fn new(cfg: FrameConfig, supports: Vec<Box<dyn TuiSupport>>) -> Frames {
+        Frames {
+            cfg,
+            supports,
+            screen: Screen::default(),
+            now: Duration::ZERO,
+            raw_heat: Heat::default(),
+            raw_ready: Duration::ZERO,
+            panes: BTreeMap::new(),
+            active: Vec::new(),
+            layout: Vec::new(),
+            layout_id: 0,
+            layouts: Vec::new(),
+            pending: None,
+            seg: None,
+            seg_cursor: None,
+            seps: Vec::new(),
+            distrust: Vec::new(),
+            cursor: Cursor::default(),
+            trail: VecDeque::new(),
+            next_id: 1,
+            title_hash: 0,
+            alt: false,
+            started: false,
+            placed: RefCell::new(HashMap::new()),
+        }
+    }
+
+    pub fn config(&self) -> &FrameConfig {
+        &self.cfg
+    }
+
+    /// Id of the current layout. A layout seen before gets its id back.
+    pub fn layout(&self) -> u32 {
+        self.layout_id
+    }
+
+    /// Take the screen in, once per burst.
+    pub fn update(&mut self, input: &ScreenInput, now: Duration) -> Vec<FrameEvent> {
+        let mut ev = Vec::new();
+        self.now = now;
+        let resized = self.screen.scan(input.grid);
+        let alt_changed = self.started && input.alt_screen != self.alt
+            || input.events.iter().any(|e| matches!(e, VtEvent::AltScreen(_)));
+        if resized || alt_changed {
+            self.raw_ready = now + ms(self.cfg.raw_settle_ms);
+        }
+        self.alt = input.alt_screen;
+        let title_hash = fnv(input.title.as_bytes());
+        let title_changed = self.started && title_hash != self.title_hash;
+        self.title_hash = title_hash;
+        if !self.started
+            || (self.cursor.col, self.cursor.row) != (input.cursor.col, input.cursor.row)
+        {
+            self.trail.push_back(CursorSample { at: now, col: input.cursor.col, row: input.cursor.row });
+            while self.trail.len() > self.cfg.trail.max(1) {
+                self.trail.pop_front();
+            }
+        }
+        self.cursor = input.cursor;
+        self.started = true;
+
+        // Segmentation, when something structural may have changed.
+        let cursor_row = Some(input.cursor.row);
+        let expired = self.distrust.iter().any(|d| d.until <= now);
+        if self.seg.is_none() || self.screen.class_change || cursor_row != self.seg_cursor || expired {
+            self.distrust.retain(|d| d.until > now);
+            let (mut leaves, mut seps) = self.segment(input, now);
+            let moved = {
+                let s = &self.screen;
+                let prev = |r: u16| {
+                    if s.row_dirty[r as usize] { s.prev_lines[r as usize].clone() } else { s.lines[r as usize].clone() }
+                };
+                let next = |r: u16| s.lines[r as usize].clone();
+                if resized { Vec::new() } else { scrolled_seps(&self.seps, &seps, &prev, &next) }
+            };
+            if !moved.is_empty() {
+                for m in moved {
+                    self.distrust.push(Distrust {
+                        bar: m.bar,
+                        area: m.parent,
+                        until: now + ms(self.cfg.distrust_ms),
+                    });
+                }
+                (leaves, seps) = self.segment(input, now);
+            }
+            self.seps = seps;
+            self.seg = Some(leaves);
+            self.seg_cursor = cursor_row;
+        }
+        self.reconcile(now, Some(input), &mut ev);
+
+        // Panes.
+        let chrome_changed = title_changed
+            || alt_changed
+            || self.active.iter().any(|id| {
+                let p = &self.panes[id];
+                p.kind == FrameKind::Chrome
+                    && (p.rect.y..p.rect.bottom()).any(|r| self.screen.row_dirty[r as usize])
+                    && self.chrome_dirty(p)
+            });
+        for id in self.active.clone() {
+            self.observe(id, Some(input), now, chrome_changed, &mut ev);
+        }
+
+        // Heat.
+        let all = Rect::new(0, 0, self.screen.cols, self.screen.rows);
+        self.raw_heat.update(&self.screen, all, now, true);
+        for id in &self.active {
+            let p = self.panes.get_mut(id).unwrap();
+            p.heat.update(&self.screen, p.rect, now, true);
+        }
+        self.promote(now, &mut ev);
+        self.screen.settle();
+        self.placed.borrow_mut().retain(|_, v| {
+            v.retain(|e| e.used + Duration::from_secs(10) > now);
+            !v.is_empty()
+        });
+        ev
+    }
+
+    /// Let time pass without a burst: promotions, commits, pending layout.
+    pub fn tick(&mut self, now: Duration) -> Vec<FrameEvent> {
+        let mut ev = Vec::new();
+        if now < self.now || !self.started {
+            return ev;
+        }
+        self.now = now;
+        self.reconcile(now, None, &mut ev);
+        for id in self.active.clone() {
+            let p = &self.panes[&id];
+            if p.fresh {
+                self.observe(id, None, now, false, &mut ev);
+            }
+            let p = self.panes.get_mut(&id).unwrap();
+            if !p.suspended {
+                p.ext.commit_due(now, p.commit);
+            }
+        }
+        let all = Rect::new(0, 0, self.screen.cols, self.screen.rows);
+        self.raw_heat.update(&self.screen, all, now, false);
+        for id in &self.active {
+            let p = self.panes.get_mut(id).unwrap();
+            p.heat.update(&self.screen, p.rect, now, false);
+        }
+        self.promote(now, &mut ev);
+        ev
+    }
+
+    /// Next time `tick` has something to do.
+    pub fn next_wake(&self) -> Option<Duration> {
+        let mut wake: Option<Duration> = None;
+        let mut at = |t: Duration| wake = Some(wake.map_or(t, |w: Duration| w.min(t)));
+        if let Some((_, since)) = &self.pending {
+            at(*since + ms(self.cfg.flap_ms));
+        }
+        if self.raw_ready > self.now {
+            at(self.raw_ready);
+        }
+        for id in &self.active {
+            let p = &self.panes[id];
+            if p.fresh {
+                at(self.now);
+            }
+            if p.state == FrameState::Candidate {
+                at(p.since + p.settle);
+            }
+            if !p.suspended
+                && p.kind == FrameKind::Pane
+                && let Some(t) = p.ext.next_commit(p.commit)
+            {
+                at(t);
+            }
+        }
+        wake
+    }
+
+    /// Every frame, on screen or remembered, by id.
+    pub fn list(&self) -> Vec<FrameInfo> {
+        let mut out = vec![FrameInfo {
+            id: RAW,
+            kind: FrameKind::Raw,
+            state: if self.now >= self.raw_ready { FrameState::Stable } else { FrameState::Candidate },
+            usable: self.started && self.now >= self.raw_ready,
+            rect: [0, 0, self.screen.cols, self.screen.rows],
+            origin: [0, 0],
+            extent: [0, (self.screen.rows as i64 - 1).max(0)],
+            key: None,
+            support: None,
+        }];
+        for p in self.panes.values() {
+            let c = p.content();
+            let o = p.origin();
+            let (lo, hi) = if p.kind == FrameKind::Pane {
+                p.ext.extent()
+            } else {
+                (o.y, o.y + c.h as i64 - 1)
+            };
+            out.push(FrameInfo {
+                id: p.id,
+                kind: p.kind,
+                state: p.state,
+                usable: self.usable(p),
+                rect: [c.x, c.y, c.w, c.h],
+                origin: [o.x, o.y],
+                extent: [lo, hi],
+                key: p.key.clone(),
+                support: p.support.map(|s| self.supports[s].name().to_string()),
+            });
+        }
+        out
+    }
+
+    /// Text of the frame rows `[y0, y1)`: what is shown, else what is
+    /// remembered, else empty. Trailing spaces trimmed. Column 0 of every
+    /// string is the same frame column.
+    pub fn text(&self, id: FrameId, y0: i64, y1: i64) -> Vec<String> {
+        let y1 = y1.min(y0.saturating_add(100_000));
+        if id == RAW {
+            return (y0..y1)
+                .map(|y| {
+                    if y >= 0 && y < self.screen.rows as i64 {
+                        self.screen.lines[y as usize].text.trim_end_matches(' ').to_string()
+                    } else {
+                        String::new()
+                    }
+                })
+                .collect();
+        }
+        let Some(p) = self.panes.get(&id) else { return Vec::new() };
+        let shown = self.is_active(id) && !p.ext.rows.is_empty();
+        let c = p.content();
+        let top = p.top() as i64;
+        let mut rows: Vec<(i64, String)> = Vec::new();
+        for y in y0..y1 {
+            let i = y - p.ext.oy;
+            let stored = p.ext.lines.get(&y);
+            if shown && i >= top && i < top + c.h as i64 {
+                let row = &p.ext.rows[i as usize];
+                match stored {
+                    Some(s) if row.committed => rows.push((s.x0, s.line.text.clone())),
+                    _ => rows.push((p.ext.ox, row.line.text.clone())),
+                }
+            } else if let Some(s) = stored {
+                rows.push((s.x0, s.line.text.clone()));
+            } else {
+                rows.push((i64::MAX, String::new()));
+            }
+        }
+        let base = rows.iter().map(|r| r.0).min().unwrap_or(0).min(p.ext.ox);
+        rows.into_iter()
+            .map(|(x0, t)| {
+                if t.is_empty() || x0 == base {
+                    t
+                } else {
+                    format!("{}{}", " ".repeat((x0 - base) as usize), t)
+                }
+            })
+            .collect()
+    }
+
+    /// Heatmap of the frame's view.
+    pub fn heat(&self, id: FrameId) -> Option<HeatView> {
+        if id == RAW {
+            return Some(self.raw_heat.view(Rect::new(0, 0, self.screen.cols, self.screen.rows)));
+        }
+        let p = self.panes.get(&id)?;
+        let c = p.content();
+        Some(p.heat.view(Rect::new(c.x - p.rect.x, c.y - p.rect.y, c.w, c.h)))
+    }
+
+    /// The innermost pane showing a screen cell, and the frame position
+    /// there. The raw frame when no pane does.
+    pub fn at(&self, col: u16, row: u16) -> Option<(FrameId, FramePos)> {
+        if col >= self.screen.cols || row >= self.screen.rows {
+            return None;
+        }
+        let hit = self
+            .active
+            .iter()
+            .filter_map(|id| self.info(*id))
+            .filter(|i| i.rect.contains(col, row))
+            .min_by_key(|i| (i.kind != FrameKind::Pane, i.rect.w as u32 * i.rect.h as u32));
+        match hit {
+            Some(i) => Some((i.id, i.to_frame(col, row)?)),
+            None => Some((RAW, FramePos { x: col as i64, y: row as i64 })),
+        }
+    }
+
+    /// As `Surfaces::find`, with the error of a bad regular expression.
+    pub fn try_find(&self, id: FrameId, query: &TextQuery, known: bool) -> Result<Vec<TextMatch>, String> {
+        let pattern = if query.regex { query.pattern.clone() } else { regex::escape(&query.pattern) };
+        let re = regex::RegexBuilder::new(&pattern)
+            .case_insensitive(query.ignore_case)
+            .build()
+            .map_err(|e| e.to_string())?;
+        let mut out = Vec::new();
+        let mut scan = |line: &Line, x0: i64, y: i64, info: &SurfaceInfo| {
+            for m in re.find_iter(&line.text) {
+                if m.is_empty() || out.len() >= 10_000 {
+                    continue;
+                }
+                let k0 = line.text[..m.start()].chars().count();
+                let k1 = k0 + m.as_str().chars().count();
+                let (c0, c1) = (line.col_of(k0), line.col_of(k1));
+                let pos = FramePos { x: x0 + c0 as i64, y };
+                out.push(TextMatch {
+                    frame: info.id,
+                    x: pos.x,
+                    y,
+                    len: c1.saturating_sub(c0).max(1),
+                    text: m.as_str().to_string(),
+                    screen: if info.state == FrameState::Inactive { None } else { info.to_screen(pos) },
+                });
+            }
+        };
+        let info = self.info(id).ok_or_else(|| format!("no frame {id}"))?;
+        if id == RAW {
+            for (r, line) in self.screen.lines.iter().enumerate() {
+                scan(line, 0, r as i64, &info);
+            }
+            return Ok(out);
+        }
+        let p = &self.panes[&id];
+        let shown = self.is_active(id);
+        let c = p.content();
+        let (first, last) = (info.origin.y, info.origin.y + c.h as i64);
+        if known {
+            for (y, s) in p.ext.lines.range(..first) {
+                scan(&s.line, s.x0, *y, &info);
+            }
+        }
+        if shown {
+            for r in 0..c.h {
+                let y = first + r as i64;
+                let i = (y - p.ext.oy) as usize;
+                match p.ext.rows.get(i) {
+                    Some(row) => scan(&row.line, p.ext.ox, y, &info),
+                    None => scan(&self.screen.lines[(c.y + r) as usize].slice(c.x, c.right()), p.ext.ox, y, &info),
+                }
+            }
+        }
+        if known {
+            let from = if shown { last } else { first };
+            for (y, s) in p.ext.lines.range(from..) {
+                scan(&s.line, s.x0, *y, &info);
+            }
+        }
+        Ok(out)
+    }
+
+    // -- internals -----------------------------------------------------
+
+    fn is_active(&self, id: FrameId) -> bool {
+        self.active.contains(&id)
+    }
+
+    fn usable(&self, p: &Pane) -> bool {
+        p.state == FrameState::Stable && !p.suspended && self.is_active(p.id)
+    }
+
+    fn chrome_dirty(&self, p: &Pane) -> bool {
+        // Text only: a clock repainted with the same digits is no change.
+        (0..p.rect.h).any(|r| {
+            let row = (p.rect.y + r) as usize;
+            self.screen.row_dirty[row]
+                && Screen::hash_of(&self.screen.prev_lines[row], p.rect.x, p.rect.right())
+                    != self.screen.row_hash(row as u16, p.rect.x, p.rect.right())
+        })
+    }
+
+    fn pane_view<'a>(&self, input: &'a ScreenInput<'a>, rect: Rect) -> PaneView<'a> {
+        let cur = (input.cursor.col, input.cursor.row);
+        PaneView {
+            grid: input.grid,
+            rect,
+            cursor: rect.contains(cur.0, cur.1).then_some(cur),
+            title: input.title,
+            alt_screen: input.alt_screen,
+        }
+    }
+
+    fn detect(&self, pv: &PaneView) -> Option<usize> {
+        let mut best: Option<(usize, f32)> = None;
+        for (i, s) in self.supports.iter().enumerate() {
+            let c = s.detect(pv);
+            if c >= 0.5 && best.is_none_or(|b| c > b.1) {
+                best = Some((i, c));
+            }
+        }
+        best.map(|b| b.0)
+    }
+
+    fn segment(&self, input: &ScreenInput, now: Duration) -> (Vec<Leaf>, Vec<Sep>) {
+        let all = Rect::new(0, 0, self.screen.cols, self.screen.rows);
+        let pv = self.pane_view(input, all);
+        for s in &self.supports {
+            if s.detect(&pv) >= 0.5
+                && let Some(rects) = s.segment(&pv)
+            {
+                let mut leaves: Vec<Leaf> = rects
+                    .into_iter()
+                    .map(|r| r.intersect(&all))
+                    .filter(|r| !r.is_empty())
+                    .map(|r| Leaf {
+                        rect: r4(r),
+                        kind: (r.h < self.cfg.min_pane_rows || r.w < self.cfg.min_pane_cols) as u8,
+                    })
+                    .collect();
+                leaves.sort();
+                leaves.dedup();
+                return (leaves, Vec::new());
+            }
+        }
+        Segmenter {
+            screen: &self.screen,
+            cursor_row: Some(input.cursor.row),
+            min_rows: self.cfg.min_pane_rows,
+            min_cols: self.cfg.min_pane_cols,
+            distrust: &self.distrust,
+            now,
+            leaves: Vec::new(),
+            seps: Vec::new(),
+        }
+        .run()
+    }
+
+    /// Bring the layout in line with the last segmentation.
+    fn reconcile(&mut self, now: Duration, input: Option<&ScreenInput>, ev: &mut Vec<FrameEvent>) {
+        let Some(seg) = self.seg.clone() else { return };
+        if seg == self.layout && !self.active.is_empty() {
+            self.pending = None;
+            for id in &self.active {
+                self.panes.get_mut(id).unwrap().suspended = false;
+            }
+            return;
+        }
+        let start = match &self.pending {
+            Some((p, since)) if *p == seg => *since,
+            _ => now,
+        };
+        if self.active.is_empty() || now >= start + ms(self.cfg.flap_ms) {
+            self.pending = None;
+            self.commit_layout(seg, now, input, ev);
+        } else {
+            for id in &self.active {
+                let p = self.panes.get_mut(id).unwrap();
+                let leaf = Leaf { rect: r4(p.rect), kind: (p.kind != FrameKind::Pane) as u8 };
+                p.suspended = !seg.contains(&leaf);
+            }
+            self.pending = Some((seg, start));
+        }
+    }
+
+    fn new_pane(&mut self, leaf: &Leaf, now: Duration) -> FrameId {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.panes.insert(
+            id,
+            Pane {
+                id,
+                kind: leaf.kind(),
+                state: FrameState::Candidate,
+                since: now,
+                rect: leaf.rect(),
+                ext: Ext::new(self.cfg.max_lines),
+                heat: Heat::default(),
+                key: None,
+                support: None,
+                support_at: None,
+                suspended: false,
+                fresh: true,
+                reattach: false,
+                last_active: now,
+                left: 0,
+                right: 0,
+                gutter_cand: (0, 0),
+                gutter_row: None,
+                fixed_tb: None,
+                hint: None,
+                hashes: Vec::new(),
+                hashes_valid: false,
+                settle: ms(self.cfg.settle_ms),
+                commit: ms(self.cfg.commit_ms),
+            },
+        );
+        id
+    }
+
+    fn hashes_for(&self, rect: Rect, left: u16, right: u16) -> Vec<u64> {
+        let (a, b) = if left + right >= rect.w { (rect.x, rect.right()) } else { (rect.x + left, rect.right() - right) };
+        (rect.y..rect.bottom()).map(|r| self.screen.row_hash(r, a, b)).collect()
+    }
+
+    /// The remembered frame that this rectangle of the screen shows.
+    fn recognise(&self, leaf: &Leaf, input: Option<&ScreenInput>, skip: &[FrameId]) -> Option<FrameId> {
+        let rect = leaf.rect();
+        let key = input.and_then(|inp| {
+            let pv = self.pane_view(inp, rect);
+            self.detect(&pv).and_then(|s| self.supports[s].frame_key(&pv))
+        });
+        let mut best: Option<(FrameId, f32, Duration)> = None;
+        for p in self.panes.values() {
+            if p.state != FrameState::Inactive || p.rect != rect || p.kind != leaf.kind() || skip.contains(&p.id)
+            {
+                continue;
+            }
+            let score = if p.kind == FrameKind::Chrome {
+                1.0
+            } else if key.is_some() && p.key == key {
+                2.0
+            } else if key.is_some() && p.key.is_some() {
+                0.0
+            } else {
+                p.ext.share(&self.hashes_for(rect, p.left, p.right))
+            };
+            if score >= self.cfg.identity
+                && best.is_none_or(|b| score > b.1 || (score == b.1 && p.last_active > b.2))
+            {
+                best = Some((p.id, score, p.last_active));
+            }
+        }
+        best.map(|b| b.0)
+    }
+
+    fn attach(&mut self, id: FrameId, now: Duration, ev: &mut Vec<FrameEvent>) {
+        let p = self.panes.get_mut(&id).unwrap();
+        p.state = FrameState::Candidate;
+        p.since = now;
+        p.suspended = false;
+        p.fresh = true;
+        p.reattach = true;
+        p.hashes_valid = false;
+        ev.push(FrameEvent::Attached { frame: id });
+    }
+
+    fn deactivate(&mut self, id: FrameId, now: Duration, ev: &mut Vec<FrameEvent>) {
+        let p = self.panes.get_mut(&id).unwrap();
+        p.ext.flush(now);
+        p.ext.reset_view();
+        p.state = FrameState::Inactive;
+        p.suspended = false;
+        p.last_active = now;
+        ev.push(FrameEvent::Inactive { frame: id });
+    }
+
+    fn prune(&mut self, ev: &mut Vec<FrameEvent>) {
+        loop {
+            let inactive: Vec<(Duration, FrameId)> = self
+                .panes
+                .values()
+                .filter(|p| p.state == FrameState::Inactive)
+                .map(|p| (p.last_active, p.id))
+                .collect();
+            if inactive.len() <= self.cfg.max_inactive {
+                return;
+            }
+            let (_, id) = inactive.into_iter().min().unwrap();
+            self.panes.remove(&id);
+            ev.push(FrameEvent::Dropped { frame: id });
+        }
+    }
+
+    fn commit_layout(
+        &mut self,
+        seg: Vec<Leaf>,
+        now: Duration,
+        input: Option<&ScreenInput>,
+        ev: &mut Vec<FrameEvent>,
+    ) {
+        let old = std::mem::take(&mut self.active);
+        let mut active: Vec<FrameId> = Vec::with_capacity(seg.len());
+        let mut fresh: Vec<FrameEvent> = Vec::new();
+        for leaf in &seg {
+            let keep = old.iter().copied().find(|id| {
+                let p = &self.panes[id];
+                p.rect == leaf.rect() && p.kind == leaf.kind() && !active.contains(id)
+            });
+            if let Some(id) = keep {
+                self.panes.get_mut(&id).unwrap().suspended = false;
+                active.push(id);
+            } else if let Some(id) = self.recognise(leaf, input, &active) {
+                self.attach(id, now, &mut fresh);
+                active.push(id);
+            } else {
+                let id = self.new_pane(leaf, now);
+                fresh.push(FrameEvent::Added { frame: id });
+                active.push(id);
+            }
+        }
+        for id in old {
+            if !active.contains(&id) {
+                self.deactivate(id, now, ev);
+            }
+        }
+        ev.append(&mut fresh);
+        self.active = active;
+        self.layout_id = match self.layouts.iter().position(|l| *l == seg) {
+            Some(i) => i as u32 + 1,
+            None => {
+                self.layouts.push(seg.clone());
+                self.layouts.len() as u32
+            }
+        };
+        self.layout = seg;
+        ev.push(FrameEvent::Layout { layout: self.layout_id });
+        self.prune(ev);
+    }
+
+    fn promote(&mut self, now: Duration, ev: &mut Vec<FrameEvent>) {
+        for id in &self.active {
+            let p = self.panes.get_mut(id).unwrap();
+            if p.state == FrameState::Candidate && !p.suspended && now >= p.since + p.settle {
+                p.state = FrameState::Stable;
+                ev.push(FrameEvent::Stable { frame: *id });
+            }
+        }
+    }
+
+    /// Line-number gutter of a pane: `(width, frame row of pane row 0)`.
+    fn gutter(&self, rect: Rect) -> Option<(u16, i64)> {
+        let mut run: Option<(usize, i64, u16, usize)> = None; // first row, number, end col, length
+        let mut best: Option<(usize, i64, u16, usize)> = None;
+        let mut nonblank = 0usize;
+        for i in 0..rect.h as usize {
+            let line = self.screen.lines[rect.y as usize + i].slice(rect.x, rect.right());
+            if !line.text.trim_end_matches(' ').is_empty() {
+                nonblank += 1;
+            }
+            let mut end = 0u16;
+            let mut n: i64 = 0;
+            let mut digits = 0;
+            let mut ok = false;
+            for (k, ch) in line.text.chars().enumerate() {
+                if ch == ' ' && digits == 0 {
+                    continue;
+                }
+                if ch.is_ascii_digit() && digits < 8 {
+                    n = n * 10 + (ch as u8 - b'0') as i64;
+                    digits += 1;
+                    end = line.col_of(k) + 1;
+                    continue;
+                }
+                ok = digits > 0 && ch == ' ';
+                break;
+            }
+            let numbered = (ok || (digits > 0 && line.text.trim_end_matches(' ').chars().count() == end as usize))
+                && digits > 0;
+            run = match run {
+                Some((first, n0, e, len)) if numbered && e == end && n == n0 + (i - first) as i64 => {
+                    Some((first, n0, e, len + 1))
+                }
+                _ if numbered => Some((i, n, end, 1)),
+                _ => None,
+            };
+            if let Some(r) = run
+                && best.is_none_or(|b| r.3 > b.3)
+            {
+                best = Some(r);
+            }
+        }
+        let (first, n0, end, len) = best?;
+        if len < 3 || len * 10 < nonblank * 6 || end + 1 >= rect.w {
+            return None;
+        }
+        Some((end + 1, n0 - 1 - first as i64))
+    }
+
+    /// Feed a pane's tracker with the screen. `input` is absent on a tick:
+    /// plugins are not consulted then.
+    fn observe(
+        &mut self,
+        id: FrameId,
+        input: Option<&ScreenInput>,
+        now: Duration,
+        chrome_changed: bool,
+        ev: &mut Vec<FrameEvent>,
+    ) {
+        let Some(mut p) = self.panes.remove(&id) else { return };
+        if p.suspended {
+            self.panes.insert(id, p);
+            return;
+        }
+        let dirty = !p.hashes_valid
+            || (p.rect.y..p.rect.bottom()).any(|r| self.screen.row_dirty[r as usize]);
+        if p.kind != FrameKind::Pane {
+            p.fresh = false;
+            p.hashes_valid = true;
+            self.panes.insert(id, p);
+            return;
+        }
+        let old_content = p.content();
+        let mut new_key = p.key.clone();
+
+        // Plugin knowledge.
+        if let Some(inp) = input
+            && (dirty || p.fresh)
+        {
+            let pv = self.pane_view(inp, p.rect);
+            if p.support_at.is_none_or(|t| now >= t + Duration::from_secs(1)) {
+                p.support = self.detect(&pv);
+                p.support_at = Some(now);
+                if let Some(s) = p.support {
+                    let t = self.supports[s].tuning();
+                    p.settle = ms(t.settle_ms.unwrap_or(self.cfg.settle_ms));
+                    p.commit = ms(t.commit_ms.unwrap_or(self.cfg.commit_ms));
+                }
+            }
+            match p.support {
+                Some(s) => {
+                    let sup = &self.supports[s];
+                    let chrome = sup.chrome(&pv);
+                    p.fixed_tb = chrome.map(|c| (c.top, c.bottom));
+                    if let Some(c) = chrome
+                        && (c.left, c.right) != (p.left, p.right)
+                    {
+                        p.left = c.left;
+                        p.right = c.right;
+                        p.ext.reset_view();
+                        p.hashes_valid = false;
+                    }
+                    p.hint = sup.view_hint(&pv);
+                    new_key = sup.frame_key(&pv);
+                }
+                None => {
+                    p.fixed_tb = None;
+                    p.hint = None;
+                    new_key = None;
+                }
+            }
+        }
+
+        // Generic gutter, unless a plugin gave the side chrome.
+        if dirty && p.fixed_tb.is_none() {
+            let found = self.gutter(p.rect);
+            let width = found.map_or(0, |g| g.0);
+            if width == p.left {
+                p.gutter_cand = (width, 0);
+            } else {
+                p.gutter_cand =
+                    if p.gutter_cand.0 == width { (width, p.gutter_cand.1 + 1) } else { (width, 1) };
+                if p.ext.lines.is_empty() || p.gutter_cand.1 >= 2 {
+                    p.left = width;
+                    p.ext.reset_view();
+                    p.hashes_valid = false;
+                }
+            }
+            p.gutter_row = found.filter(|g| g.0 == p.left).map(|g| g.1);
+        }
+
+        // Row hashes of the content columns.
+        let (a, b) = {
+            let (l, r) = if p.left + p.right >= p.rect.w { (0, 0) } else { (p.left, p.right) };
+            (p.rect.x + l, p.rect.right() - r)
+        };
+        if !p.hashes_valid || p.hashes.len() != p.rect.h as usize {
+            p.hashes = (p.rect.y..p.rect.bottom()).map(|r| self.screen.row_hash(r, a, b)).collect();
+            p.hashes_valid = true;
+        } else {
+            for r in 0..p.rect.h {
+                if self.screen.row_dirty[(p.rect.y + r) as usize] {
+                    p.hashes[r as usize] = self.screen.row_hash(p.rect.y + r, a, b);
+                }
+            }
+        }
+
+        let screen = &self.screen;
+        let rect = p.rect;
+        let line = move |i: usize| {
+            let mut l = screen.lines[rect.y as usize + i].slice(a, b);
+            l.trim_end();
+            l
+        };
+        let mut seed = 0i64;
+        if let Some(inp) = input {
+            for e in inp.events {
+                if let VtEvent::Scroll { region, dy, .. } = e {
+                    let x = region.intersect(&rect);
+                    if x.w as u32 * 5 >= rect.w as u32 * 4 && x.h as u32 * 5 >= rect.h as u32 * 4 {
+                        seed -= *dy as i64;
+                    }
+                }
+            }
+        }
+        let (hint_oy, hint_ox) = match (p.fixed_tb, p.hint) {
+            (Some((t, _)), Some(h)) => (h.row.map(|r| r - t as i64), h.col),
+            (None, Some(h)) => (h.row.map(|r| r - p.ext.top as i64), h.col),
+            _ => (p.gutter_row, None),
+        };
+        let cur = (self.cursor.col, self.cursor.row);
+        let obs = Obs {
+            hashes: &p.hashes,
+            line: &line,
+            width: b - a,
+            seed,
+            cursor_row: rect.contains(cur.0, cur.1).then(|| (cur.1 - rect.y) as usize),
+            hint_oy,
+            hint_ox,
+            fixed_tb: p.fixed_tb,
+            now,
+        };
+        if p.reattach {
+            p.ext.reattach(&obs);
+            p.reattach = false;
+        }
+        let key_changed = p.key.is_some() && new_key.is_some() && p.key != new_key && !p.fresh;
+        let out = if p.fresh || dirty || p.ext.rows.is_empty() { p.ext.observe(&obs) } else { Outcome::Same };
+        p.fresh = false;
+        for s in p.ext.shifts.drain(..) {
+            ev.push(FrameEvent::Shift { frame: id, from: s.from, to: s.to, dy: s.dy });
+        }
+        match out {
+            Outcome::Scroll { dx, dy } => ev.push(FrameEvent::Scroll { frame: id, dx, dy }),
+            Outcome::Jump => ev.push(FrameEvent::Jump { frame: id }),
+            _ => {}
+        }
+        p.ext.commit_due(now, p.commit);
+        if p.content() != old_content || p.ext.rect_changed {
+            ev.push(FrameEvent::Rect { frame: id });
+        }
+
+        if out != Outcome::Lost && !key_changed {
+            p.key = new_key;
+            self.panes.insert(id, p);
+            return;
+        }
+
+        // The pane shows something else entirely.
+        let leaf = Leaf { rect: r4(p.rect), kind: 0 };
+        let same_key = p.key.is_some() && p.key == new_key;
+        self.panes.insert(id, p);
+        let other = if same_key { None } else { self.recognise(&leaf, input, &self.active) };
+        let next = if let Some(other) = other {
+            self.deactivate(id, now, ev);
+            self.attach(other, now, ev);
+            Some(other)
+        } else if key_changed || (chrome_changed && !same_key) {
+            self.deactivate(id, now, ev);
+            let fresh = self.new_pane(&leaf, now);
+            ev.push(FrameEvent::Added { frame: fresh });
+            Some(fresh)
+        } else {
+            // A jump inside the same frame, to rows never seen.
+            let p = self.panes.get_mut(&id).unwrap();
+            p.ext.island();
+            p.fresh = true;
+            ev.push(FrameEvent::Jump { frame: id });
+            None
+        };
+        let target = match next {
+            Some(n) => {
+                let slot = self.active.iter().position(|x| *x == id).unwrap();
+                self.active[slot] = n;
+                self.prune(ev);
+                n
+            }
+            None => id,
+        };
+        self.observe(target, input, now, false, ev);
+    }
+}
+
+impl Surfaces for Frames {
+    fn info(&self, id: FrameId) -> Option<SurfaceInfo> {
+        if id == RAW {
+            let ready = self.started && self.now >= self.raw_ready;
+            return Some(SurfaceInfo {
+                id,
+                kind: FrameKind::Raw,
+                state: if ready { FrameState::Stable } else { FrameState::Candidate },
+                rect: Rect::new(0, 0, self.screen.cols, self.screen.rows),
+                origin: FramePos::default(),
+                usable: ready,
+            });
+        }
+        let p = self.panes.get(&id)?;
+        Some(SurfaceInfo {
+            id,
+            kind: p.kind,
+            state: p.state,
+            rect: p.content(),
+            origin: p.origin(),
+            usable: self.usable(p),
+        })
+    }
+
+    fn resolve(&self, sel: &FrameSel) -> Option<FrameId> {
+        let name = match sel {
+            FrameSel::Id(id) => return (*id == RAW || self.panes.contains_key(id)).then_some(*id),
+            FrameSel::Name(n) => n.as_str(),
+        };
+        let panes = || self.active.iter().map(|id| &self.panes[id]).filter(|p| p.kind == FrameKind::Pane);
+        let area = |p: &Pane| p.rect.w as u32 * p.rect.h as u32;
+        match name {
+            "raw" => Some(RAW),
+            "active" => {
+                let (c, r) = (self.cursor.col, self.cursor.row);
+                Some(panes().filter(|p| p.rect.contains(c, r)).min_by_key(|p| area(p)).map_or(RAW, |p| p.id))
+            }
+            "largest" => {
+                Some(panes().max_by_key(|p| (area(p), std::cmp::Reverse(p.id))).map_or(RAW, |p| p.id))
+            }
+            "quietest" => Some(
+                panes()
+                    .filter(|p| self.usable(p))
+                    .min_by(|x, y| {
+                        (x.heat.mean_activity(), std::cmp::Reverse(area(x)))
+                            .partial_cmp(&(y.heat.mean_activity(), std::cmp::Reverse(area(y))))
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .map_or(RAW, |p| p.id),
+            ),
+            other => {
+                let id: FrameId = other.parse().ok()?;
+                (id == RAW || self.panes.contains_key(&id)).then_some(id)
+            }
+        }
+    }
+
+    fn find(&self, id: FrameId, query: &TextQuery, known: bool) -> Vec<TextMatch> {
+        self.try_find(id, query, known).unwrap_or_default()
+    }
+
+    fn place(&self, id: FrameId, w: u16, h: u16, prefer: Prefer, taken: &[Rect]) -> Option<(u16, u16)> {
+        let view = self.heat(id)?;
+        let best = view.best(w, h, prefer, taken)?;
+        let now = self.now;
+        let mut cache = self.placed.borrow_mut();
+        let entries = cache.entry((id, w, h, prefer as u8)).or_default();
+        for e in entries.iter_mut() {
+            let r = Rect::new(e.pos.0, e.pos.1, w, h);
+            if taken.iter().any(|t| t.intersects(&r)) {
+                continue;
+            }
+            let Some(current) = view.score(e.pos.0, e.pos.1, w, h, prefer) else { continue };
+            e.used = now;
+            if (best.0, best.1) == e.pos || best.2 <= current + self.cfg.replace_margin {
+                e.better_since = None;
+                return Some(e.pos);
+            }
+            let since = *e.better_since.get_or_insert(now);
+            if now >= since + ms(self.cfg.replace_ms) {
+                e.pos = (best.0, best.1);
+                e.better_since = None;
+            }
+            return Some(e.pos);
+        }
+        entries.push(Placed { pos: (best.0, best.1), better_since: None, used: now });
+        Some((best.0, best.1))
+    }
+
+    fn cursor(&self) -> (u16, u16) {
+        (self.cursor.col, self.cursor.row)
+    }
+
+    fn cursor_trail(&self) -> Vec<CursorSample> {
+        self.trail.iter().copied().collect()
+    }
+}
+
+#[allow(dead_code)]
+const _: u64 = BLANK;
