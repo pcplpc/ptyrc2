@@ -1636,18 +1636,28 @@ impl Frames {
         }
 
         // Rows under an overlay keep what they showed: they do not vote
-        // for a scroll or a jump, and are not rewritten.
-        if p.ext.rows.len() == p.hashes.len() {
-            for (a, b) in &p.covered {
-                for i in *a as usize..*b as usize {
-                    p.hashes[i] = p.ext.rows[i].hash;
-                }
+        // for a scroll or a jump, and are not rewritten. Never seen
+        // before, they are blank: the overlay's text is not the pane's.
+        let known = p.ext.rows.len() == p.hashes.len();
+        let mut hidden: HashMap<usize, Line> = HashMap::new();
+        for (a, b) in &p.covered {
+            for i in *a as usize..*b as usize {
+                let (hash, line) = if known {
+                    (p.ext.rows[i].hash, p.ext.rows[i].line.clone())
+                } else {
+                    (screen::BLANK, Line::blank())
+                };
+                p.hashes[i] = hash;
+                hidden.insert(i, line);
             }
         }
 
         let screen = &self.screen;
         let rect = p.rect;
         let line = move |i: usize| {
+            if let Some(l) = hidden.get(&i) {
+                return l.clone();
+            }
             let mut l = screen.lines[rect.y as usize + i].slice(a, b);
             l.trim_end();
             l

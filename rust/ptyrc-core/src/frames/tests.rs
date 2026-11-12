@@ -2236,6 +2236,51 @@ fn rows_under_an_overlay_do_not_vote() {
 }
 
 #[test]
+fn a_pane_first_seen_under_an_overlay_does_not_take_its_rows() {
+    // The app starts with its palette open: the rows it hides are not
+    // known, and are not the palette's.
+    let mut s = Sim::new();
+    let d = doc(40);
+    let home = || {
+        let mut g = Grid::new(COLS, 24);
+        for (i, l) in d.iter().take(14).enumerate() {
+            put(&mut g, 4, 2 + i as u16, l);
+        }
+        g
+    };
+    let palette = || {
+        let mut g = home();
+        let r = Rect::new(10, 6, 40, 8);
+        for y in r.y..r.bottom() {
+            put(&mut g, r.x, y, &" ".repeat(r.w as usize));
+            put(&mut g, r.x + 2, y, &format!("command {y}"));
+        }
+        bg(&mut g, r, 8);
+        g
+    };
+    s.settle(&palette());
+    let panes = s.panes();
+    assert_eq!(panes.len(), 2, "{panes:#?}");
+    let under = panes.iter().find(|p| p.rect[3] == 24).expect("under");
+    let text = s.f.text(under.id, 0, 24);
+    assert_eq!(text[2].trim(), d[0]);
+    assert!(text[6..14].iter().all(String::is_empty), "{text:?}");
+    assert!(s.f.find(under.id, &lit("command"), true).is_empty());
+    let mut ev = s.feed(&home(), 1000);
+    ev.extend(s.idle(2000));
+    assert!(
+        !ev.iter().any(|e| matches!(e, FrameEvent::Jump { .. })),
+        "{ev:?}"
+    );
+    let back = s.pane();
+    assert_eq!((back.id, back.origin), (under.id, under.origin));
+    let text = s.f.text(under.id, 0, 24);
+    for i in 0..14 {
+        assert_eq!(text[2 + i].trim(), d[i]);
+    }
+}
+
+#[test]
 fn wire_forms() {
     let mut s = Sim::new();
     s.settle(&view(&doc(30), 0, 20, &[]));
