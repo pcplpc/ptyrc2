@@ -65,6 +65,9 @@ pub(crate) struct Obs<'a> {
     /// Absolute frame row of pane row 0, when the app shows it.
     pub hint_oy: Option<i64>,
     pub hint_ox: Option<i64>,
+    /// The side chrome is about to change: a horizontal move of the
+    /// content is not a scroll.
+    pub side_pending: bool,
     /// Top and bottom chrome imposed by a plugin.
     pub fixed_tb: Option<(u16, u16)>,
     pub now: Duration,
@@ -432,6 +435,7 @@ impl Ext {
             .filter(|i| nh[*i] != ph[*i] && (nh[*i] != BLANK || ph[*i] != BLANK))
             .count();
         if nb >= 2
+            && !o.side_pending
             && changed * 2 >= nb
             && let Some(dx) = self.hscroll(o, a, b)
         {
@@ -447,6 +451,21 @@ impl Ext {
             }
             self.ox += dx;
             return Outcome::Scroll { dx, dy: 0 };
+        }
+
+        // 3b. Both ways at once: the view moved down or up and the app
+        // re-centred it sideways (a cursor line shorter than the offset).
+        if nb >= 2
+            && !o.side_pending
+            && c0 * 5 < nb * 2
+            && let Some((dx, dy)) = self.diagonal(o, a, b)
+        {
+            self.flush(o.now);
+            self.ox += dx;
+            self.oy += dy;
+            self.rows = (0..h).map(|i| self.fresh(o, i)).collect();
+            self.merge_islands(o);
+            return Outcome::Scroll { dx, dy };
         }
 
         // 4. Jump.
@@ -768,6 +787,74 @@ impl Ext {
         None
     }
 
+    /// A vertical and a horizontal shift that together explain the view:
+    /// `new[i][c] == old[i + dy][c + dx]`.
+    fn diagonal(&self, o: &Obs, a: usize, b: usize) -> Option<(i64, i64)> {
+        let w = o.width as i64;
+        let span = (b - a) as i64;
+        let olds: Vec<Option<Vec<char>>> = (a..b)
+            .map(|i| {
+                let l = &self.rows[i].line;
+                (l.trivial() && !l.text.is_empty()).then(|| l.text.chars().collect())
+            })
+            .collect();
+        let news: Vec<Option<Vec<char>>> = (a..b)
+            .map(|i| {
+                let l = (o.line)(i);
+                (l.trivial() && !l.text.is_empty()).then(|| l.text.chars().collect())
+            })
+            .collect();
+        let dys: Vec<i64> = if o.seed != 0 && o.seed.abs() < span {
+            vec![o.seed]
+        } else {
+            (1..span).flat_map(|d| [d, -d]).collect()
+        };
+        for dy in dys {
+            let pairs: Vec<(&Vec<char>, &Vec<char>)> = (0..span)
+                .filter_map(|k| {
+                    let j = k + dy;
+                    if j < 0 || j >= span {
+                        return None;
+                    }
+                    Some((olds[j as usize].as_ref()?, news[k as usize].as_ref()?))
+                })
+                .collect();
+            if pairs.len() < 3 {
+                continue;
+            }
+            // Candidate shifts: where a piece of the longest new row is
+            // found in its old row.
+            let (old, new) = pairs.iter().max_by_key(|p| p.1.len())?;
+            // Three pieces: what entered on one side is not in the old row.
+            let first = new.iter().position(|c| *c != ' ').unwrap_or(0);
+            let last = new.len().saturating_sub(12).max(first);
+            for from in [first, (first + last) / 2, last] {
+                let key = &new[from..(from + 12).min(new.len())];
+                if key.len() < 4 || key.iter().all(|c| *c == ' ') {
+                    continue;
+                }
+                for at in 0..old.len().saturating_sub(key.len() - 1) {
+                    if &old[at..at + key.len()] != key {
+                        continue;
+                    }
+                    let dx = at as i64 - from as i64;
+                    if dx == 0 {
+                        continue;
+                    }
+                    let ok = pairs
+                        .iter()
+                        .filter(|p| fits(p.0, p.1, dx, w) == (true, true))
+                        .count();
+                    let bad = pairs.iter().filter(|p| !fits(p.0, p.1, dx, w).0).count();
+                    if ok >= 3 && ok * 10 >= pairs.len() * 6 && bad * 5 <= pairs.len() {
+                        return Some((dx, dy));
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// Reconcile with the absolute position the app shows.
     fn hint(&mut self, o: &Obs, jumped: bool) {
         if let Some(ox) = o.hint_ox {
@@ -823,4 +910,19 @@ fn merge(old: &Stored, x0: i64, new: &Line, width: u16) -> (i64, String) {
     }
     text.truncate(text.trim_end_matches(' ').len());
     (start, text)
+}
+
+/// Does a horizontal shift `dx` explain `new` from `old` over a view of
+/// `w` columns (`new[c] == old[c + dx]`), and with a non-blank overlap?
+fn fits(old: &[char], new: &[char], dx: i64, w: i64) -> (bool, bool) {
+    let at = |v: &[char], c: i64| v.get(c as usize).copied().unwrap_or(' ');
+    let mut solid = false;
+    for c in dx.min(0).abs()..w - dx.max(0) {
+        let (x, y) = (at(new, c), at(old, c + dx));
+        if x != y {
+            return (false, false);
+        }
+        solid |= x != ' ';
+    }
+    (true, solid)
 }

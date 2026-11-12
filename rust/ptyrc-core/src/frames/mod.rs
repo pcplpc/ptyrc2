@@ -173,6 +173,8 @@ struct Pane {
     right: u16,
     gutter_cand: (u16, u8),
     gutter_row: Option<i64>,
+    /// Left chrome a plugin asked for.
+    plugin_left: u16,
     fixed_tb: Option<(u16, u16)>,
     hint: Option<crate::plugin::ViewHint>,
     hashes: Vec<u64>,
@@ -821,6 +823,7 @@ impl Frames {
                 right: 0,
                 gutter_cand: (0, 0),
                 gutter_row: None,
+                plugin_left: 0,
                 fixed_tb: None,
                 hint: None,
                 hashes: Vec::new(),
@@ -1105,11 +1108,10 @@ impl Frames {
                     let sup = &self.supports[s];
                     let chrome = sup.chrome(&pv);
                     p.fixed_tb = chrome.map(|c| (c.top, c.bottom));
-                    if let Some(c) = chrome
-                        && (c.left, c.right) != (p.left, p.right)
-                    {
-                        p.left = c.left;
-                        p.right = c.right;
+                    let (l, r) = chrome.map_or((0, 0), |c| (c.left, c.right));
+                    p.plugin_left = l;
+                    if r != p.right {
+                        p.right = r;
                         p.ext.reset_view();
                         p.hashes_valid = false;
                     }
@@ -1119,15 +1121,17 @@ impl Frames {
                 None => {
                     p.fixed_tb = None;
                     p.hint = None;
+                    p.plugin_left = 0;
                     new_key = None;
                 }
             }
         }
 
-        // Generic gutter, unless a plugin gave the side chrome.
-        if dirty && p.fixed_tb.is_none() {
-            let found = self.gutter(p.rect);
-            let width = found.map_or(0, |g| g.0);
+        // Generic gutter: a number column is left chrome, with or without
+        // a plugin. The plugin's own left chrome is a minimum.
+        if dirty || consult {
+            let found = self.gutter(p.rect).filter(|g| g.0 >= p.plugin_left);
+            let width = found.map_or(p.plugin_left, |g| g.0);
             if width == p.left {
                 p.gutter_cand = (width, 0);
             } else {
@@ -1136,7 +1140,10 @@ impl Frames {
                 } else {
                     (width, 1)
                 };
-                if p.ext.lines.is_empty() || p.gutter_cand.1 >= 2 {
+                // A number column is taken at once; its loss is believed
+                // the second time (a half-drawn screen has none).
+                if found.is_some() || p.ext.lines.is_empty() || p.gutter_cand.1 >= 2 {
+                    p.gutter_cand = (width, 0);
                     p.left = width;
                     p.ext.reset_view();
                     p.hashes_valid = false;
@@ -1188,8 +1195,10 @@ impl Frames {
         let (hint_oy, hint_ox) = match (p.fixed_tb, p.hint) {
             (Some((t, _)), Some(h)) => (h.row.map(|r| r - t as i64), h.col),
             (None, Some(h)) => (h.row.map(|r| r - p.ext.top as i64), h.col),
-            _ => (p.gutter_row, None),
+            _ => (None, None),
         };
+        // Numbers on screen are the better witness.
+        let hint_oy = p.gutter_row.or(hint_oy);
         let cur = (self.cursor.col, self.cursor.row);
         let obs = Obs {
             hashes: &p.hashes,
@@ -1201,6 +1210,7 @@ impl Frames {
                 .then(|| (cur.1 - rect.y) as usize),
             hint_oy,
             hint_ox,
+            side_pending: p.gutter_cand.1 > 0,
             fixed_tb: p.fixed_tb,
             now,
         };

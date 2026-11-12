@@ -452,6 +452,85 @@ fn splice_insert_and_delete() {
     assert_eq!(s.f.text(id, 3, 5), vec!["changed", "changed too"]);
 }
 
+#[test]
+fn diagonal_scroll() {
+    // Down half a page while the app re-centres sideways.
+    let mut seed = 7u64;
+    let d: Vec<String> = (0..80)
+        .map(|i| {
+            let text: String = (0..200)
+                .map(|_| {
+                    seed = seed
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
+                    (b'a' + ((seed >> 33) % 26) as u8) as char
+                })
+                .collect();
+            format!("{i:02}: {text}")
+        })
+        .collect();
+    let mut s = Sim::new();
+    let screen = |top: usize, dx: usize| {
+        let lines: Vec<String> = d[top..top + 20]
+            .iter()
+            .map(|l| l.chars().skip(dx).collect())
+            .collect();
+        let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        Grid::from_lines(COLS, &refs)
+    };
+    s.settle(&screen(0, 40));
+    let id = s.pane().id;
+    s.feed(&screen(0, 60), 300);
+    assert_eq!(s.pane().origin, [20, 0]);
+    let ev = s.feed(&screen(10, 35), 300);
+    assert!(
+        ev.contains(&FrameEvent::Scroll {
+            frame: id,
+            dx: -25,
+            dy: 10
+        }),
+        "{ev:?}"
+    );
+    assert_eq!(s.pane().origin, [-5, 10]);
+    s.feed(&screen(4, 40), 300);
+    assert_eq!(s.pane().origin, [0, 4]);
+}
+
+#[test]
+fn number_column_under_a_plugin() {
+    // The plugin gives top and bottom chrome; the numbers are still left
+    // chrome, and toggling them is not a horizontal scroll.
+    let d = doc(300);
+    let mut s = Sim::with(FrameConfig::default(), vec![Box::new(Fake)]);
+    let plain = |top: usize| view(&d[top..], 0, 20, &["FAKE a.txt x"]);
+    let nu = |top: usize| {
+        let mut lines: Vec<String> = (top..top + 20)
+            .map(|i| format!("{:>3} {}", i + 1, d[i]))
+            .collect();
+        lines.push("FAKE a.txt x".into());
+        let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        Grid::from_lines(COLS, &refs)
+    };
+    s.settle(&plain(0));
+    let id = s.pane().id;
+    s.feed(&nu(0), 300);
+    assert_eq!(
+        (s.pane().rect, s.pane().origin),
+        ([4, 0, COLS - 4, 20], [0, 0])
+    );
+    // A jump is placed by the numbers.
+    s.feed(&nu(120), 300);
+    assert_eq!(s.pane().origin, [0, 120]);
+    s.feed(&nu(0), 300);
+    // Numbers off: believed at the second screen.
+    s.feed(&plain(0), 300);
+    s.feed(&plain(1), 300);
+    assert_eq!((s.pane().rect, s.pane().origin), ([0, 0, COLS, 20], [0, 1]));
+    s.idle(300);
+    assert_eq!(s.f.text(id, 0, 21), d[..21].to_vec());
+    assert_eq!(s.f.text(id, 120, 140), d[120..140].to_vec());
+}
+
 fn numbered(doc: &[String], top: usize, rows: usize) -> Grid {
     let lines: Vec<String> = doc
         .iter()
