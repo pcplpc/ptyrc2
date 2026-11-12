@@ -446,6 +446,7 @@ impl Scene {
     pub fn drop_owner(&mut self, owner: OwnerId);   // keeps `persist` sprites
     pub fn list(&self) -> Vec<SpriteInfo>;
     pub fn tick(&mut self, now: Duration, surfaces: &dyn Surfaces);
+    pub fn tick_on(&mut self, now: Duration, base: &Grid, surfaces: &dyn Surfaces);
     pub fn next_wake(&self) -> Option<Duration>;
     pub fn compose(&self, base: &Grid, surfaces: &dyn Surfaces) -> Grid;
     pub fn register_effect(&mut self, name: &str, make: EffectFactory);
@@ -514,11 +515,7 @@ Sprite, as JSON (the wire form; serde on the core types):
   with the layer `front` or `back` when none is given.
 - `z`: order inside a layer.
 - `effect`: a native generator in place of `content`; it owns the sprite's
-  cells every tick. Built in: `confetti`. Plugins add more. An effect that
-  asks (`Effect::looks`) is given, before each render on a usable frame,
-  what the app shows under it (`Effect::look`, `Under`): the rows of the
-  frame's view and the cursor as a canvas cell. Exact when the canvas is
-  the view (no `size`, default anchor).
+  cells every tick. Built in: `confetti`. Plugins add more. See Effects.
 - A sprite belongs to the connection that added it and dies with it unless
   `persist`. `ttl_ms` bounds its life in any case.
 
@@ -535,6 +532,52 @@ ids; a text anchor on those rows only loses its held match.
 A finite animation and an effect start their clock when the sprite is
 first drawn: added on a frame that is not usable yet, or on a text that
 is not there yet, they wait. `ttl_ms` counts from the add in any case.
+
+### Effects
+
+```rust
+pub trait Effect: Send {
+    fn render(&mut self, t: Duration, canvas: &mut Canvas) -> bool;
+    fn looks(&self) -> Looks { Looks::No }        // No, Cells, Heat
+    fn look(&mut self, under: &Under) {}
+    fn tune(&mut self, params: &Value) -> Result<(), String>;
+    fn period(&self) -> Duration;                 // 50 ms
+}
+impl Under<'_> {
+    pub size: (u16, u16); pub cursor: Option<(u16, u16)>;
+    pub origin: (i64, i64);
+    pub fn cell(&self, x, y) -> Option<&Cell>;
+    pub fn ink(&self, x, y) -> bool;  pub fn inked(&self) -> Vec<bool>;
+    pub fn heat(&self, x, y) -> Option<Warmth>;   // class, still, activity
+}
+```
+
+- `Scene::tick_on` is `tick` with the app's grid: an effect that looks
+  (`Looks::Cells`) is shown, before each render on a usable frame, the
+  app's cells under its canvas. `Under` borrows the grid: nothing is
+  copied, nothing is read for an effect that does not look. `tick`
+  alone shows nothing.
+- Cells are those of the screen, a canvas cell each: a tab or a wide
+  glyph shifts nothing. `ink` is `Cell::has_ink`, true for both halves
+  of a wide glyph. A canvas cell outside the view of the frame (a
+  `size`, an anchor, a scroll) shows nothing.
+- `origin`: frame position of the canvas cell `(0, 0)`. When it changes
+  (the app scrolled under a canvas fixed in the view) the effect is
+  shown and rendered in the same tick, off its period: what it keeps
+  on frame rows moves with the text in the burst that scrolls.
+- `Looks::Heat`: also the heat of those cells (`Surfaces::heat`), read
+  again every 200 ms at most.
+- `tune`: new parameters for a running effect; its state is kept. An
+  effect that does not implement it refuses.
+- `Canvas::put_faded(x, y, text, style, opacity)`: a glyph with its
+  own opacity, multiplied by the sprite's `alpha`.
+
+`draw.update {id, effect: {name, params}}`: the running effect of that
+name is tuned (`bad-params` with the effect's words when it refuses,
+nothing changed); another name, or a sprite with a content, starts that
+effect in place: frame, anchor, layer and `size` are kept. `draw.ext`
+with `id` does the same when the extension draws an effect. `ptyrc
+draw effect --id SPRITE NAME [JSON]`.
 
 ### Layers
 
@@ -632,7 +675,8 @@ around the header row, function bar chrome; no learned chrome in the
 table. A preset segments only the whole screen; inside another app's
 pane it is detected and keyed, not split. First draw
 extensions: `shapes` (line, rect, circle, ellipse), `bigtext` (block
-letters), `sand`, `rain` (effects). A draw extension refuses a parameter
+letters), `sand`, `rain`, `snow` (effects, all three tuned in place;
+unknown parameters refused). A draw extension refuses a parameter
 of the wrong type.
 
 ## Protocol
@@ -681,11 +725,11 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `frame.get` | `frame` | `{"frame":info}` |
 | `frame.at` | `x`, `y`, or `name` | `{"frame":id,"pos":[x,y]}` |
 | `draw.put` | sprite | `{"id":n}` |
-| `draw.update` | `id`, patch | `{}` |
+| `draw.update` | `id`, patch; `effect`: tune the running effect, or start another | `{}` |
 | `draw.remove` | `id` | `{}` |
 | `draw.clear` | `all` | `{"removed":n}` |
 | `draw.list` | | `{"sprites":[{..., "screen":[x,y]\|null, "visible":bool, "covered":0..1}]}` |
-| `draw.ext` | `name`, `function`, `params`, sprite fields; with `id`: redraw that sprite in place (content replaced, the rest kept unless given) | `{"id":n}` |
+| `draw.ext` | `name`, `function`, `params`, sprite fields; with `id`: redraw that sprite in place (content or effect replaced, the rest kept unless given) | `{"id":n}` |
 | `draw.exts` | | `{"exts":[{"name","functions":[...]}],"effects":[...]}` |
 | `batch` | `calls`: `[{"method","params"}]` | `{"results":[{"result"} or {"error"},...]}`, applied in one repaint |
 | `subscribe` | `topics`: `screen`, `cursor`, `frames`, `idle`, `draw`, `input`, `size`, `exit` | `{}` |
@@ -736,6 +780,7 @@ ptyrc idle [-f FRAME]             score; status 0 when idle, 1 when not
 ptyrc draw text|ext|effect|exts|rm|ls|clear ...   (sprites persist)
       [--layer back|front|N] [--blend normal|tint] [-z N]
       draw ext --id SPRITE NAME FUNCTION [JSON]   redraw in place
+      draw effect --id SPRITE NAME [JSON]         tune in place
 ptyrc show                        live mirror of the remote screen
 ptyrc events [TOPIC...]           JSON events, one per line
 ptyrc debug overlay frames|heat|off ; ptyrc debug dump
@@ -800,15 +845,21 @@ sprites die with its connection, but for the bursts of a confetti round.
 | `sand` | `idle` | native effect `sand` (draw extension `sand`), one request; one `screen.wait {idle}` on the frame name, answered by the driver when a pane is idle (`--now`: at once), then looks every 0.5 s: when its frame is inactive and a usable pane of the same key covers half of it (a resize of a pane with little text), the sprite is moved there (`heir`). `--rate`; `--cursor`: the stream falls on the cursor's column |
 | `cat` | `largest` | one sprite in frame cells, back layer (`--front`); driven by the topics `idle`, `cursor`, `screen`, `frames`, no tick: it waits on the socket until its next step. It stands on a ledge (3x11 free cells over 5 cells of text at least, or the floor of the view), walks, sits, grooms; sleeps on `idle` (a looped animation, nothing sent); jumps when the cursor is within 7 columns and 2 rows, when `covered` > 0.2 or the line under it goes; `visible` false after a scroll: back into the view after 2 to 4 s |
 | `marks` | every pane, else `raw` | `PATTERN...`, `-e` regex, `-i`; one front `tint` per match in frame cells, a colour per pattern, on remembered rows too (`screen.find {known}`), 400 at most, nearest to the view first; looks again on `screen` and `frames` after 30 ms of silence (200 ms at most), finds in one batch, changes in another; topic `draw` drops what the driver removed; a display of the counts (in view, `/known`), `auto` top-right, front (`--no-hud`) |
-| `rain` | `raw` | native effect `rain` (draw extension `rain`), one request, back layer; `--rate` drops per second over 80 columns; a drop lands on a free cell over text with probability 0.45, on the cursor and the floor always; a column within 3 of a change gets 10 % of its rain, all of it after 10 s; a replaced frame is followed as `sand` does |
+| `rain` | `raw` | native effect `rain` (draw extension `rain`), one request, back layer; `--rate` drops per second over 80 columns; a drop lands on a free cell over text with probability 0.45, on the cursor and the floor always; a column whose least still cell (heat, within 3 columns) just changed gets 10 % of its rain, all of it after 10 s; a replaced frame is followed as `sand` does |
+| `snow` | `largest` | native effect `snow` (draw extension `snow`), one request, back layer; `--rate` flakes per second over 80 columns (14), `--wind` columns per second (0.6): every 6 to 15 s the app sends another wind, 0.2 to 2 times as strong, the other way one time in five (`draw.update {effect}`: tuned in place); a replaced frame is followed as `sand` does |
 
 Draw extension `sand`: effect `sand`. Grains are braille dots, 2 x 4 a
 cell, one step every 12 ms, a render every 48 ms.
 
-- Walls: the cells of the view that are not a space, seen through
+- Walls: the cells under the canvas with ink, seen through
   `Effect::look`. A cell that gets text loses its grains; one that loses
   its text lets them fall. A resize keeps the grains, top-left fixed;
   those outside are lost.
+- Scroll: grains are fixed on frame rows. When `Under.origin` moves the
+  pile moves with the text; rows of cells that leave the canvas are put
+  away, 1024 at most, the farthest forgotten first, and come back with
+  their text. A floor that left lets its pile fall.
+- Heat: a column costs 6 more as a spout for each of its hot cells.
 - Spout: one stream, from the topmost free cell of a column: the nearest
   to the middle that lands on text, away from the ends of the run it
   lands on. Kept while it stays so; moved when the pile reaches it.
@@ -818,12 +869,39 @@ cell, one step every 12 ms, a render every 48 ms.
   rolls two dots aside, and may stop on a one-dot drop; asleep, it
   topples only off a drop of three dots. A grain that moves wakes the
   three above it: avalanches.
+- A heavy stream (more than 1.2 grains a step, 100 a second) has a
+  reach `r`, the grains a step over 1.2, 8 at most: a held grain slides
+  up to `r` dots a step, stops `r` times less often, gives way sideways
+  through `r - 1` grains and wakes those it lands on. The slopes carry
+  what the spout pours: at 400 a second, 4000 grains in 10 s, no column
+  under the spout.
 - Colour: the stream goes around `colors`, `color_ms` (20000) from one
   to the next, in 16 shades: strata. A cell has one colour: the mean
   of its grains.
 - Params: `rate` (grains per second, 120; above 166 the stream widens),
   `cursor`, `colors`, `color_ms`, `walls` (rows standing for the app's
   until it is seen), `duration_ms`, `seed`.
+
+Draw extension `snow`: effect `snow`, a render every 80 ms.
+
+- Flakes: near (2.6 to 4.2 rows a second, `*` `+` `·` as they turn) or
+  far (40 %, 1.2 to 2 rows a second, `·` at half opacity); a sway of 1.1
+  columns; `wind`; out by a side, in by the other. Not drawn in the
+  blank between two words.
+- A ledge: a cell without ink, and none beside it, over ink, over the
+  blank between two inked cells, over a full cell of snow, or the last
+  of its column. A flake takes a ledge over text one time in four, any
+  other always, and adds two eighths there, or to a neighbour ledge
+  lower by more than two. Text holds 4 eighths (`▁` to `▄`); the floor
+  a full cell (`█`) and 4 more above.
+- The snow lies on frame rows: it scrolls with the text; rows within
+  2000 of the view are kept. Snow written over is gone; snow that lost
+  what held it falls again as flakes.
+- Thaw: a cell loses an eighth every 30 s on average. Melt: a full cell
+  in 1.5 s where its cell or the one that holds it is hot, and within 3
+  columns of the cursor on its row and the row above.
+- Params: `rate` (14), `wind` (0.6), `duration_ms`, `seed`; `tune`:
+  `rate`, `wind`, `duration_ms`.
 
 `scripts/demo-apps.sh [snake] [--check]`: the apps on a scrolling vim
 buffer. `scripts/demo-frames.sh [--check]`: a tmux session of two
