@@ -10,6 +10,7 @@ import threading
 import time
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 from ptyrc import Pilot
@@ -214,6 +215,16 @@ def test_flower_paint() -> None:
     assert all(len(set(map(len, frame))) == 1 for frame in flower.SWAY)
 
 
+def until(ok: Callable[[], bool], seconds: float) -> bool:
+    """Poll `ok` every 0.1 s, for at most `seconds`."""
+    deadline = time.monotonic() + seconds
+    while not ok():
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.1)
+    return True
+
+
 def settle(pilot: Pilot) -> None:
     """Wait for a pane: a new layout is a candidate for 1.5 s, and
     nothing is drawn on it before."""
@@ -253,6 +264,84 @@ def test_fish_flees_the_cursor() -> None:
     edge = fishes.Fish(x=0.2, y=0.0, vx=-5.0, color="cyan")
     fishes.swim(edge, 0.1, box, None, False, rng)
     assert edge.x == 0 and edge.vx == 5.0
+
+
+def test_fishes_tide() -> None:
+    rng = random.Random(1)
+    box = (0, 100, 80, 123)  # x in [0, 74], y in [100, 123]
+    # Three in view, three left out by a scroll.
+    cells = [(0, 100), (74, 123), (40, 110), (10, 99), (75, 110), (40, 0)]
+    due, going = fishes.tide(cells, [None] * 6, box, 0.0, rng)
+    assert going is None and due[:3] == [None] * 3
+    assert all(fishes.WAIT[0] <= d <= fishes.WAIT[1] for d in due[3:])
+    # They go one a call, in the order of their times, and come back.
+    order = sorted(range(3, 6), key=lambda i: due[i])
+    gone = []
+    for tick in range(60):
+        due, going = fishes.tide(cells, due, box, tick * 0.1, rng)
+        if going is not None:
+            gone.append(going)
+            cells[going] = (20, 110)
+    assert gone == order and due == [None] * 6
+    # The same time for all: still one a call.
+    due, going = fishes.tide([(0, 0)] * 3, [1.0] * 3, box, 2.0, rng)
+    assert due.count(None) == 1 and due[going] is None
+    # Back in view before its time: it carries on.
+    due, _ = fishes.tide([(10, 99)], [None], box, 0.0, rng)
+    assert fishes.tide([(10, 100)], due, box, 9.0, rng) == ([None], None)
+
+
+def test_fishes_entry() -> None:
+    rng = random.Random(2)
+    box = (10, 100, 30, 102)
+    # The only spot where the text hides a whole fish.
+    rows = ["  ab cd", "  ab cdefgh  ab", "x y z"]
+    assert {fishes.entry(rows, box, rng) for _ in range(20)} == {(15, 101)}
+    # No text: a side of the view.
+    spots = {fishes.entry(["", "", ""], box, rng) for _ in range(50)}
+    assert {x for x, _ in spots} == {10, 24} and {y for _, y in spots} <= {
+        100,
+        101,
+        102,
+    }
+
+
+def test_fishes_come_back_after_a_scroll(tmp_path: Path) -> None:
+    text = tmp_path / "long.txt"
+    text.write_text("".join(f"line {i}: the quick brown fox\n" for i in range(300)))
+    vim = ["/usr/bin/vim", "-u", "NONE", "-N", str(text)]
+    with Pilot.spawn(vim, size=(80, 24)) as pilot:
+        pilot.wait_for("line 1:")
+        settle(pilot)
+
+        def in_view() -> int:
+            # A sprite out of the view has a screen cell out of the pane.
+            pane = pilot.frame("largest")
+            return sum(
+                1
+                for s in pilot.sprites()
+                if s["screen"] and pane.to_frame(*s["screen"]) is not None
+            )
+
+        args = ["-s", pilot.session, "--seed", "5"]
+        status: list[int] = []
+        thread = threading.Thread(
+            target=lambda: status.append(fishes.main(args, seconds=15))
+        )
+        thread.start()
+        assert until(lambda: in_view() == 8, 5)
+        pilot.keys("ctrl+d", "ctrl+d")  # 22 rows down: most are left above
+        assert until(lambda: pilot.frame("largest").origin[1] >= 22, 2)
+        time.sleep(0.3)
+        # Left behind, not removed: they go later, one by one.
+        assert len(pilot.sprites()) == 8 and in_view() < 8
+        counts = []
+        assert until(lambda: counts.append(in_view()) or counts[-1] == 8, 9)
+        assert len(set(counts)) > 2, counts
+        sprites = pilot.sprites()
+        assert len(sprites) == 8 and all(s["layer"] < 0 for s in sprites)
+        thread.join()
+        assert status == [0]
 
 
 def test_sand(session: Pilot) -> None:

@@ -14,7 +14,7 @@ python -m ptyrc_apps.clock -s NAME
 | `confetti` | a native effect started with one call, behind the text; `--bursts N` at once at random offsets, each on a cold spot of the heatmap; persistent sprites: the app exits, the driver plays them; `--party`: a round every 3 s |
 | `clock` | automatic placement, the front layer, a sprite updated in place, a draw extension |
 | `flower` | a drawing tied to a word (`near=`), opened by the client, then animated by the driver |
-| `fishes` | sprites in frame coordinates: they scroll with the text; the cursor read each tick; one batch per tick |
+| `fishes` | sprites in frame coordinates: they scroll with the text; one scrolled out of the view goes after a few seconds and comes back behind the text; the cursor read each tick; one batch per tick |
 | `snake` | the screen read as a map: glyphs are walls; one sprite redrawn in place each step |
 | `sand` | `Frame.is_idle` to choose a pane; a native simulation from a draw extension, with the pane's text as walls |
 

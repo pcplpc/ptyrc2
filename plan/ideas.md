@@ -230,3 +230,6 @@ Gaps met while writing the apps; none fixed in the core.
   `--count` is `--size`; `--seconds`, `--seed`, `--rate` gone.
 - Built: no `--seconds` in any app. Tests stop an app with
   `main(argv, seconds=...)`; the demos kill the app processes.
+- Built: fishes, 8 by default. One left out of the view by a scroll
+  waits 2 to 5 s, then comes back where the text hides most of it, one
+  fish a tick at most; the jump after a `less` page down is gone.
