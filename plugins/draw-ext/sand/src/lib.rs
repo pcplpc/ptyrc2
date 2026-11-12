@@ -20,10 +20,18 @@
 //! its text lets them fall. A resize keeps the grains, top-left fixed;
 //! those outside are lost.
 //!
-//! Scroll: grains are fixed on the rows of the frame. When the app
-//! scrolls, the pile moves with the text; rows that leave the canvas are
-//! put away (`ATTIC` rows at most, the farthest forgotten first) and
-//! come back with their text. A floor that left lets the pile fall.
+//! Scroll: grains are fixed on the cells of the frame. When the app
+//! scrolls, the pile moves with the text; what leaves the canvas, by
+//! any side, is put away (`ATTIC` rows of `WIDE` cells at most, the
+//! farthest forgotten first) and comes back with its text. A floor that
+//! left lets the pile fall. Rows told moved (`shift`: a splice, an
+//! island merge) take their grains along.
+//!
+//! Out of sight: the world is the canvas and up to `MARGIN` rows above
+//! and below it that the frame remembers. Their text is a wall as on
+//! screen: grains fall past the bottom of the view onto the text under
+//! it, and the pile over the view falls in when its floor goes. The
+//! first row not remembered is a floor. Further rows are frozen.
 //!
 //! Heat: a column with cells that changed lately is a worse spout.
 //!
@@ -83,6 +91,10 @@ const FLOW: f64 = 1.2;
 const REACH: usize = 8;
 /// Rows of cells kept out of the canvas, at most.
 const ATTIC: usize = 1024;
+/// Cells of a row kept, at most.
+const WIDE: usize = 1024;
+/// Remembered rows simulated on each side of the canvas, at most.
+const MARGIN: usize = 16;
 
 #[derive(Deserialize, Clone)]
 #[serde(default, deny_unknown_fields)]
@@ -159,6 +171,54 @@ fn shades(colors: &[ColorSpec]) -> (Vec<Color>, usize) {
     (out, per)
 }
 
+/// The grains of one frame row out of the world: `w` cells from the
+/// frame column `x0`, `DH` rows of dots.
+struct Strip {
+    x0: i64,
+    w: usize,
+    dots: Vec<Dot>,
+}
+
+impl Strip {
+    fn new(x0: i64, w: usize) -> Strip {
+        Strip {
+            x0,
+            w,
+            dots: vec![Dot::Free; w * DW * DH],
+        }
+    }
+
+    /// Grow to hold the cells `x0..x0 + w`; `WIDE` cells are kept, those
+    /// around the new ones.
+    fn cover(&mut self, x0: i64, w: usize) {
+        let cap = WIDE.max(w) as i64;
+        let lo = self.x0.min(x0).max(x0 - (cap - w as i64) / 2);
+        let hi = (self.x0 + self.w as i64).max(x0 + w as i64).min(lo + cap);
+        if (lo, hi) == (self.x0, self.x0 + self.w as i64) {
+            return;
+        }
+        let mut grown = Strip::new(lo, (hi - lo) as usize);
+        let from = lo.max(self.x0);
+        let n = (hi.min(self.x0 + self.w as i64) - from).max(0) as usize * DW;
+        for dy in 0..DH {
+            let src = dy * self.w * DW + (from - self.x0) as usize * DW;
+            let dst = dy * grown.w * DW + (from - lo) as usize * DW;
+            grown.dots[dst..dst + n].copy_from_slice(&self.dots[src..src + n]);
+        }
+        *self = grown;
+    }
+
+    /// Dot index of the frame column `x`, dot `k`, dot row `dy`.
+    fn index(&self, x: i64, k: usize, dy: usize) -> Option<usize> {
+        let cx = x - self.x0;
+        (cx >= 0 && cx < self.w as i64).then(|| dy * self.w * DW + cx as usize * DW + k)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.dots.iter().all(|d| *d == Dot::Free)
+    }
+}
+
 /// Where the stream starts: a cell, and whether text lies under it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct Spout {
@@ -173,13 +233,22 @@ pub struct Sand {
     rng: Rng,
     shades: Vec<Color>,
     per: usize,
-    /// Canvas, in cells.
+    /// The world, in cells: the canvas, `top` rows above it, the rows
+    /// below it.
     w: usize,
     h: usize,
+    top: usize,
+    /// Rows of the canvas.
+    ch: usize,
+    /// Frame position of the world cell `(0, 0)`.
+    pos: (i64, i64),
     /// `w * DW` by `h * DH`.
     dots: Vec<Dot>,
-    /// Foreground of the app, `seen_w` cells a row, and whether it
-    /// changed since the walls were set.
+    /// Remembered rows above and below the canvas, at the last look.
+    above: usize,
+    below: usize,
+    /// Foreground of the app over the world, `seen_w` cells a row, and
+    /// whether it changed since the walls were set.
     seen: Vec<bool>,
     seen_w: usize,
     stale: bool,
@@ -187,9 +256,8 @@ pub struct Sand {
     hot: Vec<u16>,
     /// Frame position of the canvas cell `(0, 0)`.
     origin: Option<(i64, i64)>,
-    /// Rows of cells out of the canvas, by frame row: the frame column
-    /// of their first cell, their dots.
-    attic: BTreeMap<i64, (i64, Vec<Dot>)>,
+    /// Grains out of the world, by frame row.
+    attic: BTreeMap<i64, Strip>,
     cursor: Option<(u16, u16)>,
     spout: Option<Spout>,
     choked: u32,
@@ -232,6 +300,11 @@ impl Sand {
             per,
             w: 0,
             h: 0,
+            top: 0,
+            ch: 0,
+            pos: (0, 0),
+            above: 0,
+            below: 0,
             dots: Vec::new(),
             stale: true,
             cursor: None,
@@ -268,53 +341,58 @@ impl Sand {
             .count()
     }
 
-    /// A new canvas size: the grains stay where they are.
-    fn resize(&mut self, w: usize, h: usize) {
-        let mut dots = vec![Dot::Free; w * DW * h * DH];
-        for y in 0..(h.min(self.h) * DH) {
-            for x in 0..(w.min(self.w) * DW) {
-                if let grain @ Dot::Grain(..) = self.at(x, y) {
-                    dots[y * w * DW + x] = grain;
+    /// Put the grains of the world away.
+    fn stash(&mut self) {
+        let w = self.w * DW;
+        for cy in 0..self.h {
+            let rows = &self.dots[cy * DH * w..(cy + 1) * DH * w];
+            let y = self.pos.1 + cy as i64;
+            if !rows.iter().any(|d| matches!(d, Dot::Grain(..))) && !self.attic.contains_key(&y) {
+                continue;
+            }
+            let strip = self
+                .attic
+                .entry(y)
+                .or_insert_with(|| Strip::new(self.pos.0, self.w));
+            strip.cover(self.pos.0, self.w);
+            for (i, dot) in rows.iter().enumerate() {
+                let x = self.pos.0 + ((i % w) / DW) as i64;
+                if let Some(at) = strip.index(x, i % DW, i / w) {
+                    strip.dots[at] = if *dot == Dot::Wall { Dot::Free } else { *dot };
                 }
             }
-        }
-        (self.w, self.h, self.dots) = (w, h, dots);
-        self.stale = true;
-    }
-
-    /// The canvas shows other rows of the frame: the pile goes with
-    /// them. Rows that leave are put away, rows that come are taken out.
-    fn scroll(&mut self, from: (i64, i64), to: (i64, i64)) {
-        let (w, h) = (self.w * DW, self.h);
-        for cy in 0..h {
-            let strip: Vec<Dot> = self.dots[cy * DH * w..(cy + 1) * DH * w]
-                .iter()
-                .map(|d| if *d == Dot::Wall { Dot::Free } else { *d })
-                .collect();
-            if strip.iter().any(|d| *d != Dot::Free) {
-                self.attic.insert(from.1 + cy as i64, (from.0, strip));
+            if strip.is_empty() {
+                self.attic.remove(&y);
             }
         }
         self.dots.fill(Dot::Free);
-        for cy in 0..h {
-            let Some((x0, strip)) = self.attic.remove(&(to.1 + cy as i64)) else {
+    }
+
+    /// Take out the grains put away on the cells of the world.
+    fn fetch(&mut self) {
+        let w = self.w * DW;
+        for cy in 0..self.h {
+            let y = self.pos.1 + cy as i64;
+            let Some(strip) = self.attic.get_mut(&y) else {
                 continue;
             };
-            let old_w = strip.len() / DH;
-            let shift = (x0 - to.0) * DW as i64;
-            for (i, dot) in strip.into_iter().enumerate() {
-                let x = (i % old_w) as i64 + shift;
-                if dot != Dot::Free && x >= 0 && x < w as i64 {
-                    self.dots[(cy * DH + i / old_w) * w + x as usize] = dot;
+            for i in 0..DH * w {
+                let x = self.pos.0 + ((i % w) / DW) as i64;
+                if let Some(at) = strip.index(x, i % DW, i / w) {
+                    self.dots[cy * DH * w + i] = std::mem::replace(&mut strip.dots[at], Dot::Free);
                 }
             }
+            if strip.is_empty() {
+                self.attic.remove(&y);
+            }
         }
+        let mid = self.pos.1 + self.h as i64 / 2;
         while self.attic.len() > ATTIC {
             let (first, last) = (
                 *self.attic.keys().next().unwrap(),
                 *self.attic.keys().next_back().unwrap(),
             );
-            let far = if to.1 - first > last - to.1 {
+            let far = if mid - first > last - mid {
                 first
             } else {
                 last
@@ -322,6 +400,36 @@ impl Sand {
             self.attic.remove(&far);
         }
         self.stale = true;
+    }
+
+    /// The world is now `w` by `h` cells at the frame position `pos`:
+    /// the grains stay on their cells of the frame. `keep`: those left
+    /// outside are put away; otherwise they are lost.
+    fn place(&mut self, pos: (i64, i64), w: usize, h: usize, keep: bool) {
+        let old = (self.pos, self.w, self.h);
+        self.stash();
+        if !keep {
+            let ((x0, y0), ow, oh) = old;
+            for y in y0..y0 + oh as i64 {
+                let Some(strip) = self.attic.get_mut(&y) else {
+                    continue;
+                };
+                for (i, dot) in strip.dots.iter_mut().enumerate() {
+                    let x = strip.x0 + ((i % (strip.w * DW)) / DW) as i64;
+                    let inside =
+                        x >= pos.0 && x < pos.0 + w as i64 && y >= pos.1 && y < pos.1 + h as i64;
+                    if x >= x0 && x < x0 + ow as i64 && !inside {
+                        *dot = Dot::Free;
+                    }
+                }
+                if strip.is_empty() {
+                    self.attic.remove(&y);
+                }
+            }
+        }
+        (self.pos, self.w, self.h) = (pos, w, h);
+        self.dots = vec![Dot::Free; w * DW * h * DH];
+        self.fetch();
     }
 
     /// Set the walls from what was seen: new text eats the grains under
@@ -351,9 +459,9 @@ impl Sand {
         self.stale = false;
     }
 
-    /// The spout of column `x`: its topmost free cell.
+    /// The spout of column `x`: its topmost free cell of the canvas.
     fn spout_of(&self, x: usize) -> Option<Spout> {
-        let y = (0..self.h).find(|y| !self.wall(x, *y))?;
+        let y = (self.top..self.top + self.ch).find(|y| !self.wall(x, *y))?;
         let on_text = (y..self.h).any(|y| self.wall(x, y));
         Some(Spout { x, y, on_text })
     }
@@ -371,7 +479,7 @@ impl Sand {
             .filter_map(|x| self.spout_of(x))
             .filter(|s| self.open(s))
             .min_by_key(|s| {
-                let mut cost = (2 * s.x as i64 + 1 - w).abs() + 8 * s.y as i64;
+                let mut cost = (2 * s.x as i64 + 1 - w).abs() + 8 * (s.y - self.top) as i64;
                 cost += 6 * self.hot.get(s.x).copied().unwrap_or(0) as i64;
                 match (s.y..self.h).find(|y| self.wall(s.x, *y)) {
                     None => cost += 2 * w,
@@ -606,9 +714,9 @@ impl Sand {
 
     fn draw(&self, canvas: &mut Canvas) {
         let mut text = [0u8; 4];
-        for cy in 0..self.h {
+        for cy in 0..self.ch {
             for cx in 0..self.w {
-                if let Some((glyph, color)) = self.glyph(cx, cy) {
+                if let Some((glyph, color)) = self.glyph(cx, self.top + cy) {
                     let style = StyleSpec::fg(color);
                     canvas.put(cx as i32, cy as i32, glyph.encode_utf8(&mut text), &style);
                 }
@@ -627,8 +735,14 @@ impl Effect for Sand {
         if w == 0 || h == 0 || w * h > MAX_CELLS {
             return true;
         }
-        if (w, h) != (self.w, self.h) {
-            self.resize(w, h);
+        let origin = self.origin.unwrap_or((0, 0));
+        let pos = (origin.0, origin.1 - self.above as i64);
+        let world = self.above + h + self.below;
+        if (pos, w, world, self.above, h) != (self.pos, self.w, self.h, self.top, self.ch) {
+            // A resize eats the sand it covers; a scroll keeps it.
+            let resized = self.ch > 0 && (w, h) != (self.w, self.ch);
+            (self.top, self.ch) = (self.above, h);
+            self.place(pos, w, world, !resized);
         }
         if self.stale {
             self.build();
@@ -656,8 +770,18 @@ impl Effect for Sand {
     }
 
     fn look(&mut self, under: &Under) {
-        let seen = under.inked();
         let seen_w = under.size.0 as usize;
+        let beyond = |dir: i64, start: i64| -> Vec<Vec<bool>> {
+            (0..MARGIN as i64)
+                .map_while(|k| under.row(start + dir * k))
+                .collect()
+        };
+        let above = beyond(-1, -1);
+        let below = beyond(1, under.size.1 as i64);
+        (self.above, self.below) = (above.len(), below.len());
+        let mut seen: Vec<bool> = above.into_iter().rev().flatten().collect();
+        seen.extend(under.inked());
+        seen.extend(below.into_iter().flatten());
         if (seen_w, &seen) != (self.seen_w, &self.seen) {
             (self.seen_w, self.seen) = (seen_w, seen);
             self.stale = true;
@@ -670,13 +794,18 @@ impl Effect for Sand {
                     .count() as u16
             })
             .collect();
-        if let Some(from) = self.origin
-            && from != under.origin
-            && self.w > 0
-        {
-            self.scroll(from, under.origin);
-        }
         self.origin = Some(under.origin);
+    }
+
+    fn shift(&mut self, from: i64, to: i64, dy: i64) {
+        self.stash();
+        let moved: Vec<i64> = self.attic.range(from..=to).map(|(y, _)| *y).collect();
+        let strips: Vec<(i64, Strip)> = moved
+            .into_iter()
+            .filter_map(|y| Some((y + dy, self.attic.remove(&y)?)))
+            .collect();
+        self.attic.extend(strips);
+        self.fetch();
     }
 
     fn tune(&mut self, params: &serde_json::Value) -> Result<(), String> {
@@ -695,8 +824,8 @@ impl Effect for Sand {
                     *shade = (*shade as usize % n) as u8;
                 }
             }
-            for (_, strip) in self.attic.values_mut() {
-                for dot in strip {
+            for strip in self.attic.values_mut() {
+                for dot in &mut strip.dots {
                     if let Dot::Grain(shade, _) = dot {
                         *shade = (*shade as usize % n) as u8;
                     }
