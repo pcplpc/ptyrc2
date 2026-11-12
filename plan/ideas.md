@@ -127,10 +127,9 @@ Built: see "Heatmap" in `design.md`. Left:
 - A jump fed in two bursts and caught by a hint: the first burst's rows
   may have been remembered a few rows off; they are rewritten when shown
   again. Forget what was committed since the last agreeing hint.
-- `frames.update` at 200x60: 200 µs when every row changed, 80 µs when
-  nothing did. `Screen::scan` is 140 µs and 45 µs of these, the two
-  heatmaps (raw and pane) 35 µs in both; the trackers 25 µs. Hash rows
-  before cells in the scan; update heat lazily, on read or on a tick.
+- `frames.update` at 200x60, after row stamps and lazy heat: 0.5 µs
+  when nothing changed, 17 µs for one row (trackers and segmentation),
+  500 µs for a full repaint (trackers 270, scan 120, heat 111 per map).
 - An empty main-screen frame stays inactive behind a full-screen app
   started at once (`ptyrc run less file`).
 - Preset detection on a one-row change waits up to 1 s. A preset whose

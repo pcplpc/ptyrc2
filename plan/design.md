@@ -216,6 +216,10 @@ find (literal or regex), cell styles, cursor and cursor trail (last 256
 `(time, col, row)` samples). Usable 250 ms after a resize or an alt-screen
 switch, immediately otherwise.
 
+`Grid::row_stamp(row)` changes at every write to the row; a clone is
+another grid. `Screen::scan` reads only rows whose stamp changed, then
+compares cell hashes: a write that changes nothing is still no change.
+
 ### Extended frame
 
 A sparse buffer of lines addressed by `i64` frame rows, each line a run of
@@ -381,6 +385,12 @@ computed at the time of the request: time passes without a tick.
 `debug overlay heat`: red for hot (brighter when busier), light blue for
 static text, green for free, violet for a panel; the last three brighten
 until the cell has been still for 10 s.
+
+The heat is lazy. A row is brought up to date when the screen changed on
+it; otherwise it is read as it would stand at the asked time (decay
+composes). An update or a tick without a visible change costs nothing
+per cell. The backdrop counts are kept per row. A pane that missed a
+scan, or whose rect moved, is read whole again.
 
 ### Placement
 
@@ -770,7 +780,9 @@ windows under the driver, one drawing per pane, sand in the idle one.
   is compared, text and styles, with the driver's model of the host.
 - `scripts/e2e-heat.sh`: heat classes and idle on a shell, vim and htop.
 - `scripts/bench.sh`: throughput and key-echo latency, bare, transparent,
-  engine, engine without presets, engine with sprites.
+  engine, engine without presets, engine with sprites. Then one
+  `Frames::update` at 200x60 (scan, heat, update, tick);
+  `BENCH_ONLY=frames` for it alone.
 
 - Rust unit tests per crate, `cargo test --workspace`.
 - `ptyrc-vt`: the repair property above; recorded streams of real programs.
