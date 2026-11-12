@@ -325,9 +325,8 @@ fn frame_text(engine: &ScreenEngine, params: Value) -> Res {
     // around the view.
     const MAX: i64 = 100_000;
     let (lo, hi) = (info.extent[0], info.extent[1]);
-    let y0 = p
-        .y0
-        .unwrap_or_else(|| lo.max(info.origin[1].saturating_sub(MAX / 2)));
+    let y0 =
+        p.y0.unwrap_or_else(|| lo.max(info.origin[1].saturating_sub(MAX / 2)));
     let y1 = p.y1.unwrap_or_else(|| (hi + 1).min(y0.saturating_add(MAX)));
     let y1 = y1.max(y0);
     if y1.saturating_sub(y0) > MAX {

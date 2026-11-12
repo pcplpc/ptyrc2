@@ -1656,6 +1656,34 @@ fn a_pager_jump_is_not_a_scroll() {
 }
 
 #[test]
+fn a_clear_and_its_repaint_in_two_bursts() {
+    // The clear comes alone; the repaint that follows is fed by reverse
+    // indexes, fewer than a screen: not a scroll, the rows are looked up.
+    let mut p = Pager::open(doc(300), 20, false);
+    let id = p.s.pane().id;
+    p.down(19);
+    p.down(19);
+    p.s.idle(300);
+    p.step("\r\x1b[K\x1b[H\x1b[J");
+    assert!(p.origin() >= ext::ISLAND_GAP);
+    let mut out = String::new();
+    for i in (0..19).rev() {
+        out += &format!("\x1b[H\x1bM{}\r\n", p.doc[i]);
+    }
+    out += "\x1b[20;1H\r\x1b[K:\x1b[K";
+    p.vt.feed(out.as_bytes());
+    let events = p.vt.take_events();
+    let grid = p.vt.grid().clone();
+    p.s.feed_ev(&grid, 5, &events);
+    assert_eq!((p.s.pane().id, p.origin()), (id, 0));
+    p.top = 0;
+    p.down(19);
+    assert_eq!(p.origin(), 19);
+    p.s.idle(300);
+    assert_eq!(p.s.pane().extent, [0, 56]);
+}
+
+#[test]
 fn a_status_row_places_a_pager_jump() {
     // `line N` in a standout prompt under the cursor: rows are absolute.
     let mut p = Pager::open(doc(300), 20, true);

@@ -444,6 +444,36 @@ impl Ext {
         }
     }
 
+    /// First rows on an island that holds nothing yet (the pane was wiped,
+    /// then repainted): when they are remembered elsewhere the view is
+    /// there, and the island is given back.
+    fn rejoin(&mut self, o: &Obs) -> bool {
+        let Island { lo, hi, .. } = self.islands[self.cur];
+        if self.islands.len() < 2 || self.lines.range(lo..=hi).any(|(_, s)| s.hash != BLANK) {
+            return false;
+        }
+        let h = o.hashes.len();
+        let (a, b) = self.band(h);
+        let nb = o.hashes[a..b].iter().filter(|x| **x != BLANK).count();
+        let Some((oy, votes)) = self.lookup(o.hashes, None) else {
+            return false;
+        };
+        if votes < need(nb, 50, 3) {
+            return false;
+        }
+        let keys: Vec<i64> = self.lines.range(lo..=hi).map(|(k, _)| *k).collect();
+        for k in keys {
+            self.remove_line(k);
+        }
+        self.islands.remove(self.cur);
+        self.cur = 0;
+        self.oy = oy;
+        self.enter_island(h);
+        self.rows = (0..h).map(|i| self.fresh(o, i)).collect();
+        self.mark_known(a, b);
+        true
+    }
+
     /// Attach to a screen again: find the origin in the buffer.
     pub fn reattach(&mut self, o: &Obs) {
         self.rows.clear();
@@ -480,6 +510,9 @@ impl Ext {
         }
         if self.rows.len() != h {
             self.rows = (0..h).map(|i| self.fresh(o, i)).collect();
+            if self.rejoin(o) {
+                return Outcome::Jump;
+            }
             self.hint(o, true, 0);
             return Outcome::Edit;
         }
@@ -623,6 +656,9 @@ impl Ext {
             // The pane was wiped: what was there is kept, elsewhere.
             self.island();
             self.rows = (0..h).map(|i| self.fresh(o, i)).collect();
+            return Outcome::Jump;
+        }
+        if prev_nb <= 1 && nb >= 2 && self.rejoin(o) {
             return Outcome::Jump;
         }
         // A jump replaces what was there. Lines added to a pane that had

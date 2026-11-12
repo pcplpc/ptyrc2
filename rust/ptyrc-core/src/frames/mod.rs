@@ -164,6 +164,9 @@ struct Pane {
     key: Option<String>,
     support: Option<usize>,
     support_at: Option<Duration>,
+    /// The screen was cleared at this time: what is fed right after is a
+    /// repaint, not a scroll.
+    cleared: Option<Duration>,
     /// Last answer of `detect`, and when it was asked.
     found: Option<usize>,
     found_at: Option<Duration>,
@@ -288,6 +291,9 @@ const CHURN: Duration = Duration::from_secs(3);
 /// after the last time. A change of two rows or more, of the title or of
 /// the layout asks at once.
 const DETECT_EVERY: Duration = Duration::from_secs(1);
+
+/// A repaint that follows a clear may come in several bursts, this long.
+const REPAINT: Duration = Duration::from_millis(100);
 
 /// How long a preset outlives its last detection.
 const SUPPORT_HOLD: Duration = Duration::from_secs(4);
@@ -1003,6 +1009,7 @@ impl Frames {
                 key: None,
                 support: None,
                 support_at: None,
+                cleared: None,
                 found: None,
                 found_at: None,
                 suspended: false,
@@ -1493,6 +1500,9 @@ impl Frames {
                 }
             }
         }
+        if cleared {
+            p.cleared = Some(now);
+        }
         let (hint_oy, hint_ox) = match (p.fixed_tb, p.hint) {
             (Some((t, _)), Some(h)) => (h.row.map(|r| r - t as i64), h.col),
             (None, Some(h)) => (h.row.map(|r| r - p.ext.top as i64), h.col),
@@ -1513,7 +1523,9 @@ impl Frames {
             width: b - a,
             seed,
             seed_real,
-            seed_tape: !cleared && travel == seed.abs() && seed.abs() < room,
+            seed_tape: p.cleared.is_none_or(|t| now >= t + REPAINT)
+                && travel == seed.abs()
+                && seed.abs() < room,
             cursor_row: rect
                 .contains(cur.0, cur.1)
                 .then(|| (cur.1 - rect.y) as usize),
