@@ -1,0 +1,16 @@
+[0;1;32muser@host [0;1;34m/srv/demo/docs/[0;1mapi  [0m[0m
+[0;1;91m [0;1;94massets  [0m [0;1;7;94m api                       1 [0m [0;7m index.md                               [0m[0m
+[0;1;7;94m docs    [0m [0;1;91m [0;1;94mguide                     1 [0m                                         [0m
+[0;1;91m [0;1;94mempty   [0m [0;1;91m [0mnote-1.md               7 B                                          [0m
+[0;1;91m [0;1;94msrc     [0m [0;1;91m [0mnote-2.md               7 B                                          [0m
+[0;1;91m [0mREAD~.md [0;1;91m [0mnote-3.md               7 B                                          [0m
+          [0;1;91m [0mnote-4.md               7 B                                          [0m
+          [0;1;91m [0mnote-5.md               7 B                                          [0m
+          [0;1;91m [0mnote-6.md               7 B                                          [0m
+          [0;1;91m [0mnote-7.md               7 B                                          [0m
+          [0;1;91m [0mnote-8.md               7 B                                          [0m
+          [0;1;91m [0mnote-9.md               7 B                                          [0m
+          [0;1;91m [0mnote-10.md              8 B                                          [0m
+          [0;1;91m [0mnote-11.md              8 B                                          [0m
+          [0;1;91m [0mnote-12.md              8 B                                          [0m
+[0;36mdrwxr-xr-x[0m 2 user user 1 2026-11-12 18:41         311B sum, 166G free  1/42  Top[0m

@@ -243,9 +243,23 @@ a_ranger() {
     sleep 3
     same_text ranger
     check "ranger: panes found, usable" 'len(P) >= 1 and all(f["usable"] for f in P)'
-    known "ranger: the three columns are three panes (no border, no backdrop)" 'len(P) >= 3'
+    check "ranger: the three columns are three panes, title and status rows chrome" \
+        'len(P) == 3 and all(f["support"] == "ranger" and f["rect"][1] == 1 and f["rect"][3] == H - 2 for f in P) and [f["rect"] for f in C] == [[0, 0, W, 1], [0, H - 1, W, 1]]'
+    check "ranger: the main column is keyed by its directory" \
+        '[f["key"] for f in P] == [None, "ranger:/usr/share/doc", None]'
+    local main
+    main=$(frames_json | python3 -c 'import json, sys; print(next(f["id"] for f in json.load(sys.stdin)["frames"] if f["key"]))')
     e2e_keys down; quiet; e2e_keys down; quiet; e2e_keys up; quiet
     same_text ranger
+    e2e_keys pagedown; quiet 1
+    check "ranger: the main column scrolls in its frame" \
+        "P[1][\"id\"] == $main and P[1][\"origin\"][1] > 0 and P[1][\"usable\"]"
+    e2e_keys right; quiet 2.5
+    check "ranger: another directory, another frame" \
+        "len(P) >= 2 and all(f[\"id\"] != $main for f in P) and any((f[\"key\"] or \"\").startswith(\"ranger:/usr/share/doc/\") for f in P)"
+    e2e_keys left; quiet 2.5
+    check "ranger: back, the frame of the directory is found again" \
+        "len(P) == 3 and P[1][\"id\"] == $main and P[1][\"origin\"][1] > 0"
     steady ranger 2
     sprite ranger
     e2e_keys q
