@@ -9,7 +9,8 @@
 # check; exit status 1 if a check failed.
 #
 #   scripts/e2e-tuis.sh [APP...]     default: all
-#   apps: htop less man tmux ranger glances opencode
+#   apps: htop less man tmux ranger nested glances opencode
+#   nested: htop and ranger in the panes of a tmux
 #
 # opencode is only opened, typed in and closed: nothing is submitted.
 
@@ -266,6 +267,52 @@ a_ranger() {
     gone ranger
 }
 
+# Presets inside the panes of another app: htop left, ranger top right,
+# a shell under it.
+a_nested() {
+    have tmux && have htop && have ranger || { echo "SKIP  nested"; return; }
+    begin nested tmux -L "$INNER" -f /dev/null new-session -s in htop || return
+    sleep 1
+    tmux -L "$INNER" split-window -h ranger --clean /usr/share/doc
+    sleep 1
+    tmux -L "$INNER" split-window -v
+    sleep 4
+    same_text nested
+    local hw=$(( ${SIZE%x*} / 2 ))
+    check "nested: htop in a tmux pane is split, keys composed" \
+        "[f[\"key\"] for f in P if f[\"support\"] == \"htop\"] == [\"tmux:in:0/htop:meters\", \"tmux:in:0/htop:processes\"] and all(f[\"rect\"][0] == 0 and f[\"rect\"][2] == $hw for f in P if f[\"support\"] == \"htop\")"
+    check "nested: ranger in a tmux pane is split, the main column keyed" \
+        "[f[\"key\"] for f in P if f[\"support\"] == \"ranger\" and f[\"key\"] != \"tmux:in:0\"] == [\"tmux:in:0/ranger:/usr/share/doc\"] and all(f[\"rect\"][0] > $hw for f in P if f[\"support\"] == \"ranger\")"
+    check "nested: the shell is a pane of tmux" \
+        'P[-1]["support"] is None and P[-1]["key"] == "tmux:in:0"'
+    check "nested: panes usable" 'all(f["usable"] for f in P)'
+    local ids
+    ids=$(frames_json | python3 -c '
+import json, sys
+print(sorted(f["id"] for f in json.load(sys.stdin)["frames"]
+             if f["state"] != "inactive" and f["support"] == "htop"))')
+    steady nested 5
+    check "nested: htop keeps its frames while it refreshes" \
+        "sorted(f[\"id\"] for f in P if f[\"support\"] == \"htop\") == $ids"
+    # ranger has the focus of the second pane: walk its list.
+    tmux -L "$INNER" select-pane -t 1
+    local main
+    main=$(frames_json | python3 -c '
+import json, sys
+print(next(f["id"] for f in json.load(sys.stdin)["frames"]
+           if f["state"] != "inactive" and (f["key"] or "").endswith("ranger:/usr/share/doc")))')
+    local i; for i in $(seq 30); do e2e_keys j; done; sleep 2.5
+    same_text nested
+    check "nested: the main column of ranger scrolls in its frame" \
+        "any(f[\"id\"] == $main and f[\"origin\"][1] > 0 for f in P)"
+    check "nested: the preview of ranger is a monitor: the view stays at its origin" \
+        "all(f[\"origin\"][1] < 1000 for f in P if f[\"support\"] == \"ranger\")"
+    sprite nested
+    sprite nested -f largest --layer front --auto bottom-right
+    tmux -L "$INNER" kill-server
+    gone nested
+}
+
 a_glances() {
     have glances || { echo "SKIP  glances"; return; }
     begin glances glances || return
@@ -324,11 +371,11 @@ a_opencode() {
     gone opencode
 }
 
-[ $# -eq 0 ] && set -- htop less man tmux ranger glances opencode
+[ $# -eq 0 ] && set -- htop less man tmux ranger nested glances opencode
 for app in "$@"; do
     case $app in
-        htop | less | man | tmux | ranger | glances | opencode) "a_$app" ;;
-        *) echo "e2e-tuis: no such app: $app (htop less man tmux ranger glances opencode)" >&2; exit 2 ;;
+        htop | less | man | tmux | ranger | nested | glances | opencode) "a_$app" ;;
+        *) echo "e2e-tuis: no such app: $app (htop less man tmux ranger nested glances opencode)" >&2; exit 2 ;;
     esac
     e2e_stop
 done
