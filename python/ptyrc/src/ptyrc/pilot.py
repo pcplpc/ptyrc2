@@ -95,6 +95,7 @@ def sprite_spec(
     ignore_case: bool = False,
     side: str = "right",
     gap: int | None = None,
+    slide: bool = True,
     auto: str | bool | None = None,
     cursor: tuple[int, int] | None = None,
     style: dict[str, Any] | None = None,
@@ -120,7 +121,8 @@ def sprite_spec(
     - `at=(x, y)` with `space`: `"view"` is fixed on the pane (negative
       counts from the right and bottom), `"frame"` moves with scrolling;
     - `near="word"`: next to a text match (`side`, `gap`, `nth`, `regex`,
-      `ignore_case`), following it;
+      `ignore_case`), following it; it slides along the match to stay
+      whole in the view unless `slide=False`;
     - `auto="top-right"` (or True): a quiet spot chosen by the driver;
     - `cursor=(dx, dy)`: follows the cursor.
 
@@ -165,6 +167,8 @@ def sprite_spec(
         anchor: dict[str, Any] = {"text": near, "side": side}
         if gap is not None:
             anchor["gap"] = gap
+        if not slide:
+            anchor["slide"] = False
         if ignore_case:
             anchor["ignore_case"] = True
         if nth:
@@ -244,8 +248,15 @@ class Sprite:
         self.update(anchor={"at": [x, y], "space": space})
 
     def info(self) -> dict[str, Any] | None:
-        """Its entry in `draw.list`; `screen` is where it shows, or None."""
+        """Its entry in `draw.list`. `screen`: its top-left cell, None
+        while hidden; `visible`: some of it is in the view; `covered`:
+        share of a back sprite under the app's text."""
         return next((s for s in self._pilot.sprites() if s["id"] == self.id), None)
+
+    @property
+    def visible(self) -> bool:
+        """Some of it is in the view of a usable frame. Asks the driver."""
+        return bool((self.info() or {}).get("visible"))
 
     def remove(self) -> None:
         """Remove it; fine if it is already gone."""

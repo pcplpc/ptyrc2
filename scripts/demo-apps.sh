@@ -35,12 +35,12 @@ if [ "${1:-}" != --check ]; then
     exit 0
 fi
 
-shown() { demo_json draw ls "sum(1 for s in d['sprites'] if s['screen'])"; }
+shown() { demo_json draw ls "sum(1 for s in d['sprites'] if s['visible'])"; }
 # The flower's bold word: a tint in frame coordinates.
 flower_row() { demo_json draw ls "[s['screen'][1] for s in d['sprites'] if s['blend'] == 'tint'][0]"; }
-flower_shown() { demo_json draw ls "sum(1 for s in d['sprites'] if s['kind'] == 'animation' and s['layer'] == -1 and s['screen'])"; }
+flower_shown() { demo_json draw ls "sum(1 for s in d['sprites'] if s['kind'] == 'animation' and s['layer'] == -1 and s['visible'])"; }
 # Screen row minus frame row of every fish in sight: the scroll, negated.
-fish_shift() { demo_json draw ls "sorted({s['screen'][1] - s['anchor']['at'][1] for s in d['sprites'] if s['anchor'].get('space') == 'frame' and s['screen']})"; }
+fish_shift() { demo_json draw ls "sorted({s['screen'][1] - s['anchor']['at'][1] for s in d['sprites'] if s['anchor'].get('space') == 'frame' and s['visible']})"; }
 
 demo_ok "flower, clock and fishes are up" demo_until 8 test "$(sleep 3; shown)" -ge 6
 demo_ok "a fish shows on the host" demo_until 5 eval 'e2e_host | grep -qF -e "<*//><" -e "><\\\\*>"'
