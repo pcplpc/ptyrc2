@@ -1969,3 +1969,33 @@ fn alpha_one_changes_nothing() {
     assert_eq!(compose(json!(1.0)), compose(json!(null)));
     assert_ne!(compose(json!(0.5)), compose(json!(null)));
 }
+
+#[test]
+fn a_wide_front_glyph_needs_one_backdrop() {
+    let mock = Mock::new();
+    let mut grid = Grid::from_lines(20, &["abcdef", "", "", "", "", ""]);
+    grid.cell_mut(3, 0).style.bg = Color::Indexed(4);
+    let mut scene = Scene::new();
+    let mut put = |x: i64, style: serde_json::Value| {
+        let v = json!({"anchor": {"at": [x, 0]}, "content": {"rows": ["界"], "style": style}, "layer": "front"});
+        scene.add(1, spec(v), ms(0)).unwrap();
+    };
+    // On one backdrop: drawn. Across two: not drawn, unless it brings
+    // its own.
+    put(0, json!({}));
+    put(2, json!({}));
+    put(4, json!({}));
+    let out = render(&mut scene, &mock, &grid, 0);
+    assert_eq!(out.text()[0], "界cd界");
+    assert_eq!(out.cell(3, 0).style.bg, Color::Indexed(4));
+    let mut scene = Scene::new();
+    scene
+        .add(
+            1,
+            spec(json!({"anchor": {"at": [2, 0]}, "content": {"rows": ["界"], "style": {"bg": "red"}}, "layer": "front"})),
+            ms(0),
+        )
+        .unwrap();
+    let out = render(&mut scene, &mock, &grid, 0);
+    assert_eq!(out.text()[0], "ab界ef");
+}

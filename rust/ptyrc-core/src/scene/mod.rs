@@ -1228,6 +1228,16 @@ fn on_backdrop(below: Style, fg: Option<Color>, bg: Option<Color>, attrs: Attrs)
     }
 }
 
+/// A wide glyph without a colour of its own takes the background below
+/// it, and has one style: on two backdrops it is not drawn, by halves
+/// neither.
+fn splits(out: &Grid, x: u16, y: u16, glyph: &raster::Glyph) -> bool {
+    glyph.cell.width == 2
+        && glyph.bg.is_none()
+        && x + 1 < out.cols()
+        && out.cell(x, y).backdrop() != out.cell(x + 1, y).backdrop()
+}
+
 /// A front layer: over whatever is there.
 fn paint(out: &mut Grid, x: u16, y: u16, glyph: &raster::Glyph, tint_only: bool) {
     if tint_only {
@@ -1242,6 +1252,9 @@ fn paint(out: &mut Grid, x: u16, y: u16, glyph: &raster::Glyph, tint_only: bool)
                 _ => tint(&mut out.cell_mut(x, y).style, glyph),
             }
         }
+        return;
+    }
+    if splits(out, x, y, glyph) {
         return;
     }
     let style = on_backdrop(out.cell(x, y).style, glyph.fg, glyph.bg, glyph.attrs);
@@ -1322,6 +1335,9 @@ fn paint_alpha(
             Some(bg) => veil(x, Some(bg), Some(bg), Attrs::default()),
             None => paint(out, x, y, glyph, false),
         }
+        return;
+    }
+    if splits(out, x, y, glyph) {
         return;
     }
     let below = out.cell(x, y).style;
