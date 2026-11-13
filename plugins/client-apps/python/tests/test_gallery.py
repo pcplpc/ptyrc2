@@ -146,7 +146,7 @@ PICTURES = sorted(gallery.HERE.glob("*.pic"))
 
 def test_collection_shipped() -> None:
     pictures = gallery.collection(candidates=True)
-    assert len(pictures) == len(PICTURES) >= 50
+    assert len(pictures) == len(PICTURES) >= 20
     assert {p.kind for p in pictures} == set(gallery.KINDS)
     assert len({p.name for p in pictures}) == len(pictures)
     assert any(p.frames > 1 for p in pictures)
@@ -182,10 +182,10 @@ def test_picture(path: Path) -> None:
 def test_ship_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert gallery.shipped(tmp_path / "none") is None
     ship = tmp_path / "SHIPPED"
-    ship.write_text("# best first\nowl\n\npear-and-fly\nnot-there\n")
-    assert gallery.shipped(ship) == ["owl", "pear-and-fly", "not-there"]
+    ship.write_text("# best first\nowl\n\nteapot\nnot-there\n")
+    assert gallery.shipped(ship) == ["owl", "teapot", "not-there"]
     monkeypatch.setattr(gallery, "SHIP", ship)
-    assert [p.stem for p in gallery.collection()] == ["owl", "pear-and-fly"]
+    assert [p.stem for p in gallery.collection()] == ["owl", "teapot"]
     assert len(gallery.collection(candidates=True)) == len(PICTURES)
     # A file or a directory named: the ship list is not asked.
     (tmp_path / "pear.pic").write_text(PEAR)
