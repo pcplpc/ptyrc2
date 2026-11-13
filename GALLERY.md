@@ -67,6 +67,12 @@ Then finally, you remember what matters in life:
 
 ![cats](doc/cats.gif)
 
+### stars
+
+Sit down and watch as you find your calm back through all the noise:
+
+![stars](doc/stars.gif)
+
 ## Contribute your own
 
 These were made by a human banging its head on an agent, no code written.
