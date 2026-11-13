@@ -58,8 +58,12 @@ enum Verb {
     },
     /// Drop exited apps from the list
     Forget(Select),
-    /// Restart an app on another frame: `move bricks 3`, `move 2 idle`
+    /// Move an app to another frame: `move clock 3`, `move 2 idle`;
+    /// live when it moves by itself, else restarted with `-f FRAME`
     Move {
+        /// Restart it there, even when it moves by itself
+        #[arg(long)]
+        restart: bool,
         /// An id or a name
         app: String,
         /// A frame id, or raw, active, largest, quietest, idle
@@ -99,7 +103,11 @@ pub fn manage(common: &Common, args: Manage) -> Result<ExitCode, Fail> {
         Verb::Resume(select) => each(common, "resume", &select),
         Verb::Forget(select) => each(common, "forget", &select),
         Verb::Restart { app, options } => restart(common, &app, options),
-        Verb::Move { app, frame } => move_to(common, &app, &frame),
+        Verb::Move {
+            restart,
+            app,
+            frame,
+        } => move_to(common, &app, &frame, restart),
         Verb::Frames => frames(common),
         Verb::Log { app } => log(common, &app),
     }
@@ -494,10 +502,24 @@ fn restart(common: &Common, word: &str, options: Vec<String>) -> Result<ExitCode
     restart_all(common, &mut client, plans)
 }
 
-fn move_to(common: &Common, word: &str, frame: &str) -> Result<ExitCode, Fail> {
+fn move_to(common: &Common, word: &str, frame: &str, restart: bool) -> Result<ExitCode, Fail> {
     let mut client = connect(common)?;
     let apps = list(&mut client)?;
     let app = one(&apps, word, "one app is moved: name it by id")?;
+    if app["moves"] == true && !restart {
+        let frame = match frame.parse::<u64>() {
+            Ok(id) => json!(id),
+            Err(_) => json!(frame),
+        };
+        let mut moved = client.call("app.move", json!({"app": app["id"], "frame": frame}))?;
+        if common.json {
+            print_json(&moved, false);
+        } else {
+            let info = moved["app"].take();
+            println!("{} {}: frame {}", info["id"], label(&info), moved["frame"]);
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
     let argv = with_frame(&argv_of(app), frame);
     restart_all(common, &mut client, vec![(app, Some(argv))])
 }

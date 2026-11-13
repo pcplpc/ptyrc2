@@ -300,6 +300,11 @@ impl Apps {
         self.iter().find(|a| a.conns.contains(&conn)).map(|a| a.id)
     }
 
+    /// The info of the app of `conn` changed.
+    pub fn touch(&mut self, conn: ConnId) {
+        self.changed.extend(self.of_conn(conn));
+    }
+
     fn entry(&mut self, id: u64) -> Result<&mut App, Refused> {
         self.entries.get_mut(&id).ok_or(Refused::Unknown)
     }

@@ -123,7 +123,8 @@ enum Verb {
     /// Print events, one JSON object per line
     Events {
         /// screen, cursor, frames, text, idle, draw, input, mouse, size,
-        /// colors, widgets, exit [default: all but mouse]
+        /// colors, widgets, apps, move, exit [default: all but mouse
+        /// and move]
         topics: Vec<String>,
         /// The state now as the first events (cursor, frames, idle, size,
         /// widgets)
@@ -489,8 +490,10 @@ fn verb_ls(common: &Common) -> Result<ExitCode, Fail> {
 fn verb_events(common: &Common, topics: Vec<String>, snapshot: bool) -> Result<ExitCode, Fail> {
     let mut client = connect(common)?;
     let topics: Vec<&str> = if topics.is_empty() {
-        // The mouse is asked of the host only when named.
-        TOPICS.iter().copied().filter(|t| *t != "mouse").collect()
+        // The mouse is asked of the host only when named; `move` is the
+        // word of an app that moves.
+        let asked = |t: &&str| !["mouse", "move"].contains(t);
+        TOPICS.iter().copied().filter(asked).collect()
     } else {
         topics.iter().map(String::as_str).collect()
     };

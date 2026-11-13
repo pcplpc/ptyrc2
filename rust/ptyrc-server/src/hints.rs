@@ -10,7 +10,7 @@ use ptyrc_core::widgets::WidgetId;
 use ptyrc_proto::{ErrorCode, RpcError, suggest};
 
 /// Every method of the protocol, for the nearest-name hint.
-const METHODS: [&str; 50] = [
+const METHODS: [&str; 51] = [
     "session.info",
     "session.resize",
     "session.colors",
@@ -57,6 +57,7 @@ const METHODS: [&str; 50] = [
     "app.resume",
     "app.restart",
     "app.forget",
+    "app.move",
     "batch",
     "subscribe",
     "debug.overlay",

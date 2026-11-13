@@ -1438,6 +1438,14 @@ impl Driver {
                 self.after.extend(events.map(|message| (conn, message)));
             }
         }
+        if let Some(apps) = self
+            .apps
+            .as_mut()
+            .filter(|_| topics.iter().any(|t| t == "move"))
+        {
+            // Its app now moves by itself: told on the topic `apps`.
+            apps.touch(conn);
+        }
         if let Some(conn) = self.conns.get_mut(&conn) {
             conn.topics.extend(topics);
         }
@@ -1462,14 +1470,88 @@ impl Driver {
 
     /// The info of every app, by id. `me`: the connection that asks.
     fn app_infos(&self, me: Option<ConnId>, engine: &dyn Engine) -> Vec<Value> {
-        let Some(apps) = &self.apps else {
-            return Vec::new();
-        };
-        let now = self.now();
+        let ids = self.apps.iter().flat_map(|apps| apps.iter().map(|a| a.id));
+        ids.filter_map(|id| self.app_info(id, me, engine)).collect()
+    }
+
+    /// The info of an app: the table's, and `moves`.
+    fn app_info(&self, id: u64, me: Option<ConnId>, engine: &dyn Engine) -> Option<Value> {
+        let apps = self.apps.as_ref()?;
         let owned = |conn| engine.owned(conn);
-        apps.iter()
-            .filter_map(|app| apps.info(app.id, now, me, &owned))
-            .collect()
+        let mut info = apps.info(id, self.now(), me, &owned)?;
+        info["moves"] = json!(!self.movers(id).is_empty());
+        Some(info)
+    }
+
+    /// The connections of an app subscribed to `move`.
+    fn movers(&self, id: u64) -> Vec<ConnId> {
+        let conns = (self.apps.as_ref())
+            .and_then(|apps| apps.get(id))
+            .map(|app| app.conns.iter());
+        let moves = |c: &&ConnId| self.conns.get(c).is_some_and(|c| c.topics.contains("move"));
+        conns.into_iter().flatten().filter(moves).copied().collect()
+    }
+
+    fn no_app(apps: &Apps, id: u64) -> RpcError {
+        let names: Vec<String> = (apps.iter())
+            .map(|a| format!("{} ({})", a.id, a.name))
+            .collect();
+        RpcError::new(ErrorCode::NoSprite, format!("no such app: {id}")).with_hint(
+            match names.is_empty() {
+                true => "no app; start one: ptyrc manage start APP".to_string(),
+                false => format!("apps: {}", names.join(", ")),
+            },
+        )
+    }
+
+    /// `app.move`: tell an app that moves by itself to go to a frame.
+    fn app_move(
+        &mut self,
+        conn: ConnId,
+        params: &Value,
+        engine: &mut dyn Engine,
+    ) -> Result<Value, RpcError> {
+        let id = (params.get("app").and_then(Value::as_u64))
+            .ok_or_else(|| RpcError::bad_params("app: the id of an app"))?;
+        let frame = (params.get("frame").filter(|f| !f.is_null()))
+            .ok_or_else(|| RpcError::bad_params("frame: an id or a name"))?;
+        let apps = self.apps.as_ref().expect("checked by the caller");
+        let app = apps.get(id).ok_or_else(|| Self::no_app(apps, id))?;
+        let movers = self.movers(id);
+        let why = match app.state {
+            State::Exited => Some("has exited"),
+            State::Paused => Some("is paused"),
+            State::Running if movers.is_empty() => Some("does not move by itself"),
+            State::Running => None,
+        };
+        if let Some(why) = why {
+            return Err(
+                RpcError::new(ErrorCode::NotUsable, format!("app {id} {why}")).with_hint(format!(
+                    "restart it there: ptyrc manage move --restart {id} FRAME"
+                )),
+            );
+        }
+        // Resolved as any frame name, with the same errors.
+        let token = Token(self.next_token);
+        self.next_token += 1;
+        let now = self.now();
+        let asked = json!({"frame": frame});
+        let found = hook!(self, now, |ctx| engine.handle(
+            conn,
+            token,
+            "frame.get",
+            asked,
+            ctx
+        ));
+        let frame = match found {
+            Reply::Ok(found) => found["frame"]["id"].clone(),
+            Reply::Err(error) => return Err(error),
+            Reply::Pending => return Err(RpcError::new(ErrorCode::Internal, "frame.get")),
+        };
+        for mover in movers {
+            self.send_event(mover, "move", json!({"frame": frame}));
+        }
+        Ok(json!({"app": self.app_info(id, Some(conn), engine), "frame": frame}))
     }
 
     /// Topic `apps`: the entries that changed, those that left.
@@ -1487,12 +1569,8 @@ impl Driver {
         if !self.topics.contains("apps") {
             return;
         }
-        let owned = |conn| engine.owned(conn);
-        infos.extend(
-            changed
-                .iter()
-                .filter_map(|id| apps.info(*id, now, None, &owned)),
-        );
+        let changed = changed.iter();
+        infos.extend(changed.filter_map(|id| self.app_info(*id, None, engine)));
         for info in infos {
             self.emit("apps", info);
         }
@@ -1506,7 +1584,7 @@ impl Driver {
         params: &Value,
         engine: &mut dyn Engine,
     ) -> Result<Value, RpcError> {
-        const METHODS: [&str; 7] = [
+        const METHODS: [&str; 8] = [
             "app.list",
             "app.start",
             "app.stop",
@@ -1514,6 +1592,7 @@ impl Driver {
             "app.resume",
             "app.restart",
             "app.forget",
+            "app.move",
         ];
         if !METHODS.contains(&method) {
             return Err(RpcError::unknown_method(method).with_hint(format!(
@@ -1534,6 +1613,7 @@ impl Driver {
             "app.list" => &[],
             "app.start" => &["argv", "name"],
             "app.restart" => &["app", "argv", "name"],
+            "app.move" => &["app", "frame"],
             _ => &["app"],
         };
         let given = params.as_object().into_iter().flatten();
@@ -1567,19 +1647,12 @@ impl Driver {
         if method == "app.list" {
             return Ok(json!({"apps": self.app_infos(Some(conn), engine)}));
         }
+        if method == "app.move" {
+            return self.app_move(conn, params, engine);
+        }
         let apps = self.apps.as_mut().expect("checked above");
         let refused = |apps: &Apps, id: u64, e: Refused| match e {
-            Refused::Unknown => {
-                let names: Vec<String> = (apps.iter())
-                    .map(|a| format!("{} ({})", a.id, a.name))
-                    .collect();
-                RpcError::new(ErrorCode::NoSprite, format!("no such app: {id}")).with_hint(
-                    match names.is_empty() {
-                        true => "no app; start one: ptyrc manage start APP".to_string(),
-                        false => format!("apps: {}", names.join(", ")),
-                    },
-                )
-            }
+            Refused::Unknown => Self::no_app(apps, id),
             Refused::NotUsable(message) => RpcError::new(ErrorCode::NotUsable, message),
             Refused::Spawn(message) => RpcError::bad_params(message),
         };
@@ -1624,9 +1697,7 @@ impl Driver {
             }
             id
         };
-        let apps = self.apps.as_ref().expect("checked above");
-        let owned = |conn| engine.owned(conn);
-        Ok(json!({"app": apps.info(id, now, Some(conn), &owned)}))
+        Ok(json!({"app": self.app_info(id, Some(conn), engine)}))
     }
 
     /// An app was paused or resumed: hide or show what its connections
