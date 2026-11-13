@@ -918,6 +918,170 @@ as an object. Hidden or gone: `variant`, `size`, `rect`, `sprite`
 null. The event's data is the info itself; `subscribe {snapshot}`
 sends one per widget.
 
+## Apps and the manager
+
+Decided with the owner, 2026-11-13 (`plan/interview.md`). An **app** here
+is a client program of the session, not the wrapped program.
+
+### The table
+
+The driver keeps a table of apps (`ptyrc-server/src/apps.rs`):
+
+- **child**: a program the driver started: `app.start`, `Config::apps`
+  (`run --app`, `tmux attach --app`), the hotkey. Its own process group,
+  stdin and stdout null, stderr to `<socket dir>/<session>.app-<id>.log`
+  (truncated at each run, removed with the entry and at the end);
+  environment: `PTYRC_SESSION`, `PTYRC_SOCKET`, `PTYRC_APP=<id>`.
+  SIGTERM to its group at the end of the session.
+- **client**: a process connected to the socket that is no child's: one
+  entry a pid (`SO_PEERCRED`), made at its first connection, gone with
+  its last.
+
+A connection belongs to the child whose process group holds its peer
+(`getpgid` of the peer pid, at accept), else to the client of its pid.
+
+App info: `{"id","kind":"child"|"client","name","argv":[...],"pid",
+"state":"running"|"paused"|"exited","status":code|null,"runs":n,
+"since":seconds,"conns":[id,...],"sprites":n,"widgets":n,"log":path|null,
+"me":bool}`. `id`: from 1, never used twice in a session. `name`: given
+at `app.start`; else the file name of `argv[0]`. `argv`: as started; of
+a client, `/proc/<pid>/cmdline` (empty when unreadable). `status`: of an
+exited child, 128 + signal when killed. `runs`: starts so far. `since`:
+seconds in the present state. `sprites`, `widgets`: those its
+connections own. `me`: the entry of the connection that asks.
+
+An exited child stays in the table (`exited`) until restarted or
+forgotten; 16 at most, the oldest forgotten first. A client that left is
+not kept.
+
+### Methods
+
+| method | params | result |
+|---|---|---|
+| `app.list` | | `{"apps":[info,...]}`, by id |
+| `app.start` | `argv`: `[program, arg...]`, `name` | `{"app":info}`; `bad-params` with the reason when it does not start |
+| `app.stop` | `app`: id | `{"app":info}`; SIGTERM, SIGCONT when paused, SIGKILL after 2 s. A child: its group; a client: its pid. An exited child: nothing |
+| `app.pause` | `app` | `{"app":info}`; see Pause |
+| `app.resume` | `app` | `{"app":info}` |
+| `app.restart` | `app`, `argv`, `name` (both optional: as before) | `{"app":info}`, at once; stopped as by `app.stop`, started again when it has ended, under the same id. A client: `not-usable` |
+| `app.forget` | `app` | `{}`; an exited child leaves the table; another state: `not-usable` |
+
+An unknown id: `no-sprite`, `no such app: N`, the hint naming the apps.
+An app may not stop, pause or restart itself (`me`): `not-usable`.
+Not on a replay (`bad-request`), nor on `--transparent`.
+
+Topic `apps`: the info of an app, when its state, pid, connections or
+argv change; `"state":"gone"` once for an entry that leaves the table.
+`subscribe {snapshot}`: one per app. `me` is absent from events.
+
+### Pause
+
+`app.pause`: SIGSTOP (group of a child, pid of a client), and everything
+its connections own is hidden: sprites, widgets (their place is kept,
+not an obstacle to other widgets while hidden), effects. Their clocks
+stand still: animations, effects, `ttl_ms` and motions go on at
+`app.resume` from where they were. A sprite or a widget added while
+paused is hidden too.
+
+Events are not queued for a paused connection (it does not read);
+answers are. `app.resume`: SIGCONT, all is shown again, and each of its
+connections is sent the snapshot of its topics (as `subscribe
+{snapshot}`); one subscribed to `text` gets a `text` event per frame on
+screen naming every row in view: an app that keeps the text reads it
+again. `Scene::hide_owner(owner, hidden, now)`,
+`Widgets::hide_owner(owner, hidden)`.
+
+### Hotkey
+
+Replaces the demo. `Config::hotkey` (`hotkey.rs`): ctrl+t typed twice in
+a row on the host keyboard, while no key is grabbed, runs that command
+as a child (name `manage`); typed again while it runs, the pair ends
+it. Whoever is connected. Held 350 ms, CSI u forms: as before. A
+command that does not start rings the bell. `ptyrc run` and `ptyrc tmux
+wrap` give `ptyrc manage --overlay` (the driver's own binary), or the
+words of `$PTYRC_HOTKEY`. `--no-hotkey` (`--no-demo` is read as it),
+`--transparent`: none. `ptyrc-app demo`, `$PTYRC_DEMO`: gone.
+
+### Modal widgets
+
+`widget.show {modal: true}`: a widget that must be seen and takes the
+keyboard's attention (the manager).
+
+- Layer `hud` when none is given; the inside and the border are opaque
+  and in front of the app's text.
+- Laid out as any widget. When no room takes any of its variants it is
+  put **over** the text: the largest variant whose outer size and gap
+  fit the view of its frame (without the gap when none does; the
+  smallest, clipped, when none does), at `prefer` (`any`: centred); the
+  cells of the gap around it are blanked, opaque: the blackout. Info:
+  `"modal":true`, `"over":bool`.
+- It never shrinks another widget, is never pressed, evicted, grown nor
+  shrunk for another. It is laid out again when its frame's view
+  changes size, its declaration changes, or it is shown again. A modal
+  is an obstacle to the others.
+- Border member `"chase": {"len": 3, "ms": 80, "style": {...}}`: a run
+  of `len` border cells in that style goes round the border clockwise,
+  a cell every `ms`, played by the driver. Preset `alert`: heavy,
+  bright yellow, bold, not dim, a white chase; the title bold.
+
+### `ptyrc manage`
+
+```
+ptyrc manage                       on a terminal: the menu; else `ls`
+ptyrc manage ls                    the apps: ID STATE SINCE PID NAME ARGS
+ptyrc manage start APP [OPTION...]     `ptyrc-app APP OPTION...`
+ptyrc manage start --cmd PROGRAM [ARG...]   any program
+ptyrc manage stop    APP... | --all
+ptyrc manage pause   APP... | --all
+ptyrc manage resume  APP... | --all      (`unpause`)
+ptyrc manage restart APP [OPTION...]   options given: in place of the old
+ptyrc manage forget  APP... | --all     exited ones
+ptyrc manage log APP               what it wrote on stderr
+ptyrc manage --overlay             the menu in a modal widget (the hotkey)
+```
+
+- `APP`: an id, or a name: every app of that name not exited (`restart`
+  with options, `log`: exactly one; several: status 2, the ids named).
+  The name of an app run by `ptyrc-app` is its first word (`bricks`),
+  told from `argv` for a client. `--all`: all but `me` and the manager.
+- `start` finds `ptyrc-app` as `ptyrc app` does (127 when absent) and
+  sends its path in `argv`. It waits 400 ms: an app that ended by then
+  with an error is status 1, the last line of its log shown.
+- `stop`, `restart` wait for the end or the new start, 5 s at most.
+- `--json`: the infos.
+- No session chosen and several live, on a terminal: the menu asks.
+
+The menu (`ptyrc-cli/src/manage/`): one model (`menu.rs`: keys in, rows
+of styled runs out, for a given size; no clock, no I/O), two fronts:
+`tty.rs` (this terminal, alternate screen) and `overlay.rs` (a modal
+widget of the session, border `alert`, variants 34x9, 48x13, 64x18,
+78x22, prefer centre; `input.grab` of every key, escape ctrl+t).
+
+- Main list: the apps (state mark, name and arguments, state, since),
+  then `start an app…`, `random app`. enter: the actions of the row.
+  Keys: `↑↓`/`jk`, `enter`, `esc`/`q` back or leave, `s` start, `p`
+  pause or resume, `r` restart, `e` restart with other options, `x` or
+  `delete` stop (an exited one: forget), `l` log.
+- Start: the apps of the catalog with their line of help; enter: the
+  form.
+- Form: a row per option of the app: a flag is a checkbox (`space`,
+  `enter`), a choice goes round with `←→`, a value is typed (`enter`
+  edits, `enter` or `esc` ends); then positionals and `more arguments`
+  as typed lines; then `start` / `restart`. Restart with other options
+  opens it filled from the `argv` running; words it does not know go to
+  `more arguments`.
+- A foot line names the keys of the screen. The list follows the topic
+  `apps`. An app that ends within 400 ms of a start shows the last line
+  of its log.
+
+Catalog: `ptyrc-app --catalog` prints `{"apps":[{"name","help",
+"options":[{"flags":["-r","--rules"],"kind":"flag"|"value"|"choice"|
+"count","metavar","choices":[...],"default","help"}],"positionals":
+[{"name","nargs","help"}],"random":[[arg,...],...]}]}`, from the
+argparse parser of each app; `-h`, `-s` are left out. `random`: the
+argument lists `random app` draws from (was `demo.VARIANTS`); empty:
+never drawn. No `ptyrc-app`: the menu has no `start an app…`.
+
 ## Plugins
 
 Rust crates linked into `ptyrc-cli` and registered at startup

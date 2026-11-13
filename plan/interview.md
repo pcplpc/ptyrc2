@@ -187,3 +187,15 @@ Supersedes `--spawn --rate` above.
   tmux session one is in, `ptyrc tmux detach` removes it, `--app` starts
   a client app with it. The rule "the core names no program" bends here:
   the CLI and the session lookup of the clients know tmux.
+
+## Manager, seventh session (2026-11-13)
+
+- `ptyrc manage`: the apps of a session, by sub-verbs (start, stop,
+  pause, resume, restart with other flags) and as a menu (arrows,
+  enter, esc). Apps are co-children of the driver.
+- ctrl+t ctrl+t opens the menu in a widget of the session in place of
+  the random app: bright yellow animated border; several sizes; with
+  no place for it, it blacks out part of a frame and draws over.
+- Pause: freeze and hide. Scope: everything connected, clients started
+  elsewhere too (stop, pause). The widget is modal: every key is its
+  own. Flags: a checklist from the app's options, and a free line.
