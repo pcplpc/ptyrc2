@@ -6,7 +6,7 @@
     ptyrc-app cat -f active --front
     ptyrc-app cat --count 3 --random     # three cats, each its own look
     ptyrc-app cat --food --mice          # plates and mice, now and then
-    ptyrc-app cat -a                     # --random --food --mice
+    ptyrc-app cat -a                     # --random --food --mice, two cats
 
 What it shows:
 
@@ -38,7 +38,8 @@ of it, left of it, else on it. The cats come and eat, one on each
 side; an empty plate goes, and the word gets no other. `--food` lays a
 plate on a ledge now and then, for a while. `--mice`: a mouse walks a
 ledge now and then; a cat that sees it pounces, the mouse runs, and
-is caught when the cat lands on it. `-a`: `--random --food --mice`.
+is caught when the cat lands on it. `-a`: `--random --food --mice`,
+and two cats unless `--count` says otherwise.
 """
 
 from __future__ import annotations
@@ -1079,18 +1080,22 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
     )
     out.add_argument("--front", action="store_true", help="in front of the text")
     out.add_argument("--seed", type=int, help="same seed, same cats")
-    out.add_argument("--count", type=int, default=1, help="cats [default: 1]")
+    out.add_argument("--count", type=int, help="cats [default: 1; 2 with -a]")
     out.add_argument(
         "-r", "--random", action="store_true", help="coats and features drawn"
     )
     out.add_argument("--food", action="store_true", help="a plate now and then")
     out.add_argument("--mice", action="store_true", help="a mouse now and then")
-    out.add_argument("-a", "--all", action="store_true", help="--random --food --mice")
+    out.add_argument(
+        "-a", "--all", action="store_true", help="--random --food --mice, two cats"
+    )
     args = _cli.parse(out, argv)
-    if not 1 <= args.count <= MAX_CATS:
-        out.error(f"--count must be between 1 and {MAX_CATS}")
     if args.all:
         args.random = args.food = args.mice = True
+    if args.count is None:
+        args.count = 2 if args.all else 1
+    if not 1 <= args.count <= MAX_CATS:
+        out.error(f"--count must be between 1 and {MAX_CATS}")
     return _cli.run(lambda pilot, args: app(pilot, args, seconds), args)
 
 
