@@ -10,12 +10,12 @@ ptyrc app bricks
 You can also directly start a user app with the driver:
 
 ```sh
-ptyrc run --app fishes -- vim LICENSE.txt
+ptyrc run --app 'flower -a' -- vim GALLERY.md
 ```
 
-You then get fishes:
+You then get flowers:
 
-![fishes](doc/fishes.gif)
+![flower](doc/flower.gif)
 
 ### sand
 
@@ -34,6 +34,12 @@ You can get the perfect weather to appreciate the end of the world:
 If you want to work on your ADHD as you are reviewing bad code:
 
 ![snake](doc/snake.gif)
+
+### fishes
+
+If ever you feel like drowning, don't worry you'll be in good company:
+
+![fishes](doc/fishes.gif)
 
 ### snow
 
