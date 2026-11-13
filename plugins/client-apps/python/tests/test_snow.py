@@ -42,6 +42,8 @@ def test_gusts() -> None:
     assert lo <= next(beats) <= hi and len(winds) == 1
 
 
+# The drift is shaped by the step of the effect: real time keeps it fine.
+@pytest.mark.realtime
 def test_snow(session: Pilot) -> None:
     session.send("clear; printf '\\n\\n\\n\\n          %040d\\n' 0\n")
     session.wait_for("0" * 40, frame="raw")

@@ -1337,7 +1337,9 @@ def test_cat_options(session: Pilot) -> None:
     settle(session)
     watch(
         session,
-        lambda: cat.main(["-s", session.session, "--count", "3", "-a"], seconds=2.0),
+        lambda: cat.main(
+            ["-s", session.session, "--count", "3", "-a", "--seed", "2"], seconds=2.0
+        ),
         lambda host: "_/" in host,
     )
     # `-a` alone: two cats.
@@ -1348,7 +1350,11 @@ def test_cat_options(session: Pilot) -> None:
         most = max(most, sum(s["size"] == [cat.W, cat.H] for s in session.sprites()))
         return most == 2
 
-    watch(session, lambda: cat.main(["-s", session.session, "-a"], seconds=3.0), two)
+    watch(
+        session,
+        lambda: cat.main(["-s", session.session, "-a", "--seed", "2"], seconds=3.0),
+        two,
+    )
     assert most == 2
     with pytest.raises(SystemExit):
         cat.main(["-s", session.session, "--count", "0"])
