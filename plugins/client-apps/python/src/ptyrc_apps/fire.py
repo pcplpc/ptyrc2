@@ -142,10 +142,18 @@ def _strength(t: float, look: Look, poke: float | None) -> float:
 
 
 def heat(
-    x: float, y: float, t: float, w: int, top: float, f: float, seed: int
+    x: float,
+    y: float,
+    t: float,
+    w: int,
+    top: float,
+    f: float,
+    seed: int,
+    spread: float = 0.94,
 ) -> float:
     """Heat, 0 to 1, at column `x`, `y` half rows over the bed of a fire
-    `w` columns wide that may rise `top` half rows, of strength `f`."""
+    `w` columns wide that may rise `top` half rows, of strength `f`.
+    `spread`: the share of the width the bed takes."""
     half = w / 2
     cx = (w - 1) / 2
     if w <= 5:
@@ -157,13 +165,13 @@ def heat(
         rise = top * (0.7 + 0.3 * f) * (0.9 + 0.2 * _noise(seed, 3.0, t * 4.0))
         v = y / (rise * (1 - abs(u) ** 1.6))
         return max(0.0, min(1.0, (1 - v) * 2.4)) if v < 1 else 0.0
-    u = (x - cx) / (half * 0.94)
+    u = (x - cx) / (half * spread)
     if abs(u) >= 1:
         return 0.0
     # Tongues: the height wanders along the bed and in time.
     lick = _noise(seed, x * 0.42 + 50.0, t * 1.4)
     wide = _noise(seed + 3, x * 0.13, t * 0.5)
-    rise = top * f * (1 - u * u) ** 0.7 * (0.25 + 0.8 * lick**1.3 + 0.4 * wide)
+    rise = top * f * (1 - u * u) ** 0.7 * (0.2 + 0.72 * lick**1.3 + 0.36 * wide)
     rise = min(rise, top * 1.05)
     if rise <= 0.05:
         return 0.0
@@ -312,9 +320,11 @@ def scene(
     if look.logs and w <= 5:
         top = 2.0 * floor
 
+    spread = 0.82 if look.logs and w > 12 else 0.94  # as wide as the logs
+
     def at(x: int, y: float) -> float:
         """Heat at half row `y` from the bed."""
-        value = heat(x, y, t, w, top, f, seed)
+        value = heat(x, y, t, w, top, f, seed, spread)
         if y < 1.0 and w > 5:
             value = max(value, 0.45 * _embers(x, t, w, seed))
         return value
