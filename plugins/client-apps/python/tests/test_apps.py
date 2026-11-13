@@ -1104,7 +1104,7 @@ def test_cat_art() -> None:
     grey = cat.look("alert", coat=cat.COATS[1])["cells"][1]
     assert {run.get("fg") for run in grey} == {None, 250, 117, 244}
     # The plate and the mouse.
-    assert {len(row) for row in (*cat.PLATE, cat.BOWL)} == {cat.PW}
+    assert {len(row) for row in cat.PLATE} == {cat.PW}
     assert {len(row) for row in cat.MOUSE} == {cat.MW}
     left = cat.mouse_look(right=False, step=0)["cells"][0]
     assert "".join(run["t"] for run in left) == '<°",_,)~~'
@@ -1239,8 +1239,8 @@ def test_cat_food(session: Pilot) -> None:
     run(lambda: bool(home.plates))
     (plate,) = home.plates
     (word,) = session.find(r"\bfood\b", regex=True)
-    assert (plate.x, plate.g) == (word.x + 5, word.y + 1)
-    assert "\\_____/" in shown(session)
+    assert (plate.x, plate.g) == (word.x + 4 + cat.GAP, word.y + 1)
+    assert "\\oOo/" in shown(session)
     # They come, one on each side that is free, and face it.
     run(lambda: any(it.act == "eat" for it in home.cats))
     eater = next(it for it in home.cats if it.act == "eat")
@@ -1251,7 +1251,7 @@ def test_cat_food(session: Pilot) -> None:
     assert plate.left == 0 and home.eaten == {(word.x, word.y)}
     home.stale = True
     run(lambda: all(it.meal is None and it.act != "eat" for it in home.cats))
-    assert not home.plates and "\\_____/" not in shown(session)
+    assert not home.plates and "\\.../" not in shown(session)
 
 
 def test_cat_served_and_mice(session: Pilot) -> None:

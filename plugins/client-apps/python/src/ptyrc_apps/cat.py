@@ -63,6 +63,7 @@ __all__ = [
     "COVERED",
     "EARS",
     "EYES",
+    "GAP",
     "GROUND",
     "MOUSE",
     "MW",
@@ -100,7 +101,8 @@ READ = 0.3  # seconds, at least, between two reads of the text
 AWAY = (2.0, 4.0)  # seconds out of the view before it comes back
 GROUND = 5  # cells of text, at least, under the cat
 COVERED = 0.2  # share of the cat under text that makes it move
-PW, PH = 7, 2  # the box of a plate
+PW, PH = 5, 1  # the box of a plate
+GAP = 3  # cells from a word to its plate: the cursor after it scares no eater
 MW = 9  # cells of a mouse, on one row
 BITE = 2.5  # seconds a portion lasts
 EMPTY = 3.0  # seconds an empty plate stays
@@ -193,10 +195,9 @@ POSES: dict[str, tuple[tuple[tuple[str, str, str], int], ...]] = {
     ),
 }
 
-# The heap of a plate by portions left, over its bowl.
-PLATE = ("       ", "   .   ", "  .o.  ", "  oOo  ", " .oOo. ")
-BOWL = "\\_____/"
-PLATE_INK = {"": 75, ".oO": 173}
+# A plate, by portions left.
+PLATE = ("\\.../", "\\.o./", "\\.o./", "\\oOo/", "\\oOo/")
+PLATE_INK = {"": 75, "oO": 173, ".": 130}
 
 # Facing right: at rest, then the two steps of its walk.
 MOUSE = ('~-(,_,"°>', '~~(,_,"°>', '-~(_,_"°>')
@@ -250,7 +251,7 @@ def look(
 
 def plate_look(left: int) -> dict[str, Any]:
     """A plate with `left` portions, as content for `Sprite.set`."""
-    return {"cells": paint((PLATE[left], BOWL), PLATE_INK, bold=True)}
+    return {"cells": paint((PLATE[left],), PLATE_INK, bold=True)}
 
 
 def mouse_look(right: bool = True, step: int | None = None) -> dict[str, Any]:
@@ -777,7 +778,7 @@ class Home:
         over = max(x0, min(x + (n - PW) // 2, x1 - PW))
         sites = [
             site
-            for site in ((x + n + 1, y + 1), (x - PW - 1, y + 1), (over, y))
+            for site in ((x + n + GAP, y + 1), (x - PW - GAP, y + 1), (over, y))
             if self.room(*site)
         ]
         seated = (site for site in sites if self.chairs(*site))
