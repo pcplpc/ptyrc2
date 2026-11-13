@@ -1,5 +1,7 @@
 
-## ptyrc gallery
+## `ptyrc2` gallery
+
+See [`README.md`](./README.md) to learn more.
 
 If you already started a driver, you can bind a user app as follows:
 
@@ -16,6 +18,12 @@ ptyrc run --app 'flower -a' -- vim GALLERY.md
 You then get flowers:
 
 ![flower](doc/flower.gif)
+
+### confetti
+
+Throw a party in your terminal:
+
+![confetti-all](doc/confetti-all.gif)
 
 ### sand
 

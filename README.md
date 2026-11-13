@@ -2,7 +2,7 @@
 >
 > This file was written by a human. Use at your own risk.
 
-# `ptyrc2` – the pty remote controller
+## `ptyrc2` – the pty remote controller
 
 This started as [`ptyrc`](https://github.com/pcplpc/ptyrc) a work done by hand
 with the love of a human, now with slop and unreviewed code.
@@ -14,7 +14,7 @@ See the [`GALLERY.md`](GALLERY.md) if you want to see only the pictures..
 
 ![confetti](doc/confetti-all.gif)
 
-# Usage
+## Usage
 
 Wrap any application with `ptyrc` as follows:
 
@@ -34,7 +34,7 @@ You can use `ptyrc python` to start an interactive session:
 
 Running `ptyrc python script.py` runs the script with `pilot` defined.
 
-# Install from source
+## Install from source
 
 It's not published
 on [crates.io](https://crates.io)
