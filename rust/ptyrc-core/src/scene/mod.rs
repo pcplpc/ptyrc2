@@ -21,7 +21,7 @@ use crate::types::{
 use ptyrc_vt::palette::{self, Rgb};
 use ptyrc_vt::{Attrs, Cell, Color, Grid, Rect, Style};
 use raster::Slot;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 /// Auto-placed sprites ask for a spot this often.
@@ -117,6 +117,8 @@ struct Sprite {
     text_at: Option<(FramePos, u16)>,
     /// Top-left screen cell at the last tick; `None`: hidden.
     screen: Option<(i64, i64)>,
+    /// Its owner is hidden, since then: not ticked, not drawn.
+    hidden: Option<Duration>,
 }
 
 impl Sprite {
@@ -231,6 +233,8 @@ pub struct Scene {
     host: HostColors,
     /// Layer names declared by clients.
     layers: BTreeMap<String, i32>,
+    /// Owners whose sprites are hidden (`hide_owner`).
+    hidden: BTreeSet<OwnerId>,
 }
 
 impl Default for Scene {
@@ -250,6 +254,7 @@ impl Scene {
             last_tick: Duration::ZERO,
             host: HostColors::default(),
             layers: BTreeMap::new(),
+            hidden: BTreeSet::new(),
         };
         scene.register_effect("confetti", Box::new(confetti));
         scene.register_effect("sparkle", Box::new(sparkle));
@@ -488,6 +493,7 @@ impl Scene {
             auto: AutoState::default(),
             text_at: None,
             screen: None,
+            hidden: self.hidden.contains(&owner).then_some(now),
         };
         let at = self
             .sprites
@@ -652,8 +658,57 @@ impl Scene {
         self.note_removed(before)
     }
 
+    /// Hide or show again what `owner` has. Hidden, a sprite is neither
+    /// ticked nor drawn, and its clocks stand still: animation, effect,
+    /// `ttl_ms` and motion go on from where they were when it is shown
+    /// again. A sprite added by a hidden owner is hidden.
+    pub fn hide_owner(&mut self, owner: OwnerId, hidden: bool, now: Duration) {
+        let changed = match hidden {
+            true => self.hidden.insert(owner),
+            false => self.hidden.remove(&owner),
+        };
+        if !changed {
+            return;
+        }
+        for sprite in self.sprites.iter_mut().filter(|s| s.owner == owner) {
+            match (hidden, sprite.hidden) {
+                (true, None) => {
+                    sprite.hidden = Some(now);
+                    sprite.screen = None;
+                }
+                (false, Some(since)) => {
+                    sprite.hidden = None;
+                    let away = now.saturating_sub(since);
+                    sprite.born += away;
+                    if let Some(at) = &mut sprite.expires {
+                        *at += away;
+                    }
+                    if let Some(mover) = &mut sprite.mover {
+                        mover.last += away;
+                    }
+                    match &mut sprite.body {
+                        Body::Anim(anim) => anim.since += away,
+                        Body::Fx(fx) => fx.next += away,
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.dirty = true;
+    }
+
+    /// Whether what `owner` has is hidden.
+    pub fn owner_hidden(&self, owner: OwnerId) -> bool {
+        self.hidden.contains(&owner)
+    }
+
     /// The owner is gone: remove its sprites but the `persist` ones.
     pub fn drop_owner(&mut self, owner: OwnerId) {
+        self.hidden.remove(&owner);
+        for sprite in self.sprites.iter_mut().filter(|s| s.owner == owner) {
+            // What stays is shown: nobody is left to show it again.
+            sprite.hidden = None;
+        }
         let before = self.sprites.len();
         self.sprites.retain(|s| s.owner != owner || s.persist);
         self.note_removed(before);
@@ -811,6 +866,7 @@ impl Scene {
         let mut spots: Vec<(SpriteId, FrameId, Rect)> = self
             .sprites
             .iter()
+            .filter(|s| s.hidden.is_none())
             .filter_map(|s| {
                 let (x, y) = s.auto.spot?;
                 let (w, h) = s.size();
@@ -819,6 +875,9 @@ impl Scene {
             .collect();
 
         for sprite in &mut self.sprites {
+            if sprite.hidden.is_some() {
+                continue;
+            }
             if sprite.expires.is_some_and(|at| now >= at) {
                 dead.push(sprite.id);
                 continue;
@@ -1060,7 +1119,7 @@ impl Scene {
     pub fn next_wake(&self) -> Option<Duration> {
         let mut wake: Option<Duration> = None;
         let mut at = |t: Duration| wake = Some(wake.map_or(t, |w| w.min(t)));
-        for s in &self.sprites {
+        for s in self.sprites.iter().filter(|s| s.hidden.is_none()) {
             if let Some(t) = s.expires {
                 at(t);
             }
@@ -1130,6 +1189,9 @@ fn each_glyph(
     cursor: (u16, u16),
     mut f: impl FnMut(u16, u16, &raster::Glyph),
 ) {
+    if sprite.hidden.is_some() {
+        return;
+    }
     let Some(info) = sprite.frame.and_then(|id| surfaces.info(id)) else {
         return;
     };

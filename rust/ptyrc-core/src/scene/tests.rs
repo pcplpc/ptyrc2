@@ -2522,3 +2522,45 @@ fn a_client_declares_layer_names() {
     scene.name_layer(&mut v);
     assert_eq!(v, json!({"layer": "front"}));
 }
+
+#[test]
+fn hidden_owner_stands_still() {
+    let mock = Mock::new();
+    let frames = json!([{"rows": ["1"], "ms": 100}, {"rows": ["2"], "ms": 100}]);
+    let mut scene = Scene::new();
+    scene
+        .add(1, spec(json!({"frames": frames, "ttl_ms": 1000})), ms(0))
+        .unwrap();
+    scene
+        .add(
+            2,
+            spec(json!({"anchor": {"at": [3, 0], "space": "view"},
+                        "content": {"rows": ["o"]}})),
+            ms(0),
+        )
+        .unwrap();
+    assert_eq!(show(&mut scene, &mock, &base(), 50)[0], "1  o");
+    scene.take_dirty();
+    scene.hide_owner(1, true, ms(50));
+    assert!(scene.take_dirty() && scene.owner_hidden(1));
+    // Nothing of it is drawn, nothing is due; the other goes on.
+    assert_eq!(show(&mut scene, &mock, &base(), 5000)[0], "   o");
+    assert_eq!(scene.next_wake(), None);
+    assert_eq!(scene.list().len(), 2);
+    // Added while hidden: hidden.
+    scene
+        .add(
+            1,
+            spec(json!({"anchor": {"at": [5, 0], "space": "view"},
+                        "content": {"rows": ["x"]}})),
+            ms(6000),
+        )
+        .unwrap();
+    assert_eq!(show(&mut scene, &mock, &base(), 6000)[0], "   o");
+    // Shown again: the clocks go on from where they were.
+    scene.hide_owner(1, false, ms(10_050));
+    assert_eq!(show(&mut scene, &mock, &base(), 10_149)[0], "1  o x");
+    assert_eq!(show(&mut scene, &mock, &base(), 10_150)[0], "2  o x");
+    assert_eq!(show(&mut scene, &mock, &base(), 10_999)[0], "2  o x");
+    assert_eq!(show(&mut scene, &mock, &base(), 11_000)[0], "   o x");
+}
