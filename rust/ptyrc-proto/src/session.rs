@@ -7,6 +7,7 @@ use std::io;
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 /// Environment variable naming the session; set by the driver for the app.
 pub const ENV_SESSION: &str = "PTYRC_SESSION";
@@ -162,8 +163,30 @@ impl fmt::Display for SelectError {
 
 impl std::error::Error for SelectError {}
 
-/// The session to talk to: `explicit`, else `PTYRC_SESSION`, else the only
-/// live one.
+/// The session a tmux session names in its option `@ptyrc` (set by
+/// `ptyrc tmux attach`), for a process in a pane of it: `$TMUX_PANE` is
+/// asked of the server of `$TMUX`.
+fn of_tmux() -> Option<String> {
+    let set = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
+    set("TMUX")?;
+    let output = Command::new("tmux")
+        .args([
+            "display-message",
+            "-p",
+            "-t",
+            &set("TMUX_PANE")?,
+            "#{@ptyrc}",
+        ])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    let name = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    (output.status.success() && valid_name(&name)).then_some(name)
+}
+
+/// The session to talk to: `explicit`, else `PTYRC_SESSION`, else the one
+/// over the tmux session this process is in, else the only live one.
 pub fn select(explicit: Option<&str>) -> Result<Session, SelectError> {
     let env = std::env::var(ENV_SESSION).ok().filter(|s| !s.is_empty());
     if let Some(name) = explicit.map(str::to_string).or(env) {
@@ -182,6 +205,12 @@ pub fn select(explicit: Option<&str>) -> Result<Session, SelectError> {
                 Err(SelectError::NotFound(name, live))
             }
         };
+    }
+    if let Some(name) = of_tmux() {
+        let path = socket_path(&name);
+        if is_live(&path) {
+            return Ok(Session { name, path });
+        }
     }
     let mut live = list();
     match live.len() {
