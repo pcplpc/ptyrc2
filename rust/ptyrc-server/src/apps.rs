@@ -388,8 +388,8 @@ impl Apps {
         }
         if let Some(argv) = argv {
             app.argv = argv;
-            app.name = name.unwrap_or_else(|| file_name(&app.argv[0]));
-        } else if let Some(name) = name {
+        }
+        if let Some(name) = name {
             app.name = name;
         }
         let exited = app.state == State::Exited;
