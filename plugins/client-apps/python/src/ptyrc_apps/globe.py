@@ -364,10 +364,10 @@ def _flakes(
     storm = 0.0 if since is None else math.exp(-since / STORM)
     share = THIN + (1 - THIN) * storm
     out = set()
-    count = max(3, round(len(free) / 4.5))
+    count = max(5, round(len(free) / 4.5))
     for i in range(count):
         rng = random.Random(seed * 7919 + i)
-        if i / count >= share:
+        if i >= max(3.0, share * count):
             continue
         speed = rng.uniform(0.5, 1.3)  # rows a second
         lane, phase = rng.random(), rng.uniform(0, rows + 1.0)
