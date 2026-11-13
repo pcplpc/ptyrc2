@@ -147,7 +147,7 @@ def test_groups() -> None:
     box = (0, 0, 80, 24)
     game = bricks.Game(random.Random(5))
     laid, large = [], []
-    for _ in range(1200):
+    for _ in range(2400):
         game.step(box, walls)
         checks(game, box, walls)
         new = [e[1] for e in game.events if e[0] == "group"]
@@ -155,7 +155,7 @@ def test_groups() -> None:
         if new:
             (large if game.groups[-1].large else laid).append(new[0])
             assert game.groups[-1].bricks == new[0]
-    assert len(laid) >= 30 and all(2 <= len(group) <= 3 for group in laid)
+    assert len(laid) >= 20 and all(2 <= len(group) <= 3 for group in laid)
     assert all(
         abs(a.y - b.y) <= 1 and abs(a.x - b.x) <= 6 for g in laid for a in g for b in g
     )
@@ -183,7 +183,7 @@ def test_groups() -> None:
 
 
 def test_walls() -> None:
-    """Half the bricks are laid in large groups: medium walls, a block,
+    """Two bricks in three are laid in large groups: medium walls, a block,
     a row or a pile where the place is tight, now and then a big wall."""
     rows = {
         "blank": [""] * 24,
@@ -238,7 +238,7 @@ def test_walls() -> None:
                 assert all(b.kind in bricks.KINDS for b in group.bricks)
         small, big = game.laid
         share = big / (small + big)
-        assert small + big >= 150 and 0.45 <= share <= 0.55, (name, share)
+        assert small + big >= 150 and 0.6 <= share <= 0.73, (name, share)
         sizes = [size for size, _, _ in shapes]
         assert sizes.count(1) >= 3  # medium ones of several shapes, everywhere
         if name == "blank":  # room: every medium one is a wall, some are big
@@ -372,6 +372,7 @@ def test_rules() -> None:
 
 def test_kinds() -> None:
     box = (0, 0, 40, 12)
+    box = (0, 0, 40, 12)
     # A hard brick takes three hits.
     g = still(rules=True)
     hard = lay(g, 8, 2, "hard")
@@ -431,6 +432,7 @@ def test_kinds() -> None:
 
 def test_bonuses() -> None:
     box = (0, 0, 40, 12)
+    box = (0, 0, 40, 12)
     g = still(bonuses=True)
     g.step(box, set())
     racket = g.rackets[0]
@@ -477,7 +479,13 @@ def test_bonuses() -> None:
     g._award(bricks.Capsule(54, 0, 0, "twin"), racket, box)
     g.step(box, set())
     assert [r.dead for r in g.rackets] == [0, 0]
-    for _ in range(bricks.LAST["twin"]):
+    twin = g.rackets[1]
+    for _ in range(bricks.LAST["twin"] // 2):
+        g.balls = []
+        g.step(box, set())
+    g._award(bricks.Capsule(55, 0, 0, "twin"), racket, box)  # no longer for it
+    assert g.rackets == [racket, twin]
+    for _ in range(bricks.LAST["twin"] // 2):
         g.balls = []
         g.step(box, set())
     assert g.rackets == [racket]
@@ -492,6 +500,7 @@ def test_drops() -> None:
     )
     assert 2 * shares["multi"] > sum(shares.values())
     g = still(bonuses=True)
+    box = (0, 0, 40, 12)
     box = (0, 0, 40, 12)
     kinds = []
     for i in range(400):
@@ -831,3 +840,16 @@ def test_bricks_all(session: Pilot) -> None:
         )
 
     watch(session, lambda: bricks.main(args, seconds=4), look)
+
+
+def test_crowd() -> None:
+    """No `multi` is dropped with `CROWD` balls or more in play."""
+    for n, some in ((bricks.CROWD - 1, True), (bricks.CROWD, False)):
+        game = bricks.Game(random.Random(3), bonuses=True)
+        game.balls = [bricks.Ball(100 + i, 5.5, 5.5, 0.3, 0.5) for i in range(n)]
+        for i in range(300):
+            brick = bricks.Brick(200 + i, 0, 0)
+            game._lay(brick)
+            game._smash(brick, game.balls[0], (0, 0))
+        kinds = {cap.kind for cap in game.capsules}
+        assert ("multi" in kinds) is some and kinds - {"multi"}

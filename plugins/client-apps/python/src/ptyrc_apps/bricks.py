@@ -21,10 +21,10 @@ What it shows:
   racket. A racket keeps off the text when it has the choice.
 - Terrain in frame cells: groups of bricks, laid one at a time all
   over the view, far from each other, where a ball gets: between the
-  lines, after the short ones, in the blanks. Half the bricks are laid
+  lines, after the short ones, in the blanks. Two bricks in three are laid
   in large groups, a colour a row: medium walls of 2 rows by 3 to 5
   bricks, a row or a pile where the place is tight; now and then a
-  big wall of 3 or 4 rows by 6 to 8. The other half in groups of 2 or
+  big wall of 3 or 4 rows by 6 to 8. The others in groups of 2 or
   3. A group goes 10 to 20 s after it is laid,
   a second later for each brick over three, dim for its last second.
 
@@ -38,8 +38,9 @@ More, each on its own flag; `-a` for all (see `_bricks`):
   touched and kill the racket under them; bumpers that send the ball
   away faster, anywhere; bombs that take their neighbours with them.
 - `-b`: bonuses. Two broken bricks in five drop a capsule; the racket
-  that touches it gets, three times in five, two balls for each one;
-  else a wide racket, a twin, or 5 s of fire: the ball goes through
+  that touches it gets, three times in five, two balls for each one
+  (none is dropped with 4 balls or more in play);
+  else a wide racket, a twin for a while, or 5 s of fire: the ball goes through
   the bricks. Two are bad, and no racket goes for them: a small
   racket, a faster ball. A spare ball out costs nothing.
 - `-m`: two rackets, two scores. One keeps the top, the other the
@@ -106,6 +107,7 @@ FILL = 12  # seconds to lay as many
 AGE = (10, 20)  # seconds a group lasts
 LONG = 1  # second more for each brick over three
 BIG = ((3, 4), (6, 8))  # rows and columns of a big wall, in bricks
+LARGE = 2  # bricks laid in large groups for one in a small group
 OFTEN = 0.2  # share of the large groups a big wall is tried for
 #: Of a medium one, in the order tried: a wall, a block, a row, a pile.
 MEDIUM = (((2, 2), (3, 5)), ((2, 2), (3, 3)), ((1, 1), (4, 6)), ((3, 4), (2, 2)))
@@ -162,11 +164,12 @@ KINDS = {
 BONUSES = {"multi": 12, "wide": 2, "twin": 2, "fire": 2, "small": 1, "fast": 1}
 BAD = ("small", "fast")  # no racket goes for these
 DROP = 0.4  # share of the broken bricks that drop a capsule
+CROWD = 4  # balls from which no `multi` is dropped
 BALLS = 5  # at once
 SPLIT = (0.3, 0.8)  # columns a move between a ball and the one that leaves it
 DEAD = 60  # steps a killed racket is away
 WARN = 6  # rows under a falling brick a racket keeps out of
-LAST = {"wide": 320, "small": 240, "twin": 400, "fast": 160, "kick": 24}  # steps
+LAST = {"wide": 320, "small": 240, "twin": 200, "fast": 160, "kick": 24}  # steps
 
 
 def fly(x: float, y: float, vx: float, vy: float, solid: Solid) -> tuple[Any, ...]:
@@ -395,9 +398,9 @@ class Game:
         return True
 
     def _group(self, box: Box, walls: set[Cell], most: int = 32) -> list[Brick]:
-        """Lay a group on free cells of the view. Half the bricks go to
-        large groups: while those have no more bricks laid than the
-        small ones, a medium one, the first of `MEDIUM` that fits;
+        """Lay a group on free cells of the view. Two bricks in three go
+        to large groups: while those have no more than `LARGE` times
+        the bricks of the small ones, a medium one, the first of `MEDIUM` that fits;
         once in five a big wall is tried first, of `most` bricks at
         most. Where none fits, or else, a small group of 2 or 3. Not on a racket or the two rows about it, nor where a ball
         is about to go."""
@@ -426,7 +429,7 @@ class Game:
             )
 
         found, size = None, 0
-        if self.laid[1] <= self.laid[0]:
+        if self.laid[1] <= LARGE * self.laid[0]:
             big = rng.random() < OFTEN
             for n, sizes in enumerate((BIG, *MEDIUM) if big else MEDIUM):
                 (r0, r1), (c0, c1) = sizes
@@ -931,7 +934,8 @@ class Game:
                 queue.extend((b, (b.x + BW // 2, b.y)) for b in near)
             elif self.bonuses and self.rng.random() < DROP:
                 kind = self.rng.choices(list(BONUSES), list(BONUSES.values()))[0]
-                self.capsules.append(Capsule(self._number(), *cell, kind))
+                if kind != "multi" or len(self.balls) < CROWD:
+                    self.capsules.append(Capsule(self._number(), *cell, kind))
         if ball.combo >= 2:
             self.events.append(("combo", at, ball.combo))
 
@@ -1616,10 +1620,8 @@ class Game:
                 if self._size(r, w, box):
                     r.span = LAST[cap.kind]
         elif cap.kind == "twin":
-            twins = [r for r in self.rackets if r.team == team and r.left is not None]
-            if twins:
-                twins[0].left = LAST["twin"]
-            else:
+            # One twin a team; another capsule does not make it last.
+            if not any(r.team == team and r.left is not None for r in self.rackets):
                 self.rackets.append(Racket(self._number(), team, left=LAST["twin"]))
         elif cap.kind == "multi":
             for ball in list(self.balls):  # two for one, `BALLS` at most
