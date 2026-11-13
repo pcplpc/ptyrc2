@@ -6,7 +6,9 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import socket
+import subprocess
 import threading
 from pathlib import Path
 from typing import Any
@@ -65,9 +67,32 @@ def live_sessions() -> list[str]:
     return [p.stem for p in socks if _alive(p)]
 
 
+def _of_tmux() -> str | None:
+    """The session the tmux session of this pane names in `@ptyrc`."""
+    pane = os.environ.get("TMUX_PANE")
+    if not os.environ.get("TMUX") or not pane:
+        return None
+    try:
+        done = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", pane, "#{@ptyrc}"],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    name = done.stdout.strip()
+    if done.returncode != 0 or not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9._-]*", name):
+        return None
+    return name
+
+
 def socket_path(session: str | None = None) -> Path:
     """Socket of `session`, else of `PTYRC_SOCKET` / `PTYRC_SESSION`, else of
-    the only live session."""
+    the session over the tmux session of this pane, else of the only live
+    session."""
     if session is None:
         direct = os.environ.get("PTYRC_SOCKET")
         if direct:
@@ -85,6 +110,9 @@ def socket_path(session: str | None = None) -> Path:
                 else f"start it: ptyrc run --name {session} -- CMD",
             )
         return path
+    over = _of_tmux()
+    if over is not None and _alive(runtime_dir() / f"{over}.sock"):
+        return runtime_dir() / f"{over}.sock"
     live = live_sessions()
     if len(live) == 1:
         return runtime_dir() / f"{live[0]}.sock"

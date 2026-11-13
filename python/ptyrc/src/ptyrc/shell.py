@@ -4,7 +4,8 @@
     ptyrc-python                  interactive
     ptyrc-python FILE [ARGS...]   run FILE with `pilot` defined
 
-The session is that of `$PTYRC_SESSION`, else the only live one.
+The session is that of `$PTYRC_SESSION`, else the one over the tmux
+session of this pane, else the only live one.
 """
 
 from __future__ import annotations
