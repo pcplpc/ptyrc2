@@ -32,7 +32,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from ptyrc import Pilot
+from ptyrc import Pilot, clock
 
 from . import _cli, _widgets
 from . import _probe as probe
@@ -696,7 +696,7 @@ def live(pilot: Pilot, args: argparse.Namespace, seconds: float | None) -> None:
     data = {name: MONITORS[name].read() for name in names}
     deck = _widgets.Deck(pilot, args)
     if args.merged:
-        turn, since = 0, time.monotonic()
+        turn, since = 0, clock.monotonic()
         one = deck.add(
             MERGED,
             merged_sizes(names),
@@ -706,8 +706,8 @@ def live(pilot: Pilot, args: argparse.Namespace, seconds: float | None) -> None:
 
         def tick() -> None:
             nonlocal turn, since
-            if time.monotonic() - since >= args.cycle:
-                turn, since = turn + 1, time.monotonic()
+            if clock.monotonic() - since >= args.cycle:
+                turn, since = turn + 1, clock.monotonic()
                 one.set(title=MONITORS[names[turn % len(names)]].title)
             name = names[turn % len(names)]
             data[name] = MONITORS[name].read()

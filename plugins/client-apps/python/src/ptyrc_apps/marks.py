@@ -25,11 +25,10 @@ What it shows:
 from __future__ import annotations
 
 import argparse
-import time
 from collections.abc import Sequence
 from typing import Any
 
-from ptyrc import Match, Pilot, PtyrcError, Sprite
+from ptyrc import Match, Pilot, PtyrcError, Sprite, clock
 
 from . import _cli
 
@@ -179,11 +178,11 @@ class Marks:
 def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
     marks = Marks(pilot, args)
     pilot.subscribe("screen", "frames", "draw")
-    end = None if seconds is None else time.monotonic() + seconds
+    end = None if seconds is None else clock.monotonic() + seconds
     marks.look()
     # Until the session ends: a closed connection raises out of `events`.
     while True:
-        left = None if end is None else end - time.monotonic()
+        left = None if end is None else end - clock.monotonic()
         if left is not None and left <= 0:
             return
         # Sleep until something changes; then let the burst end.
@@ -195,11 +194,11 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
             break
         if not dirty:
             continue
-        burst = time.monotonic() + BURST
+        burst = clock.monotonic() + BURST
         for topic, data in pilot.events(timeout=SETTLE):
             if topic == "draw":
                 marks.forget(data["removed"])
-            if time.monotonic() > burst:
+            if clock.monotonic() > burst:
                 break
         marks.look()
 

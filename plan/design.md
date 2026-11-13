@@ -1414,6 +1414,11 @@ socket 0600), `/tmp/ptyrc-<uid>/` without `XDG_RUNTIME_DIR`. `<session>` is
 `PTYRC_SESSION`, else the live session its tmux session names (`@ptyrc`,
 see `ptyrc tmux`), else the only live session, else fails with the list.
 
+Durations on the wire (`timeout_ms`, `ttl_ms`, `ms`, ...) are session
+time: real time times `$PTYRC_CLOCK_RATE` (default 1), read by the driver
+at its start and by `ptyrc.clock` at import. Programs in the pty keep real
+time. Tests run at 5.
+
 UTF-8 JSON, one object per line. Version 1.
 
 ```
@@ -1869,6 +1874,9 @@ windows under the driver, one drawing per pane, sand in the idle one.
   their snapshots; `tests/tools.rs`: grab, click, host mouse, shot, attach on a pty;
   `tests/hotkey.rs`: the pair on a pty; `tests/manage.rs`: the verbs of
   `ptyrc manage` on a headless session, a stand-in app in Python.
-- Python: `uv run pytest`, against a headless driver.
+- Python: `uv run pytest`, against a headless driver, session time 5
+  times real time (`PTYRC_CLOCK_RATE=1` to run at real time); a test
+  marked `realtime` (apps) keeps rate 1. A test that times what the
+  driver or an app does measures with `ptyrc.clock`.
 - `scripts/e2e-tmux.sh`: the driver inside a detached tmux, `tmux
   capture-pane` is the host's verdict.

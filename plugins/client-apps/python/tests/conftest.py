@@ -12,9 +12,36 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from ptyrc import Pilot
+
+# Session time runs faster than real time (`ptyrc.clock`); read at import.
+os.environ.setdefault("PTYRC_CLOCK_RATE", "5")
+
+from ptyrc import Pilot, clock
 
 ROOT = Path(__file__).resolve().parents[4]
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers", "realtime: session time is real time (rate 1) in this test"
+    )
+
+
+@pytest.fixture(autouse=True)
+def _realtime(request: pytest.FixtureRequest) -> Iterator[None]:
+    """With `@pytest.mark.realtime`: rate 1 for the pilot and the drivers
+    the test starts."""
+    if request.node.get_closest_marker("realtime") is None:
+        yield
+        return
+    saved = clock.rate()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("PTYRC_CLOCK_RATE", "1")
+        clock.set_rate(1)
+        try:
+            yield
+        finally:
+            clock.set_rate(saved)
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -9,6 +9,7 @@ import time
 
 import pytest
 from ptyrc import Pilot, PtyrcError, Sprite
+from ptyrc import clock as session_clock
 from ptyrc_apps import snow
 
 DRIFT = "▁▂▃▄▅▆▇█"
@@ -99,13 +100,13 @@ def test_snow_without_cover(session: Pilot) -> None:
     thread = threading.Thread(target=lambda: snow.main(args, seconds=5))
     thread.start()
     try:
-        deadline = time.monotonic() + 4
+        deadline = session_clock.monotonic() + 4
         seen = 0
-        while time.monotonic() < deadline:
+        while session_clock.monotonic() < deadline:
             assert sum(lying(session)) == 0
             host = "".join(session.dump()["host"])
             seen += any(c in host for c in "*+")
-            time.sleep(0.1)
+            session_clock.sleep(0.1)
         assert seen > 10
     finally:
         thread.join()

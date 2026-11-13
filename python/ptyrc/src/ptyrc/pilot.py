@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Self
 
+from . import clock
 from ._wire import Connection, PtyrcError, live_sessions, runtime_dir, socket_path
 from .tools import Locator, Tools, frame_locator
 from .widgets import Widgets
@@ -665,7 +666,7 @@ class Pilot(Tools, Widgets):
         params["timeout_ms"] = int(timeout * 1000)
         if self._batch is not None:
             raise RuntimeError("wait_for inside a batch")
-        res = self._conn.call("screen.wait", params, timeout=timeout + 5.0)
+        res = self._conn.call("screen.wait", params, timeout=clock.real(timeout) + 5.0)
         if not res.get("matched", False):
             raise TimeoutError(f"wait_for({pattern!r})")
         match = res.get("match")
@@ -679,7 +680,7 @@ class Pilot(Tools, Widgets):
         if self._batch is not None:
             raise RuntimeError("wait_idle inside a batch")
         params = {"idle": True, "frame": frame, "timeout_ms": int(timeout * 1000)}
-        res = self._conn.call("screen.wait", params, timeout=timeout + 5.0)
+        res = self._conn.call("screen.wait", params, timeout=clock.real(timeout) + 5.0)
         if not res.get("matched", False):
             raise TimeoutError(f"wait_idle({frame!r})")
         return self.frame(res["frame"])
@@ -797,10 +798,11 @@ class Pilot(Tools, Widgets):
 
     def event(self, timeout: float | None = None) -> tuple[str, Any] | None:
         """The next event, `(topic, data)`; None after `timeout` seconds
-        of silence. Raises `PtyrcError` (`gone`) when the connection is
-        closed and nothing is left to read."""
+        (session time, `clock`) of silence. Raises `PtyrcError` (`gone`)
+        when the connection is closed and nothing is left to read."""
+        wait = None if timeout is None else clock.real(timeout)
         try:
-            msg = self._conn.events.get(timeout=timeout)
+            msg = self._conn.events.get(timeout=wait)
         except queue.Empty:
             return None
         if msg is None:

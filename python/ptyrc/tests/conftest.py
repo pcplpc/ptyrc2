@@ -12,6 +12,10 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
+
+# Session time runs faster than real time (`ptyrc.clock`); read at import.
+os.environ.setdefault("PTYRC_CLOCK_RATE", "5")
+
 from ptyrc import Pilot
 
 # `tests_support` is imported by the test modules.

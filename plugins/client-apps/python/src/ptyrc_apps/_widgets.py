@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from ptyrc import Pilot, Widget
+from ptyrc import Pilot, Widget, clock
 
 from . import _cli
 
@@ -128,18 +128,20 @@ class Deck:
         `tick`: the app's work before each periodic draw (read its
         data). `align`: draw on the multiples of `period` of the wall
         clock, as a clock does."""
-        end = None if seconds is None else time.monotonic() + seconds
-        due = time.monotonic()
+        end = None if seconds is None else clock.monotonic() + seconds
+        due = clock.monotonic()
         while True:
-            now = time.monotonic()
+            now = clock.monotonic()
             if end is not None and now >= end:
                 return
             if now >= due:
                 if tick is not None:
                     tick()
                 self.draw()
-                now = time.monotonic()
-                due = now + (period - time.time() % period if align else period)
+                now = clock.monotonic()
+                # The wall clock is real time: one of its seconds is `rate()` here.
+                wall = (period - time.time() % period) * clock.rate()
+                due = now + (wall if align else period)
             wait = due - now if end is None else min(due, end) - now
             event = self.pilot.event(timeout=max(0.0, wait))
             if event is None:

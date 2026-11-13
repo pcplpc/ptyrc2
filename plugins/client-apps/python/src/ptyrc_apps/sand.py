@@ -30,10 +30,9 @@ from __future__ import annotations
 
 import argparse
 import random
-import time
 from collections.abc import Sequence
 
-from ptyrc import Frame, Pilot, PtyrcError, Sprite
+from ptyrc import Frame, Pilot, PtyrcError, Sprite, clock
 
 from . import _cli
 from ._cli import follow, heir
@@ -70,9 +69,9 @@ def still(pilot: Pilot, sel: int | str, timeout: float) -> Frame | None:
 
 
 def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
-    end = None if seconds is None else time.monotonic() + seconds
+    end = None if seconds is None else clock.monotonic() + seconds
     while True:
-        left = 30.0 if end is None else end - time.monotonic()
+        left = 30.0 if end is None else end - clock.monotonic()
         if left <= 0:
             return
         if args.now:
@@ -82,9 +81,9 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
         if frame is not None and frame.usable:
             break
         if args.now or frame is not None:
-            time.sleep(POLL)  # a layout still settling
+            clock.sleep(POLL)  # a layout still settling
     sand = pour(pilot, frame, args.rate, args.cursor)
-    follow(pilot, frame, sand, None if end is None else end - time.monotonic())
+    follow(pilot, frame, sand, None if end is None else end - clock.monotonic())
 
 
 def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> int:

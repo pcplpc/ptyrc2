@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 from ptyrc import Frame, Match, Pilot, Sprite
+from ptyrc import clock as session_clock
 from ptyrc_apps import (
     APPS,
     _arcade,
@@ -51,13 +52,13 @@ def watch(pilot: Pilot, run: Callable[[], int], seen: Callable[[str], bool]) -> 
     ok = False
     while thread.is_alive():
         ok = ok or seen(shown(pilot))
-        time.sleep(0.02)
+        session_clock.sleep(0.02)
     thread.join()
     assert status == [0]
     deadline = time.monotonic() + 3
     while pilot.sprites() and time.monotonic() < deadline:
         ok = ok or seen(shown(pilot))
-        time.sleep(0.02)
+        session_clock.sleep(0.02)
     assert ok, "the app never showed"
     assert pilot.sprites() == []
     assert pilot.dump()["host"] == pilot.text()
@@ -89,7 +90,7 @@ def record(
             raise KeyboardInterrupt
         return real(*args, origin=origin, **kw)
 
-    monkeypatch.setattr(confetti, "time", clock)
+    monkeypatch.setattr(confetti, "clock", clock)
     monkeypatch.setattr(confetti, "burst", burst)
     return log
 
@@ -101,6 +102,7 @@ def apart(origins: list[tuple[int, int]]) -> bool:
     )
 
 
+@pytest.mark.realtime
 def test_confetti(session: Pilot) -> None:
     args = ["-s", session.session, "--one-shot", "--bursts", "2", "--sparkle"]
     watch(
@@ -211,7 +213,7 @@ def calls(
 
         return call
 
-    monkeypatch.setattr(confetti, "time", clock)
+    monkeypatch.setattr(confetti, "clock", clock)
     for name in ("pop", "burst", "rocket"):
         monkeypatch.setattr(confetti, name, logged(name))
     return log
@@ -294,12 +296,12 @@ def test_confetti_rocket(session: Pilot) -> None:
         session, origin=(30, 4), rise=18, seconds=0.9, look=("^", "!:'"), persist=True
     )
     rows: list[tuple[float, int]] = []
-    start = time.monotonic()
+    start = session_clock.monotonic()
     while session.sprites():
         heads = [y for y, row in enumerate(session.dump()["host"]) if row[30:31] == "^"]
         if heads:
-            rows.append((time.monotonic() - start, heads[0]))
-        time.sleep(0.01)
+            rows.append((session_clock.monotonic() - start, heads[0]))
+        time.sleep(0.005)
     ys = [y for _, y in rows]
     assert ys == sorted(ys, reverse=True) and ys[0] > 14 and ys[-1] <= 6, rows
     # More rows in the first half of the flight than in the second.
@@ -641,7 +643,7 @@ def test_fishes_hide_behind_text(
         target=lambda: status.append(fishes.main(args, seconds=12))
     )
     thread.start()
-    time.sleep(10)
+    session_clock.sleep(10)
     frame = session.frame("largest")
     cover = fishes.cover(frame.text(), fishes.view(frame))
     shy = [f for f in born if f.shy]
@@ -1518,7 +1520,7 @@ def test_dispatch(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(confetti, "time", Clock())
+    monkeypatch.setattr(confetti, "clock", Clock())
     assert main([]) == 2
     out = capsys.readouterr().out
     assert all(name in out for name in APPS)
