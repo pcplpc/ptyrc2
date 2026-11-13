@@ -11,7 +11,9 @@ mod rooms;
 #[cfg(test)]
 mod tests;
 
-pub use border::{Align, Border, BorderPatch, BorderSpec, TitlePatch, TitleSpec, compose, presets};
+pub use border::{
+    Align, Border, BorderPatch, BorderSpec, Side, TitlePatch, TitleSpec, compose, presets,
+};
 
 use crate::frames::{HeatClass, HeatView};
 use crate::scene::{Anchor, Content, Layer, Scene, Space, SpritePatch, SpriteSpec};

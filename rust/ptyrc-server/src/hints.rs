@@ -60,7 +60,7 @@ const FRAME_NAMES: [&str; 5] = ["raw", "active", "largest", "quietest", "idle"];
 const COLOURS: [&str; 10] = [
     "default", "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "grey",
 ];
-const BORDER: &str = r#"{"base":NAME,"corners":"┌┐└┘","top":"─","bottom":"─","left":"│","right":"│","style":{...},"title":{"align":"left"|"center"|"right","before":" ","after":" ","style":{...}}}"#;
+const BORDER: &str = r#"{"base":NAME,"corners":"┌┐└┘","top":"─","bottom":"─","left":"│","right":"│","style":{...},"title":{"side":"top"|"bottom","align":"left"|"center"|"right","before":" ","after":" ","style":{...}}}"#;
 const ANCHORS: &str = r#"one of {"at":[x,y],"space":"frame"|"view"}, {"text":"...","side":"right"|"left"|"above"|"below"|"over"}, {"auto":{"prefer":"top-left"|"top"|"top-right"|"left"|"center"|"right"|"bottom-left"|"bottom"|"bottom-right"|"any"}}, {"cursor":{"dx":1,"dy":0}}"#;
 
 pub(crate) fn unknown_method(method: &str) -> RpcError {

@@ -306,29 +306,42 @@ fn rooms_of_a_large_screen_are_cheap() {
 fn border_title_cut_and_absent() {
     let plain = BorderSpec::default();
     let c = compose(&plain, "clock", Some(&Content::rows(&["12:00"])), 9, 1);
-    assert_eq!(text_of(&c), ["┌ clock ──┐", "│12:00    │", "└─────────┘"]);
+    // Bottom right by default.
+    assert_eq!(text_of(&c), ["┌─────────┐", "│12:00    │", "└── clock ┘"]);
     // Cut: room is 9 - 2 = 7 cells.
     let c = compose(&plain, "a long title", None, 9, 1);
-    assert_eq!(text_of(&c)[0], "┌ a long… ┐");
+    assert_eq!(text_of(&c)[2], "└ a long… ┘");
     // Under 3 cells of room: no title.
     let c = compose(&plain, "clock", None, 4, 1);
-    assert_eq!(text_of(&c)[0], "┌────┐");
+    assert_eq!(text_of(&c)[2], "└────┘");
     let c = compose(&plain, "clock", None, 5, 1);
-    assert_eq!(text_of(&c)[0], "┌ cl… ┐");
+    assert_eq!(text_of(&c)[2], "└ cl… ┘");
     // Empty title: none.
     let c = compose(&plain, "", None, 6, 1);
-    assert_eq!(text_of(&c)[0], "┌──────┐");
-    // Aligned right and centred.
-    let mut right = plain.clone();
-    right.title.align = Align::Right;
+    assert_eq!(text_of(&c)[2], "└──────┘");
+    // Aligned left and centred.
+    let mut other = plain.clone();
+    other.title.align = Align::Left;
     assert_eq!(
-        text_of(&compose(&right, "ab", None, 10, 1))[0],
-        "┌────── ab ┐"
+        text_of(&compose(&other, "ab", None, 10, 1))[2],
+        "└ ab ──────┘"
     );
-    right.title.align = Align::Center;
+    other.title.align = Align::Center;
     assert_eq!(
-        text_of(&compose(&right, "ab", None, 10, 1))[0],
-        "┌─── ab ───┐"
+        text_of(&compose(&other, "ab", None, 10, 1))[2],
+        "└─── ab ───┘"
+    );
+    // On the top edge.
+    other.title.side = Side::Top;
+    assert_eq!(
+        text_of(&compose(&other, "ab", None, 10, 1)),
+        ["┌─── ab ───┐", "│          │", "└──────────┘"]
+    );
+    let top: BorderPatch =
+        serde_json::from_str(r#"{"title": {"side": "top", "align": "left"}}"#).unwrap();
+    assert_eq!(
+        text_of(&compose(&top.apply(&plain), "ab", None, 10, 1))[0],
+        "┌ ab ──────┐"
     );
 }
 
@@ -342,9 +355,12 @@ fn border_patterns_style_and_none() {
         text_of(&c),
         ["╔═╤═╤═╗", "║     ║", "╟     ╢", "║     ║", "╚═╧═╧═╝"]
     );
-    // The title keeps the phase of the pattern after it.
+    // The title keeps the phase of the pattern around it.
     let c = compose(&b, "x", None, 8, 1);
-    assert_eq!(text_of(&c)[0], "╔ x ╤═╤═╤╗");
+    assert_eq!(text_of(&c)[2], "╚═╧═╧═ x ╝");
+    b.title.align = Align::Left;
+    let c = compose(&b, "x", None, 8, 1);
+    assert_eq!(text_of(&c)[2], "╚ x ╧═╧═╧╝");
     // Dim border, opaque inside: every cell has a background.
     let c = compose(
         &BorderSpec::default(),
@@ -523,10 +539,10 @@ fn show_and_set_errors() {
         Err(WidgetError::NoFrame("activ".into()))
     );
     let mut show = Show::new("clock");
-    show.border = Some(Border::Object(BorderPatch {
+    show.border = Some(Border::Object(Box::new(BorderPatch {
         corners: Some("++".into()),
         ..BorderPatch::default()
-    }));
+    })));
     assert!(
         matches!(rig.w.show(1, show), Err(WidgetError::BadParams(m)) if m.contains("four glyphs"))
     );
@@ -590,8 +606,8 @@ fn alone_on_a_blank_screen_fill_and_centre() {
     assert!(rig.scene.contains(sprite));
     assert_eq!(rig.scene.list()[0].layer, -1);
     assert_eq!(
-        rig.shown()[3],
-        format!("{}┌ t {}┐", " ".repeat(9), "─".repeat(57))
+        rig.shown()[20],
+        format!("{}└{} t ┘", " ".repeat(9), "─".repeat(57))
     );
 
     // fill 0.1: 192 cells: 32x10 (320) beats 12x5 (60).

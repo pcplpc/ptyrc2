@@ -135,6 +135,6 @@ mod tests {
             .iter()
             .map(|runs| runs.iter().map(|r| r.t.as_str()).collect())
             .collect();
-        assert_eq!(rows, ["╔ sun ╤═╗", "║       ║", "╟       ╢", "╚═╧═╧═╧═╝"]);
+        assert_eq!(rows, ["╔═╤═╤═╤═╗", "║       ║", "╟       ╢", "╚═╧ sun ╝"]);
     }
 }

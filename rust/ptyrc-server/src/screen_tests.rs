@@ -836,8 +836,8 @@ fn a_widget_is_laid_out_drawn_and_told() {
         placed["rect"][1].as_u64().unwrap(),
     ];
     let (x, y) = (x as usize, y as u16);
-    assert_eq!(&rig.row(y)[x..], "┌ cl… ┐");
     assert_eq!(&rig.row(y + 1)[x..], "│12:00│");
+    assert_eq!(&rig.row(y + 2)[x..], "└ cl… ┘");
     let list = rig.call("widget.list", json!({}));
     assert_eq!(list["widgets"][0], placed);
     assert_eq!(

@@ -6,19 +6,30 @@ use crate::scene::{ColorSpec, Content, Run, StyleSpec};
 use ptyrc_vt::{Color, char_width};
 use serde::{Deserialize, Serialize};
 
-/// Where the title sits on the top edge.
+/// Where the title sits along its edge.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Align {
-    #[default]
     Left,
     Center,
+    #[default]
     Right,
 }
 
-/// The title on the top edge: `before`, the text, `after`.
+/// The edge the title is on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Side {
+    Top,
+    #[default]
+    Bottom,
+}
+
+/// The title on an edge: `before`, the text, `after`. Bottom right by
+/// default.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TitleSpec {
+    pub side: Side,
     pub align: Align,
     pub before: String,
     pub after: String,
@@ -28,7 +39,8 @@ pub struct TitleSpec {
 impl Default for TitleSpec {
     fn default() -> TitleSpec {
         TitleSpec {
-            align: Align::Left,
+            side: Side::Bottom,
+            align: Align::Right,
             before: " ".into(),
             after: " ".into(),
             style: StyleSpec::default(),
@@ -151,6 +163,8 @@ pub fn presets() -> Vec<(&'static str, BorderSpec)> {
 #[serde(deny_unknown_fields)]
 pub struct TitlePatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub side: Option<Side>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub align: Option<Align>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub before: Option<String>,
@@ -201,6 +215,9 @@ impl BorderPatch {
             b.style = style;
         }
         if let Some(t) = &self.title {
+            if let Some(side) = t.side {
+                b.title.side = side;
+            }
             if let Some(align) = t.align {
                 b.title.align = align;
             }
@@ -219,7 +236,7 @@ impl BorderPatch {
 #[serde(untagged)]
 pub enum Border {
     Name(String),
-    Object(BorderPatch),
+    Object(Box<BorderPatch>),
 }
 
 /// One cell of a widget: its text (one glyph, a wide one taking two
@@ -343,8 +360,8 @@ fn inner(content: Option<&Content>, w: u16, h: u16) -> Vec<Vec<Option<Slot>>> {
     rows
 }
 
-/// A widget as one opaque `cells` content: the border, the title on its
-/// top edge, the content of inner size `w x h`. A cell without a
+/// A widget as one opaque `cells` content: the border, the title on
+/// one of its edges, the content of inner size `w x h`. A cell without a
 /// background is given the default one: nothing behind shows through.
 pub fn compose(
     border: &BorderSpec,
@@ -378,7 +395,9 @@ pub fn compose(
         top.push(glyph(corners[0]));
         top.extend((0..iw).map(|i| edge(&border.top, i)));
         top.push(glyph(corners[1]));
-        title_on(&mut top, border, title);
+        if border.title.side == Side::Top {
+            title_on(&mut top, border, title);
+        }
         grid.push(top);
         for (y, row) in body.into_iter().enumerate() {
             let mut line = Vec::with_capacity(ow);
@@ -391,6 +410,9 @@ pub fn compose(
         bottom.push(glyph(corners[2]));
         bottom.extend((0..iw).map(|i| edge(&border.bottom, i)));
         bottom.push(glyph(corners[3]));
+        if border.title.side == Side::Bottom {
+            title_on(&mut bottom, border, title);
+        }
         grid.push(bottom);
     }
     let cells = grid
@@ -420,7 +442,7 @@ pub fn compose(
     }
 }
 
-/// Put the title on the top edge `row` (corners included), between the
+/// Put the title on the edge `row` (corners included), between the
 /// corners: cut with `…`, absent under 3 cells of room.
 fn title_on(row: &mut [Option<Slot>], border: &BorderSpec, title: &str) {
     if title.is_empty() {
