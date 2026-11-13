@@ -203,10 +203,16 @@ dependencies = [
  "clap",
  "ptyrc-core",
  "ptyrc-draw-bigtext",
+ "ptyrc-draw-rain",
+ "ptyrc-draw-sand",
  "ptyrc-draw-shapes",
+ "ptyrc-draw-snow",
  "ptyrc-proto",
  "ptyrc-server",
  "ptyrc-tui-agent",
+ "ptyrc-tui-glances",
+ "ptyrc-tui-htop",
+ "ptyrc-tui-ranger",
  "ptyrc-tui-tmux",
  "ptyrc-tui-vim",
  "ptyrc-vt",
@@ -233,10 +239,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "ptyrc-draw-rain"
+version = "2.0.0"
+dependencies = [
+ "ptyrc-core",
+ "ptyrc-vt",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "ptyrc-draw-sand"
+version = "2.0.0"
+dependencies = [
+ "ptyrc-core",
+ "ptyrc-vt",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ptyrc-draw-shapes"
 version = "2.0.0"
 dependencies = [
  "ptyrc-core",
+ "serde_json",
+]
+
+[[package]]
+name = "ptyrc-draw-snow"
+version = "2.0.0"
+dependencies = [
+ "ptyrc-core",
+ "ptyrc-vt",
+ "serde",
  "serde_json",
 ]
 
@@ -273,10 +309,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "ptyrc-tui-glances"
+version = "2.0.0"
+dependencies = [
+ "ptyrc-core",
+ "ptyrc-vt",
+]
+
+[[package]]
+name = "ptyrc-tui-htop"
+version = "2.0.0"
+dependencies = [
+ "ptyrc-core",
+ "ptyrc-vt",
+]
+
+[[package]]
+name = "ptyrc-tui-ranger"
+version = "2.0.0"
+dependencies = [
+ "ptyrc-core",
+ "ptyrc-vt",
+ "regex",
+]
+
+[[package]]
 name = "ptyrc-tui-tmux"
 version = "2.0.0"
 dependencies = [
  "ptyrc-core",
+ "ptyrc-tui-vim",
  "ptyrc-vt",
  "regex",
 ]

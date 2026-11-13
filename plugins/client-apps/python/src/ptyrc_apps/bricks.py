@@ -22,11 +22,13 @@ What it shows:
   racket. A racket keeps off the text when it has the choice.
 - Terrain in frame cells: groups of bricks, laid one at a time all
   over the view, far from each other, where a ball gets: between the
-  lines, after the short ones, in the blanks. Two bricks in three are laid
-  in large groups, a colour a row: medium walls of 2 rows by 3 to 5
-  bricks, a row or a pile where the place is tight; now and then a
-  big wall of 3 or 4 rows by 6 to 8. The others in groups of 2 or
-  3. A group goes 50 to 100 s after it is laid,
+  lines, after the short ones, in the blanks. Near the top of the
+  view when it has room there, near the middle with two rackets
+  (`-m`); elsewhere when it has not. Large groups, a colour a row:
+  medium walls of 2 rows by 3 to 5 bricks, a row or a pile where the
+  place is tight; now and then a big wall of 3 or 4 rows by 6 to 8.
+  Where no large one fits, groups of 2 or 3. A group goes 50 to 100 s
+  after it is laid,
   two seconds later for each brick over three, dim for its last second.
 
 The game never ends. The last ball out sets the score to 0; the racket
@@ -59,8 +61,10 @@ the terminal, keeps it going; the opposite arrow stops it. The racket
 moves as the others do: stopped by bricks, rackets and the sides of
 the view, not by text. Twins play alone; no racket of a player keeps
 away from a duel. With a player the balls go half as fast; rackets,
-capsules and the rest keep their pace. ctrl+t gives the arrows back and
-ends.
+capsules and the rest keep their pace. With `-m` the rackets that play
+alone take the pace of the player: the mean of the cells a step its
+racket moved over the last `PACED` seconds, within `PACES`. ctrl+t
+gives the arrows back and ends.
 
 Rules count in steps of the game, not in seconds; `second` is the
 steps in a second.
@@ -117,6 +121,8 @@ KICK = 6  # eighths more for a fast one
 MOVES = 2  # cells a racket moves in a step
 REACH_X = 3  # cells a step the racket of a player moves along its row; one row
 HELD = 2  # steps a press of an arrow moves it
+PACED = 4  # seconds of the moves of a player the other rackets take their pace from
+PACES = (0.5, 3.0)  # cells a step, at least and at most, they then move
 ARROWS = {"left": (0, -1), "right": (0, 1), "up": (1, -1), "down": (1, 1)}  # axis, way
 BRICKS = 240  # bricks in the view, at most; one a `PLOT` cells, 8 at least
 PLOT = 48
@@ -126,7 +132,6 @@ KEPT = 0.55
 AGE = (50, 100)  # seconds a group lasts
 LONG = 2  # seconds more for each brick over three
 BIG = ((3, 4), (6, 8))  # rows and columns of a big wall, in bricks
-LARGE = 2  # bricks laid in large groups for one in a small group
 OFTEN = 0.2  # share of the large groups a big wall is tried for
 #: Of a medium one, in the order tried: a wall, a block, a row, a pile.
 MEDIUM = (((2, 2), (3, 5)), ((2, 2), (3, 3)), ((1, 1), (4, 6)), ((3, 4), (2, 2)))
@@ -135,6 +140,7 @@ FADE = 1  # second it is dim before it goes
 CLEAR = 60  # moves of a ball no group is laid in the way of
 TRIES = 60  # places drawn for a group
 PICK = 10  # of which the farthest from the others is kept
+BANDS = 3  # of the view, by rows: a group goes to the nearest to where it is liked
 ROOM = 40  # free cells a group must be next to
 #: Shapes of a small group: left cells of its bricks.
 SHAPES = (
@@ -368,6 +374,10 @@ class Game:
         self.player = player  # team whose racket is moved by `press`
         self.gear = 3 if player is None else 4  # a move is 2 ** gear of `PACE`
         self.held = [(0, 0), (0, 0)]  # along x, along y: way, steps left
+        self.pace = float(MOVES)  # cells a step a racket that plays alone moves
+        self.reach = MOVES  # of which in this step
+        self.credit = 0.0  # cells it has yet to move
+        self.moved: deque[int] = deque(maxlen=PACED * second)  # player: cells a step
         self.rules, self.bonuses, self.teams = rules, bonuses, 1 + multiplayer
         self.second = second
         self.solid: dict[Cell, Brick] = {}  # every cell of every brick
@@ -422,12 +432,11 @@ class Game:
         return True
 
     def _group(self, box: Box, walls: set[Cell], most: int = 32) -> list[Brick]:
-        """Lay a group on free cells of the view. Two bricks in three go
-        to large groups: while those have no more than `LARGE` times
-        the bricks of the small ones, a medium one, the first of `MEDIUM` that fits;
-        once in five a big wall is tried first, of `most` bricks at
-        most. Where none fits, or else, a small group of 2 or 3. Not on a racket or the two rows about it, nor where a ball
-        is about to go."""
+        """Lay a group on free cells of the view: a medium one, the
+        first of `MEDIUM` that fits; once in five a big wall is tried
+        first, of `most` bricks at most. Where no large one fits, a
+        small group of 2 or 3. Not on a racket or the two rows about
+        it, nor where a ball is about to go."""
         rng = self.rng
         x0, y0, x1, y1 = box
         if x1 - x0 < 3 * BW or y1 - y0 < 4:
@@ -453,19 +462,18 @@ class Game:
             )
 
         found, size = None, 0
-        if self.laid[1] <= LARGE * self.laid[0]:
-            big = rng.random() < OFTEN
-            for n, sizes in enumerate((BIG, *MEDIUM) if big else MEDIUM):
-                (r0, r1), (c0, c1) = sizes
-                rows = rng.randint(r0, min(r1, max(r0, y1 - y0 - 4)))
-                cols = rng.randint(c0, max(c0, min(c1, most // rows)))
-                style = rng.choice(STYLES) if rows > 2 and cols > 3 else "full"
-                shape = self._wall(rows, cols, style, rng.random() < 0.5)
-                if rows * c0 <= most:
-                    found = self._spot([shape], box, free, keep, True)
-                if found is not None:
-                    size = 2 if big and not n else 1
-                    break
+        big = rng.random() < OFTEN
+        for n, sizes in enumerate((BIG, *MEDIUM) if big else MEDIUM):
+            (r0, r1), (c0, c1) = sizes
+            rows = rng.randint(r0, min(r1, max(r0, y1 - y0 - 4)))
+            cols = rng.randint(c0, max(c0, min(c1, most // rows)))
+            style = rng.choice(STYLES) if rows > 2 and cols > 3 else "full"
+            shape = self._wall(rows, cols, style, rng.random() < 0.5)
+            if rows * c0 <= most:
+                found = self._spot([shape], box, free, keep, True)
+            if found is not None:
+                size = 2 if big and not n else 1
+                break
         if found is None:
             found = self._spot(SHAPES, box, free, keep, False)
         if found is None:
@@ -522,7 +530,9 @@ class Game:
     ) -> tuple[Sequence[Cell], int, int, tuple[float, float]] | None:
         """Where a group goes: of `TRIES` places drawn for a shape of
         `shapes`, of the first `PICK` that are free and that a ball can
-        get to (`_open`), the farthest from the other groups, a row
+        get to (`_open`): those of the band of rows nearest to the top
+        of the view, to its middle with two teams, the view cut in
+        `BANDS`; of these the farthest from the other groups, a row
         counting for two columns. A large one touches no brick and,
         of two rows or more, has as many free cells next to it as its
         longest row has cells."""
@@ -558,8 +568,13 @@ class Game:
                 ((mx - gx) ** 2 + (2 * (my - gy)) ** 2 for gx, gy in others),
                 default=0.0,
             )
-            if best is None or far > best[0]:
-                best = (far, shape, x, y, (mx, my))
+            if self.teams > 1:
+                off = abs(2 * my - y0 - y1) / (y1 - y0)
+            else:
+                off = (my - y0) / (y1 - y0)
+            rank = (-min(BANDS - 1, int(BANDS * off)), far)
+            if best is None or rank > best[0]:
+                best = (rank, shape, x, y, (mx, my))
             found += 1
             if found >= PICK:
                 break
@@ -931,14 +946,31 @@ class Game:
             if left:
                 self.held[axis] = (way, left - 1)
                 moves += [(way, 0)] * REACH_X if axis == 0 else [(0, way)]
-        if r is None or r.dead or not moves:
-            return
-        room = self._free(box, r.w)
-        bad = {(x - i, y) for x, y in self._blocked(r) for i in range(r.w)}
-        for dx, dy in moves:
-            there = (r.x + dx, r.y + dy)
-            if there in room and there not in bad:
-                r.x, r.y = there
+        done = 0
+        if r is not None and not r.dead and moves:
+            room = self._free(box, r.w)
+            bad = {(x - i, y) for x, y in self._blocked(r) for i in range(r.w)}
+            for dx, dy in moves:
+                there = (r.x + dx, r.y + dy)
+                if there in room and there not in bad:
+                    r.x, r.y = there
+                    done += 1
+        self._pace(done)
+
+    def _pace(self, done: int) -> None:
+        """Set the cells the rackets that play alone move in this step.
+        `MOVES`; against a player, two teams: the mean of the cells a
+        step its racket moved (`done`, in this one) over the last
+        `PACED` seconds, within `PACES`; a share of a cell is kept for
+        the next step."""
+        if self.player is not None and self.teams > 1:
+            self.moved.append(done)
+            if len(self.moved) == self.moved.maxlen:
+                low, high = PACES
+                self.pace = min(high, max(low, sum(self.moved) / len(self.moved)))
+        self.credit += self.pace
+        self.reach = int(self.credit)
+        self.credit -= self.reach
 
     def _out(self, ball: Ball, box: Box) -> None:
         """Out by the top or the bottom. The last one: the score of who
@@ -1173,7 +1205,7 @@ class Game:
             return gain + 0.05
         edge = box[1] if side < 0 else box[3] - 1
         far = abs(x - lx - half) + abs(edge - row)
-        return gain - (RISK if far + SPARE <= MOVES * k else LOSS)
+        return gain - (RISK if far + SPARE <= int(self.pace * k) else LOSS)
 
     def _free(self, box: Box, w: int) -> set[Cell]:
         """`_room` with nothing taken; kept while the terrain is."""
@@ -1301,10 +1333,12 @@ class Game:
                 continue
             taken = self._blocked(r)
             if any(
-                (x + i, y) in taken for x, y in plan.way[:MOVES] for i in range(r.w)
+                (x + i, y) in taken
+                for x, y in plan.way[: self.reach]
+                for i in range(r.w)
             ):
                 # A ball or a racket in the way: another way, if in time.
-                depth = MOVES * (plan.step - self.steps)
+                depth = int(self.pace * (plan.step - self.steps))
                 if plan.place in ways(r, depth, {plan.place}):
                     plan.way = way(r, plan.place, depth)
                 else:
@@ -1317,7 +1351,7 @@ class Game:
         # One search a racket: as far as the last of them, until it has
         # every place where it would be hit.
         aims: dict[Racket, set[Cell]] = {}
-        depth = int(MOVES * threats[-1].path[-1][0]) + SPARE if threats else 0
+        depth = int(self.pace * threats[-1].path[-1][0]) + SPARE if threats else 0
         for flight in threats:
             team = 0 if self.teams == 1 or flight.side < 0 else 1
             free = [r for r in alive if r.team == team and r not in goals]
@@ -1325,7 +1359,7 @@ class Game:
             if keeper:
                 r, plan = keeper[0], keeper[0].plan
                 goals[r] = plan.way
-                slack[r] = MOVES * (plan.step - self.steps) - len(plan.way)
+                slack[r] = int(self.pace * (plan.step - self.steps)) - len(plan.way)
                 minded.add(flight.ball.n)
                 continue
             plans = []
@@ -1397,7 +1431,7 @@ class Game:
                 r.plan = None
             if r.plan is None and self.steps >= r.think and not away:
                 r.think = self.steps + THINK
-                depth = int(MOVES * CHASE)
+                depth = int(self.pace * CHASE)
                 rest = [f for f in flights.values() if f.ball.n not in minded]
                 dist = ways(r, depth, self._spots(r, rest, CHASE))
                 found = self._chase(r, rest, dist, box, walls)
@@ -1422,7 +1456,7 @@ class Game:
         for r, path in goals.items():
             taken = self._blocked(r)
             done = 0
-            for x, y in path[:MOVES]:
+            for x, y in path[: self.reach]:
                 if any((x + i, y) in taken for i in range(r.w)):
                     break
                 r.x, r.y = x, y
@@ -1444,7 +1478,7 @@ class Game:
         here = plan.way[0] if plan.way else plan.place
         if (
             abs(here[0] - r.x) + abs(here[1] - r.y) != bool(plan.way)
-            or len(plan.way) > MOVES * k
+            or len(plan.way) > int(self.pace * k)
             or not room.issuperset(plan.way)
         ):
             return False
@@ -1481,7 +1515,7 @@ class Game:
             spots = [c for c in spots if c in dist]
             if not spots:
                 continue
-            due = MOVES * k - 1
+            due = int(self.pace * k) - 1
             timely = [c for c in spots if dist[c] <= due]
             if timely:
                 spare = max(due - dist[c] for c in timely)
@@ -1507,7 +1541,7 @@ class Game:
                     best = (key, -i, c)
         assert best is not None
         _, i, goal = best
-        return dist[goal] - MOVES * path[i + 1][0], goal, i
+        return dist[goal] - int(self.pace * path[i + 1][0]), goal, i
 
     def _chase(
         self,
@@ -1538,7 +1572,8 @@ class Game:
                 spots = [
                     c
                     for lx in range(floor(x) - r.w + 1, floor(x) + 1)
-                    if (c := (lx, floor(y))) in dist and dist[c] < MOVES * k - 1
+                    if (c := (lx, floor(y))) in dist
+                    and dist[c] < int(self.pace * k) - 1
                 ]
                 if spots:
                     rows.append((i, spots))

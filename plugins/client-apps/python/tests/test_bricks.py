@@ -137,36 +137,28 @@ def test_game() -> None:
 
 
 def test_groups() -> None:
-    """Groups, one at a time, all over the view, where a ball gets:
-    between the lines, after the short ones, in the blanks."""
-    rows = [
-        "" if i % 4 == 3 else "words " * (2 + i % 5) if i < 16 else ""
-        for i in range(24)
-    ]
-    walls = walls_of(rows)
+    """Groups, one at a time. Where no large one fits, small ones, of 2
+    or 3, far from each other, all over the view."""
+    gaps = ("w" + " " * 9) * 8
+    walls = walls_of([gaps if i % 2 else "words " * 13 for i in range(24)])
     box = (0, 0, 80, 24)
     game = bricks.Game(random.Random(5))
-    laid, large = [], []
+    laid = []
     for _ in range(2400):
         game.step(box, walls)
         checks(game, box, walls)
         new = [e[1] for e in game.events if e[0] == "group"]
         assert len(new) <= 1  # one at a time
         if new:
-            (large if game.groups[-1].large else laid).append(new[0])
-            assert game.groups[-1].bricks == new[0]
-    assert len(laid) >= 20 and all(2 <= len(group) <= 3 for group in laid)
+            laid.append(new[0])
+            assert game.groups[-1].bricks == new[0] and not game.groups[-1].large
+    assert len(laid) >= 40 and all(2 <= len(group) <= 3 for group in laid)
     assert all(
         abs(a.y - b.y) <= 1 and abs(a.x - b.x) <= 6 for g in laid for a in g for b in g
     )
-    assert large and all(len(group) >= 4 for group in large)
+    assert game.laid[0] >= 100 and game.laid[1] == 0
     sectors = {(4 * g[0].x // 80, 3 * g[0].y // 24) for g in laid}
     assert len(sectors) >= 9  # all over the view
-    lines = {y for _, y in walls}
-    after = [g for g in laid if all(b.y in lines for b in g)]
-    between = [g for g in laid if g[0].y not in lines and g[0].y < 16]
-    blank = [g for g in laid if g[0].y > 16]
-    assert after and between and blank
     # The first ones are far from each other.
     first = [(g[0].x, g[0].y) for g in laid[:4]]
     assert all(
@@ -182,9 +174,40 @@ def test_groups() -> None:
     assert not game.solid and game._group((0, 0, 30, 4), full) == []
 
 
+def test_bands() -> None:
+    """A group goes near the top of the view, near its middle with two
+    teams; elsewhere when there is no room."""
+    box = (0, 0, 80, 24)
+    pages = {
+        "blank": [""] * 24,
+        "lines": ["" if i % 4 == 3 else "words " * (2 + i % 5) for i in range(24)],
+        "top": ["words " * 13 if i < 10 else "" for i in range(24)],
+        "middle": ["words " * 13 if 6 <= i < 18 else "" for i in range(24)],
+    }
+    for name, page in pages.items():
+        walls = walls_of(page)
+        for teams in (1, 2):
+            game = bricks.Game(random.Random(5), multiplayer=teams == 2)
+            bands = [0, 0, 0]
+            for _ in range(2400):
+                game.step(box, walls)
+                if any(e[0] == "group" for e in game.events):
+                    ys = [b.y for b in game.groups[-1].bricks]
+                    bands[int(3 * (sum(ys) / len(ys) + 0.5) / 24)] += 1
+            liked, n = bands[teams - 1], sum(bands)
+            assert n >= 10, (name, teams, bands)
+            if name in ("blank", "lines"):
+                assert 2 * liked > n, (name, teams, bands)
+            elif (name, teams) == ("top", 1):  # the next band down
+                assert bands[0] == 0 and 2 * bands[1] > n, bands
+            elif (name, teams) == ("middle", 2):  # either side
+                assert bands[1] == 0 and bands[0] and bands[2], bands
+
+
 def test_walls() -> None:
-    """Two bricks in three are laid in large groups: medium walls, a block,
-    a row or a pile where the place is tight, now and then a big wall."""
+    """Large groups: medium walls, a block, a row or a pile where the
+    place is tight, now and then a big wall. Small ones only where no
+    large one fits."""
     rows = {
         "blank": [""] * 24,
         "lines": ["" if i % 4 == 3 else "words " * (2 + i % 5) for i in range(24)],
@@ -237,8 +260,9 @@ def test_walls() -> None:
             if name == "lines":
                 assert all(b.kind in bricks.KINDS for b in group.bricks)
         small, big = game.laid
-        share = big / (small + big)
-        assert small + big >= 60 and 0.6 <= share <= 0.73, (name, share)
+        assert big >= 60 and small <= big / 10, (name, small, big)
+        if name == "blank":
+            assert small == 0
         sizes = [size for size, _, _ in shapes]
         assert sizes.count(1) >= 3  # medium ones of several shapes, everywhere
         if name == "blank":  # room: every medium one is a wall, some are big
@@ -493,7 +517,7 @@ def test_bonuses() -> None:
 
 def test_drops() -> None:
     """`multi` is by far the most common capsule; a game with `-b`
-    has one caught within 20 s."""
+    has one caught within 30 s."""
     shares = bricks.BONUSES
     assert shares["multi"] >= 5 * max(
         n for kind, n in shares.items() if kind != "multi"
@@ -517,7 +541,7 @@ def test_drops() -> None:
     for seed in range(8):
         game = bricks.Game(random.Random(seed), bonuses=True)
         caught = False
-        for _ in range(20 * game.second):
+        for _ in range(30 * game.second):
             game.step(box, walls)
             checks(game, box, walls)
             caught = caught or ("catch", "multi") in {e[::2] for e in game.events}
@@ -868,6 +892,41 @@ def test_player() -> None:
     g.press("down")
     g.step(box, set())
     assert (low.x, low.y) == (at[0], at[1] + 1)
+    # The others take the pace of the player: the mean of its moves over
+    # `PACED` seconds, within `PACES`. A player alone, no player: `MOVES`.
+    wide = (0, 0, 80, 24)
+    for kw in ({}, {"player": 0}, {"multiplayer": True}):
+        g = still(**kw)
+        for _ in range(2 * bricks.PACED * g.second):
+            g.press("right")
+            g.step(wide, set())
+        assert g.pace == bricks.MOVES and g.reach == bricks.MOVES
+    g = still(multiplayer=True, player=1)
+    g.step(wide, set())
+    top, low = g.rackets
+    assert g.pace == bricks.MOVES
+    shoot(g, 70.5, 12.5).vx = 0.0
+    for _ in range(bricks.PACED * g.second):  # still: the slowest
+        was = (top.x, top.y)
+        g.step(wide, set())
+        assert abs(top.x - was[0]) + abs(top.y - was[1]) <= bricks.MOVES
+    assert g.pace == bricks.PACES[0]
+    far = 0
+    for i in range(40):
+        was = (top.x, top.y)
+        shoot(g, 5.5 if i < 20 else 70.5, 12.5).vx = 0.0
+        g.step(wide, set())
+        far += (moved := abs(top.x - was[0]) + abs(top.y - was[1]))
+        assert moved <= 1
+    assert 10 <= far <= 20  # half a cell a step
+    key = "left"
+    for i in range(bricks.PACED * g.second):  # to and fro, all the time
+        if i % 8 == 0:
+            g.press(key)  # stops it
+            key = "left" if key == "right" else "right"
+        g.press(key)
+        g.step(wide, set())
+    assert g.pace > bricks.MOVES and g.pace <= bricks.PACES[1]
     # Face to face: the one that keeps away is never the player's.
     for seed in range(8):
         g = still(multiplayer=True, player=1)
