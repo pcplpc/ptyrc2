@@ -30,32 +30,6 @@ ptyrc run --app bricks -- vim ~/.vimrc
 
 You can use `ptyrc python` to start an interactive session:
 
-```py
-Connected to "vim /home/plcp/.vimrc"
->>> pilot.argv
-['vim', '/home/plcp/.vimrc']
->>> pilot.size
-(110, 13)
->>> pilot.cursor()
-Cursor(x=0, y=0, visible=True, frame=2, trail=(), pos=(0, 0))
->>> pilot.find("syntax on")
-[Match(frame=0, x=0, y=10, len=9, text='syntax on', screen=(0, 10))]
->>> pilot.send("jjj$")
->>> pilot.cursor().x
-35
->>> pilot.send("ohello world!")
->>> pilot.keys("esc")
->>> pilot.text()[4]
-'" hello world!'
->>> pilot.draw(["<3"], near="nocompatible", fg="red")
-Sprite(1)
->>> pilot.keys(":q!", "enter")
->>> pilot.connected
-False
-```
-
-For example, if you want to pilot manually:
-
 ![pilot](doc/interact.gif)
 
 Running `ptyrc python script.py` runs the script with `pilot` defined.
@@ -78,15 +52,21 @@ You then get fishes:
 
 ![fishes](doc/fishes.gif)
 
-Perfect weather for a coding session:
+----
+
+You can also get the perfect weather to appreciate becoming obsolete:
 
 ![rain](doc/rain.gif)
 
-Freeze-cold `htop` monitoring:
+----
+
+You can cool down your terminal as the planet gets hotter too:
 
 ![sand](doc/snow.gif)
 
-Sand pouring on your screen:
+----
+
+You can easy sandbox any of your favorite applications:
 
 ![sand](doc/sand.gif)
 
