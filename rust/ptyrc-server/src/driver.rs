@@ -166,10 +166,43 @@ impl Signals {
     }
 }
 
+/// The session's clock: real time times `$PTYRC_CLOCK_RATE` (default 1),
+/// so that tests see seconds pass faster. Programs in the pty keep real
+/// time.
+#[derive(Clone, Copy)]
+struct Clock {
+    start: Instant,
+    rate: f64,
+}
+
+impl Clock {
+    fn new() -> Clock {
+        let rate = std::env::var("PTYRC_CLOCK_RATE")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|r| r.is_finite() && *r > 0.0)
+            .unwrap_or(1.0);
+        Clock {
+            start: Instant::now(),
+            rate,
+        }
+    }
+
+    /// Session time since the start.
+    fn elapsed(&self) -> Duration {
+        self.start.elapsed().mul_f64(self.rate)
+    }
+
+    /// The real time that `d` of session time takes.
+    fn real(&self, d: Duration) -> Duration {
+        d.div_f64(self.rate)
+    }
+}
+
 struct Driver {
     cfg: Config,
     info: SessionInfo,
-    start: Instant,
+    clock: Clock,
     /// The app; `None` in a replay.
     pty: Option<Pty>,
     recorder: Option<Recorder>,
@@ -399,7 +432,7 @@ impl Driver {
             stdin_open: host.interactive || !cfg.headless,
             cfg,
             info,
-            start: Instant::now(),
+            clock: Clock::new(),
             pty: Some(pty),
             recorder,
             player: None,
@@ -455,7 +488,7 @@ impl Driver {
             stdin_open: false,
             cfg,
             info,
-            start: Instant::now(),
+            clock: Clock::new(),
             after: Vec::new(),
             pty: None,
             recorder: None,
@@ -534,7 +567,7 @@ impl Driver {
     fn now(&self) -> Duration {
         match &self.player {
             Some(player) => player.now(),
-            None => self.start.elapsed(),
+            None => self.clock.elapsed(),
         }
     }
 
@@ -671,7 +704,7 @@ impl Driver {
                     .into_iter()
                     .flatten()
                     .min();
-                wake.map(|w| w.saturating_sub(now))
+                wake.map(|w| self.clock.real(w.saturating_sub(now)))
             };
             let ready = self.wait(timeout)?;
             if self.player.as_ref().is_some_and(Player::paused) {
@@ -974,7 +1007,7 @@ impl Driver {
             return self.forward_input(bytes, engine);
         };
         let armed = self.grab.is_none();
-        let (forward, twice) = hotkey.sort(bytes, self.start.elapsed(), armed);
+        let (forward, twice) = hotkey.sort(bytes, self.clock.elapsed(), armed);
         if twice && !self.hotkey_pressed() {
             let _ = self.host.write(b"\x07");
         }
@@ -1142,7 +1175,7 @@ impl Driver {
             }
         }
         if let Some(recorder) = &mut self.recorder {
-            recorder.input(self.start.elapsed(), &self.pty_queue[..sent]);
+            recorder.input(self.clock.elapsed(), &self.pty_queue[..sent]);
         }
         self.pty_queue.drain(..sent);
     }
@@ -1304,7 +1337,7 @@ impl Driver {
             && let Some(apps) = &mut self.apps
             && let Some(peer) = self.conns.get_mut(&conn).and_then(|c| c.peer.take())
         {
-            apps.attach(conn, Some(peer), false, self.start.elapsed());
+            apps.attach(conn, Some(peer), false, self.clock.elapsed());
         }
         Some(match method {
             "session.info" => Ok(self.session_info(engine)),
@@ -2114,7 +2147,7 @@ impl Driver {
             apps.finish();
         }
         if let Some(recorder) = &mut self.recorder {
-            recorder.exit(self.start.elapsed(), status);
+            recorder.exit(self.clock.elapsed(), status);
         }
         let mut out = Vec::new();
         if self.host_mouse {
