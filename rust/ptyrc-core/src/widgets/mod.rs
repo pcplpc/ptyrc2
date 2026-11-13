@@ -79,7 +79,7 @@ pub struct VariantDecl {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Declare {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "or_default")]
     pub widgets: Vec<VariantDecl>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub border: Option<Border>,
@@ -89,16 +89,29 @@ fn default_fill() -> f32 {
     0.5
 }
 
+/// A member given as null is absent.
+fn or_default<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
+}
+
+fn or_fill<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
+    Ok(Option::<f32>::deserialize(d)?.unwrap_or_else(default_fill))
+}
+
 /// `widget.show`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Show {
     pub tag: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "or_default")]
     pub frame: FrameSel,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "or_default")]
     pub prefer: Prefer,
-    #[serde(default = "default_fill")]
+    #[serde(default = "default_fill", deserialize_with = "or_fill")]
     pub fill: f32,
     /// The tag when absent; `""`: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]

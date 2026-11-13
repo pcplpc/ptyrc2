@@ -488,6 +488,25 @@ fn declare_checks_and_replaces() {
 }
 
 #[test]
+fn null_members_are_absent() {
+    let show: Show = serde_json::from_value(serde_json::json!({
+        "tag": "t", "frame": null, "prefer": null, "fill": null, "title": null,
+        "border": null, "layer": null,
+    }))
+    .unwrap();
+    assert_eq!(show, Show::new("t"));
+    let decl: Declare =
+        serde_json::from_value(serde_json::json!({"widgets": null, "border": null})).unwrap();
+    assert_eq!(decl, Declare::default());
+    let set: Set = serde_json::from_value(
+        serde_json::json!({"id": 1, "variant": null, "content": null, "title": "x"}),
+    )
+    .unwrap();
+    assert_eq!(set.title.as_deref(), Some("x"));
+    assert!(serde_json::from_value::<Show>(serde_json::json!({"tag": "t", "rows": []})).is_err());
+}
+
+#[test]
 fn show_and_set_errors() {
     let mut rig = Rig::new(40, 10);
     rig.declare(1, "clock", &[[5, 1]]);
