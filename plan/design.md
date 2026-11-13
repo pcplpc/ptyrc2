@@ -809,6 +809,8 @@ repaint.
   the one shown; `not-usable` when none is), kept by the driver; and,
   or, the title. A variant never set is blank.
 - `widget.hide {id}`: the widget goes; the declaration stays.
+- Params: a member given as null is absent; an unknown member is
+  refused (`bad-params`).
 - A widget dies with its connection. A widget id that is not one of
   the connection's: `no-sprite`, `no such widget: N`, the hint naming
   the connection's widgets.
