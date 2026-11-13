@@ -402,7 +402,7 @@ class Poke:
     more each `again` seconds it keeps moving there.
 
         poke = Poke()
-        deck.on_hover(widget, poke.on_move, poke.on_leave)
+        poke.on_move(x, y)
         scene(t, w, h, look, poke.age())
     """
 
@@ -486,7 +486,13 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None) -> None:
         return scene(t, w, h, look, poke.age(now))
 
     deck = _widgets.Deck(pilot, args)
-    deck.add("fire", list(SIZES), render)
+    widget = deck.add("fire", list(SIZES), render)
+    # The next draw shows it: no draw of its own.
+    deck.on_hover(
+        widget,
+        lambda x, y: poke.on_move(x, y) or False,
+        lambda: poke.on_leave() or False,
+    )
     deck.run(period=PERIOD, seconds=seconds)
 
 
