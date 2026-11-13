@@ -8,10 +8,10 @@ ptyrc = { workspace = true }
 ptyrc-apps = { workspace = true }
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6", "ptyrc", "ptyrc-apps"]
+dev = ["pytest>=8", "pytest-xdist>=3.8", "ruff>=0.6", "ptyrc", "ptyrc-apps"]
 
 [tool.pytest.ini_options]
-addopts = "-p no:cacheprovider --import-mode=importlib --strict-markers"
+addopts = "-p no:cacheprovider --import-mode=importlib --strict-markers -n auto --dist worksteal"
 testpaths = ["python", "plugins/client-apps/python"]
 
 [tool.ruff]

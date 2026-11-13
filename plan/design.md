@@ -1874,9 +1874,10 @@ windows under the driver, one drawing per pane, sand in the idle one.
   their snapshots; `tests/tools.rs`: grab, click, host mouse, shot, attach on a pty;
   `tests/hotkey.rs`: the pair on a pty; `tests/manage.rs`: the verbs of
   `ptyrc manage` on a headless session, a stand-in app in Python.
-- Python: `uv run pytest`, against a headless driver, session time 5
-  times real time (`PTYRC_CLOCK_RATE=1` to run at real time); a test
-  marked `realtime` (apps) keeps rate 1. A test that times what the
-  driver or an app does measures with `ptyrc.clock`.
+- Python: `uv run pytest`, against a headless driver, in parallel
+  (`-n auto`; `-n0` for one process), session time 5 times real time
+  (`PTYRC_CLOCK_RATE=1` to run at real time); a test marked `realtime`
+  (apps) keeps rate 1. A test that times what the driver or an app does
+  measures with `ptyrc.clock`. Apps under test take a `--seed`.
 - `scripts/e2e-tmux.sh`: the driver inside a detached tmux, `tmux
   capture-pane` is the host's verdict.
