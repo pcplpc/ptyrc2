@@ -190,7 +190,7 @@ No code: a text file in `src/ptyrc_apps/pictures/`, `NAME.pic`. A
 header (`name`, `author`, `kind`, `ink`, and for one that moves
 `period`, `hold`), then a block a size: `== WxH`, the rows of glyphs,
 `::`, the rows of ink keys; `++` starts the next frame. The format is
-told at the top of `gallery.py`; `apple.pic` is the smallest, `owl.pic`
+told at the top of `gallery.py`; `banana.pic` is the smallest, `owl.pic`
 blinks and looks at the pointer, `swell.pic` has two sizes.
 
     ptyrc-app gallery --file NAME.pic --print --colour -m
