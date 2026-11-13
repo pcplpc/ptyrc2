@@ -679,6 +679,77 @@ fn rooms_ranked_by_variant_then_prefer() {
 }
 
 #[test]
+fn prefer_names_the_side_of_the_room() {
+    let mut rig = Rig::new(80, 24);
+    rig.declare(1, "t", &[[10, 3]]);
+    let mut at = |prefer: Prefer| {
+        let mut show = Show::new("t");
+        show.prefer = prefer;
+        let id = rig.show(1, show);
+        rig.rect(id).unwrap()
+    };
+    assert_eq!(at(Prefer::Any), [34, 9, 12, 5]);
+    assert_eq!(at(Prefer::Center), [34, 9, 12, 5]);
+    assert_eq!(at(Prefer::TopRight), [68, 0, 12, 5]);
+    assert_eq!(at(Prefer::Top), [34, 0, 12, 5]);
+    assert_eq!(at(Prefer::Left), [0, 9, 12, 5]);
+    assert_eq!(at(Prefer::BottomLeft), [0, 19, 12, 5]);
+
+    // Not on an edge of the view: the gap is kept.
+    let mut rig = Rig::new(80, 24);
+    for y in 0..24 {
+        rig.write(60, y, &"x".repeat(20));
+    }
+    rig.write(0, 0, &"x".repeat(60));
+    rig.run(2000);
+    rig.declare(1, "t", &[[10, 3]]);
+    let mut show = Show::new("t");
+    show.prefer = Prefer::TopRight;
+    let id = rig.show(1, show);
+    assert_eq!(rig.rect(id), Some([46, 2, 12, 5]));
+}
+
+#[test]
+fn placed_one_shrinks_to_let_a_hidden_one_in() {
+    let mut rig = Rig::new(40, 10);
+    rig.declare(1, "a", &[[10, 2], [30, 6]]);
+    rig.declare(2, "b", &[[10, 2]]);
+    let a = rig.show(1, Show::new("a"));
+    assert_eq!(rig.info(a).variant.as_deref(), Some("30x6"));
+    // No room around `a` for `b`: `a` takes its smaller variant.
+    let b = rig.show(2, Show::new("b"));
+    assert_eq!(rig.info(a).variant.as_deref(), Some("10x2"));
+    assert_eq!(rig.info(b).state, WidgetState::Placed);
+    let (ra, rb) = (rig.rect(a).unwrap(), rig.rect(b).unwrap());
+    let [x, y, w, h] = ra;
+    assert!(!overlaps(
+        [x.saturating_sub(2), y.saturating_sub(1), w + 4, h + 2],
+        rb
+    ));
+    assert!(rig.events.iter().any(|e| e.id == a && e.rect == Some(ra)));
+    assert_eq!(rig.scene.list().len(), 2);
+    // Settled: nothing moves.
+    rig.run(5000);
+    assert_eq!((rig.rect(a), rig.rect(b)), (Some(ra), Some(rb)));
+    assert_eq!(rig.w.next_wake(), None);
+    // `b` goes: `a` grows back.
+    assert!(rig.w.hide(2, b));
+    rig.run(2600);
+    assert_eq!(rig.info(a).variant.as_deref(), Some("30x6"));
+
+    // No smaller variant makes the room: the first stays, as it is.
+    let mut rig = Rig::new(20, 6);
+    rig.declare(1, "a", &[[14, 2]]);
+    rig.declare(2, "b", &[[14, 2]]);
+    let a = rig.show(1, Show::new("a"));
+    let first = rig.rect(a);
+    let b = rig.show(2, Show::new("b"));
+    rig.run(1000);
+    assert_eq!(rig.rect(a), first);
+    assert_eq!(rig.info(b).state, WidgetState::Hidden);
+}
+
+#[test]
 fn pressed_then_evicted_elsewhere_smaller_or_hidden() {
     let mut rig = Rig::new(40, 10);
     rig.declare(1, "t", &[[4, 1], [20, 4]]);
@@ -812,6 +883,37 @@ fn declaration_replaced_lays_out_again() {
             size: [10, 2]
         }]
     );
+    // A variant of the same name and size, given no content, keeps its
+    // own; another size is blank.
+    let set = |rig: &mut Rig, name: &str, size: [u16; 2], rows: Option<&[&str]>| {
+        let decl = Declare {
+            widgets: vec![VariantDecl {
+                tag: "k".into(),
+                name: Some(name.into()),
+                size,
+                content: rows.map(Content::rows),
+            }],
+            border: Some(Border::Name("none".into())),
+        };
+        rig.w.declare(2, decl).unwrap();
+        rig.run(300);
+    };
+    set(&mut rig, "v", [4, 1], Some(&["abcd"]));
+    let k = rig.show(2, Show::new("k"));
+    let text = |rig: &Rig| {
+        let [x, y, w, _] = rig.rect(k).unwrap();
+        let row = &rig.shown()[y as usize];
+        row.chars()
+            .skip(x as usize)
+            .take(w as usize)
+            .collect::<String>()
+    };
+    assert_eq!(text(&rig), "abcd");
+    set(&mut rig, "v", [4, 1], None);
+    assert_eq!(text(&rig), "abcd");
+    set(&mut rig, "v", [3, 1], None);
+    assert_eq!(text(&rig).trim_end(), "");
+
     // The connection's border, given at declare: the widget takes it.
     rig.w
         .declare(
@@ -973,4 +1075,19 @@ fn look_cost_at_200x60() {
         rig.tick();
     }
     eprintln!("look: {:?}", started.elapsed() / 20);
+
+    // The worst case: a widget hidden, no smaller variant of the others
+    // lets it in.
+    rig.declare(9, "t", &[[150, 50]]);
+    rig.show(9, Show::new("t"));
+    let started = std::time::Instant::now();
+    for _ in 0..20 {
+        rig.w.urgent = true;
+        rig.tick();
+    }
+    let placed = rig.w.list().iter().filter(|i| i.rect.is_some()).count();
+    eprintln!(
+        "look, one hidden: {:?}, {placed} of 9 placed",
+        started.elapsed() / 20
+    );
 }

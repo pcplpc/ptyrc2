@@ -415,7 +415,8 @@ impl Widgets {
     }
 
     /// Declare variants for the connection. A tag declared again has its
-    /// variants replaced, and its widget is laid out again. Returns the
+    /// variants replaced, and its widget is laid out again; a variant of
+    /// the same name and size, given no content, keeps its own. Returns the
     /// tags of the connection, in order of first declaration. Nothing is
     /// applied on error.
     pub fn declare(&mut self, owner: OwnerId, decl: Declare) -> Result<Vec<String>, WidgetError> {
@@ -476,7 +477,15 @@ impl Widgets {
         let mut touched: Vec<String> = Vec::new();
         for (tag, variants) in tags {
             match own.tags.iter_mut().find(|(t, _)| *t == tag) {
-                Some(slot) => slot.1 = variants,
+                Some(slot) => {
+                    let mut old = std::mem::replace(&mut slot.1, variants);
+                    for v in slot.1.iter_mut().filter(|v| v.content.is_none()) {
+                        v.content = old
+                            .iter_mut()
+                            .find(|o| o.name == v.name && o.size == v.size)
+                            .and_then(|o| o.content.take());
+                    }
+                }
                 None => own.tags.push((tag.clone(), variants)),
             }
             touched.push(tag);
@@ -952,8 +961,9 @@ impl Widgets {
     }
 
     /// The best place for a widget as a new one, on `open` (view cells)
-    /// less the rects `taken`.
-    fn best(&self, w: &Widget, look: &Look, taken: &[Rect]) -> Option<Place> {
+    /// less the rects `taken`. `cap`: only the variants of a smaller
+    /// outer area.
+    fn best(&self, w: &Widget, look: &Look, taken: &[Rect], cap: Option<u32>) -> Option<Place> {
         let (vw, vh) = (look.view.w as usize, look.view.h as usize);
         let mut open = look.open.clone();
         for t in taken {
@@ -987,6 +997,7 @@ impl Widgets {
                 .iter()
                 .enumerate()
                 .filter(|(_, (ow, oh))| *ow <= aw && *oh <= ah)
+                .filter(|(_, (ow, oh))| cap.is_none_or(|c| (*ow as u32 * *oh as u32) < c))
                 .min_by(|(i, (aw_, ah_)), (j, (bw, bh))| {
                     let (a, b) = (*aw_ as u32 * *ah_ as u32, *bw as u32 * *bh as u32);
                     let (da, db) = ((a as f32 - target).abs(), (b as f32 - target).abs());
@@ -995,7 +1006,9 @@ impl Widgets {
             let Some((i, &(ow, oh))) = pick else {
                 continue;
             };
-            let at = (r.x + gl + (aw - ow) / 2, r.y + gt + (ah - oh) / 2);
+            // On the side of the room `prefer` names; centred for `any`.
+            let (fx, fy) = prefer_point(w.prefer).unwrap_or((1, 1));
+            let at = (r.x + gl + (aw - ow) * fx / 2, r.y + gt + (ah - oh) * fy / 2);
             let dist = prefer_distance(w.prefer, at, (ow, oh), (vw16, vh16));
             let key = (
                 Reverse(ow as u32 * oh as u32),
@@ -1016,6 +1029,48 @@ impl Widgets {
             }
         }
         best.map(|(_, p)| p)
+    }
+
+    /// Room for widget `i`, which has none: a widget placed in its frame,
+    /// the largest first, takes a smaller variant, the largest that lets
+    /// `i` in. `taken`: the obstacles, each with the index of its widget.
+    /// Returns that widget, its new place, the place of `i`.
+    fn squeeze(
+        &self,
+        i: usize,
+        look: &Look,
+        taken: &[(usize, Rect)],
+    ) -> Option<(usize, Place, Place)> {
+        let area = |p: &Place| p.outer.0 as u32 * p.outer.1 as u32;
+        let w = &self.widgets[i];
+        let mut placed: Vec<(usize, Place)> = self
+            .widgets
+            .iter()
+            .enumerate()
+            .filter(|(j, o)| {
+                *j != i && o.live && o.frame == w.frame && !o.relayout && o.pressed.is_none()
+            })
+            .filter_map(|(j, o)| Some((j, o.place?)))
+            .collect();
+        placed.sort_by_key(|(_, p)| Reverse(area(p)));
+        for (j, place) in placed {
+            let mut rects: Vec<Rect> = taken
+                .iter()
+                .filter(|(k, _)| *k != j)
+                .map(|(_, r)| *r)
+                .collect();
+            let mut cap = area(&place);
+            while let Some(small) = self.best(&self.widgets[j], look, &rects, Some(cap)) {
+                rects.push(small.rect());
+                let found = self.best(w, look, &rects, None);
+                rects.pop();
+                if let Some(found) = found {
+                    return Some((j, small, found));
+                }
+                cap = area(&small);
+            }
+        }
+        None
     }
 
     /// Lay the widgets out, the oldest first: those to place, those
@@ -1054,19 +1109,32 @@ impl Widgets {
             let look = looks.iter().find(|l| l.info.id == info.id).expect("looked");
             // Every other widget placed is an obstacle, in this view's
             // cells.
-            let taken: Vec<Rect> = self
+            let taken: Vec<(usize, Rect)> = self
                 .widgets
                 .iter()
                 .enumerate()
                 .filter(|(j, _)| *j != i)
-                .filter_map(|(_, o)| {
+                .filter_map(|(j, o)| {
                     let rect = o.screen?;
                     o.place?;
-                    obstacle(rect, look.view)
+                    Some((j, obstacle(rect, look.view)?))
                 })
                 .collect();
-            let found = self.best(&self.widgets[i], look, &taken);
+            let rects: Vec<Rect> = taken.iter().map(|(_, r)| *r).collect();
+            let mut found = self.best(&self.widgets[i], look, &rects, None);
             let view = look.view;
+            let on_screen = |p: Place| [view.x + p.at.0, view.y + p.at.1, p.outer.0, p.outer.1];
+            if fresh
+                && found.is_none()
+                && let Some((j, small, place)) = self.squeeze(i, look, &taken)
+            {
+                let o = &mut self.widgets[j];
+                o.place = Some(small);
+                o.screen = Some(on_screen(small));
+                o.grow = None;
+                o.rev += 1;
+                found = Some(place);
+            }
             let w = &mut self.widgets[i];
             if fresh {
                 if found != w.place {
@@ -1095,9 +1163,7 @@ impl Widgets {
             } else {
                 w.grow = None;
             }
-            w.screen = w
-                .place
-                .map(|p| [view.x + p.at.0, view.y + p.at.1, p.outer.0, p.outer.1]);
+            w.screen = w.place.map(on_screen);
         }
         self.quiet_due = soonest.map(|s| now + Duration::from_secs_f32(s).max(ms(1)));
     }
@@ -1195,10 +1261,10 @@ fn obstacle(rect: [u16; 4], view: Rect) -> Option<Rect> {
     (!r.is_empty()).then(|| Rect::new(r.x - view.x, r.y - view.y, r.w, r.h))
 }
 
-/// How far a rect is from the point `prefer` names in a `vw x vh` view,
-/// each axis scaled by the view's size; 0 for `any`.
-fn prefer_distance(prefer: Prefer, at: (u16, u16), outer: (u16, u16), view: (u16, u16)) -> i64 {
-    let (fx, fy) = match prefer {
+/// The point `prefer` names, in halves of a span: 0 the start, 1 the
+/// middle, 2 the end. None for `any`.
+fn prefer_point(prefer: Prefer) -> Option<(u16, u16)> {
+    Some(match prefer {
         Prefer::TopLeft => (0, 0),
         Prefer::Top => (1, 0),
         Prefer::TopRight => (2, 0),
@@ -1208,8 +1274,17 @@ fn prefer_distance(prefer: Prefer, at: (u16, u16), outer: (u16, u16), view: (u16
         Prefer::BottomLeft => (0, 2),
         Prefer::Bottom => (1, 2),
         Prefer::BottomRight => (2, 2),
-        Prefer::Any => return 0,
+        Prefer::Any => return None,
+    })
+}
+
+/// How far a rect is from the point `prefer` names in a `vw x vh` view,
+/// each axis scaled by the view's size; 0 for `any`.
+fn prefer_distance(prefer: Prefer, at: (u16, u16), outer: (u16, u16), view: (u16, u16)) -> i64 {
+    let Some((fx, fy)) = prefer_point(prefer) else {
+        return 0;
     };
+    let (fx, fy) = (fx as i64, fy as i64);
     let (vw, vh) = (view.0 as i64, view.1 as i64);
     // Doubled: the centre of the rect, the point in the view.
     let cx = 2 * at.0 as i64 + outer.0 as i64;
