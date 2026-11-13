@@ -324,6 +324,74 @@ fn bad_frame_key_colour_anchor_json() {
 }
 
 #[test]
+fn widget_errors() {
+    let mut sb = Sandbox::new("widgets");
+    sb.session("one");
+    let call = |method: &str, params: &str| sb.ptyrc(&["call", method, params]);
+    call("widget.show", r#"{"tag": "clock"}"#).fails(
+        2,
+        "no such tag: clock",
+        "this connection declared no tag: `widget.declare` first",
+    );
+    call("widget.hide", r#"{"id": 3}"#).fails(
+        4,
+        "no such widget: 3",
+        "this connection shows no widget",
+    );
+    call("widget.declare", r#"{"border": "paintng"}"#).fails(
+        2,
+        "no such border: paintng",
+        "did you mean painting? borders: plain, round, heavy, double, ascii, none, painting",
+    );
+    call("widget.declare", r#"{"border": {"top": "日"}}"#).fails(
+        2,
+        "border top",
+        "glyphs of one cell",
+    );
+    call("widget.declare", r#"{"border": 3}"#).fails(2, "bad border", "a preset name (plain");
+    call(
+        "widget.declare",
+        r#"{"widgets": [{"tag": "a", "size": [0, 1]}]}"#,
+    )
+    .fails(
+        2,
+        "from 1x1 to 200x60",
+        "16 variants a tag, 64 tags a connection",
+    );
+    // In one connection: a batch.
+    let out = call(
+        "batch",
+        r#"{"calls": [
+            {"method": "widget.declare", "params": {"widgets": [{"tag": "t", "size": [4, 1]}]}},
+            {"method": "widget.show", "params": {"tag": "t", "border": "painting"}},
+            {"method": "widget.set", "params": {"id": 1, "variant": "4x2", "title": "x"}}
+        ]}"#,
+    );
+    assert_eq!(out.status, 0, "{}", out.stderr);
+    assert!(out.stdout.contains(r#""tags""#), "{}", out.stdout);
+    assert!(
+        out.stdout.contains(r#""border": "painting""#),
+        "{}",
+        out.stdout
+    );
+    assert!(
+        out.stdout.contains("did you mean 4x1? variants: 4x1"),
+        "{}",
+        out.stdout
+    );
+    let out = sb.ptyrc(&["widgets"]);
+    assert_eq!(out.status, 0);
+    assert!(out.stdout.starts_with("  ID  OWNER  TAG"), "{}", out.stdout);
+    assert_eq!(
+        out.stdout.lines().count(),
+        1,
+        "the batch's widget died with it"
+    );
+    let out = sb.ptyrc(&["widgets", "--json"]);
+    assert_eq!(out.stdout.trim(), r#"{"widgets":[]}"#);
+}
+
+#[test]
 fn wait_timeout_and_usage() {
     let mut sb = Sandbox::new("wait");
     sb.session("one");

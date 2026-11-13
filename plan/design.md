@@ -88,7 +88,7 @@ Per burst:
    repaired after. A burst that also scrolls a region, inserts, deletes
    or clears: `repair(host, base)`, everything is unpainted.
 3. Emit the burst; `host.feed(burst)`.
-4. `frames.update(...)`, `scene.tick(...)`,
+4. `frames.update(...)`, `widgets.tick(...)`, `scene.tick(...)`,
    `desired = scene.compose(app.grid(), frames)`.
 5. If `app.in_ground()`: emit `repair(host, desired)`. Otherwise wait for
    the next burst: never inject inside an escape sequence or a UTF-8
@@ -771,59 +771,83 @@ impl Widgets {
     pub fn drop_owner(&mut self, owner: OwnerId);
     pub fn touch(&mut self);                      // the screen changed
     pub fn tick(&mut self, now: Duration, base: &Grid,
+        cursor: Option<(u16, u16)>,               // when it shows
         surfaces: &dyn Surfaces, scene: &mut Scene) -> Vec<WidgetInfo>;
     pub fn next_wake(&self) -> Option<Duration>;
     pub fn list(&self) -> Vec<WidgetInfo>;
+    pub fn info(&self, id: WidgetId) -> Option<WidgetInfo>;
 }
 ```
 
 No clock inside. `tick` lays out, adds, updates and removes the sprites,
 and returns the widgets whose info changed (one `widgets` event each).
+The driver touches on every burst, resize and frame change, and ticks
+before the scene is ticked and composed: a widget moves in the same
+repaint.
 
 ### Declared, shown, set
 
 - `widget.declare {widgets: [{tag, name, size, content}], border}`:
   the collection of the connection. A tag declared again has its
   variants replaced; a widget of it is laid out again. `name`: `WxH`
-  when absent, unique in the tag. `content`: optional, as a sprite's
-  (`rows` and a style, or `cells`). Limits: 64 tags a connection, 16
-  variants a tag, inner sizes from 1x1 to 200x60.
+  when absent, unique in the tag. `content`: optional, the member of a
+  sprite (`{"rows": [...], "style": {...}}` or `{"cells": [[run,
+  ...], ...]}`). Limits: 64 tags a connection, 16 variants a tag,
+  inner sizes from 1x1 to 200x60. Answer: `{"tags": [...]}`, every tag
+  of the connection, in order of first declaration. Nothing is applied
+  on error.
 - `widget.show {tag, frame, prefer, fill, title, border, layer}`: one
   widget per connection and tag; shown again, the same widget with the
-  new options. `frame`: an id or a name, resolved once (`raw`).
-  `prefer`: as for `auto` (`any`). `fill`: `0.1..=1` (0.5). `title`:
-  the tag when absent; `""`: none. `layer`: `back` when absent.
-- `widget.set {id, variant, content..., title}`: the content of one
-  variant (`variant` absent: the one shown; `not-usable` when none is),
-  kept by the driver; and, or, the title. A variant never set is blank.
+  new options, those absent at their defaults. `frame`: an id or a
+  name, resolved once, at the call (`raw`). `prefer`: as for `auto`
+  (`any`). `fill`: `0.1..=1` (0.5). `title`: the tag when absent;
+  `""`: none. `layer`: `back` when absent, a declared name allowed. It
+  is laid out at once: the answer `{"widget": info}` is placed when a
+  room is there.
+- `widget.set {id, variant, content, title}`, `content` and `title`
+  optional, one at least: the content of one variant (`variant` absent:
+  the one shown; `not-usable` when none is), kept by the driver; and,
+  or, the title. A variant never set is blank.
 - `widget.hide {id}`: the widget goes; the declaration stays.
-- A widget dies with its connection.
+- Params: a member given as null is absent; an unknown member is
+  refused (`bad-params`).
+- A widget dies with its connection. A widget id that is not one of
+  the connection's: `no-sprite`, `no such widget: N`, the hint naming
+  the connection's widgets.
 
-Content is clipped to the inner size and padded with blanks. The
-inside is opaque: nothing of the layers behind shows through. The
-app's text does: the default layer is `back`, a widget never hides
-what the app writes.
+Content is clipped to the inner size and padded with blanks; a wide
+glyph cut by the right edge is a blank. The inside is opaque: a cell
+without `bg` gets the default background, nothing of the layers behind
+shows through. The app's text does: the default layer is `back`, a
+widget never hides what the app writes.
 
 ### Borders
 
-One cell thick, dim. The title is on the top edge, after one cell of
-it: `┌ clock ───┐`; cut with `…` when it does not fit, absent under 3
-cells of room.
+One cell thick, dim. The title is on the top edge, between the
+corners: `before`, the title, `after`, from the cell after the corner
+(`align` left): `┌ clock ───┐`. Room: the cells between the corners
+less `before` and `after`. Cut with `…` when it does not fit, absent
+(with `before` and `after`) under 3 cells of room. The edge keeps its
+pattern on both sides of the title. The title is not dim.
 
 `border`: a preset name, or an object: `{"base": NAME, "corners":
 "┌┐└┘", "top": "─", "bottom": "─", "left": "│", "right": "│", "style":
 {...}, "title": {"align": "left" | "center" | "right", "before": " ",
 "after": " ", "style": {...}}}`. `base`: the preset the other members
-replace (`plain`). An edge is a pattern, one glyph or several, repeated
-along it from the top or the left; glyphs of one cell only. Given at
-`widget.declare` it is the connection's default; at `widget.show`, the
-widget's.
+replace (`plain`), a member of `title` each; `style` replaces the
+whole style. An edge is a pattern, one glyph or several, repeated
+along it from the top or the left; glyphs of one cell only; four
+corners and four edges, or none at all. An unknown member: `bad
+border`. Given at `widget.declare` it is the connection's default
+(absent: kept); at `widget.show`, the widget's.
 
 Presets of the core: `plain` (thin, square, dim; the default), `round`,
 `heavy`, `double`, `ascii`, `none` (no border, no title: the outer
 size is the inner one). A draw extension adds presets
-(`DrawExt::borders`); `widget.borders` lists the names. Extension
-`borders`: `painting` and others, frames as of pictures.
+(`DrawExt::borders`); `widget.borders` lists the names, the core's
+first. Extension `borders`: `painting` (gilt double frame, ticks along
+the edges), `baroque` (bronze, crossed corners, studded edges), `mat`
+(a pale mount of half blocks), `sketch` (dashed, rounded, dim).
 
 ### Layout
 
@@ -833,47 +857,60 @@ each one placed is an obstacle to the next.
 - **Open cell**, for a widget: inside the view of its frame; no ink in
   the app's grid; not of class `panel`; no visible change for
   `quiet_ms` (1000); not on the row of a visible cursor; not under
-  another widget, nor within `gap` of one (2 columns, 1 row).
-- **Room**: a maximal rectangle of open cells.
-- A variant fits a room that holds its outer size and the gap on every
-  side.
+  another widget placed.
+- **Room**: a maximal rectangle of open cells (histogram and stack,
+  O(cells)).
+- A variant fits a room that holds its outer size and `gap` (2
+  columns, 1 row) on every side but those on an edge of the view: a
+  widget keeps the gap from text, from other widgets, from the cursor
+  row.
 - In a room: of the variants that fit, the one whose outer area is the
   nearest to `fill` of the room's; the larger on a tie. It is centred
-  in the room.
-- Of the rooms: the one that gives the largest variant; then the
-  nearest to `prefer`, when not `any`; then the largest; then the
-  topmost, the leftmost.
+  in the room less its gaps.
+- Of the rooms: the one that gives the largest variant (outer area);
+  then the nearest to `prefer`, when not `any` (the widget's centre to
+  the point named, each axis over the view's size); then the largest;
+  then the topmost, the leftmost.
 - No room for any variant: the widget is hidden until one opens.
 
 A placed widget stays where it is, as it is:
 
 - **Pressed**: an app cell under its outer rectangle has ink, or the
-  rectangle is no longer whole inside the view. It stays drawn (the
-  text shows over it). Pressed for `evict_ms` (300), it is laid out
-  again as a new one: elsewhere, smaller, or hidden.
+  rectangle is no longer whole inside the view. Seen at the first tick
+  after a change. It stays drawn (the text shows over it). Pressed for
+  `evict_ms` (300), it is laid out again as a new one: elsewhere,
+  smaller, or hidden.
 - **Grown**: at each look, when a layout as a new widget, its own cells
-  counted open, gives a larger variant, and the same one for
-  `replace_ms` (2000) of looks, it moves there. Never for a variant of
-  the same size or a smaller one: no jitter.
+  counted open, gives a larger variant (outer area), and the same one
+  in the same place for `replace_ms` (2000) of looks, it moves there.
+  Never for a variant of the same size or a smaller one: no jitter.
 - A look: when the screen, an obstacle or a declaration changed
-  (`touch`), `look_ms` (250) apart at least; and when a timer above is
-  due. A quiet screen costs nothing.
+  (`touch`), `look_ms` (250) apart at least; at once after
+  `widget.show`; and when a timer is due: an eviction, a move, the
+  first cell, otherwise open, that turns quiet. A quiet screen costs
+  nothing.
 
 The widget's sprite: frame and layer as shown, anchored in view cells,
-border and content in one `cells` content. Hidden with its frame
-(not usable), back with it. It is listed by `draw.list`; `draw.remove`
-on it hides the widget.
+border and content in one `cells` content, owned by the connection.
+Hidden with its frame (not usable), back with it. It is listed by
+`draw.list`; removed by
+`draw.remove`, `draw.clear` or with a forgotten frame, the widget goes
+as by `widget.hide`.
 
 ### Events
 
 Topic `widgets`: the info of a widget, when it changes: placed, moved,
 another variant, hidden, gone.
 
-Widget info: `{"id","tag","frame","state":"placed"|"hidden"|"gone",
-"variant":name|null,"size":[w,h]|null,"rect":[x,y,w,h]|null,
+Widget info: `{"id","owner","tag","frame","state":"placed"|"hidden"|
+"gone","variant":name|null,"size":[w,h]|null,"rect":[x,y,w,h]|null,
 "sprite":id|null,"title","border":name|null,"variants":[{"name",
-"size"}]}`. `size`: inner, of the variant shown. `rect`: outer, screen
-cells. `border`: null for one given as an object.
+"size"}]}`. `owner`: the connection. `frame`: null until a name is
+resolved. `size`: inner, of the variant shown. `rect`: outer, screen
+cells. `title`: as drawn, `""` for none. `border`: null for one given
+as an object. Hidden or gone: `variant`, `size`, `rect`, `sprite`
+null. The event's data is the info itself; `subscribe {snapshot}`
+sends one per widget.
 
 ## Plugins
 
@@ -936,8 +973,9 @@ two rules, under them `glances:sidebar` left of the column of `TASKS`
 (8 cells or more) and `glances:processes`; all monitors. First draw
 extensions: `shapes` (line, rect, circle, ellipse), `bigtext` (block
 letters), `sand`, `rain`, `snow` (effects, all three tuned in place;
-unknown parameters refused). A draw extension refuses a parameter
-of the wrong type.
+unknown parameters refused), `borders` (border presets of widgets:
+`painting`, `baroque`, `mat`, `sketch`; no function). A draw extension
+refuses a parameter of the wrong type.
 
 ## Tools
 
@@ -1157,14 +1195,14 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `draw.exts` | | `{"exts":[{"name","functions":[...]}],"effects":[...]}` |
 | `layer.define` | `name`, `z` | `{"layers":[{"name","z"}]}`; see Layers |
 | `layer.list` | | the same |
-| `widget.declare` | `widgets`: `[{tag, name, size, content}]`, `border` | `{"tags":[...]}`; see Widgets |
+| `widget.declare` | `widgets`: `[{tag, name, size, content}]`, `border` | `{"tags":[...]}`, the connection's; see Widgets |
 | `widget.show` | `tag`, `frame`, `prefer`, `fill`, `title`, `border`, `layer` | `{"widget":info}` |
-| `widget.set` | `id`, `variant`, content, `title` | `{}` |
+| `widget.set` | `id`, `variant`, `content`, `title` | `{}` |
 | `widget.hide` | `id` | `{}` |
 | `widget.list` | | `{"widgets":[info,...]}`, every connection's |
 | `widget.borders` | | `{"borders":[name,...]}` |
 | `batch` | `calls`: `[{"method","params"}]` | `{"results":[{"result"} or {"error"},...]}`, applied in one repaint |
-| `subscribe` | `topics`: `screen`, `cursor`, `frames`, `text`, `idle`, `draw`, `input`, `mouse`, `size`, `colors`, `widgets`, `exit`; `snapshot` | `{}`; with `snapshot`, then the state now as events, to this client: `idle` per frame on screen, `cursor`, `frames`, `size` |
+| `subscribe` | `topics`: `screen`, `cursor`, `frames`, `text`, `idle`, `draw`, `input`, `mouse`, `size`, `colors`, `widgets`, `exit`; `snapshot` | `{}`; with `snapshot`, then the state now as events, to this client: `idle` per frame on screen, `cursor`, `frames`, `size`, `widgets` per widget |
 | `debug.overlay` | `what`: `frames`, `heat`, `off` | `{}` |
 | `debug.dump` | | app grid, host grid, sprites, frames |
 
@@ -1232,7 +1270,8 @@ ptyrc keys KEY...                 press keys
 ptyrc wait [PATTERN] [--stable MS] [--idle] [--gone] [--timeout MS]
 ptyrc frames [--watch]
 ptyrc heat [-f FRAME] [--classes]
-ptyrc widgets [--watch]           widgets, their variant and place
+ptyrc widgets [--watch]           widgets, their variant and place;
+      --watch: then one line per change
 ptyrc idle [-f FRAME]             score; status 0 when idle, 1 when not
 ptyrc draw text|ext|effect|exts|rm|ls|clear ...   (sprites persist)
       [--layer back|front|N] [--blend normal|tint] [-z N]
@@ -1290,7 +1329,7 @@ Exit status:
 | 1 | a negative answer: `find` without a match (silent), `wait` timed out (says what was waited for), `click --text` without a match, `replay --check` with a difference (names each) |
 | 2 | usage, or a request that is wrong: a bad key, colour, anchor, position, JSON, method, topic, session name for `run` |
 | 3 | no session to talk to: none, not found, several and none chosen, dead (stale socket, removed), bad name; `run`: the name is taken, no socket directory |
-| 4 | the request names what is not there or not usable: frame, sprite |
+| 4 | the request names what is not there or not usable: frame, sprite, widget |
 | 5 | the connection or the system: closed by the driver, I/O |
 | 126 | `run`: the command is there and cannot run: a directory, not executable, no interpreter |
 | 127 | `run`: the command is not there |
@@ -1461,7 +1500,11 @@ windows under the driver, one drawing per pane, sand in the idle one.
   `Frames::update` at 200x60 (scan, heat, update, tick);
   `BENCH_ONLY=frames` for it alone.
 
-- Rust unit tests per crate, `cargo test --workspace`.
+- Rust unit tests per crate, `cargo test --workspace`. Widgets
+  (`ptyrc-core/src/widgets/tests.rs`): rooms against brute force,
+  fill and centring, ranking, `prefer`, gap, cursor row, panel and
+  changed cells, pressed and evicted, grown, two owners, declarations
+  replaced, borders and titles.
 - `ptyrc-vt`: the repair property above; recorded streams of real programs.
 - `ptyrc-server`: headless end-to-end, a `Vt` fed with the host log stands
   for the host.

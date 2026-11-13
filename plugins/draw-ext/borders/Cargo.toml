@@ -1,0 +1,11 @@
+[package]
+name = "ptyrc-draw-borders"
+description = "ptyrc: draw extension: borders of widgets, frames as of pictures"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ptyrc-core.workspace = true
+ptyrc-vt.workspace = true
+serde_json.workspace = true

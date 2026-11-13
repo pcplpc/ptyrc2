@@ -69,6 +69,8 @@ enum Verb {
     Wait(verbs::Wait),
     /// List frames: the raw screen and the panes found on it
     Frames(verbs::Frames),
+    /// List widgets: their variant and place, every connection's
+    Widgets(verbs::Widgets),
     /// Print the safety heatmap of a frame: 9 free and still, 0 busy
     Heat {
         #[arg(short, long, default_value = "raw")]
@@ -114,9 +116,10 @@ enum Verb {
     /// Print events, one JSON object per line
     Events {
         /// screen, cursor, frames, text, idle, draw, input, mouse, size,
-        /// exit [default: all but mouse]
+        /// colors, widgets, exit [default: all but mouse]
         topics: Vec<String>,
-        /// The state now as the first events (cursor, frames, idle, size)
+        /// The state now as the first events (cursor, frames, idle, size,
+        /// widgets)
         #[arg(long)]
         snapshot: bool,
     },
@@ -319,6 +322,7 @@ fn run(cli: Cli) -> Result<ExitCode, Fail> {
         Verb::Cursor => verbs::cursor(&common),
         Verb::Wait(args) => verbs::wait(&common, args),
         Verb::Frames(args) => verbs::frames(&common, args),
+        Verb::Widgets(args) => verbs::widgets(&common, args),
         Verb::Heat { frame, classes } => verbs::heat(&common, &frame, classes),
         Verb::Idle { frame } => verbs::idle(&common, &frame),
         Verb::Draw(verb) => verbs::draw(&common, verb),

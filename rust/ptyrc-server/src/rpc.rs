@@ -6,6 +6,7 @@ use crate::engine::{ConnId, Ctx, Reply, Token};
 use crate::screen::{DEBUG_OWNER, Overlay, ScreenEngine, Wait};
 use ptyrc_core::frames::{HeatClass, IDLE_SECS};
 use ptyrc_core::scene::{ColorSpec, SpritePatch, SpriteSpec};
+use ptyrc_core::widgets::{Declare, Set, Show, WidgetError, WidgetId};
 use ptyrc_core::{FrameId, FrameKind, FrameSel, FrameState, RAW, Surfaces, TextMatch, TextQuery};
 use ptyrc_proto::{ErrorCode, RpcError};
 use ptyrc_vt::{Attrs, Cell, Color, Grid, Rect, Style, render_ansi};
@@ -440,6 +441,72 @@ fn scene_err(e: ptyrc_core::scene::SceneError) -> RpcError {
     RpcError::new(code, e.to_string())
 }
 
+fn widget_err(
+    engine: &ScreenEngine,
+    conn: ConnId,
+    id: Option<WidgetId>,
+    e: WidgetError,
+) -> RpcError {
+    let code = match e {
+        WidgetError::NoWidget(_) => ErrorCode::NoSprite,
+        WidgetError::NoFrame(_) => ErrorCode::NoFrame,
+        WidgetError::NotUsable(_) => ErrorCode::NotUsable,
+        WidgetError::BadParams(_) => ErrorCode::BadParams,
+    };
+    crate::hints::widget(engine, conn.0, id, RpcError::new(code, e.to_string()))
+}
+
+/// `widget.declare {widgets, border}`: `{"tags": [...]}`.
+fn widget_declare(engine: &mut ScreenEngine, conn: ConnId, params: Value) -> Res {
+    let decl: Declare = parse(params)?;
+    let tags = engine
+        .widgets
+        .declare(conn.0, decl)
+        .map_err(|e| widget_err(engine, conn, None, e))?;
+    Ok(json!({"tags": tags}))
+}
+
+/// `widget.show {tag, frame, prefer, fill, title, border, layer}`: laid
+/// out at once; `{"widget": info}`.
+fn widget_show(engine: &mut ScreenEngine, conn: ConnId, mut params: Value, ctx: &mut Ctx) -> Res {
+    engine.scene.name_layer(&mut params);
+    let mut show: Show = parse(params)?;
+    check_frame(engine, &show.frame)?;
+    // A name is resolved once, now.
+    if let Some(id) = engine.frames.resolve(&show.frame) {
+        show.frame = FrameSel::Id(id);
+    }
+    let id = engine
+        .widgets
+        .show(conn.0, show)
+        .map_err(|e| widget_err(engine, conn, None, e))?;
+    engine.tick_widgets(ctx.now(), ctx);
+    Ok(json!({"widget": engine.widgets.info(id)}))
+}
+
+/// `widget.set {id, variant, content, title}`.
+fn widget_set(engine: &mut ScreenEngine, conn: ConnId, params: Value) -> Res {
+    let set: Set = parse(params)?;
+    let id = set.id;
+    engine
+        .widgets
+        .set(conn.0, set)
+        .map_err(|e| widget_err(engine, conn, Some(id), e))?;
+    Ok(json!({}))
+}
+
+/// `widget.hide {id}`.
+fn widget_hide(engine: &mut ScreenEngine, conn: ConnId, params: Value) -> Res {
+    let id = params
+        .get("id")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| RpcError::bad_params("id: required"))?;
+    if !engine.widgets.hide(conn.0, id) {
+        return Err(widget_err(engine, conn, None, WidgetError::NoWidget(id)));
+    }
+    Ok(json!({}))
+}
+
 /// `layer.define {name, z}`: a layer name for every client.
 fn layer_define(engine: &mut ScreenEngine, params: Value) -> Res {
     let name = params.get("name").and_then(Value::as_str);
@@ -744,13 +811,19 @@ pub(crate) fn handle(
         })),
         "draw.ext" => draw_ext(engine, conn, params, now),
         "draw.exts" => draw_exts(engine),
+        "widget.declare" => widget_declare(engine, conn, params),
+        "widget.show" => widget_show(engine, conn, params, ctx),
+        "widget.set" => widget_set(engine, conn, params),
+        "widget.hide" => widget_hide(engine, conn, params),
+        "widget.list" => Ok(json!({"widgets": engine.widgets.list()})),
+        "widget.borders" => Ok(json!({"borders": engine.widgets.borders()})),
         "layer.define" => layer_define(engine, params),
         "layer.list" => layer_list(engine),
         "debug.overlay" => set_overlay(engine, params, now),
         "debug.dump" => debug_dump(engine),
         _ => return Reply::Err(crate::hints::unknown_method(method)),
     };
-    if method.starts_with("draw.") || method == "debug.overlay" {
+    if method.starts_with("draw.") || method.starts_with("widget.") || method == "debug.overlay" {
         ctx.request_repaint();
     }
     match result {
