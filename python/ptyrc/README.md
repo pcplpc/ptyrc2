@@ -36,6 +36,7 @@ with Pilot.spawn(["vim", "notes.md"], size=(100, 30)) as pilot:
 | type | `send`, `keys`, `paste`, `write` |
 | frames | `frames`, `panes`, `frame`, `frame_at`; `Frame.text`, `known`, `find`, `heat`, `heat_classes`, `idle`, `check_idle`, `is_idle`, `to_screen`, `to_frame`, `draw` |
 | draw | `draw`, `put`, `effect`, `ext`, `sprites`, `clear`; `Sprite.set`, `ext`, `move`, `update`, `tune`, `info`, `remove` |
+| widgets | `widget`, `widgets`, `borders`; `Widget.set`, `hide`, `refresh`, `update`, `variant`, `size`, `rect`, `placed` |
 | other | `batch`, `events`, `event`, `subscribe`, `resize`, `debug_overlay`, `dump`, `call`, `show`, `attach` |
 | tools | `locator`, `Frame.locator`, `click`, `grab`, `release`, `shown`, `snapshot`; `spawn(record=)`, `Pilot.replay`, `tape` |
 
@@ -60,6 +61,17 @@ pilot.frame("active").locator("OK").click()  # as the app's mouse mode wants
 with Pilot.replay("session.tape") as replay:  # written by spawn(record=...)
     replay.tape.seek(2.5)  # tape seconds; the clock stops there
     assert "TODO" in "\n".join(replay.text())
+```
+
+A widget is a small window the driver places and sizes: one tag, the
+same information for several inner sizes; it shows the variant that
+fits the room, and moves it when the app writes there:
+
+```python
+clock = pilot.widget("clock", [(5, 1), (8, 1)], border="round")
+clock.set([time.strftime("%H:%M:%S")[: clock.size[0]]])  # the variant shown
+for topic, data in pilot.events("widgets"):  # placed, moved, another size
+    clock.update(data)
 ```
 
 Sprites are drawn behind the app's text unless `layer="front"`; the app
