@@ -12,7 +12,8 @@ mod rooms;
 mod tests;
 
 pub use border::{
-    Align, Border, BorderPatch, BorderSpec, Side, TitlePatch, TitleSpec, compose, presets,
+    Align, Border, BorderPatch, BorderSpec, ChaseSpec, Side, TitlePatch, TitleSpec, compose,
+    compose_at, presets,
 };
 
 use crate::frames::{HeatClass, HeatView};
@@ -120,9 +121,12 @@ pub struct Show {
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub border: Option<Border>,
-    /// `back` when absent.
+    /// `back` when absent; `hud` for a modal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layer: Option<Layer>,
+    /// Always shown: over the text when no room takes it.
+    #[serde(default, deserialize_with = "or_default")]
+    pub modal: bool,
 }
 
 impl Show {
@@ -135,6 +139,7 @@ impl Show {
             title: None,
             border: None,
             layer: None,
+            modal: false,
         }
     }
 }
@@ -183,6 +188,9 @@ pub struct WidgetInfo {
     pub title: String,
     pub border: Option<String>,
     pub variants: Vec<VariantInfo>,
+    pub modal: bool,
+    /// A modal put over the text, for want of a room.
+    pub over: bool,
 }
 
 /// Widget failure; `code` is the wire error code.
@@ -256,11 +264,25 @@ struct Place {
     variant: usize,
     at: (u16, u16),
     outer: (u16, u16),
+    /// A modal over the text: the cells blanked around it, on the left,
+    /// top, right, bottom. None: in a room.
+    over: Option<[u16; 4]>,
 }
 
 impl Place {
     fn rect(&self) -> Rect {
         Rect::new(self.at.0, self.at.1, self.outer.0, self.outer.1)
+    }
+
+    /// The rect with the cells blanked around it.
+    fn cover(&self) -> Rect {
+        let [l, t, r, b] = self.over.unwrap_or_default();
+        Rect::new(
+            self.at.0 - l,
+            self.at.1 - t,
+            self.outer.0 + l + r,
+            self.outer.1 + t + b,
+        )
     }
 }
 
@@ -271,6 +293,8 @@ struct Drawn {
     at: (u16, u16),
     layer: i32,
     rev: u64,
+    /// Step of the border's chase.
+    step: Option<u64>,
 }
 
 struct Widget {
@@ -284,6 +308,11 @@ struct Widget {
     title: Option<String>,
     border: Option<Framed>,
     layer: Layer,
+    modal: bool,
+    /// Size of the view a modal was laid out in.
+    view: Option<(u16, u16)>,
+    /// Back from a hidden owner: laid out again if its place is taken.
+    recheck: bool,
     place: Option<Place>,
     /// Laid out again as a new one at the next look.
     relayout: bool,
@@ -338,6 +367,10 @@ pub struct Widgets {
     due: Option<Duration>,
     /// When the next cell of a view turns quiet.
     quiet_due: Option<Duration>,
+    /// When the chase of a border next moves.
+    chase_due: Option<Duration>,
+    /// Owners whose widgets are not drawn (`hide_owner`).
+    hidden: std::collections::BTreeSet<OwnerId>,
 }
 
 fn ms(n: u32) -> Duration {
@@ -360,6 +393,8 @@ impl Widgets {
             last_tick: Duration::ZERO,
             due: None,
             quiet_due: None,
+            chase_due: None,
+            hidden: Default::default(),
         };
         for (name, spec) in presets() {
             widgets.register_border(name, spec);
@@ -529,7 +564,9 @@ impl Widgets {
             FrameSel::Name(name) if FRAME_NAMES.contains(&name.as_str()) => None,
             FrameSel::Name(name) => return Err(WidgetError::NoFrame(name.clone())),
         };
-        let layer = show.layer.unwrap_or(Layer::BACK);
+        let layer = show
+            .layer
+            .unwrap_or(if show.modal { Layer::HUD } else { Layer::BACK });
         let id = match self
             .widgets
             .iter_mut()
@@ -543,6 +580,7 @@ impl Widgets {
                 w.title = show.title;
                 w.border = border;
                 w.layer = layer;
+                w.modal = show.modal;
                 w.relayout = true;
                 w.rev += 1;
                 w.id
@@ -561,6 +599,9 @@ impl Widgets {
                     title: show.title,
                     border,
                     layer,
+                    modal: show.modal,
+                    view: None,
+                    recheck: false,
                     place: None,
                     relayout: true,
                     pressed: None,
@@ -664,6 +705,33 @@ impl Widgets {
             self.dirty = true;
         }
         self.decls.remove(&owner);
+        self.hidden.remove(&owner);
+    }
+
+    /// Hide or show again every widget of an owner. Hidden, a widget is
+    /// not drawn, keeps its place and variant, and is no obstacle to the
+    /// others; shown again, it is where it was, or laid out again when
+    /// that place was taken.
+    pub fn hide_owner(&mut self, owner: OwnerId, hidden: bool) {
+        let changed = match hidden {
+            true => self.hidden.insert(owner),
+            false => self.hidden.remove(&owner),
+        };
+        if !changed {
+            return;
+        }
+        for w in self.widgets.iter_mut().filter(|w| w.owner == owner) {
+            w.recheck = !hidden;
+            w.pressed = None;
+            w.grow = None;
+        }
+        self.dirty = true;
+        self.urgent = true;
+    }
+
+    /// The widgets of this owner are hidden by `hide_owner`.
+    pub fn owner_hidden(&self, owner: OwnerId) -> bool {
+        self.hidden.contains(&owner)
     }
 
     /// The screen or the frames changed: a look is due, `look_ms` after
@@ -695,21 +763,22 @@ impl Widgets {
 
     fn info_of(&self, w: &Widget) -> WidgetInfo {
         let variants = self.variants_of(w);
-        let shown = w.place.and_then(|p| variants.get(p.variant));
+        let place = w.place.filter(|_| !self.hidden.contains(&w.owner));
+        let shown = place.and_then(|p| variants.get(p.variant));
         WidgetInfo {
             id: w.id,
             owner: w.owner,
             tag: w.tag.clone(),
             frame: w.frame,
-            state: if w.place.is_some() {
+            state: if place.is_some() {
                 WidgetState::Placed
             } else {
                 WidgetState::Hidden
             },
             variant: shown.map(|v| v.name.clone()),
             size: shown.map(|v| v.size),
-            rect: w.place.and(w.screen),
-            sprite: w.place.and(w.sprite),
+            rect: place.and(w.screen),
+            sprite: place.and(w.sprite),
             title: w.title.clone().unwrap_or_else(|| w.tag.clone()),
             border: self.border_of(w).name,
             variants: variants
@@ -719,6 +788,8 @@ impl Widgets {
                     size: v.size,
                 })
                 .collect(),
+            modal: w.modal,
+            over: place.is_some_and(|p| p.over.is_some()),
         }
     }
 
@@ -729,6 +800,7 @@ impl Widgets {
             size: None,
             rect: None,
             sprite: None,
+            over: false,
             ..self.info_of(w)
         }
     }
@@ -778,6 +850,9 @@ impl Widgets {
         }
         let mut wake = self.due;
         let mut at = |t: Duration| wake = Some(wake.map_or(t, |w| w.min(t)));
+        if let Some(t) = self.chase_due {
+            at(t);
+        }
         if self.pending || self.urgent || !self.gone.is_empty() {
             at(self.last_tick);
         }
@@ -811,6 +886,7 @@ impl Widgets {
         self.pending = false;
         if self.widgets.is_empty() {
             self.due = None;
+            self.chase_due = None;
             self.dirty = false;
             self.urgent = false;
             return changed;
@@ -844,6 +920,15 @@ impl Widgets {
                 w.pressed = None;
                 w.grow = None;
             }
+            // A modal is laid out again when its view changes size.
+            let size = info.map(|i| {
+                let v = i.rect.intersect(&base.rect());
+                (v.w, v.h)
+            });
+            if w.modal && w.live && w.place.is_some() && w.view != size {
+                w.relayout = true;
+                self.urgent = true;
+            }
         }
 
         let timer = self.due.is_some_and(|d| now >= d);
@@ -855,6 +940,10 @@ impl Widgets {
             .is_none_or(|l| now >= l + ms(self.cfg.look_ms));
         if self.urgent || timer || (self.dirty && paced) {
             self.look(now, base, cursor, surfaces);
+            if self.widgets.iter().any(|w| w.modal) {
+                // What a modal just covered is pressed from now.
+                self.press(now, base, surfaces);
+            }
             self.dirty = false;
             self.urgent = false;
             self.last_look = Some(now);
@@ -875,7 +964,23 @@ impl Widgets {
     /// Mark the placed widgets pressed or not: ink under them, or out of
     /// their view.
     fn press(&mut self, now: Duration, base: &Grid, surfaces: &dyn Surfaces) {
-        for w in self.widgets.iter_mut().filter(|w| w.live) {
+        // What the modals cover, in screen cells.
+        let covers: Vec<Rect> = self
+            .widgets
+            .iter()
+            .filter(|w| w.modal && w.live && !self.hidden.contains(&w.owner))
+            .filter_map(|w| {
+                let (p, info) = (w.place?, surfaces.info(w.frame?)?);
+                let c = p.cover();
+                Some(Rect::new(info.rect.x + c.x, info.rect.y + c.y, c.w, c.h))
+            })
+            .collect();
+        let hidden = &self.hidden;
+        for w in self
+            .widgets
+            .iter_mut()
+            .filter(|w| w.live && !w.modal && !hidden.contains(&w.owner))
+        {
             let (Some(place), Some(info)) = (w.place, w.frame.and_then(|id| surfaces.info(id)))
             else {
                 continue;
@@ -889,7 +994,11 @@ impl Widgets {
             let ink = !out
                 && (r.y..r.bottom())
                     .any(|y| (r.x..r.right()).any(|x| base.cell(view.x + x, view.y + y).has_ink()));
-            if out || ink {
+            let under = !covers.is_empty() && {
+                let on = Rect::new(info.rect.x + r.x, info.rect.y + r.y, r.w, r.h);
+                covers.iter().any(|c| !c.intersect(&on).is_empty())
+            };
+            if out || ink || under {
                 w.pressed.get_or_insert(now);
             } else {
                 w.pressed = None;
@@ -1026,6 +1135,7 @@ impl Widgets {
                         variant: i,
                         at,
                         outer: (ow, oh),
+                        over: None,
                     },
                 ));
             }
@@ -1050,7 +1160,13 @@ impl Widgets {
             .iter()
             .enumerate()
             .filter(|(j, o)| {
-                *j != i && o.live && o.frame == w.frame && !o.relayout && o.pressed.is_none()
+                *j != i
+                    && o.live
+                    && !o.modal
+                    && !self.hidden.contains(&o.owner)
+                    && o.frame == w.frame
+                    && !o.relayout
+                    && o.pressed.is_none()
             })
             .filter_map(|(j, o)| Some((j, o.place?)))
             .collect();
@@ -1088,16 +1204,16 @@ impl Widgets {
         let mut soonest: Option<f32> = None;
         for i in 0..self.widgets.len() {
             let w = &self.widgets[i];
-            if !w.live {
+            if !w.live || self.hidden.contains(&w.owner) {
                 continue;
             }
             let Some(info) = w.frame.and_then(|id| surfaces.info(id)) else {
                 continue;
             };
             let evicted = w.pressed.is_some_and(|t| now >= t + ms(self.cfg.evict_ms));
-            let fresh = w.place.is_none() || w.relayout || evicted;
-            if !fresh && w.pressed.is_some() {
-                // Pressed, not yet evicted: it stays.
+            let mut fresh = w.place.is_none() || w.relayout || evicted;
+            if !fresh && !w.recheck && (w.pressed.is_some() || w.modal) {
+                // Pressed, not yet evicted: it stays. A modal stays.
                 continue;
             }
             if !looks.iter().any(|l| l.info.id == info.id) {
@@ -1115,7 +1231,7 @@ impl Widgets {
                 .widgets
                 .iter()
                 .enumerate()
-                .filter(|(j, _)| *j != i)
+                .filter(|(j, o)| *j != i && !self.hidden.contains(&o.owner))
                 .filter_map(|(j, o)| {
                     let rect = o.screen?;
                     o.place?;
@@ -1123,10 +1239,24 @@ impl Widgets {
                 })
                 .collect();
             let rects: Vec<Rect> = taken.iter().map(|(_, r)| *r).collect();
+            if w.recheck {
+                // Back from a hidden owner: where it was, unless another
+                // widget took the place meanwhile.
+                let own = w.place.map(|p| p.rect());
+                fresh |= own.is_some_and(|r| rects.iter().any(|t| !t.intersect(&r).is_empty()));
+                self.widgets[i].recheck = false;
+                let w = &self.widgets[i];
+                if !fresh && (w.pressed.is_some() || w.modal) {
+                    continue;
+                }
+            }
+            let modal = self.widgets[i].modal;
             let mut found = self.best(&self.widgets[i], look, &rects, None);
             let view = look.view;
             let on_screen = |p: Place| [view.x + p.at.0, view.y + p.at.1, p.outer.0, p.outer.1];
-            if fresh
+            if fresh && found.is_none() && modal {
+                found = self.over(&self.widgets[i], view);
+            } else if fresh
                 && found.is_none()
                 && let Some((j, small, place)) = self.squeeze(i, look, &taken)
             {
@@ -1143,6 +1273,7 @@ impl Widgets {
                     w.rev += 1;
                 }
                 w.place = found;
+                w.view = Some((view.w, view.h));
                 w.pressed = None;
                 w.grow = None;
                 w.relayout = false;
@@ -1170,8 +1301,59 @@ impl Widgets {
         self.quiet_due = soonest.map(|s| now + Duration::from_secs_f32(s).max(ms(1)));
     }
 
+    /// The place of a modal no room takes, over the text: the largest
+    /// variant that fits the view with the gap around it; without the
+    /// gap when none does; the smallest, clipped, when none does. At
+    /// `prefer`, centred for `any`.
+    fn over(&self, w: &Widget, view: Rect) -> Option<Place> {
+        let thick = self.border_of(w).spec.thickness();
+        let outer = |v: &Variant| (v.size[0] + 2 * thick, v.size[1] + 2 * thick);
+        let area = |v: &Variant| outer(v).0 as u32 * outer(v).1 as u32;
+        let variants = self.variants_of(w);
+        let (gx, gy) = self.cfg.gap;
+        let largest = |gx: u16, gy: u16| {
+            variants
+                .iter()
+                .enumerate()
+                .filter(|(_, v)| outer(v).0 + 2 * gx <= view.w && outer(v).1 + 2 * gy <= view.h)
+                .max_by_key(|(i, v)| (area(v), Reverse(*i)))
+        };
+        let (index, v, (gx, gy)) = match (largest(gx, gy), largest(0, 0)) {
+            (Some((i, v)), _) => (i, v, (gx, gy)),
+            (None, Some((i, v))) => (i, v, (0, 0)),
+            (None, None) => {
+                let (i, v) = variants
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(i, v)| (area(v), *i))?;
+                (i, v, (0, 0))
+            }
+        };
+        let (ow, oh) = outer(v);
+        let (fx, fy) = prefer_point(w.prefer).unwrap_or((1, 1));
+        let at = (
+            gx + view.w.saturating_sub(ow + 2 * gx) * fx / 2,
+            gy + view.h.saturating_sub(oh + 2 * gy) * fy / 2,
+        );
+        // The blackout: the gap, as far as the view goes.
+        let (bx, by) = self.cfg.gap;
+        let over = [
+            bx.min(at.0),
+            by.min(at.1),
+            bx.min(view.w.saturating_sub(at.0 + ow)),
+            by.min(view.h.saturating_sub(at.1 + oh)),
+        ];
+        Some(Place {
+            variant: index,
+            at,
+            outer: (ow, oh),
+            over: Some(over),
+        })
+    }
+
     /// Bring the sprites in line with the places.
     fn sync(&mut self, now: Duration, surfaces: &dyn Surfaces, scene: &mut Scene) {
+        let mut chase_due: Option<Duration> = None;
         for i in 0..self.widgets.len() {
             let w = &self.widgets[i];
             let info = w.frame.and_then(|id| surfaces.info(id));
@@ -1184,20 +1366,29 @@ impl Widgets {
                 ]),
                 _ => None,
             };
+            let chase = self.border_of(w).spec.chasing().copied();
             let want = match (w.place, w.frame) {
-                (Some(p), Some(frame)) => Some(Drawn {
-                    frame,
-                    at: p.at,
-                    layer: w.layer.0,
-                    rev: w.rev,
-                }),
+                (Some(p), Some(frame)) if !self.hidden.contains(&w.owner) => {
+                    let cover = p.cover();
+                    if let Some(c) = chase.filter(|_| w.live) {
+                        let t = c.next(now);
+                        chase_due = Some(chase_due.map_or(t, |d: Duration| d.min(t)));
+                    }
+                    Some(Drawn {
+                        frame,
+                        at: (cover.x, cover.y),
+                        layer: w.layer.0,
+                        rev: w.rev,
+                        step: chase.map(|c| c.step(now)),
+                    })
+                }
                 _ => None,
             };
             if want == w.drawn && w.sprite.is_some() == want.is_some() {
                 self.widgets[i].screen = screen;
                 continue;
             }
-            let content = want.map(|_| self.content_of(w));
+            let content = want.map(|d| self.content_of(w, d.step));
             let w = &mut self.widgets[i];
             w.screen = screen;
             match (want, w.sprite) {
@@ -1217,7 +1408,7 @@ impl Widgets {
                             frame: (old.map(|o| o.frame) != Some(d.frame))
                                 .then_some(FrameSel::Id(d.frame)),
                             anchor: Some(anchor.clone()),
-                            content: (old.map(|o| o.rev) != Some(d.rev))
+                            content: (old.map(|o| (o.rev, o.step)) != Some((d.rev, d.step)))
                                 .then(|| content.clone().expect("content")),
                             layer: Some(Layer(d.layer)),
                             ..SpritePatch::default()
@@ -1238,20 +1429,23 @@ impl Widgets {
             }
             w.drawn = if w.sprite.is_some() { want } else { None };
         }
+        self.chase_due = chase_due;
     }
 
     /// The sprite content of a placed widget.
-    fn content_of(&self, w: &Widget) -> Content {
+    fn content_of(&self, w: &Widget, step: Option<u64>) -> Content {
         let variants = self.variants_of(w);
         let place = w.place.expect("placed");
         let v = &variants[place.variant];
         let title = w.title.clone().unwrap_or_else(|| w.tag.clone());
-        compose(
+        compose_at(
             &self.border_of(w).spec,
             &title,
             v.content.as_ref(),
             v.size[0],
             v.size[1],
+            step,
+            place.over.unwrap_or_default(),
         )
     }
 }

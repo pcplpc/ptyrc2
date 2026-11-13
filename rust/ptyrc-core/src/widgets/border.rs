@@ -48,6 +48,47 @@ impl Default for TitleSpec {
     }
 }
 
+fn chase_len() -> u16 {
+    3
+}
+
+fn chase_ms() -> u32 {
+    80
+}
+
+fn chase_runs() -> u16 {
+    1
+}
+
+/// Runs of border cells in another style that go round the border,
+/// clockwise: `runs` of them, evenly spaced, `len` cells each, a cell
+/// every `ms`. `len` 0: none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChaseSpec {
+    #[serde(default = "chase_len")]
+    pub len: u16,
+    #[serde(default = "chase_ms")]
+    pub ms: u32,
+    #[serde(default = "chase_runs")]
+    pub runs: u16,
+    #[serde(default)]
+    pub style: StyleSpec,
+}
+
+impl ChaseSpec {
+    /// The step at `now`: the border cell the first run has reached,
+    /// counted along the border without end.
+    pub fn step(&self, now: std::time::Duration) -> u64 {
+        now.as_millis() as u64 / self.ms.max(1) as u64
+    }
+
+    /// When the step after that of `now` starts.
+    pub fn next(&self, now: std::time::Duration) -> std::time::Duration {
+        std::time::Duration::from_millis((self.step(now) + 1) * self.ms.max(1) as u64)
+    }
+}
+
 /// A border, one cell thick. `corners`: four glyphs, top-left,
 /// top-right, bottom-left, bottom-right. An edge is a pattern repeated
 /// from the top or the left. All empty: no border, no title.
@@ -60,6 +101,8 @@ pub struct BorderSpec {
     pub right: String,
     pub style: StyleSpec,
     pub title: TitleSpec,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chase: Option<ChaseSpec>,
 }
 
 impl Default for BorderSpec {
@@ -84,6 +127,7 @@ impl BorderSpec {
                 ..StyleSpec::default()
             },
             title: TitleSpec::default(),
+            chase: None,
         }
     }
 
@@ -97,7 +141,39 @@ impl BorderSpec {
             right: String::new(),
             style: StyleSpec::default(),
             title: TitleSpec::default(),
+            chase: None,
         }
+    }
+
+    /// `alert`: heavy, bright yellow, bold, a white chase; made to be
+    /// seen.
+    pub fn alert() -> BorderSpec {
+        let bright = |n: u8| StyleSpec {
+            fg: Some(ColorSpec(Color::Indexed(n))),
+            bold: true,
+            ..StyleSpec::default()
+        };
+        BorderSpec {
+            style: bright(11),
+            title: TitleSpec {
+                style: bright(11),
+                ..TitleSpec::default()
+            },
+            chase: Some(ChaseSpec {
+                len: 4,
+                ms: 60,
+                runs: 2,
+                style: bright(15),
+            }),
+            ..BorderSpec::lines("┏┓┗┛", "━", "┃")
+        }
+    }
+
+    /// The chase, when one shows.
+    pub fn chasing(&self) -> Option<&ChaseSpec> {
+        self.chase
+            .as_ref()
+            .filter(|c| c.len > 0 && c.runs > 0 && !self.is_none())
     }
 
     pub fn is_none(&self) -> bool {
@@ -142,6 +218,11 @@ impl BorderSpec {
             }
             single(what, edge)?;
         }
+        if let Some(c) = &self.chase
+            && (c.ms < 20 || c.ms > 10_000 || c.len > 64 || c.runs > 16)
+        {
+            return Err("border chase: ms 20 to 10000, len 64 at most, runs 16 at most".into());
+        }
         Ok(())
     }
 }
@@ -154,6 +235,7 @@ pub fn presets() -> Vec<(&'static str, BorderSpec)> {
         ("heavy", BorderSpec::lines("┏┓┗┛", "━", "┃")),
         ("double", BorderSpec::lines("╔╗╚╝", "═", "║")),
         ("ascii", BorderSpec::lines("++++", "-", "|")),
+        ("alert", BorderSpec::alert()),
         ("none", BorderSpec::none()),
     ]
 }
@@ -195,6 +277,8 @@ pub struct BorderPatch {
     pub style: Option<StyleSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<TitlePatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chase: Option<ChaseSpec>,
 }
 
 impl BorderPatch {
@@ -213,6 +297,9 @@ impl BorderPatch {
         set(&mut b.right, &self.right);
         if let Some(style) = self.style {
             b.style = style;
+        }
+        if let Some(chase) = self.chase {
+            b.chase = Some(chase);
         }
         if let Some(t) = &self.title {
             if let Some(side) = t.side {
@@ -370,6 +457,36 @@ pub fn compose(
     w: u16,
     h: u16,
 ) -> Content {
+    compose_at(border, title, content, w, h, None, [0; 4])
+}
+
+/// The cell of a border of outer size `ow x oh` at `i` along it,
+/// clockwise from the top-left corner.
+fn along(i: usize, ow: usize, oh: usize) -> (usize, usize) {
+    let (a, b) = (ow - 1, oh - 1);
+    if i < a {
+        (i, 0)
+    } else if i < a + b {
+        (a, i - a)
+    } else if i < 2 * a + b {
+        (a - (i - a - b), b)
+    } else {
+        (0, b - (i - 2 * a - b))
+    }
+}
+
+/// `compose`, with the chase of the border at `step` (see `ChaseSpec`)
+/// and a margin of opaque blanks around it: cells on the left, top,
+/// right, bottom.
+pub fn compose_at(
+    border: &BorderSpec,
+    title: &str,
+    content: Option<&Content>,
+    w: u16,
+    h: u16,
+    step: Option<u64>,
+    margin: [u16; 4],
+) -> Content {
     let t = border.thickness() as usize;
     let (iw, ih) = (w as usize, h as usize);
     let (ow, oh) = (iw + 2 * t, ih + 2 * t);
@@ -395,9 +512,6 @@ pub fn compose(
         top.push(glyph(corners[0]));
         top.extend((0..iw).map(|i| edge(&border.top, i)));
         top.push(glyph(corners[1]));
-        if border.title.side == Side::Top {
-            title_on(&mut top, border, title);
-        }
         grid.push(top);
         for (y, row) in body.into_iter().enumerate() {
             let mut line = Vec::with_capacity(ow);
@@ -410,10 +524,43 @@ pub fn compose(
         bottom.push(glyph(corners[2]));
         bottom.extend((0..iw).map(|i| edge(&border.bottom, i)));
         bottom.push(glyph(corners[3]));
-        if border.title.side == Side::Bottom {
-            title_on(&mut bottom, border, title);
-        }
         grid.push(bottom);
+        // The chase goes under the title.
+        let around = 2 * (ow - 1) + 2 * (oh - 1);
+        if let (Some(chase), Some(step)) = (border.chasing(), step)
+            && around > 0
+        {
+            let runs = (chase.runs as usize).min(around);
+            for run in 0..runs {
+                let head = (step as usize % around) + run * around / runs;
+                for k in 0..(chase.len as usize).min(around) {
+                    let (x, y) = along((head + around - k) % around, ow, oh);
+                    if let Some(slot) = &mut grid[y][x] {
+                        slot.style = chase.style;
+                    }
+                }
+            }
+        }
+        let edge = match border.title.side {
+            Side::Top => 0,
+            Side::Bottom => oh - 1,
+        };
+        title_on(&mut grid[edge], border, title);
+    }
+    let [ml, mt, mr, mb] = margin.map(|m| m as usize);
+    if ml + mt + mr + mb > 0 {
+        let blank = || Some(Slot::blank(StyleSpec::default()));
+        let wide = ml + ow + mr;
+        let mut padded: Vec<Vec<Option<Slot>>> = Vec::with_capacity(mt + oh + mb);
+        padded.extend((0..mt).map(|_| (0..wide).map(|_| blank()).collect()));
+        for row in grid {
+            let mut line: Vec<Option<Slot>> = (0..ml).map(|_| blank()).collect();
+            line.extend(row);
+            line.extend((0..mr).map(|_| blank()));
+            padded.push(line);
+        }
+        padded.extend((0..mb).map(|_| (0..wide).map(|_| blank()).collect()));
+        grid = padded;
     }
     let cells = grid
         .into_iter()
