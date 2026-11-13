@@ -676,3 +676,11 @@ extension `borders`, `ptyrc widgets`. Left:
   would do.
 - No click on a widget beyond the host mouse on its sprite (`mouse`
   events name the sprite, not the widget).
+- First come, first served: a widget placed large does not shrink to
+  let a hidden one in. On a small screen the last app shown may wait
+  for ever. A layout of all the widgets at once, each given a share.
+- Not merged in `main` by the pilot: another session held uncommitted
+  work on `rust/ptyrc-cli/src/main.rs` there. Branch `fork/wclients`
+  holds it all (`fork/widgets`, `fork/wmonitor` merged in).
+  `Cargo.lock` is not committed and lacks `ptyrc-draw-borders`:
+  `just install` (`--locked`) fails until it is.
