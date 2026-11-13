@@ -511,9 +511,11 @@ impl Widgets {
         if let Some(border) = border {
             own.border = Some(border);
         }
-        let mut touched: Vec<String> = Vec::new();
+        // Per tag replaced: the index in the new variants of each old one
+        // of the same name and size.
+        let mut touched: Vec<(String, Vec<Option<usize>>)> = Vec::new();
         for (tag, variants) in tags {
-            match own.tags.iter_mut().find(|(t, _)| *t == tag) {
+            let map = match own.tags.iter_mut().find(|(t, _)| *t == tag) {
                 Some(slot) => {
                     let mut old = std::mem::replace(&mut slot.1, variants);
                     for v in slot.1.iter_mut().filter(|v| v.content.is_none()) {
@@ -522,14 +524,39 @@ impl Widgets {
                             .find(|o| o.name == v.name && o.size == v.size)
                             .and_then(|o| o.content.take());
                     }
+                    old.iter()
+                        .map(|o| {
+                            slot.1
+                                .iter()
+                                .position(|v| v.name == o.name && v.size == o.size)
+                        })
+                        .collect()
                 }
-                None => own.tags.push((tag.clone(), variants)),
-            }
-            touched.push(tag);
+                None => {
+                    own.tags.push((tag.clone(), variants));
+                    Vec::new()
+                }
+            };
+            touched.push((tag, map));
         }
         let names = own.tags.iter().map(|(t, _)| t.clone()).collect();
         for w in self.widgets.iter_mut().filter(|w| w.owner == owner) {
-            if touched.contains(&w.tag) || (border_changed && w.border.is_none()) {
+            let map = touched.iter().find(|(t, _)| *t == w.tag).map(|(_, m)| m);
+            if let Some(map) = map {
+                // The variant shown, at its new index; gone: no place
+                // until the look.
+                let kept = w
+                    .place
+                    .and_then(|p| Some((p, map.get(p.variant).copied()??)));
+                w.place = kept.map(|(p, variant)| Place { variant, ..p });
+                if w.place.is_none() {
+                    w.screen = None;
+                    w.pressed = None;
+                    self.urgent = true;
+                }
+                w.grow = None;
+            }
+            if map.is_some() || (border_changed && w.border.is_none()) {
                 w.relayout = true;
                 w.rev += 1;
             }
@@ -635,16 +662,14 @@ impl Widgets {
             return bad("content or title: one at least");
         }
         Widgets::check_content(&set.content)?;
-        let decl = self
+        let Some(variants) = self
             .decls
             .get_mut(&owner)
-            .expect("a widget has a declaration");
-        let variants = decl
-            .tags
-            .iter_mut()
-            .find(|(t, _)| *t == w.tag)
+            .and_then(|d| d.tags.iter_mut().find(|(t, _)| *t == w.tag))
             .map(|(_, v)| v)
-            .expect("a widget has a tag");
+        else {
+            return bad(format!("no such tag: {}", w.tag));
+        };
         if let Some(content) = set.content {
             let index = match &set.variant {
                 Some(name) => match variants.iter().position(|v| v.name == *name) {
@@ -661,7 +686,13 @@ impl Widgets {
                     }
                 },
             };
-            variants[index].content = Some(content);
+            let Some(v) = variants.get_mut(index) else {
+                return Err(WidgetError::NotUsable(format!(
+                    "widget {} shows no variant: name one with `variant`",
+                    w.id
+                )));
+            };
+            v.content = Some(content);
             if w.place.is_some_and(|p| p.variant == index) {
                 w.rev += 1;
             }
@@ -1367,7 +1398,8 @@ impl Widgets {
                 _ => None,
             };
             let chase = self.border_of(w).spec.chasing().copied();
-            let want = match (w.place, w.frame) {
+            let shown = w.place.filter(|p| p.variant < self.variants_of(w).len());
+            let want = match (shown, w.frame) {
                 (Some(p), Some(frame)) if !self.hidden.contains(&w.owner) => {
                     let cover = p.cover();
                     if let Some(c) = chase.filter(|_| w.live) {
@@ -1388,7 +1420,7 @@ impl Widgets {
                 self.widgets[i].screen = screen;
                 continue;
             }
-            let content = want.map(|d| self.content_of(w, d.step));
+            let content = want.and_then(|d| self.content_of(w, d.step));
             let w = &mut self.widgets[i];
             w.screen = screen;
             match (want, w.sprite) {
@@ -1409,7 +1441,8 @@ impl Widgets {
                                 .then_some(FrameSel::Id(d.frame)),
                             anchor: Some(anchor.clone()),
                             content: (old.map(|o| (o.rev, o.step)) != Some((d.rev, d.step)))
-                                .then(|| content.clone().expect("content")),
+                                .then(|| content.clone())
+                                .flatten(),
                             layer: Some(Layer(d.layer)),
                             ..SpritePatch::default()
                         };
@@ -1432,13 +1465,13 @@ impl Widgets {
         self.chase_due = chase_due;
     }
 
-    /// The sprite content of a placed widget.
-    fn content_of(&self, w: &Widget, step: Option<u64>) -> Content {
-        let variants = self.variants_of(w);
-        let place = w.place.expect("placed");
-        let v = &variants[place.variant];
+    /// The sprite content of a placed widget; none when not placed on a
+    /// variant of its tag.
+    fn content_of(&self, w: &Widget, step: Option<u64>) -> Option<Content> {
+        let place = w.place?;
+        let v = self.variants_of(w).get(place.variant)?;
         let title = w.title.clone().unwrap_or_else(|| w.tag.clone());
-        compose_at(
+        Some(compose_at(
             &self.border_of(w).spec,
             &title,
             v.content.as_ref(),
@@ -1446,7 +1479,7 @@ impl Widgets {
             v.size[1],
             step,
             place.over.unwrap_or_default(),
-        )
+        ))
     }
 }
 

@@ -949,6 +949,52 @@ fn declaration_replaced_lays_out_again() {
 }
 
 #[test]
+fn variant_gone_on_a_declare() {
+    let mut rig = Rig::new(60, 20);
+    rig.declare(1, "t", &[[4, 1], [10, 2], [30, 8]]);
+    let id = rig.show(1, Show::new("t"));
+    assert_eq!(rig.info(id).variant.as_deref(), Some("30x8"));
+    // Fewer variants: the one shown is gone. Set and tick before the
+    // next look.
+    rig.declare(1, "t", &[[10, 2]]);
+    let set = Set {
+        id,
+        content: Some(Content::rows(&["ab"])),
+        ..Set::default()
+    };
+    assert_eq!(rig.w.set(1, set.clone()).unwrap_err().code(), "not-usable");
+    rig.tick();
+    assert_eq!(rig.info(id).variant.as_deref(), Some("10x2"));
+    rig.w.set(1, set).unwrap();
+    rig.tick();
+    assert_eq!(rig.info(id).size, Some([10, 2]));
+
+    // The same, the owner hidden: nothing shown, laid out when back.
+    rig.declare(1, "t", &[[4, 1], [10, 2], [30, 8]]);
+    rig.run(300);
+    assert_eq!(rig.info(id).variant.as_deref(), Some("30x8"));
+    rig.w.hide_owner(1, true);
+    rig.tick();
+    rig.declare(1, "t", &[[4, 1]]);
+    rig.tick();
+    assert_eq!(rig.info(id).state, WidgetState::Hidden);
+    rig.w.hide_owner(1, false);
+    rig.tick();
+    assert_eq!(rig.info(id).variant.as_deref(), Some("4x1"));
+
+    // A variant kept by name and size keeps the widget where it is
+    // until the look, at its new index.
+    rig.declare(1, "t", &[[10, 2], [30, 8]]);
+    rig.run(300);
+    assert_eq!(rig.info(id).variant.as_deref(), Some("30x8"));
+    let at = rig.rect(id);
+    rig.declare(1, "t", &[[30, 8]]);
+    rig.tick();
+    assert_eq!(rig.info(id).variant.as_deref(), Some("30x8"));
+    assert_eq!(rig.rect(id), at);
+}
+
+#[test]
 fn set_content_title_and_hide() {
     let mut rig = Rig::new(40, 10);
     let decl = Declare {
