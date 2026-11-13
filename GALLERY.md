@@ -23,6 +23,12 @@ You can sandbox any of your favorite applications with ease:
 
 ![sand](doc/sand.gif)
 
+### fishes
+
+If ever you feel like drowning, don't worry you'll be in good company:
+
+![fishes](doc/fishes.gif)
+
 ### rain
 
 You can get the perfect weather to appreciate the end of the world:
@@ -34,12 +40,6 @@ You can get the perfect weather to appreciate the end of the world:
 If you want to work on your ADHD as you are reviewing bad code:
 
 ![snake](doc/snake.gif)
-
-### fishes
-
-If ever you feel like drowning, don't worry you'll be in good company:
-
-![fishes](doc/fishes.gif)
 
 ### snow
 
