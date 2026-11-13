@@ -70,7 +70,7 @@ impl Grab {
 
 /// Length of the first key of `bytes`: a control sequence, an escaped
 /// character, a UTF-8 character, a byte.
-fn key_len(bytes: &[u8]) -> usize {
+pub(crate) fn key_len(bytes: &[u8]) -> usize {
     let utf8 = |b: u8| match b {
         0xc0..=0xdf => 2,
         0xe0..=0xef => 3,
@@ -101,7 +101,7 @@ fn key_len(bytes: &[u8]) -> usize {
 /// Legacy bytes of a key sent as `CSI code;mods u` (kitty keyboard
 /// protocol) or `CSI 27;mods;code ~` (xterm modifyOtherKeys), when it has
 /// some. A release event has none.
-fn legacy(key: &[u8]) -> Option<Vec<u8>> {
+pub(crate) fn legacy(key: &[u8]) -> Option<Vec<u8>> {
     let params = std::str::from_utf8(key.strip_prefix(b"\x1b[")?).ok()?;
     let (code, mods): (u32, u32) = if let Some(params) = params.strip_suffix('u') {
         let mut fields = params.split(';');
@@ -144,6 +144,11 @@ fn legacy(key: &[u8]) -> Option<Vec<u8>> {
         (false, false) => return None,
     }
     Some(bytes)
+}
+
+/// A key release, as the kitty keyboard protocol reports it.
+pub(crate) fn is_release(key: &[u8]) -> bool {
+    key.starts_with(b"\x1b[") && key.ends_with(b":3u")
 }
 
 /// Name of a key, as `input.send` takes it; a printable character is its

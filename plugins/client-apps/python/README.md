@@ -23,6 +23,12 @@ python -m ptyrc_apps.clock -s NAME
 | `rain` | a native effect from a draw extension that sees the text: drops fall behind it and splash on the top of its lines, on the cursor and on the floor; less rain on columns that changed in the last 10 s (the heat, given to the effect) |
 | `snow` | a native effect that sees cells and heat: flakes fall behind the text; with `--cover`, snow lies over the lines of text, a cell away from the words of its own row, and on the floor, in smooth piles up to three rows deep; it melts where the screen changed lately and around the cursor; it lies on frame rows, so it scrolls with the text; the wind is tuned in place (`Sprite.tune(wind=...)`), the effect keeps its state |
 
+In a `ptyrc run` with no client connected, ctrl+t typed twice runs one
+of them on the session; twice again replaces it by the next
+(`demo.py`: rounds of all the apps shuffled, the `-a` version one time
+in two; `marks` is not shown). `ptyrc-app` must be in `PATH`, or
+`PTYRC_DEMO` name the command: `PTYRC_DEMO="uv run ptyrc-app demo"`.
+
 `scripts/demo-apps.sh` runs them on a scrolling vim buffer;
 `scripts/demo-frames.sh` gives each pane of a tmux session its own
 drawing. Both take `--check`.

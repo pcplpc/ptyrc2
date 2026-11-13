@@ -17,6 +17,7 @@ def usage() -> str:
     lines = ["usage: ptyrc-app <name> [options]", "", "apps:"]
     lines += [f"  {name:{width}}  {doc}" for name, doc in sorted(APPS.items())]
     lines += ["", "`ptyrc-app <name> --help` lists the options of an app."]
+    lines += ["`ptyrc-app demo SEED NTH` runs one of them: see `ptyrc_apps.demo`."]
     return "\n".join(lines)
 
 
@@ -26,6 +27,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(usage())
         return 0 if argv else 2
     name, rest = argv[0], argv[1:]
+    if name == "demo":
+        return importlib.import_module("ptyrc_apps.demo").main(rest)
     if name not in APPS:
         print(f"ptyrc-app: no app named {name}\n\n{usage()}", file=sys.stderr)
         return 2

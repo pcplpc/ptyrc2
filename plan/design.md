@@ -916,6 +916,21 @@ that moves a snapshot is read in the diff of the `.snap`.
   One grab at a time (`not-usable` for another client).
   `scripts/grab-sprite.py`: the arrows move a sprite in vim's pane; vim
   does not see them.
+- The demo (`demo.rs`): ctrl+t typed twice in a row on the host
+  keyboard, while no client is connected and no key is grabbed, runs a
+  client app on the session; the pair reaches nobody. While that app
+  runs, the pair terminates it (SIGTERM to its process group; its
+  sprites go with its connection) and runs the next, whoever is
+  connected. A first ctrl+t is held 350 ms, or until the next key: alone
+  it goes to the app, late. CSI u and modifyOtherKeys forms count; a
+  release event between the two does not break the pair. The driver
+  runs `$PTYRC_DEMO` (words split on spaces), else `ptyrc-app demo`,
+  with two more arguments, `SEED NTH`: a number drawn once for the
+  session and the count of runs before; `PTYRC_SESSION` and
+  `PTYRC_SOCKET` are set, stdio is null. A command that does not start
+  rings the bell. `ptyrc_apps.demo` picks the app from them: rounds of
+  all the apps shuffled, none twice in a row, the `-a` version one time
+  in two. `--no-demo`, `--transparent`: no demo.
 - `input.click`: a click at a screen cell, written as the app asked:
   SGR (1006) or X10 bytes, press and release, press alone under mode 9
   or for the wheel. `mods`: `shift`, `alt`, `ctrl` held. `count`: 2 is
@@ -1061,7 +1076,7 @@ form exists.
 ptyrc run [--name N] [--headless --size CxR] [--host-log F]
           [--transparent] [--no-presets] [--coalesce-ms N]
           [--host-fg COLOR] [--host-bg COLOR]
-          [--record FILE [--record-input]] [--] CMD...
+          [--record FILE [--record-input]] [--no-demo] [--] CMD...
 ptyrc replay FILE [--name N] [--speed X] [--until T] [--step] [--hold]
           [--no-presets | --presets] [--snap | --check SNAPS] [--at T,...]
 ptyrc tape [status | step [N] | seek T | play [SPEED] | pause | quit]

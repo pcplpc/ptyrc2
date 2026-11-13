@@ -2,6 +2,7 @@
 //! The event loop: app pty, host terminal, signals, clients, one timer.
 
 use crate::conn::Conn;
+use crate::demo::Demo;
 use crate::engine::{ConnId, Ctx, Effects, Engine, Reply, SessionInfo, Token};
 use crate::grab::{self, Grab};
 use crate::host::Host;
@@ -31,7 +32,7 @@ use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Upper bounds of a burst (design: "Coalescing").
 const BURST_MAX_BYTES: usize = 1 << 20;
@@ -72,6 +73,11 @@ pub struct Config {
     pub record_input: bool,
     /// Whether the engine has the per-app presets: written on the tape.
     pub presets: bool,
+    /// The demo: ctrl+t twice on the host keyboard, with no client
+    /// connected, runs this command on the session, with two more
+    /// arguments: a seed and the number of runs before; twice again
+    /// replaces it by the next run. `None`: no demo.
+    pub demo: Option<Vec<String>>,
 }
 
 impl Default for Config {
@@ -89,6 +95,7 @@ impl Default for Config {
             record: None,
             record_input: false,
             presets: true,
+            demo: None,
         }
     }
 }
@@ -147,6 +154,7 @@ struct Driver {
     player: Option<Player>,
     /// A client holds keys of the host keyboard.
     grab: Option<Grab>,
+    demo: Option<Demo>,
     /// The pty returned end of file or EIO.
     pty_eof: bool,
     /// Bytes waiting to be typed into the app.
@@ -303,6 +311,12 @@ impl Driver {
                     socket.to_string_lossy().into_owned(),
                 ),
             ];
+            let demo = cfg.demo.clone().map(|command| {
+                let seed = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_or(0, |d| d.as_nanos() as u64);
+                Demo::new(command, env.clone(), seed ^ u64::from(std::process::id()))
+            });
             if std::env::var_os("TERM").is_none() {
                 env.push(("TERM".to_string(), "xterm-256color".to_string()));
             }
@@ -325,9 +339,9 @@ impl Driver {
             };
             let pty = pty::spawn(&cfg.argv, &env, cols, rows)
                 .map_err(|e| start::exec_error(program, &e))?;
-            Ok::<_, RunError>((signals, host, pty, cols, rows, recorder))
+            Ok::<_, RunError>((signals, host, pty, cols, rows, recorder, demo))
         })();
-        let (signals, host, pty, cols, rows, recorder) = match built {
+        let (signals, host, pty, cols, rows, recorder, demo) = match built {
             Ok(parts) => parts,
             Err(e) => {
                 let _ = fs::remove_file(&socket);
@@ -354,6 +368,7 @@ impl Driver {
             recorder,
             player: None,
             grab: None,
+            demo,
             pty_eof: false,
             pty_queue: Vec::new(),
             host,
@@ -406,6 +421,7 @@ impl Driver {
             recorder: None,
             player: Some(Player::new(replay)),
             grab: None,
+            demo: None,
             pty_eof: true,
             pty_queue: Vec::new(),
             host: Host::headless(None),
@@ -562,6 +578,13 @@ impl Driver {
                 // The host does not tell: the defaults stand.
                 self.replies_until = None;
                 let held = self.replies.give_up();
+                self.host_input(&held, engine);
+            }
+            if let Some(demo) = &mut self.demo
+                && demo.due().is_some_and(|t| t <= now)
+            {
+                // One ctrl+t: the app's.
+                let held = demo.flush();
                 self.forward_input(&held, engine);
             }
             let timeout = if self.repaint {
@@ -586,10 +609,8 @@ impl Driver {
                 }
             } else {
                 let wake = engine.next_wake(now);
-                let wake = match (wake, self.replies_until) {
-                    (Some(a), Some(b)) => Some(a.min(b)),
-                    (a, b) => a.or(b),
-                };
+                let due = self.demo.as_ref().and_then(Demo::due);
+                let wake = [wake, self.replies_until, due].into_iter().flatten().min();
                 wake.map(|w| w.saturating_sub(now))
             };
             let ready = self.wait(timeout)?;
@@ -806,7 +827,7 @@ impl Driver {
                 if changed {
                     self.colors_changed(engine);
                 }
-                self.forward_input(&fed.forward, engine);
+                self.host_input(&fed.forward, engine);
             }
             Err(Errno::INTR | Errno::AGAIN) => {}
             Err(_) => self.stdin_open = false,
@@ -883,6 +904,20 @@ impl Driver {
         }
         out.extend_from_slice(rest);
         out
+    }
+
+    /// Bytes of the host keyboard: ctrl+t twice in a row, with no
+    /// client but the demo and no grab, is the demo's.
+    fn host_input(&mut self, bytes: &[u8], engine: &mut dyn Engine) {
+        let Some(demo) = &mut self.demo else {
+            return self.forward_input(bytes, engine);
+        };
+        let armed = self.grab.is_none() && (demo.running() || self.conns.is_empty());
+        let (forward, twice) = demo.sort(bytes, self.start.elapsed(), armed);
+        if twice && !demo.next() {
+            let _ = self.host.write(b"\x07");
+        }
+        self.forward_input(&forward, engine);
     }
 
     /// Keyboard bytes on their way to the app.
@@ -1034,6 +1069,9 @@ impl Driver {
                     .code()
                     .unwrap_or_else(|| 128 + status.signal().unwrap_or(0)),
             );
+        }
+        if let Some(demo) = &mut self.demo {
+            demo.reap();
         }
         Ok(())
     }
@@ -1629,6 +1667,9 @@ impl Driver {
     /// `status`: the app's exit status, or `None` after a driver error.
     fn finish(&mut self, engine: &mut dyn Engine, status: Option<i32>) -> i32 {
         let status = status.unwrap_or(1);
+        if let Some(demo) = &mut self.demo {
+            demo.stop();
+        }
         if let Some(recorder) = &mut self.recorder {
             recorder.exit(self.start.elapsed(), status);
         }

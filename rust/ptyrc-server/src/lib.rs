@@ -6,6 +6,7 @@
 //! methods answer is the `Engine`'s business.
 
 mod conn;
+mod demo;
 pub mod driver;
 pub mod engine;
 mod grab;

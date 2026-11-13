@@ -154,6 +154,9 @@ struct Run {
     /// Record what is typed too (passwords included)
     #[arg(long, requires = "record")]
     record_input: bool,
+    /// No demo: ctrl+t twice in a row is the app's, as any key
+    #[arg(long)]
+    no_demo: bool,
     /// The program and its arguments [default: $SHELL]
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     command: Vec<String>,
@@ -370,9 +373,22 @@ fn verb_run(args: Run) -> Result<ExitCode, Fail> {
         record: args.record,
         record_input: args.record_input,
         presets: !args.no_presets && !args.transparent,
+        // Nothing is drawn on a transparent stream.
+        demo: (!args.no_demo && !args.transparent).then(demo_command),
     };
     let status = ptyrc_server::run(config, plugins::engine(args.transparent, !args.no_presets))?;
     Ok(ExitCode::from(status.clamp(0, 255) as u8))
+}
+
+/// What the demo runs: the words of `$PTYRC_DEMO`, else `ptyrc-app demo`.
+fn demo_command() -> Vec<String> {
+    let words = std::env::var("PTYRC_DEMO").unwrap_or_default();
+    let words: Vec<String> = words.split_whitespace().map(str::to_string).collect();
+    if words.is_empty() {
+        vec!["ptyrc-app".into(), "demo".into()]
+    } else {
+        words
+    }
 }
 
 fn verb_ls(common: &Common) -> Result<ExitCode, Fail> {
