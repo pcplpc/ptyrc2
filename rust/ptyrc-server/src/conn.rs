@@ -17,6 +17,8 @@ pub(crate) struct Conn {
     pub topics: HashSet<String>,
     /// To be closed: end of stream, error, or protocol violation.
     pub dead: bool,
+    /// Of a paused app: it does not read, events are not queued for it.
+    pub paused: bool,
 }
 
 impl Conn {
@@ -28,6 +30,7 @@ impl Conn {
             out: Vec::new(),
             topics: HashSet::new(),
             dead: false,
+            paused: false,
         })
     }
 

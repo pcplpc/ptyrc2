@@ -189,6 +189,22 @@ pub trait Engine {
         Vec::new()
     }
 
+    /// Hide, or show again, everything the connection owns (its app is
+    /// paused, or resumed): hidden, its clocks stand still.
+    fn hide_owner(&mut self, _conn: ConnId, _hidden: bool, _ctx: &mut Ctx) {}
+
+    /// How many sprites and widgets the connection owns.
+    fn owned(&self, _conn: ConnId) -> (usize, usize) {
+        (0, 0)
+    }
+
+    /// For a connection that was paused and got no event meanwhile: the
+    /// events that bring it up to date on `topic`. `snapshot`, and what
+    /// has no snapshot but can be told again.
+    fn resume_events(&mut self, topic: &str, now: Duration) -> Vec<Value> {
+        self.snapshot(topic, now)
+    }
+
     /// The clock stands still (a paused replay): the real time at which
     /// `on_stall` is to be called, if any.
     fn stall_wake(&self) -> Option<std::time::Instant> {

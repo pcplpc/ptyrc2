@@ -12,9 +12,9 @@ pub const PROTOCOL: u32 = 1;
 pub const SERVER: &str = concat!("ptyrc/", env!("CARGO_PKG_VERSION"));
 
 /// Topics of `subscribe`.
-pub const TOPICS: [&str; 12] = [
+pub const TOPICS: [&str; 13] = [
     "screen", "cursor", "frames", "text", "idle", "draw", "input", "mouse", "size", "colors",
-    "widgets", "exit",
+    "widgets", "apps", "exit",
 ];
 
 /// Client to server. `id` is echoed as given.

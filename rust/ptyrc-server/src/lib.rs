@@ -5,14 +5,15 @@
 //! The driver is transparent plumbing. What is drawn and what the protocol
 //! methods answer is the `Engine`'s business.
 
+mod apps;
 mod conn;
-mod demo;
 pub mod driver;
 pub mod engine;
 mod grab;
 mod hints;
 pub mod host;
 pub mod hostcolors;
+mod hotkey;
 pub mod keys;
 pub mod mouse;
 mod paging;

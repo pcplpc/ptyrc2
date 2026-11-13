@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The event loop: app pty, host terminal, signals, clients, one timer.
 
+use crate::apps::{Apps, Refused, State};
 use crate::conn::Conn;
-use crate::demo::{self, Demo};
 use crate::engine::{ConnId, Ctx, Effects, Engine, Reply, SessionInfo, Token};
 use crate::grab::{self, Grab};
 use crate::host::Host;
 use crate::hostcolors::{Known, QUERY_BG, QUERY_FG, Replies};
+use crate::hotkey::Hotkey;
 use crate::keys;
 use crate::mouse;
 use crate::paging;
@@ -31,10 +32,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
-use std::process::Child;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 /// Upper bounds of a burst (design: "Coalescing").
 const BURST_MAX_BYTES: usize = 1 << 20;
@@ -77,14 +77,15 @@ pub struct Config {
     pub record_input: bool,
     /// Whether the engine has the per-app presets: written on the tape.
     pub presets: bool,
-    /// The demo: ctrl+t twice on the host keyboard, with no client
-    /// connected, runs this command on the session, with two more
-    /// arguments: a seed and the number of runs before; twice again
-    /// replaces it by the next run. `None`: no demo.
-    pub demo: Option<Vec<String>>,
-    /// Commands run on the session once the app has started, as the
-    /// demo's but without the two arguments; terminated at the end.
+    /// The hotkey: ctrl+t twice on the host keyboard, while no key is
+    /// grabbed, runs this command as a child app named `manage`; twice
+    /// again while it runs ends it. `None`: no hotkey.
+    pub hotkey: Option<Vec<String>>,
+    /// Commands started as child apps once the program has started;
+    /// terminated at the end.
     pub apps: Vec<Vec<String>>,
+    /// Nothing is drawn (`PassThrough`): no app table, `app.*` refused.
+    pub transparent: bool,
     /// The caller has a successor for the host terminal: `session.handoff`
     /// is served, and `run` tells when the session ended by it.
     pub handoff: bool,
@@ -105,8 +106,9 @@ impl Default for Config {
             record: None,
             record_input: false,
             presets: true,
-            demo: None,
+            hotkey: None,
             apps: Vec::new(),
+            transparent: false,
             handoff: false,
         }
     }
@@ -175,9 +177,12 @@ struct Driver {
     player: Option<Player>,
     /// A client holds keys of the host keyboard.
     grab: Option<Grab>,
-    demo: Option<Demo>,
-    /// The commands of `Config::apps` that started.
-    apps: Vec<Child>,
+    /// The sorter of the hotkey; `None`: no hotkey.
+    hotkey: Option<Hotkey>,
+    /// The child the hotkey started, while in the table.
+    hotkey_app: Option<u64>,
+    /// The app table; `None` in a replay and when transparent.
+    apps: Option<Apps>,
     /// The pty returned end of file or EIO.
     pty_eof: bool,
     /// Bytes waiting to be typed into the app.
@@ -340,13 +345,8 @@ impl Driver {
                     socket.to_string_lossy().into_owned(),
                 ),
             ];
-            let demo = cfg.demo.clone().map(|command| {
-                let seed = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map_or(0, |d| d.as_nanos() as u64);
-                Demo::new(command, env.clone(), seed ^ u64::from(std::process::id()))
-            });
-            let clients = env.clone();
+            let hotkey = (cfg.hotkey.is_some() && !cfg.transparent).then(Hotkey::default);
+            let mut apps = (!cfg.transparent).then(|| Apps::new(env.clone(), &socket));
             if std::env::var_os("TERM").is_none() {
                 env.push(("TERM".to_string(), "xterm-256color".to_string()));
             }
@@ -369,12 +369,15 @@ impl Driver {
             };
             let pty = pty::spawn(&cfg.argv, &env, cols, rows)
                 .map_err(|e| start::exec_error(program, &e))?;
-            let apps = (cfg.apps.iter())
-                .filter_map(|command| demo::spawn(command, &[], &clients))
-                .collect();
-            Ok::<_, RunError>((signals, host, pty, cols, rows, recorder, demo, apps))
+            if let Some(apps) = &mut apps {
+                for command in &cfg.apps {
+                    // One that does not start is not in the table.
+                    let _ = apps.start(command.clone(), None, false, Duration::ZERO);
+                }
+            }
+            Ok::<_, RunError>((signals, host, pty, cols, rows, recorder, hotkey, apps))
         })();
-        let (signals, host, pty, cols, rows, recorder, demo, apps) = match built {
+        let (signals, host, pty, cols, rows, recorder, hotkey, apps) = match built {
             Ok(parts) => parts,
             Err(e) => {
                 let _ = fs::remove_file(&socket);
@@ -401,7 +404,8 @@ impl Driver {
             recorder,
             player: None,
             grab: None,
-            demo,
+            hotkey,
+            hotkey_app: None,
             apps,
             pty_eof: false,
             pty_queue: Vec::new(),
@@ -457,8 +461,9 @@ impl Driver {
             recorder: None,
             player: Some(Player::new(replay)),
             grab: None,
-            demo: None,
-            apps: Vec::new(),
+            hotkey: None,
+            hotkey_app: None,
+            apps: None,
             pty_eof: true,
             pty_queue: Vec::new(),
             host: Host::headless(None),
@@ -625,12 +630,17 @@ impl Driver {
                 self.handoff_kill = Some(now + HANDOFF_WAIT);
                 self.signal_app(Signal::KILL);
             }
-            if let Some(demo) = &mut self.demo
-                && demo.due().is_some_and(|t| t <= now)
+            if let Some(hotkey) = &mut self.hotkey
+                && hotkey.due().is_some_and(|t| t <= now)
             {
                 // One ctrl+t: the app's.
-                let held = demo.flush();
+                let held = hotkey.flush();
                 self.forward_input(&held, engine);
+            }
+            if let Some(apps) = &mut self.apps
+                && apps.due().is_some_and(|t| t <= now)
+            {
+                apps.tick(now);
             }
             let timeout = if self.repaint {
                 Some(Duration::ZERO)
@@ -654,9 +664,10 @@ impl Driver {
                 }
             } else {
                 let wake = engine.next_wake(now);
-                let due = self.demo.as_ref().and_then(Demo::due);
+                let due = self.hotkey.as_ref().and_then(Hotkey::due);
                 let kill = self.handoff_kill.filter(|_| self.exit_status.is_none());
-                let wake = [wake, self.replies_until, due, kill]
+                let apps = self.apps.as_ref().and_then(Apps::due);
+                let wake = [wake, self.replies_until, due, kill, apps]
                     .into_iter()
                     .flatten()
                     .min();
@@ -689,7 +700,7 @@ impl Driver {
                 self.flush_pty();
             }
             if ready.listener {
-                self.accept();
+                self.accept(engine);
             }
             for id in ready.conns_in {
                 self.pump_conn(id, engine);
@@ -700,6 +711,7 @@ impl Driver {
                 }
             }
             self.reap_conns(engine);
+            self.flush_apps(engine);
         }
     }
 
@@ -955,18 +967,35 @@ impl Driver {
         out
     }
 
-    /// Bytes of the host keyboard: ctrl+t twice in a row, with no
-    /// client but the demo and no grab, is the demo's.
+    /// Bytes of the host keyboard: ctrl+t twice in a row, while no key
+    /// is grabbed, is the hotkey.
     fn host_input(&mut self, bytes: &[u8], engine: &mut dyn Engine) {
-        let Some(demo) = &mut self.demo else {
+        let Some(hotkey) = &mut self.hotkey else {
             return self.forward_input(bytes, engine);
         };
-        let armed = self.grab.is_none() && (demo.running() || self.conns.is_empty());
-        let (forward, twice) = demo.sort(bytes, self.start.elapsed(), armed);
-        if twice && !demo.next() {
+        let armed = self.grab.is_none();
+        let (forward, twice) = hotkey.sort(bytes, self.start.elapsed(), armed);
+        if twice && !self.hotkey_pressed() {
             let _ = self.host.write(b"\x07");
         }
         self.forward_input(&forward, engine);
+    }
+
+    /// The hotkey: end its app when it runs, else start it. False: it
+    /// did not start.
+    fn hotkey_pressed(&mut self) -> bool {
+        let now = self.now();
+        let (Some(apps), Some(command)) = (&mut self.apps, &self.cfg.hotkey) else {
+            return false;
+        };
+        let running = self.hotkey_app.filter(|id| apps.get(*id).is_some());
+        if let Some(id) = running {
+            return apps.stop(id, now).is_ok();
+        }
+        self.hotkey_app = apps
+            .start(command.clone(), Some("manage".into()), true, now)
+            .ok();
+        self.hotkey_app.is_some()
     }
 
     /// Keyboard bytes on their way to the app.
@@ -1129,11 +1158,10 @@ impl Driver {
                     .unwrap_or_else(|| 128 + status.signal().unwrap_or(0)),
             );
         }
-        if let Some(demo) = &mut self.demo {
-            demo.reap();
+        let now = self.now();
+        if let Some(apps) = &mut self.apps {
+            apps.reap(now);
         }
-        self.apps
-            .retain_mut(|child| matches!(child.try_wait(), Ok(None)));
         Ok(())
     }
 
@@ -1184,14 +1212,27 @@ impl Driver {
         self.host.write(&out)
     }
 
-    fn accept(&mut self) {
+    fn accept(&mut self, engine: &mut dyn Engine) {
         while let Ok((stream, _)) = self.listener.accept() {
             let Ok(mut conn) = Conn::new(stream) else {
                 continue;
             };
             conn.send(&event("hello", self.hello()));
-            self.conns.insert(ConnId(self.next_conn), conn);
+            let id = ConnId(self.next_conn);
             self.next_conn += 1;
+            let now = self.now();
+            if let Some(apps) = &mut self.apps {
+                let peer = rustix::net::sockopt::socket_peercred(&conn.stream).ok();
+                let peer = peer.map(|cred| cred.pid.as_raw_nonzero().get() as u32);
+                let app = apps.attach(id, peer, now).and_then(|app| apps.get(app));
+                // One more connection of a paused app: paused as the others.
+                conn.paused = app.is_some_and(|app| app.state == State::Paused);
+            }
+            let paused = conn.paused;
+            self.conns.insert(id, conn);
+            if paused {
+                hook!(self, now, |ctx| engine.hide_owner(id, true, ctx));
+            }
         }
     }
 
@@ -1264,6 +1305,7 @@ impl Driver {
                 Ok(json!({}))
             }
             _ if method.starts_with("tape.") => self.tape(method, &params, in_batch)?,
+            _ if method.starts_with("app.") => self.app_call(conn, method, &params, engine),
             "batch" if in_batch => Err(RpcError::new(ErrorCode::BadRequest, "batch inside batch")),
             "batch" => self.batch(conn, params, engine),
             _ => {
@@ -1390,12 +1432,8 @@ impl Driver {
         };
         if snapshot {
             // Sent after the answer, to this client only.
-            let now = self.now();
             for topic in &topics {
-                let state = match topic.as_str() {
-                    "size" => vec![json!({"size": [self.info.cols, self.info.rows]})],
-                    topic => engine.snapshot(topic, now),
-                };
+                let state = self.topic_state(topic, engine, false);
                 let events = state.into_iter().map(|data| event(topic, data));
                 self.after.extend(events.map(|message| (conn, message)));
             }
@@ -1408,6 +1446,216 @@ impl Driver {
         // A tick, so that the engine sees the new topics.
         self.repaint = true;
         Ok(json!({}))
+    }
+
+    /// The state of `topic` now, as the data of events. `resume`: for a
+    /// connection that was paused, and missed what was sent meanwhile.
+    fn topic_state(&mut self, topic: &str, engine: &mut dyn Engine, resume: bool) -> Vec<Value> {
+        let now = self.now();
+        match topic {
+            "size" => vec![json!({"size": [self.info.cols, self.info.rows]})],
+            "apps" => self.app_infos(None, engine),
+            topic if resume => engine.resume_events(topic, now),
+            topic => engine.snapshot(topic, now),
+        }
+    }
+
+    /// The info of every app, by id. `me`: the connection that asks.
+    fn app_infos(&self, me: Option<ConnId>, engine: &dyn Engine) -> Vec<Value> {
+        let Some(apps) = &self.apps else {
+            return Vec::new();
+        };
+        let now = self.now();
+        let owned = |conn| engine.owned(conn);
+        apps.iter()
+            .filter_map(|app| apps.info(app.id, now, me, &owned))
+            .collect()
+    }
+
+    /// Topic `apps`: the entries that changed, those that left.
+    fn flush_apps(&mut self, engine: &dyn Engine) {
+        let now = self.now();
+        let Some(apps) = &mut self.apps else {
+            return;
+        };
+        let changed = apps.take_changed();
+        let mut infos = apps.take_gone(now);
+        if changed.is_empty() && infos.is_empty() {
+            return;
+        }
+        self.hotkey_app.take_if(|id| apps.get(*id).is_none());
+        if !self.topics.contains("apps") {
+            return;
+        }
+        let owned = |conn| engine.owned(conn);
+        infos.extend(
+            changed
+                .iter()
+                .filter_map(|id| apps.info(*id, now, None, &owned)),
+        );
+        for info in infos {
+            self.emit("apps", info);
+        }
+    }
+
+    /// `app.*`: the app table.
+    fn app_call(
+        &mut self,
+        conn: ConnId,
+        method: &str,
+        params: &Value,
+        engine: &mut dyn Engine,
+    ) -> Result<Value, RpcError> {
+        const METHODS: [&str; 7] = [
+            "app.list",
+            "app.start",
+            "app.stop",
+            "app.pause",
+            "app.resume",
+            "app.restart",
+            "app.forget",
+        ];
+        if !METHODS.contains(&method) {
+            return Err(RpcError::unknown_method(method).with_hint(format!(
+                "{}app methods: {}",
+                suggest::did_you_mean(method, METHODS),
+                METHODS.join(", ")
+            )));
+        }
+        let now = self.now();
+        if self.apps.is_none() {
+            let what = match self.player {
+                Some(_) => "a replay has no apps",
+                None => "a transparent session has no apps",
+            };
+            return Err(RpcError::new(ErrorCode::BadRequest, what));
+        }
+        let members: &[&str] = match method {
+            "app.list" => &[],
+            "app.start" => &["argv", "name"],
+            "app.restart" => &["app", "argv", "name"],
+            _ => &["app"],
+        };
+        let given = params.as_object().into_iter().flatten();
+        if let Some((bad, _)) = given.clone().find(|(k, _)| !members.contains(&k.as_str())) {
+            return Err(RpcError::bad_params(format!("{method}: no member `{bad}`"))
+                .with_hint(format!("members: {}", members.join(", "))));
+        }
+        let member = |name: &str| params.get(name).filter(|v| !v.is_null());
+        let argv = match member("argv") {
+            None => None,
+            Some(list) => Some(
+                list.as_array()
+                    .filter(|a| !a.is_empty())
+                    .and_then(|a| {
+                        a.iter()
+                            .map(|w| w.as_str().map(str::to_string))
+                            .collect::<Option<Vec<_>>>()
+                    })
+                    .ok_or_else(|| RpcError::bad_params("argv: [program, arg...], strings"))?,
+            ),
+        };
+        let name = match member("name") {
+            None => None,
+            Some(name) => Some(
+                name.as_str()
+                    .filter(|n| !n.is_empty())
+                    .ok_or_else(|| RpcError::bad_params("name: a string"))?
+                    .to_string(),
+            ),
+        };
+        if method == "app.list" {
+            return Ok(json!({"apps": self.app_infos(Some(conn), engine)}));
+        }
+        let apps = self.apps.as_mut().expect("checked above");
+        let refused = |apps: &Apps, id: u64, e: Refused| match e {
+            Refused::Unknown => {
+                let names: Vec<String> = (apps.iter())
+                    .map(|a| format!("{} ({})", a.id, a.name))
+                    .collect();
+                RpcError::new(ErrorCode::NoSprite, format!("no such app: {id}")).with_hint(
+                    match names.is_empty() {
+                        true => "no app; start one: ptyrc manage start APP".to_string(),
+                        false => format!("apps: {}", names.join(", ")),
+                    },
+                )
+            }
+            Refused::NotUsable(message) => RpcError::new(ErrorCode::NotUsable, message),
+            Refused::Spawn(message) => RpcError::bad_params(message),
+        };
+        let id = if method == "app.start" {
+            let argv = argv.ok_or_else(|| RpcError::bad_params("argv: [program, arg...]"))?;
+            apps.start(argv, name, false, now)
+                .map_err(|e| refused(apps, 0, e))?
+        } else {
+            let id = member("app")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| RpcError::bad_params("app: the id of an app"))?;
+            if apps.get(id).is_none() {
+                return Err(refused(apps, id, Refused::Unknown));
+            }
+            let me = apps.of_conn(conn) == Some(id);
+            let verb = &method["app.".len()..];
+            if me && matches!(verb, "stop" | "pause" | "restart") {
+                return Err(RpcError::new(
+                    ErrorCode::NotUsable,
+                    format!("app {id} is the one that asks: it may not {verb} itself"),
+                ));
+            }
+            let done = match verb {
+                "stop" => apps.stop(id, now).map(|()| None),
+                "pause" => apps.pause(id, now).map(|was| was.then_some(true)),
+                "resume" => apps.resume(id, now).map(|was| was.then_some(false)),
+                "restart" => apps.restart(id, argv, name, now).map(|()| None),
+                _ => apps.forget(id).map(|()| None),
+            };
+            let hint = |e: RpcError| match verb {
+                "restart" if e.code == ErrorCode::NotUsable => {
+                    e.with_hint("stop it, then start it as a child: ptyrc manage start APP")
+                }
+                _ => e,
+            };
+            let paused = done.map_err(|e| hint(refused(apps, id, e)))?;
+            if let Some(paused) = paused {
+                self.set_paused(id, paused, engine);
+            }
+            if verb == "forget" {
+                return Ok(json!({}));
+            }
+            id
+        };
+        let apps = self.apps.as_ref().expect("checked above");
+        let owned = |conn| engine.owned(conn);
+        Ok(json!({"app": apps.info(id, now, Some(conn), &owned)}))
+    }
+
+    /// An app was paused or resumed: hide or show what its connections
+    /// own. Paused, a connection gets no event and holds no key;
+    /// resumed, it is sent the state of its topics.
+    fn set_paused(&mut self, id: u64, paused: bool, engine: &mut dyn Engine) {
+        let conns: Vec<ConnId> = (self.apps.as_ref())
+            .and_then(|apps| apps.get(id))
+            .map(|app| app.conns.iter().copied().collect())
+            .unwrap_or_default();
+        let now = self.now();
+        for id in conns {
+            let Some(conn) = self.conns.get_mut(&id) else {
+                continue;
+            };
+            conn.paused = paused;
+            let topics: Vec<String> = conn.topics.iter().cloned().collect();
+            hook!(self, now, |ctx| engine.hide_owner(id, paused, ctx));
+            if paused {
+                self.grab.take_if(|g| g.conn == id);
+                continue;
+            }
+            for topic in topics {
+                for data in self.topic_state(&topic, engine, true) {
+                    self.send_event(id, &topic, data);
+                }
+            }
+        }
+        self.repaint = true;
     }
 
     fn refresh_topics(&mut self) {
@@ -1723,7 +1971,7 @@ impl Driver {
 
     /// An event for one client, subscribed or not.
     fn send_event(&mut self, conn: ConnId, topic: &str, data: Value) {
-        if let Some(conn) = self.conns.get_mut(&conn) {
+        if let Some(conn) = self.conns.get_mut(&conn).filter(|c| !c.paused) {
             conn.send(&event(topic, data));
         }
     }
@@ -1733,7 +1981,8 @@ impl Driver {
             return;
         }
         let message = event(topic, data);
-        for conn in self.conns.values_mut().filter(|c| c.topics.contains(topic)) {
+        let reads = |c: &&mut Conn| c.topics.contains(topic) && !c.paused;
+        for conn in self.conns.values_mut().filter(reads) {
             conn.send(&message);
         }
     }
@@ -1751,6 +2000,9 @@ impl Driver {
         }
         for id in dead {
             self.conns.remove(&id);
+            if let Some(apps) = &mut self.apps {
+                apps.detach(id);
+            }
             self.grab.take_if(|g| g.conn == id);
             self.pending.retain(|_, (conn, _)| *conn != id);
             self.refresh_topics();
@@ -1763,10 +2015,9 @@ impl Driver {
     /// `status`: the app's exit status, or `None` after a driver error.
     fn finish(&mut self, engine: &mut dyn Engine, status: Option<i32>) -> i32 {
         let status = status.unwrap_or(1);
-        if let Some(demo) = &mut self.demo {
-            demo.stop();
+        if let Some(apps) = &mut self.apps {
+            apps.finish();
         }
-        self.apps.iter().for_each(demo::terminate);
         if let Some(recorder) = &mut self.recorder {
             recorder.exit(self.start.elapsed(), status);
         }
