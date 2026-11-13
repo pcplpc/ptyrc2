@@ -12,7 +12,8 @@ python -m ptyrc_apps.clock -s NAME
 | app | what it shows |
 |---|---|
 | `confetti` | the pops of the first ptyrc: finite animations of 3 by 3 cells, four colours a burst, behind the text; `--bursts N` at once at random offsets, each shot on a cold spot of the heatmap; a round every 3 s until interrupted; `--one-shot`: one round of persistent sprites: the app exits, the driver plays them. `--fancy`: big explosions, a native effect started with one call; `--random`: pops of several kinds, explosions of random size, scale, shape and colours; `--fireworks`: a rocket first, one sprite with a `motion` that brakes; `--sparkle`: twinkles; `-a`: all |
-| `clock` | automatic placement, the front layer, a sprite updated in place, a draw extension |
+| `clock` | one widget, a variant per face: `HH:MM` up to block digits with the date and week, a braille dial; the driver picks the face and the place, the deck draws the face shown each second; `--tz`, `--utc`, `--no-seconds`, `--big` (block digits only), `--print` (every face, no driver) |
+| `monitor` | the state of this machine in widgets the driver places: a tiny glances (CPU, cores, memory, swap, load, network, top processes), who is logged in (grouped, cleaner than `w`), TCP ports open to the outside, free space of the local disks; each a tag of variants from one line to a small table, `render(data, w, h)` pure; `--monitor LIST`, `--merged`: one widget showing them in turn; `--print [WxH]`: no driver, the variants in boxes on stdout |
 | `flower` | flowers of random size and colours planted on cold cells next to the matches of a word (`--count N`, 0: all), the word bolded with a tint; `-a`: anywhere, next to `--count` words drawn from the screen (default 5; 0: 10 to 30, redrawn each minute), one renewed every 10 s, no bold; grown by the client, swayed by the driver; frame coordinates |
 | `fishes` | sprites in frame coordinates: they scroll with the text; one scrolled out of the view goes after a few seconds and comes back behind the text; half of them shy, hiding behind the text; the cursor and the text told by the driver (`_cli.Sight`), not asked; one batch per tick. `-d`: decorations standing on the text, behind or in front of the fishes; `-b`: bubbles, each one request with a `motion`; `-r`: random species, events (a creature crossing, an object sinking, a hook); `-a`: all. Populated areas are remembered in frame cells (`_reef.Reef`) |
 | `snake` | the screen read as a map: glyphs are walls, read again when the topic `text` says so (`_cli.Sight`); one sprite redrawn in place each step. `-e`: particles, each one request with a `motion`, golden apples, a shaded body, the score; `-x`: foes that bite the tail off; `-l`: beams from wall to wall that burn what they cross; `-a`: all (`_arcade`); `--front`, not in `-a`: over the text; `--grab`, not in `-a`: the arrows of the host keyboard steer the snake, at half the speed; against a wall it waits, into its body it bites itself off; ctrl+t gives them back and ends |
@@ -112,6 +113,17 @@ What to know:
 - **What**: `rows` (a space is transparent), `cells` (styled runs),
   `frames` (an animation the driver plays alone), `effect` (a native
   generator), `pilot.ext(...)` (a draw extension).
+- **Widgets**: a small window the driver places, sizes and moves.
+  `pilot.widget(tag, [(8, 1), (20, 5)], content=render)` declares the
+  variants of a tag, the same information for boxes of those inner
+  sizes, and shows one: where there is room, about half of it,
+  centred, in a border with the title; a smaller one, or elsewhere,
+  when the app's text takes the place. Behind the text by default.
+  Topic `widgets` tells the variant shown; `Widget.set` fills it.
+  `_widgets.Deck` does both for an app: `deck.add(tag, sizes, render)`,
+  `deck.run(period)` (`clock.py`, `monitor.py`). `border=`: `plain`,
+  `round`, `heavy`, `double`, `ascii`, `none`, `painting`, `baroque`,
+  `mat`, `sketch`, or an object of glyphs.
 - **In which layer**: the app's text is layer 0. `layer="back"` (the
   default) draws behind it, in the cells it leaves free; `layer="front"`
   over it; integers order more layers (`-2` is behind `-1`), `z` orders
@@ -131,7 +143,8 @@ What to know:
 `_cli.hold(pilot)` keeps an app with nothing to send connected;
 `_cli.follow` does, and follows a frame replaced.
 
-Read `confetti.py`, `clock.py` and `rain.py` first, then `marks.py`,
+Read `confetti.py`, `clock.py` and `rain.py` first (`monitor.py`
+for widgets), then `marks.py`,
 `cat.py`, `flower.py`, `fishes.py`, `snake.py`, `bricks.py`,
 `sand.py`.
 
