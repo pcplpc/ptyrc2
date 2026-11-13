@@ -8,16 +8,22 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from ptyrc import Pilot, Widget, clock
+from ptyrc import Pilot, PtyrcError, Widget, clock
 
 from . import _cli
 
 __all__ = ["Deck", "options"]
 
 Size = tuple[int, int]
+#: What of a widget's info a hover stands on.
+_PLACE = ("sprite", "variant", "rect")
 #: `render(w, h)`: the rows of a variant, strings or rows of runs. The
 #: size is the key: one variant a size in a tag.
 Render = Callable[[int, int], Any]
+#: `move(x, y)`: the host mouse over the cell `(x, y)` of the inner box.
+#: Returning False: nothing changed, the widget is not drawn again.
+Move = Callable[[int, int], Any]
+Leave = Callable[[], Any]
 
 
 def options(
@@ -50,8 +56,12 @@ class Deck:
     Driven by the topic `widgets`: a variant just put is drawn at once,
     the others once a period, in one batch. A hidden widget is not
     rendered. On the topic `move` its tags are shown again on the frame
-    named (`move`).
+    named (`move`). `on_hover`: the host mouse over a widget.
     """
+
+    #: Session seconds without a move after which a hover is over: the
+    #: host tells no move of a mouse that left its window. None: never.
+    hover_timeout: float | None = 1.5
 
     def __init__(self, pilot: Pilot, args: argparse.Namespace | None = None) -> None:
         self.pilot = pilot
@@ -66,6 +76,9 @@ class Deck:
         self.widgets: list[tuple[Widget, Render]] = []
         self._show: dict[int, dict[str, Any]] = {}
         self._sizes: dict[int, Sequence[Size] | Mapping[str, Size]] = {}
+        self._hover: dict[int, tuple[Move, Leave | None]] = {}
+        self._over: Widget | None = None
+        self._over_until: float | None = None
         pilot.subscribe("widgets", "exit")
         _cli.movable(pilot)
 
@@ -112,6 +125,63 @@ class Deck:
                 if size is not None and only in (None, widget):
                     widget.set(render(*size))
 
+    def on_hover(self, widget: Widget, move: Move, leave: Leave | None = None) -> None:
+        """Follow the host mouse over `widget`, a widget of the deck.
+
+        `move(x, y)`: the mouse, no button down, came on the cell
+        `(x, y)` of the inner box, or went from one to another; a cell
+        of the border is not in the box. `leave()`, once after the last
+        `move`: the mouse went out of the box (on the border, another
+        sprite or none), `hover_timeout` passed without a move, or the
+        widget was moved, changed or hidden. After either the widget is
+        drawn again, unless the handler returned False.
+
+        The first handler subscribes to `hover`: the driver then asks
+        the host for the moves. A driver without the topic refuses:
+        the handlers are never called."""
+        if not self._hover:
+            try:
+                self.pilot.subscribe("hover")
+            except PtyrcError as err:
+                if err.code != "bad-params":
+                    raise
+        self._hover[id(widget)] = (move, leave)
+
+    def hover(self, data: dict[str, Any]) -> None:
+        """Give the data of a `hover` event to the handlers."""
+        sprite = data.get("sprite")
+        found = None
+        for widget, _ in self.widgets:
+            if id(widget) not in self._hover or sprite is None:
+                continue
+            rect, size = widget.rect, widget.size
+            if widget.info.get("sprite") != sprite or rect is None or size is None:
+                continue
+            # The border is as thick on every side.
+            x = data["x"] - rect[0] - (rect[2] - size[0]) // 2
+            y = data["y"] - rect[1] - (rect[3] - size[1]) // 2
+            if 0 <= x < size[0] and 0 <= y < size[1]:
+                found = (widget, x, y)
+        if found is None or found[0] is not self._over:
+            self.leave()
+        if found is None:
+            return
+        widget, x, y = found
+        self._over = widget
+        if self.hover_timeout is not None:
+            self._over_until = clock.monotonic() + self.hover_timeout
+        if self._hover[id(widget)][0](x, y) is not False:
+            self.draw(widget)
+
+    def leave(self) -> None:
+        """End the hover under way, if any."""
+        widget, self._over, self._over_until = self._over, None, None
+        if widget is None:
+            return
+        leave = self._hover[id(widget)][1]
+        if leave is not None and leave() is not False:
+            self.draw(widget)
+
     def take(self, data: dict[str, Any]) -> Widget | None:
         """Give the data of a `widgets` event to the widget it tells
         of; that widget, if it is of the deck."""
@@ -142,9 +212,14 @@ class Deck:
                 # The wall clock is real time: one of its seconds is `rate()` here.
                 wall = (period - time.time() % period) * clock.rate()
                 due = now + (wall if align else period)
-            wait = due - now if end is None else min(due, end) - now
-            event = self.pilot.event(timeout=max(0.0, wait))
+            if self._over_until is not None and now >= self._over_until:
+                self.leave()
+            wake = min(t for t in (due, end, self._over_until) if t is not None)
+            event = self.pilot.event(timeout=max(0.0, wake - now))
             if event is None:
+                continue
+            if event[0] == "hover":
+                self.hover(event[1])
                 continue
             if event[0] == "exit":
                 return
@@ -154,7 +229,13 @@ class Deck:
             if event[0] != "widgets":
                 continue
             shown = {id(w): w.variant for w, _ in self.widgets}
+            over = {} if self._over is None else self._over.info
             widget = self.take(event[1])
+            # The widget under the mouse moved, changed or went.
+            if widget is self._over is not None and any(
+                over.get(k) != widget.info.get(k) for k in _PLACE
+            ):
+                self.leave()
             # Moved only: what it shows stands.
             if widget is not None and widget.variant != shown[id(widget)]:
                 self.draw(widget)
