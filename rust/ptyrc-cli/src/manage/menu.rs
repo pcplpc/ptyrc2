@@ -700,8 +700,10 @@ enum Screen {
         id: u64,
         sel: usize,
     },
+    /// The catalog; `filter`: typed, narrows it.
     Start {
         sel: usize,
+        filter: Line,
     },
     Form(Box<Form>),
     /// The frames; `pick`: chosen for that.
@@ -769,6 +771,27 @@ fn since(seconds: f64) -> String {
         3600..172_800 => format!("{}h", s / 3600),
         _ => format!("{}d", s / 86400),
     }
+}
+
+/// The apps of the catalog whose name or help holds `typed`, any case:
+/// names that start with it first, then names, then helps.
+fn matching<'a>(catalog: Option<&'a Catalog>, typed: &str) -> Vec<&'a App> {
+    let apps = catalog.map_or(&[][..], |c| &c.apps[..]);
+    let typed = typed.to_lowercase();
+    let rank = |app: &App| {
+        let name = app.name.to_lowercase();
+        match () {
+            _ if name.starts_with(&typed) => Some(0),
+            _ if name.contains(&typed) => Some(1),
+            _ if app.help.to_lowercase().contains(&typed) => Some(2),
+            _ => None,
+        }
+    };
+    let mut found: Vec<(u8, &App)> = (apps.iter())
+        .filter_map(|a| rank(a).map(|r| (r, a)))
+        .collect();
+    found.sort_by_key(|(r, _)| *r);
+    found.into_iter().map(|(_, a)| a).collect()
 }
 
 /// Move a selection among `n` rows.
@@ -1130,7 +1153,10 @@ impl Menu {
                 let wanted = match key {
                     "esc" | "q" => return vec![Action::Quit],
                     "s" if self.catalog.is_some() => {
-                        self.stack.push(Screen::Start { sel: 0 });
+                        self.stack.push(Screen::Start {
+                            sel: 0,
+                            filter: Line::default(),
+                        });
                         return Vec::new();
                     }
                     "s" => {
@@ -1143,7 +1169,10 @@ impl Menu {
                             return Vec::new();
                         }
                         Some(Entry::Start) => {
-                            self.stack.push(Screen::Start { sel: 0 });
+                            self.stack.push(Screen::Start {
+                                sel: 0,
+                                filter: Line::default(),
+                            });
                             return Vec::new();
                         }
                         Some(Entry::Random) => return self.random().into_iter().collect(),
@@ -1192,16 +1221,23 @@ impl Menu {
                     return self.act(id, *act);
                 }
             }
-            Screen::Start { sel } => {
-                let apps = self.catalog.as_ref().map_or(&[][..], |c| &c.apps[..]);
-                if step(sel, apps.len(), key, PAGE) {
-                } else if back {
+            Screen::Start { sel, filter } => {
+                let apps = matching(self.catalog.as_ref(), &filter.string());
+                // Letters are typed: only the other keys move.
+                let moves = !matches!(key, "j" | "k");
+                if moves && step(sel, apps.len(), key, PAGE) {
+                } else if matches!(key, "esc" | "left") && !filter.text.is_empty() {
+                    *filter = Line::default();
+                    *sel = 0;
+                } else if matches!(key, "esc" | "left") {
                     self.stack.pop();
-                } else if matches!(key, "enter" | "right")
-                    && let Some(app) = apps.get(*sel)
-                {
-                    let form = Form::new(Target::Start, &app.name, Some(app));
-                    self.stack.push(Screen::Form(Box::new(form)));
+                } else if matches!(key, "enter" | "right") {
+                    if let Some(app) = apps.get(*sel) {
+                        let form = Form::new(Target::Start, &app.name, Some(app));
+                        self.stack.push(Screen::Form(Box::new(form)));
+                    }
+                } else if key != "space" && filter.key(key) {
+                    *sel = 0;
                 }
             }
             Screen::Form(_) => return self.form_key(key),
@@ -1448,10 +1484,12 @@ impl Menu {
                 let keys = vec![("↑↓ move", 1), ("enter do", 1), ("esc back", 0)];
                 (title.trim().to_string(), rows, Some(*sel), keys)
             }
-            Screen::Start { sel } => {
-                let apps = self.catalog.as_ref().map_or(&[][..], |c| &c.apps[..]);
-                let width = apps.iter().map(|a| len(&a.name)).max().unwrap_or(0);
-                let rows = (apps.iter())
+            Screen::Start { sel, filter } => {
+                let typed = filter.string();
+                let apps = matching(self.catalog.as_ref(), &typed);
+                let all = self.catalog.as_ref().map_or(&[][..], |c| &c.apps[..]);
+                let width = all.iter().map(|a| len(&a.name)).max().unwrap_or(0);
+                let mut rows: Vec<Row> = (apps.iter())
                     .map(|a| {
                         vec![
                             run(format!("{:<width$}", a.name), BOLD),
@@ -1459,9 +1497,30 @@ impl Menu {
                         ]
                     })
                     .collect();
-                hint = apps.get(*sel).map(|a| a.help.clone());
-                let keys = vec![("↑↓ move", 1), ("enter options", 1), ("esc back", 0)];
-                ("start an app".into(), rows, Some(*sel), keys)
+                let sel = match rows.is_empty() {
+                    true => {
+                        rows.push(vec![run("no app matches", DIM)]);
+                        None
+                    }
+                    false => Some(*sel),
+                };
+                hint = apps.get(sel.unwrap_or(0)).map(|a| a.help.clone());
+                let (title, keys) = match typed.as_str() {
+                    "" => (
+                        "start an app".to_string(),
+                        vec![
+                            ("↑↓ move", 1),
+                            ("enter options", 1),
+                            ("type to filter", 2),
+                            ("esc back", 0),
+                        ],
+                    ),
+                    _ => (
+                        format!("start an app: {typed}"),
+                        vec![("↑↓ move", 1), ("enter options", 1), ("esc clear", 0)],
+                    ),
+                };
+                (title, rows, sel, keys)
             }
             Screen::Form(form) => {
                 let rows = form_rows(form, inner);
