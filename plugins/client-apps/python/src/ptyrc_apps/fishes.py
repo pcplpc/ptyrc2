@@ -48,11 +48,10 @@ from __future__ import annotations
 import argparse
 import math
 import random
-import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from ptyrc import Frame, Pilot, Sprite
+from ptyrc import Frame, Pilot, Sprite, clock
 
 from . import _cli
 from ._reef import Events, Reef, mirror, pad
@@ -368,7 +367,7 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     surveyed: Box | None = None  # the view at the last look at the reef
     settle: float | None = None  # time of a second look, the view still
     reef = Reef()
-    events = Events(reef, time.monotonic(), rng) if args.random else None
+    events = Events(reef, clock.monotonic(), rng) if args.random else None
     # Told by the driver (`_cli.Sight`): the text of the view when it
     # changed or scrolled, the cursor when it moved. Nothing is asked.
     sight = _cli.Sight(pilot, frame, cursor=True)
@@ -379,7 +378,7 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
         cursor = sight.cursor
         moving, before = cursor != before, cursor
         cells = [fish.cell[:2] for fish in school]
-        now = time.monotonic()
+        now = clock.monotonic()
         due, going = tide(cells, due, box, now, rng, [f.length for f in school])
         with sight.drawing():
             # The reef is looked at when the text is read, and once

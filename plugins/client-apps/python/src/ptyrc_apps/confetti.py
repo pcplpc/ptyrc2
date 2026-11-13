@@ -42,11 +42,10 @@ import argparse
 import heapq
 import itertools
 import random
-import time
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from ptyrc import Pilot, Sprite
+from ptyrc import Pilot, Sprite, clock
 
 from . import _cli
 
@@ -290,7 +289,7 @@ def play(pilot: Pilot, args: argparse.Namespace, rng: random.Random) -> None:
     rocket queues what follows the flight."""
     layer = "front" if args.front else "back"
     persist = args.one_shot
-    begin = time.monotonic()
+    begin = clock.monotonic()
     queue: list[tuple[float, int, Callable[[], None]]] = []
     order = itertools.count()
     avoid: list[tuple[int, int]] = []
@@ -367,7 +366,7 @@ def play(pilot: Pilot, args: argparse.Namespace, rng: random.Random) -> None:
             layer=layer,
             persist=persist,
         )
-        later(time.monotonic() + seconds, lambda: bang(frame.id, origin, color))
+        later(clock.monotonic() + seconds, lambda: bang(frame.id, origin, color))
 
     def round_(n: int) -> None:
         start = begin + n * PERIOD
@@ -387,7 +386,7 @@ def play(pilot: Pilot, args: argparse.Namespace, rng: random.Random) -> None:
         sparkle(pilot, args.frame, last if args.one_shot else None)
     while queue:
         at, _, action = heapq.heappop(queue)
-        time.sleep(max(0.0, at - time.monotonic()))
+        clock.sleep(max(0.0, at - clock.monotonic()))
         action()
 
 

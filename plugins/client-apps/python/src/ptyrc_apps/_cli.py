@@ -6,10 +6,9 @@ from __future__ import annotations
 import argparse
 import contextlib
 import sys
-import time
 from collections.abc import Callable, Iterator, Sequence
 
-from ptyrc import Cursor, Frame, Pilot, PtyrcError, Sprite
+from ptyrc import Cursor, Frame, Pilot, PtyrcError, Sprite, clock
 
 __all__ = [
     "Sight",
@@ -102,10 +101,10 @@ def ticks(period: float, seconds: float | None = None) -> Iterator[float]:
     """Yield the time step, then sleep to the next tick; stop after
     `seconds`. The step is measured, so motion keeps its speed when a
     tick is late."""
-    start = last = time.monotonic()
+    start = last = clock.monotonic()
     while seconds is None or last - start < seconds:
-        time.sleep(max(0.0, last + period - time.monotonic()))
-        now = time.monotonic()
+        clock.sleep(max(0.0, last + period - clock.monotonic()))
+        now = clock.monotonic()
         yield min(now - last, 4 * period)
         last = now
 
@@ -178,14 +177,14 @@ def follow(
     `beats`: the app's own work between two events. Each `next()` gives
     the seconds to wait before the one after: a generator does its work
     after each `yield`."""
-    now = time.monotonic()
+    now = clock.monotonic()
     end = None if seconds is None else now + seconds
     beat = None if beats is None else now + next(beats)
     screen: tuple[int, int] | None = None  # when `frame` was last settled
     pilot.subscribe("frames", "exit", snapshot=True)
     movable(pilot)
     while True:
-        now = time.monotonic()
+        now = clock.monotonic()
         if end is not None and now >= end:
             return
         if beats is not None and beat is not None and now >= beat:

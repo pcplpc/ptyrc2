@@ -48,12 +48,11 @@ import argparse
 import math
 import random
 import re
-import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from ptyrc import Frame, Pilot, PtyrcError, Sprite
+from ptyrc import Frame, Pilot, PtyrcError, Sprite, clock
 
 from . import _cli
 from ._reef import mirror, pad, paint
@@ -1024,7 +1023,7 @@ class Home:
 def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
     rng = random.Random(args.seed)
     frame = _cli.pick(pilot, args.frame)
-    start = time.monotonic()
+    start = clock.monotonic()
     home = Home(
         pilot,
         frame,
@@ -1043,7 +1042,7 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     lost = 0.0  # since when the frame is out of sight
     # Until the session ends: a closed connection raises out of `events`.
     while True:
-        now = time.monotonic()
+        now = clock.monotonic()
         if end is not None and now >= end:
             return
         try:
@@ -1068,9 +1067,9 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
             wake = min(wake, now + 0.5)
         if end is not None:
             wake = min(wake, end)
-        timeout = None if wake == math.inf else max(0.001, wake - time.monotonic())
+        timeout = None if wake == math.inf else max(0.001, wake - clock.monotonic())
         for topic, data in pilot.events(timeout=timeout):
-            home.on(topic, data, time.monotonic())
+            home.on(topic, data, clock.monotonic())
             break
 
 

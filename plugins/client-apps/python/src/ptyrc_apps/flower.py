@@ -38,11 +38,10 @@ import argparse
 import math
 import random
 import re
-import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
-from ptyrc import Frame, Match, Pilot, Sprite
+from ptyrc import Frame, Match, Pilot, Sprite, clock
 
 from . import _cli
 
@@ -434,11 +433,11 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     if args.count is None:
         args.count = POOL if args.anywhere else 1
     frame = _cli.pick(pilot, args.frame)
-    garden = Garden(size=args.count, swap=time.monotonic() + SWAP)
+    garden = Garden(size=args.count, swap=clock.monotonic() + SWAP)
     sight = _cli.Sight(pilot, frame)
     scanned = -math.inf
     for _ in _cli.ticks(0.05, seconds):
-        now = time.monotonic()
+        now = clock.monotonic()
         with sight.drawing(), pilot.batch():
             garden.flowers = [
                 f for f in garden.flowers if f.dies is None or f.dies > now
