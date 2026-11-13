@@ -46,6 +46,8 @@ const PTY_QUEUE_HIGH: usize = 1 << 20;
 const DEFAULT_SIZE: (u16, u16) = (80, 24);
 /// How long the host has to tell its colours.
 const HOST_COLORS_WAIT: Duration = Duration::from_millis(1000);
+/// How long the app has to leave after the hang-up of a handoff.
+const HANDOFF_WAIT: Duration = Duration::from_millis(1000);
 
 /// How to run a session.
 #[derive(Clone, Debug)]
@@ -83,6 +85,9 @@ pub struct Config {
     /// Commands run on the session once the app has started, as the
     /// demo's but without the two arguments; terminated at the end.
     pub apps: Vec<Vec<String>>,
+    /// The caller has a successor for the host terminal: `session.handoff`
+    /// is served, and `run` tells when the session ended by it.
+    pub handoff: bool,
 }
 
 impl Default for Config {
@@ -102,8 +107,18 @@ impl Default for Config {
             presets: true,
             demo: None,
             apps: Vec::new(),
+            handoff: false,
         }
     }
+}
+
+/// How a session ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Exit {
+    /// Exit status of the app; 128 + signal when killed.
+    pub status: i32,
+    /// Ended by `session.handoff`: the host terminal is the caller's.
+    pub handoff: bool,
 }
 
 struct Signals {
@@ -191,6 +206,10 @@ struct Driver {
     mouse_held: Option<Value>,
     /// A replay: makes the engine again when the tape is rewound.
     factory: Option<Box<dyn FnMut() -> Box<dyn Engine>>>,
+    /// `session.handoff` was asked.
+    handoff: bool,
+    /// The app was hung up for it; when it is killed if it stays.
+    handoff_kill: Option<Duration>,
 }
 
 /// Name the session and listen on its socket.
@@ -242,13 +261,15 @@ fn bind_session(cfg: &Config) -> Result<(String, PathBuf, UnixListener), RunErro
     Ok((name, socket, listener))
 }
 
-/// Run a session to its end: spawn the app, serve, return its exit status
-/// (128 + signal when killed).
-pub fn run(cfg: Config, mut engine: Box<dyn Engine>) -> Result<i32, RunError> {
+/// Run a session to its end: spawn the app, serve, return how it ended.
+pub fn run(cfg: Config, mut engine: Box<dyn Engine>) -> Result<Exit, RunError> {
     let mut driver = Driver::start(cfg)?;
     let result = driver.serve(&mut engine);
     let status = driver.finish(engine.as_mut(), result.as_ref().ok().copied());
-    result.and(Ok(status)).map_err(RunError::from)
+    let handoff = driver.handoff;
+    result
+        .and(Ok(Exit { status, handoff }))
+        .map_err(RunError::from)
 }
 
 /// Replay a tape in place of an app: a headless session whose clock is
@@ -401,6 +422,8 @@ impl Driver {
             host_mouse: false,
             mouse_held: None,
             factory: None,
+            handoff: false,
+            handoff_kill: None,
         })
     }
 
@@ -454,6 +477,8 @@ impl Driver {
             host_mouse: false,
             mouse_held: None,
             factory: None,
+            handoff: false,
+            handoff_kill: None,
         })
     }
 
@@ -595,6 +620,11 @@ impl Driver {
                 let held = self.replies.give_up();
                 self.host_input(&held, engine);
             }
+            if self.handoff_kill.is_some_and(|t| t <= now) && self.exit_status.is_none() {
+                // The app did not leave on the hang-up.
+                self.handoff_kill = Some(now + HANDOFF_WAIT);
+                self.signal_app(Signal::KILL);
+            }
             if let Some(demo) = &mut self.demo
                 && demo.due().is_some_and(|t| t <= now)
             {
@@ -625,7 +655,11 @@ impl Driver {
             } else {
                 let wake = engine.next_wake(now);
                 let due = self.demo.as_ref().and_then(Demo::due);
-                let wake = [wake, self.replies_until, due].into_iter().flatten().min();
+                let kill = self.handoff_kill.filter(|_| self.exit_status.is_none());
+                let wake = [wake, self.replies_until, due, kill]
+                    .into_iter()
+                    .flatten()
+                    .min();
                 wake.map(|w| w.saturating_sub(now))
             };
             let ready = self.wait(timeout)?;
@@ -1220,6 +1254,7 @@ impl Driver {
             "session.info" => Ok(self.session_info(engine)),
             "session.resize" => self.session_resize(&params, engine),
             "session.colors" => self.session_colors(&params, engine),
+            "session.handoff" => self.session_handoff(&params),
             "subscribe" => self.subscribe(conn, &params, engine),
             "input.send" => self.input_send(&params, engine),
             "input.click" => self.input_click(&params, engine),
@@ -1255,6 +1290,7 @@ impl Driver {
         let object = info.as_object_mut().expect("hello is an object");
         object.insert("exited".into(), json!(self.exit_status.is_some()));
         object.insert("grabbed".into(), json!(self.grab.is_some()));
+        object.insert("handoff".into(), json!(self.cfg.handoff));
         if let Value::Object(extras) = engine.session_extras() {
             object.extend(extras);
         }
@@ -1262,6 +1298,38 @@ impl Driver {
             object.insert("tape".into(), player.status_json());
         }
         info
+    }
+
+    /// The end of the app is a handoff: `run` tells its caller to take the
+    /// host terminal. The app is hung up, unless `hangup` is false: the
+    /// client makes it leave.
+    fn session_handoff(&mut self, params: &Value) -> Result<Value, RpcError> {
+        if !self.cfg.handoff {
+            return Err(
+                RpcError::new(ErrorCode::BadRequest, "this session has no successor")
+                    .with_hint("a session of `ptyrc tmux attach` has one"),
+            );
+        }
+        let hangup = match params.get("hangup") {
+            None | Some(Value::Null) => true,
+            Some(Value::Bool(hangup)) => *hangup,
+            Some(_) => return Err(RpcError::bad_params("hangup: not a boolean")),
+        };
+        self.handoff = true;
+        if hangup && self.handoff_kill.is_none() {
+            self.handoff_kill = Some(self.now() + HANDOFF_WAIT);
+            self.signal_app(Signal::HUP);
+        }
+        Ok(json!({}))
+    }
+
+    fn signal_app(&self, signal: Signal) {
+        if self.pty.is_some()
+            && self.exit_status.is_none()
+            && let Some(pid) = Pid::from_raw(self.info.pid as i32)
+        {
+            let _ = kill_process_group(pid, signal);
+        }
     }
 
     fn session_resize(

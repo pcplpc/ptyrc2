@@ -404,10 +404,11 @@ fn verb_run(args: Run) -> Result<ExitCode, Fail> {
         presets: !args.no_presets && !args.transparent,
         // Nothing is drawn on a transparent stream.
         demo: (!args.no_demo && !args.transparent).then(demo_command),
+        handoff: false,
         apps,
     };
-    let status = ptyrc_server::run(config, plugins::engine(args.transparent, !args.no_presets))?;
-    Ok(ExitCode::from(status.clamp(0, 255) as u8))
+    let exit = ptyrc_server::run(config, plugins::engine(args.transparent, !args.no_presets))?;
+    Ok(ExitCode::from(exit.status.clamp(0, 255) as u8))
 }
 
 /// What the demo runs: the words of `$PTYRC_DEMO`; else `ptyrc-app demo`,

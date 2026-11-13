@@ -219,6 +219,27 @@ fn exit_status_is_the_apps() {
 }
 
 #[test]
+fn handoff_needs_a_successor() {
+    let sb = Sandbox::new("handoff");
+    let mut driver = sb.headless("h", &["cat"]);
+    let mut client = sb.client("h");
+    let info = client.call("session.info", json!({})).unwrap();
+    assert_eq!(info["handoff"], false);
+    match client.call("session.handoff", json!({})) {
+        Err(ClientError::Rpc(e)) => {
+            assert_eq!(e.code, ErrorCode::BadRequest);
+            assert!(e.hint.unwrap().contains("ptyrc tmux attach"));
+        }
+        other => panic!("{other:?}"),
+    }
+    // Refused: the app goes on.
+    client
+        .call("input.send", json!({"keys": ["ctrl+d"]}))
+        .unwrap();
+    assert_eq!(wait_exit(&mut driver), 0);
+}
+
+#[test]
 fn output_before_exit_is_not_lost() {
     let sb = Sandbox::new("drain");
     let mut driver = sb.headless("d", &["sh", "-c", "sleep 0.2; seq 1 20000; echo the-end"]);
