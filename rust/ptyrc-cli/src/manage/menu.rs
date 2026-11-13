@@ -815,11 +815,21 @@ impl Menu {
         menu
     }
 
-    /// The table of the driver, whole.
+    /// The table of the driver, whole. The apps started by the driver
+    /// come first, then the clients from elsewhere; by id.
     pub fn apps(&mut self, mut apps: Vec<AppInfo>) {
         apps.retain(|a| a.state != State::Gone);
-        apps.sort_by_key(|a| a.id);
+        apps.sort_by_key(|a| (!a.child, a.id));
         self.apps = apps;
+        self.follow();
+    }
+
+    /// Put the selection of the main list on an app: the one just
+    /// started.
+    pub fn select(&mut self, app: u64) {
+        if let Some(Screen::Main { id, .. }) = self.stack.first_mut() {
+            *id = Some(app);
+        }
         self.follow();
     }
 
@@ -830,7 +840,7 @@ impl Menu {
         self.apps.retain(|a| a.id != info.id);
         if info.state != State::Gone {
             self.apps.push(AppInfo { me, ..info });
-            self.apps.sort_by_key(|a| a.id);
+            self.apps.sort_by_key(|a| (!a.child, a.id));
         }
         self.follow();
     }
@@ -1405,8 +1415,21 @@ impl Menu {
                 let on_app = matches!(self.entries().get(*sel), Some(Entry::App(_)));
                 let mut keys = vec![("↑↓ move", 1)];
                 if on_app {
-                    keys.extend([("enter open", 1), ("s start", 4), ("p pause", 2)]);
-                    keys.extend([("r restart", 5), ("e options", 6), ("x stop", 3)]);
+                    // The two keys that go both ways say which.
+                    let state = self.entries().get(*sel).and_then(|e| match e {
+                        Entry::App(id) => self.info(*id).map(|a| a.state),
+                        _ => None,
+                    });
+                    let pause = match state {
+                        Some(State::Paused) => "p resume",
+                        _ => "p pause",
+                    };
+                    let stop = match state {
+                        Some(State::Exited) => "x forget",
+                        _ => "x stop",
+                    };
+                    keys.extend([("enter open", 1), ("s start", 4), (pause, 2)]);
+                    keys.extend([("r restart", 5), ("e options", 6), (stop, 3)]);
                     keys.extend([("m move", 6), ("l log", 7), ("f frames", 7)]);
                 } else {
                     keys.extend([("enter open", 1), ("s start", 4), ("f frames", 5)]);

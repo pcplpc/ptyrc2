@@ -120,6 +120,9 @@ impl<B: Backend> Runner<B> {
                 Ok(started) => {
                     self.watch.extend(started.map(|id| (id, now + EARLY)));
                     self.refresh();
+                    if let (Action::Start { .. }, Some(id)) = (&action, started) {
+                        self.menu.select(id);
+                    }
                 }
                 Err(fail) => {
                     // Refused: the table shown may be an old one.

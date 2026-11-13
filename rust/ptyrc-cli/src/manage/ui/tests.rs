@@ -137,6 +137,9 @@ fn keys_reach_the_session() {
     keys(&mut r, "s down enter enter", t0);
     assert_eq!(r.backend.asked.last().unwrap(), "start clock");
     assert!(screen(&r).contains("● clock"), "{}", screen(&r));
+    // The selection is on the app just started.
+    keys(&mut r, "s enter enter p", t0);
+    assert_eq!(r.backend.asked.last().unwrap(), "pause 2");
     assert_eq!(keys(&mut r, "q", t0), Flow::Quit);
 }
 

@@ -766,7 +766,7 @@ fn move_to_a_frame() {
     );
     // An app that moves as it runs keeps its state.
     m.app(info(9, "snow -f 2", "running"));
-    keys(&mut m, "down down down down m");
+    keys(&mut m, "down down down m");
     let screen = shown(&m, 64, 18);
     assert!(screen.starts_with(" move snow to"), "{screen}");
     assert!(screen.contains("moves live: state kept"), "{screen}");
@@ -796,7 +796,7 @@ fn move_to_a_frame() {
         ]
     );
     // A client that does not move stays where it is.
-    assert_eq!(keys(&mut m, "up m"), []);
+    assert_eq!(keys(&mut m, "down m"), []);
     assert!(shown(&m, 78, 22).contains("python3: it does not move, and was not started here"));
 }
 

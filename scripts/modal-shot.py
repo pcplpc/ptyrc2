@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """A modal `alert` widget over a full 80x24 screen: what the host shows."""
-import subprocess, sys, time
+import sys
+import time
+
 from ptyrc import Pilot
 
 fill = "seq 1 2000 | tr '\\n' ' ' | head -c 1919; sleep 60"
