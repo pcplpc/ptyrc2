@@ -14,6 +14,11 @@ pub(crate) const ISLAND_GAP: i64 = 100_000;
 pub(crate) const FEED_GAP: Duration = Duration::from_millis(10);
 /// Islands kept per frame; the least recently shown goes first.
 const MAX_ISLANDS: usize = 8;
+/// Rows at an end of a pane with no chrome known there that a page
+/// asked by the keyboard may leave out of its stitch.
+const STITCH_CHROME: usize = 2;
+/// Glyphs of a row that tells where a page went.
+const STITCH_INK: usize = 4;
 
 /// A run of frame rows whose place relative to the others is unknown.
 #[derive(Clone, Copy, Debug, Default)]
@@ -114,6 +119,8 @@ pub(crate) struct Obs<'a> {
     /// Share of the document above the last row shown, `0..=1`, read on
     /// a prompt: an estimate.
     pub progress: Option<f32>,
+    /// A page key or the wheel was just used on this pane: `(up, down)`.
+    pub paged: (bool, bool),
     pub now: Duration,
 }
 
@@ -741,6 +748,15 @@ impl Ext {
             return Outcome::Scroll { dx: 0, dy: o.seed };
         }
 
+        // A page the keyboard or the wheel asked for: the rows it kept
+        // tell how far.
+        if c0 * 5 < nb * 2
+            && let Some(dy) = self.stitch(o, &ph)
+        {
+            self.apply_scroll(o, &ph, dy);
+            return Outcome::Scroll { dx: 0, dy };
+        }
+
         // 2. Splice.
         if let Some(out) = self.splice(o, &ph, nb, c0) {
             return out;
@@ -863,6 +879,61 @@ impl Ext {
             }
         }
         out
+    }
+
+    /// The shift of a page asked by the keyboard or the wheel
+    /// (`Obs::paged`): the least one, that way, under which every row
+    /// that could align does. One aligned row is enough when it tells:
+    /// unique in the view before and after, `STITCH_INK` glyphs or more.
+    /// Up to `STITCH_CHROME` rows at an end where no chrome is known may
+    /// differ: chrome not learned yet. Fewest such rows first.
+    fn stitch(&self, o: &Obs, ph: &[u64]) -> Option<i64> {
+        let (up, down) = o.paged;
+        if !up && !down {
+            return None;
+        }
+        let nh = o.hashes;
+        let (a, b) = self.band(nh.len());
+        let slack = |known: u16| {
+            if known == 0 && o.fixed_tb.is_none() {
+                STITCH_CHROME
+            } else {
+                0
+            }
+        };
+        let (st, sb) = (slack(self.top), slack(self.bottom));
+        let once = |hs: &[u64], x: u64| hs[a..b].iter().filter(|y| **y == x).count() == 1;
+        let tells = |i: usize| {
+            nh[i] != BLANK
+                && once(nh, nh[i])
+                && once(ph, nh[i])
+                && (o.line)(i).text.chars().filter(|c| *c != ' ').count() >= STITCH_INK
+        };
+        for cut in 0..=st + sb {
+            for t in cut.saturating_sub(sb)..=cut.min(st) {
+                let (a, b) = (a + t, b.saturating_sub(cut - t));
+                if b < a + 3 {
+                    continue;
+                }
+                for d in 1..(b - a) as i64 {
+                    for dy in [d, -d] {
+                        if !(if dy > 0 { down } else { up }) {
+                            continue;
+                        }
+                        let (from, to) = if dy > 0 {
+                            (a, b - d as usize)
+                        } else {
+                            (a + d as usize, b)
+                        };
+                        let fits = (from..to).all(|i| nh[i] == ph[(i as i64 + dy) as usize]);
+                        if fits && (from..to).any(tells) {
+                            return Some(dy);
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// View rows equal to what is remembered at their place need no

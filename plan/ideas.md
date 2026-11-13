@@ -630,6 +630,16 @@ Left:
 - `tune` of `confetti` cannot change `count`, `colors`, `spread`: the
   pieces are thrown at the start.
 
+## Page hints
+
+Built: see "Page asked" in `design.md`. Left:
+
+- A page with no row in common, or painted in two bursts, is given up.
+- Other page keys (`space`, `b`, `ctrl+f`, `ctrl+d`) are a preset's to
+  declare; arrows sent by a host for the wheel are not read.
+- A key is for every pane: the focused one is not known.
+- Keys held: several pages in one burst have no row in common.
+
 ## Confetti, as in the first ptyrc
 
 - Built: plain confetti is the pop of `temp/ptyrc/example/conffeti.py`,

@@ -3109,3 +3109,86 @@ fn a_page_with_two_rows_of_overlap_is_a_scroll() {
     s.feed(&view(&d, 169, 20, &[]), 300);
     assert_ne!(s.pane().origin, [0, 169]);
 }
+
+fn scrolled(ev: &[FrameEvent]) -> Option<i64> {
+    ev.iter().find_map(|e| match e {
+        FrameEvent::Scroll { dy, .. } => Some(*dy),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_page_asked_by_a_key_is_stitched_on_one_row() {
+    let d = doc(400);
+    let mut s = Sim::new();
+    s.settle(&view(&d, 150, 20, &[]));
+    let id = s.pane().id;
+    let oy = s.pane().origin[1];
+    s.f.paged(1, None, s.now);
+    let ev = s.feed(&view(&d, 169, 20, &[]), 30);
+    assert_eq!(scrolled(&ev), Some(19), "{ev:?}");
+    // The wheel, on the pane.
+    s.idle(500);
+    s.f.paged(-1, Some((3, 3)), s.now);
+    let ev = s.feed(&view(&d, 150, 20, &[]), 30);
+    assert_eq!(scrolled(&ev), Some(-19), "{ev:?}");
+    assert_eq!((s.pane().id, s.pane().origin[1]), (id, oy));
+    // Clamped at the end: more rows in common.
+    s.idle(500);
+    s.f.paged(1, None, s.now);
+    let ev = s.feed(&view(&d, 155, 20, &[]), 30);
+    assert_eq!(scrolled(&ev), Some(5), "{ev:?}");
+}
+
+#[test]
+fn a_page_is_not_stitched_the_other_way_nor_late_nor_elsewhere() {
+    let d = doc(400);
+    let page = |s: &mut Sim, dy: i8, at: Option<(u16, u16)>, wait: u64| {
+        s.settle(&view(&d, 150, 20, &[]));
+        s.f.paged(dy, at, s.now);
+        let ev = s.feed(&view(&d, 169, 20, &[]), wait);
+        scrolled(&ev)
+    };
+    assert_eq!(page(&mut Sim::new(), 1, None, 30), Some(19));
+    assert_eq!(page(&mut Sim::new(), -1, None, 30), None);
+    assert_eq!(page(&mut Sim::new(), 1, None, 400), None);
+    assert_eq!(page(&mut Sim::new(), 1, Some((3, 40)), 30), None);
+    // No row in common: given up.
+    let mut s = Sim::new();
+    s.settle(&view(&d, 150, 20, &[]));
+    s.f.paged(1, None, s.now);
+    assert_eq!(scrolled(&s.feed(&view(&d, 170, 20, &[]), 30)), None);
+}
+
+#[test]
+fn a_page_is_not_stitched_on_a_row_that_tells_nothing() {
+    // The row in common is short, or shown twice.
+    for weak in ["}", "the same line"] {
+        let mut d = doc(400);
+        d[169] = weak.to_string();
+        d[160] = "the same line".to_string();
+        let mut s = Sim::new();
+        s.settle(&view(&d, 150, 20, &[]));
+        s.f.paged(1, None, s.now);
+        let ev = s.feed(&view(&d, 169, 20, &[]), 30);
+        assert_eq!(scrolled(&ev), None, "{weak}: {ev:?}");
+    }
+}
+
+#[test]
+fn a_page_is_stitched_under_chrome_not_learned() {
+    let d = doc(400);
+    let mut s = Sim::new();
+    s.settle(&view(&d, 150, 19, &["150,1    37%"]));
+    let oy = s.pane().origin[1];
+    s.f.paged(1, None, s.now);
+    let ev = s.feed(&view(&d, 168, 19, &["168,1    42%"]), 30);
+    assert_eq!(scrolled(&ev), Some(18), "{ev:?}");
+    s.idle(500);
+    s.f.paged(1, None, s.now);
+    let ev = s.feed(&view(&d, 186, 19, &["186,1    46%"]), 30);
+    assert_eq!(scrolled(&ev), Some(18), "{ev:?}");
+    // The ruler is chrome from now on.
+    assert_eq!(s.pane().rect[3], 19);
+    assert_eq!(s.pane().origin[1], oy + 36);
+}

@@ -138,6 +138,11 @@ pub trait Engine {
         true
     }
 
+    /// The app was asked for a page or sent a wheel notch, by the host
+    /// keyboard or a client: `dy` -1 up, 1 down; `at`: the screen cell
+    /// of the wheel.
+    fn on_paged(&mut self, _dy: i8, _at: Option<(u16, u16)>, _now: Duration) {}
+
     /// A request the driver does not answer itself.
     fn handle(
         &mut self,

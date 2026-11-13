@@ -9,6 +9,7 @@ use crate::host::Host;
 use crate::hostcolors::{Known, QUERY_BG, QUERY_FG, Replies};
 use crate::keys;
 use crate::mouse;
+use crate::paging;
 use crate::player::{Player, Replay, Step};
 use crate::pty::{self, Pty};
 use crate::record::{Header, Record, Recorder};
@@ -506,6 +507,7 @@ impl Driver {
                     let mut out = Vec::with_capacity(burst.len() + 256);
                     hook!(self, now, |ctx| engine.on_burst(&burst, now, &mut out, ctx));
                 }
+                Step::Feed(Record::Input(bytes)) => self.paged(&bytes, engine),
                 Step::Feed(Record::Resize(cols, rows)) => self.resize(engine, cols, rows)?,
                 Step::Feed(Record::HostColors(colors)) => {
                     self.colors.learn(0, colors.fg);
@@ -958,7 +960,17 @@ impl Driver {
             engine.on_input(bytes, ctx)
         });
         if forward {
+            self.paged(bytes, engine);
             self.pty_queue.extend_from_slice(bytes);
+        }
+    }
+
+    /// Tell the engine of the page keys and wheel notches among bytes
+    /// on their way to the app.
+    fn paged(&self, bytes: &[u8], engine: &mut dyn Engine) {
+        let now = self.now();
+        for (dy, at) in paging::scan(bytes) {
+            engine.on_paged(dy, at, now);
         }
     }
 
@@ -1323,7 +1335,7 @@ impl Driver {
             .collect();
     }
 
-    fn input_send(&mut self, params: &Value, engine: &dyn Engine) -> Result<Value, RpcError> {
+    fn input_send(&mut self, params: &Value, engine: &mut dyn Engine) -> Result<Value, RpcError> {
         let mut bytes = Vec::new();
         let mut given = false;
         if let Some(text) = params.get("text") {
@@ -1366,11 +1378,11 @@ impl Driver {
         if !given {
             return Err(RpcError::bad_params("one of text, keys, bytes"));
         }
-        self.type_in(bytes)
+        self.type_in(bytes, engine)
     }
 
     /// Queue bytes for the app, on behalf of a client.
-    fn type_in(&mut self, bytes: Vec<u8>) -> Result<Value, RpcError> {
+    fn type_in(&mut self, bytes: Vec<u8>, engine: &mut dyn Engine) -> Result<Value, RpcError> {
         if self.player.is_some() {
             return Err(RpcError::new(
                 ErrorCode::BadRequest,
@@ -1380,12 +1392,13 @@ impl Driver {
         if self.exit_status.is_some() {
             return Err(RpcError::new(ErrorCode::Gone, "the app exited"));
         }
+        self.paged(&bytes, engine);
         self.pty_queue.extend(bytes);
         Ok(json!({}))
     }
 
     /// A click at a screen cell, in the form the app asked for.
-    fn input_click(&mut self, params: &Value, engine: &dyn Engine) -> Result<Value, RpcError> {
+    fn input_click(&mut self, params: &Value, engine: &mut dyn Engine) -> Result<Value, RpcError> {
         let cell = |key: &str| {
             params
                 .get(key)
@@ -1472,7 +1485,7 @@ impl Driver {
                 "the app's mouse mode (X10) cannot tell a cell past 222",
             )
         })?;
-        self.type_in(bytes)
+        self.type_in(bytes, engine)
     }
 
     fn input_grab(&mut self, conn: ConnId, params: &Value) -> Result<Value, RpcError> {

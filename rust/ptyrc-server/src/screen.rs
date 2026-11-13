@@ -707,6 +707,10 @@ impl Engine for ScreenEngine {
         self.app.modes().app_cursor
     }
 
+    fn on_paged(&mut self, dy: i8, at: Option<(u16, u16)>, now: Duration) {
+        self.frames.paged(dy, at, now);
+    }
+
     fn mouse_mode(&self) -> crate::mouse::MouseMode {
         let modes = self.app.modes();
         crate::mouse::MouseMode {

@@ -15,6 +15,7 @@ pub mod host;
 pub mod hostcolors;
 pub mod keys;
 pub mod mouse;
+mod paging;
 pub mod player;
 pub mod pty;
 pub mod record;

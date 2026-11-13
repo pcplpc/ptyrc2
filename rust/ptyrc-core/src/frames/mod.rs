@@ -331,6 +331,8 @@ pub struct Frames {
     /// asked.
     nested: RefCell<HashMap<segment::Rect4, Nested>>,
     placed: RefCell<PlaceCache>,
+    /// The user paged up, down.
+    paged: [Option<Paged>; 2],
 }
 
 /// Replacements closer than this are in a row.
@@ -348,6 +350,10 @@ const PIECES: Duration = Duration::from_millis(100);
 
 /// A repaint that follows a clear may come in several bursts, this long.
 const REPAINT: Duration = Duration::from_millis(100);
+/// How long a page key or a wheel notch is believed to explain a change.
+const PAGED: Duration = Duration::from_millis(300);
+/// When the user last paged, and the screen cell of the wheel.
+type Paged = (Duration, Option<(u16, u16)>);
 
 /// A pane replaced whole is the same one repainted when, on average over
 /// its rows, this share of the cells kept their glyph and this share kept
@@ -469,6 +475,7 @@ impl Frames {
             now: Duration::ZERO,
             raw_heat: Heat::default(),
             raw_ready: Duration::ZERO,
+            paged: [None; 2],
             panes: BTreeMap::new(),
             active: Vec::new(),
             layout: Vec::new(),
@@ -504,6 +511,15 @@ impl Frames {
     /// Id of the current layout. A layout seen before gets its id back.
     pub fn layout(&self) -> u32 {
         self.layout_id
+    }
+
+    /// The user asked for a page or turned the wheel: `dy < 0` up,
+    /// `dy > 0` down; `at`: the screen cell of the wheel. A hint for the
+    /// changes of the next `PAGED`, of the pane at `at` or of any pane.
+    pub fn paged(&mut self, dy: i8, at: Option<(u16, u16)>, now: Duration) {
+        if dy != 0 {
+            self.paged[(dy > 0) as usize] = Some((now, at));
+        }
     }
 
     /// Take the screen in, once per burst.
@@ -1931,6 +1947,14 @@ impl Frames {
             fixed_tb: p.fixed_tb,
             alt: p.alt,
             progress: input.and_then(|inp| self.progress(inp, rect)),
+            paged: {
+                let live = |p: Option<Paged>| {
+                    p.is_some_and(|(t, at)| {
+                        now <= t + PAGED && at.is_none_or(|(x, y)| rect.contains(x, y))
+                    })
+                };
+                (live(self.paged[0]), live(self.paged[1]))
+            },
             now,
         };
         if p.reattach {
