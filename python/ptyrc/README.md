@@ -36,7 +36,7 @@ with Pilot.spawn(["vim", "notes.md"], size=(100, 30)) as pilot:
 | type | `send`, `keys`, `paste`, `write` |
 | frames | `frames`, `panes`, `frame`, `frame_at`; `Frame.text`, `known`, `find`, `heat`, `heat_classes`, `idle`, `check_idle`, `is_idle`, `to_screen`, `to_frame`, `draw` |
 | draw | `draw`, `put`, `effect`, `ext`, `sprites`, `clear`; `Sprite.set`, `ext`, `move`, `update`, `tune`, `info`, `remove` |
-| other | `batch`, `events`, `event`, `subscribe`, `resize`, `debug_overlay`, `dump`, `call` |
+| other | `batch`, `events`, `event`, `subscribe`, `resize`, `debug_overlay`, `dump`, `call`, `show`, `attach` |
 | tools | `locator`, `Frame.locator`, `click`, `grab`, `release`, `shown`, `snapshot`; `spawn(record=)`, `Pilot.replay`, `tape` |
 
 Events: `pilot.subscribe("idle", "cursor", snapshot=True)` sends the
@@ -67,5 +67,8 @@ is layer 0, negative layers are behind it.
 
 Errors are `PtyrcError` with a `code` (`no-frame`, `bad-params`, `gone`...);
 `wait_for` raises `TimeoutError`. The wire protocol is in `plan/design.md`.
+
+`ptyrc python` (`ptyrc-python`) is a console with `pilot = Pilot()`;
+`ptyrc python FILE` runs FILE with `pilot` defined.
 
 `uv run pytest python/ptyrc` runs the tests against a headless driver.

@@ -34,7 +34,7 @@ def parser(prog: str, description: str, frame: str = "raw") -> argparse.Argument
     out.add_argument(
         "-s",
         "--session",
-        help="session to draw on [default: $PTYRC_SESSION, else the only one]",
+        help="session to draw on [default: $PTYRC_SESSION]",
     )
     out.add_argument(
         "-f",

@@ -106,6 +106,8 @@ enum Verb {
     },
     /// Run a client app: `ptyrc app bricks`; `ptyrc app` lists them
     App(apps::App),
+    /// An interactive Python session with `pilot` connected
+    Python(apps::Python),
     /// Debug tools
     #[command(subcommand)]
     Debug(verbs::Debug),
@@ -324,6 +326,7 @@ fn run(cli: Cli) -> Result<ExitCode, Fail> {
         Verb::Replay(args) => replay::replay(args),
         Verb::Tape { verb } => replay::tape(&common, verb),
         Verb::App(args) => apps::app(&common, args),
+        Verb::Python(args) => apps::python(&common, args),
         Verb::Debug(verb) => verbs::debug(&common, verb),
         Verb::Events { topics, snapshot } => verb_events(&common, topics, snapshot),
     }
@@ -392,7 +395,7 @@ fn demo_command() -> Vec<String> {
     if !words.is_empty() {
         return words;
     }
-    let program = apps::find()
+    let program = apps::find(apps::APP)
         .and_then(|p| p.into_os_string().into_string().ok())
         .unwrap_or_else(|| apps::APP.into());
     vec![program, "demo".into()]

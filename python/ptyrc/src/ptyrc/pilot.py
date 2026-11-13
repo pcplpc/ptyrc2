@@ -827,6 +827,28 @@ class Pilot(Tools):
     def dump(self) -> dict[str, Any]:
         return self.call("debug.dump")
 
+    # -- terminal ---------------------------------------------------------
+
+    def show(self) -> None:
+        """Mirror the remote screen in this terminal; ^C leaves."""
+        try:
+            self._cli("show")
+        except KeyboardInterrupt:
+            pass
+
+    def attach(
+        self, *, detach: str = "ctrl+t", resize: bool = False, sprites: bool = False
+    ) -> None:
+        """The remote screen in this terminal and its keyboard there;
+        `detach` leaves. `resize`: the session takes this terminal's size
+        (headless sessions). `sprites`: show them too."""
+        args = ["attach", "--detach", detach]
+        args += ["--resize"] * resize + ["--sprites"] * sprites
+        self._cli(*args)
+
+    def _cli(self, *args: str) -> None:
+        subprocess.run([find_binary(), "--session", self.session, *args], check=False)
+
 
 class _Batch:
     """Calls collected by `Pilot.batch()`. After the block, `results` holds

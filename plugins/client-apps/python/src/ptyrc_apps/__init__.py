@@ -10,15 +10,15 @@ __all__ = ["APPS"]
 
 #: Name of each app and what it does; the module is `ptyrc_apps.<name>`.
 APPS = {
-    "bricks": "a brick breaker that plays alone around the words",
-    "cat": "a cat on the text; it sleeps when nothing moves",
-    "clock": "a floating clock in a quiet corner",
-    "confetti": "pops of confetti; --fancy, --fireworks, --one-shot",
-    "fishes": "fishes behind the text, afraid of the cursor",
-    "flower": "a flower next to a word",
-    "marks": "a highlighter: the matches of patterns, in colours",
+    "confetti": "adds confetti to your terminal",
+    "clock": "one clock in a quiet corner",
+    "fishes": "fishes hides behind the text",
+    "cat": "one cat comes to visit you",
     "rain": "quiet rain behind the text",
+    "snow": "snow on the lines of text",
     "sand": "sand falling in an idle pane",
-    "snake": "a snake that plays alone between the words",
-    "snow": "snow on the lines of text; it melts where they change",
+    "snake": "snake game that plays alone",
+    "bricks": "brick breaker game that plays alone",
+    "flower": 'add flowers next to the word "flower"',
+    "marks": "highlights a selected pattern",
 }

@@ -1107,10 +1107,13 @@ ptyrc events [TOPIC...] [--snapshot]   JSON events, one per line;
 ptyrc debug overlay frames|heat|off ; ptyrc debug dump
 ptyrc call METHOD [JSON]          raw request
 ptyrc app [NAME [OPTION...]]      a client app: `ptyrc-app NAME...`
+ptyrc python [FILE [ARG...]]      Python with `pilot` connected:
+      a console, or FILE run as `__main__`
 ```
 
-`ptyrc app` executes `ptyrc-app` with its arguments as given, `-s` as
-`$PTYRC_SESSION`. `ptyrc-app` is taken from `PATH`; else from `.venv/bin`
+`ptyrc app` executes `ptyrc-app` with its arguments as given, `ptyrc
+python` `ptyrc-python`; `-s` becomes `$PTYRC_SESSION` and unsets
+`$PTYRC_SOCKET`. The program is taken from `PATH`; else from `.venv/bin`
 or `venv/bin` in the current directory or one above it; else from the same
 above the `ptyrc` binary. None: status 127.
 
