@@ -310,6 +310,37 @@ fn start_with_defaults_is_enter_twice() {
 }
 
 #[test]
+fn start_filters_as_typed() {
+    let mut m = menu();
+    keys(&mut m, "s s n o");
+    let screen = shown(&m, 64, 18);
+    assert!(screen.starts_with(" start an app: sno"), "{screen}");
+    assert!(
+        screen.contains("\n snow ") && !screen.contains("confetti"),
+        "{screen}"
+    );
+    assert_eq!(
+        keys(&mut m, "enter enter"),
+        [Action::Start {
+            name: "snow".into(),
+            args: vec![]
+        }]
+    );
+    // j, k, q, h are letters there; nothing matches: a dim row, enter
+    // does nothing.
+    keys(&mut m, "s q j");
+    assert!(shown(&m, 64, 18).contains("no app matches"));
+    assert!(keys(&mut m, "enter").is_empty());
+    // backspace edits; esc clears, then goes back.
+    keys(&mut m, "backspace backspace");
+    assert!(shown(&m, 64, 18).starts_with(" start an app  "));
+    keys(&mut m, "c esc");
+    assert!(shown(&m, 64, 18).contains("confetti"));
+    keys(&mut m, "esc");
+    assert!(shown(&m, 64, 18).starts_with(" apps of"));
+}
+
+#[test]
 fn the_form() {
     let mut m = menu();
     keys(&mut m, "s end up up up enter"); // bricks
