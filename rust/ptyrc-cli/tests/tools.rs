@@ -281,6 +281,89 @@ fn host_clicks_go_to_a_sprite_or_to_the_app() {
 }
 
 #[test]
+fn hovers_go_to_a_listener_and_never_to_the_app() {
+    let sb = Sandbox::new("hover");
+    // The app asks for clicks only.
+    let script = format!("printf '\\033[?1000h\\033[?1006h'; {SHOW_KEYS}");
+    let (mut host, mut driver) =
+        HostPty::spawn(&sb, &[BIN, "run", "--name", "h", "--", "sh", "-c", &script]);
+    wait_for(|| sb.socket("h").exists(), "socket");
+    let mut client = sb.client("h");
+    client
+        .call("screen.wait", json!({"stable_ms": 200, "timeout_ms": 5000}))
+        .unwrap();
+    let sprite = client
+        .call(
+            "draw.put",
+            json!({"content": {"rows": ["[-ok-]"]}, "anchor": {"at": [10, 3], "space": "view"},
+                   "layer": "front", "persist": true}),
+        )
+        .unwrap()["id"]
+        .clone();
+    host.wait_seen("[-ok-]");
+    // Not asked for by default, nor for a listener of `mouse`.
+    assert!(!seen(&host).contains("\x1b[?1003h"));
+
+    client.subscribe(&["hover"]).unwrap();
+    host.wait_seen("\x1b[?1003h\x1b[?1006h");
+    let next = |client: &mut Client| loop {
+        let event = client.next_event(Some(TIMEOUT)).unwrap().expect("an event");
+        assert_ne!(event.event, "mouse");
+        if event.event == "hover" {
+            return event.data;
+        }
+    };
+
+    // Over the sprite, then off it: the cell in the sprite, then one
+    // event that names none. Moves elsewhere are silent.
+    host.type_in(b"a\x1b[<35;13;4M\x1b[<39;14;4M\x1b[<35;30;4M\x1b[<35;31;4Mb");
+    let over = next(&mut client);
+    assert_eq!(
+        over,
+        json!({"sprite": sprite, "at": [2, 0], "x": 12, "y": 3, "frame": over["frame"],
+               "pos": over["pos"], "mods": []})
+    );
+    let shifted = next(&mut client);
+    assert_eq!(
+        (shifted["at"].clone(), shifted["mods"].clone()),
+        (json!([3, 0]), json!(["shift"]))
+    );
+    let left = next(&mut client);
+    assert_eq!(
+        (
+            left["sprite"].clone(),
+            left["at"].clone(),
+            left["x"].clone()
+        ),
+        (Value::Null, Value::Null, json!(29))
+    );
+    // The app, which asked for no move, saw none of them.
+    host.wait_seen("ab");
+
+    // With no listener of `mouse`, a click on the sprite is the app's.
+    host.type_in(b"c\x1b[<0;13;4M\x1b[<0;13;4md");
+    host.wait_seen("c^[[<0;13;4M^[[<0;13;4md");
+
+    // A listener of `mouse` too: the click is the sprite's again; the
+    // host still reports moves.
+    let mut other = sb.client("h");
+    other.subscribe(&["mouse"]).unwrap();
+    host.type_in(b"e\x1b[<0;13;4M\x1b[<0;13;4m\x1b[<35;13;4Mf");
+    assert_eq!(next(&mut client)["sprite"], sprite);
+    host.wait_seen("ef");
+
+    // The hover listener gone: 1003 off, clicks still asked.
+    drop(client);
+    host.wait_seen("\x1b[?1003l\x1b[?1002h\x1b[?1006h");
+    // The last one gone: the app's modes.
+    drop(other);
+    host.wait_seen("\x1b[?1002l\x1b[?1003l\x1b[?1000l\x1b[?9l\x1b[?1006l\x1b[?1000h\x1b[?1006h");
+
+    drop(driver.0.kill());
+    host.wait_exit(&mut driver);
+}
+
+#[test]
 fn pictures_of_the_screen() {
     let sb = Sandbox::new("shot");
     let script = "printf '\\033[31mred\\033[0m <plain>\\r\\n\\033[1;44mbar\\033[0m'; sleep 30";

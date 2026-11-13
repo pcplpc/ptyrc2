@@ -785,7 +785,12 @@ class Pilot(Tools, Widgets):
         scroll), `cursor`, `frames`, `idle` (a frame became idle, or
         busy), `draw` (sprites removed with the rows or the frame they
         were on), `widgets` (a widget placed, moved, resized, hidden),
-        `input`, `size`, `apps` (the info of an app when it changes),
+        `input`, `mouse` (clicks of the host mouse on sprites), `hover`
+        (`{"sprite", "at", "x", "y", "frame", "pos", "mods"}`: the host
+        mouse, no button down, moved over a sprite; once with `sprite`
+        None when it leaves it for none; the driver asks the host for
+        the moves while a client listens), `size`, `apps` (the info of
+        an app when it changes),
         `move` (`{"frame": id}`: this app is asked to go to that frame;
         subscribing says it can), `exit`.
 

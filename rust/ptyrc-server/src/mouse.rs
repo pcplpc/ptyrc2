@@ -41,6 +41,9 @@ impl MouseMode {
 /// What the driver asks of the host for a client: presses, releases,
 /// drags, in SGR form.
 pub const HOST_ON: &[u8] = b"\x1b[?1002h\x1b[?1006h";
+/// The same and the moves with no button down, while a client listens
+/// to `hover`.
+pub const HOST_HOVER: &[u8] = b"\x1b[?1003h\x1b[?1006h";
 pub const HOST_OFF: &[u8] = b"\x1b[?1002l\x1b[?1003l\x1b[?1000l\x1b[?9l\x1b[?1006l";
 
 pub const BUTTONS: [&str; 7] = [
@@ -53,6 +56,56 @@ pub const BUTTONS: [&str; 7] = [
     "wheel-right",
 ];
 pub const MODS: [&str; 3] = ["shift", "alt", "ctrl"];
+
+/// What the driver asks of the host.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HostMouse {
+    /// Nothing: the modes of the app.
+    #[default]
+    Off,
+    /// Presses, releases, drags (`mouse`).
+    Clicks,
+    /// And the moves with no button down (`hover`).
+    Hover,
+}
+
+impl HostMouse {
+    /// What the listeners want: `hover` asks the most.
+    pub fn wanted(mouse: bool, hover: bool) -> HostMouse {
+        match (mouse, hover) {
+            (_, true) => HostMouse::Hover,
+            (true, false) => HostMouse::Clicks,
+            (false, false) => HostMouse::Off,
+        }
+    }
+
+    /// The private modes that put the host in this state, whatever the
+    /// app set meanwhile. Empty for `Off`: see `leave`.
+    pub fn sequence(self) -> &'static [u8] {
+        match self {
+            HostMouse::Off => b"",
+            HostMouse::Clicks => HOST_ON,
+            HostMouse::Hover => HOST_HOVER,
+        }
+    }
+
+    /// From `self` to `next`; `app`: the modes the host gets back when
+    /// no client listens.
+    pub fn leave(self, next: HostMouse, app: MouseMode) -> Vec<u8> {
+        match next {
+            HostMouse::Off => {
+                let mut out = HOST_OFF.to_vec();
+                out.extend(app.set_sequence());
+                out
+            }
+            // 1002 does not end 1003 on every terminal.
+            HostMouse::Clicks if self == HostMouse::Hover => {
+                [&b"\x1b[?1003l"[..], HOST_ON].concat()
+            }
+            next => next.sequence().to_vec(),
+        }
+    }
+}
 
 const SHIFT: u8 = 4;
 const MOTION: u8 = 32;
@@ -81,6 +134,11 @@ impl Report {
     /// A button went down.
     pub fn press(self) -> bool {
         !self.release && !self.motion() && !self.wheel()
+    }
+
+    /// A move with no button down: what 1003 adds.
+    pub fn hover(self) -> bool {
+        self.motion() && !self.wheel() && self.code & 3 == 3
     }
 
     /// `left`, ..., or `none` (a release in X10 form, a move with no
@@ -341,6 +399,41 @@ mod tests {
         assert_eq!(drag.encode(mode(2, true)), None);
         assert!(drag.encode(mode(4, true)).is_some());
         assert_eq!(release.encode(mode(1, false)), None);
+    }
+
+    #[test]
+    fn a_move_reaches_only_an_app_that_asked_1003() {
+        let (hover, _) = parse(b"\x1b[<35;4;2M").unwrap();
+        assert!(hover.hover() && !hover.press());
+        assert_eq!((hover.button(), hover.action()), ("none", "move"));
+        for bits in [0, 1, 2, 4, 6] {
+            assert_eq!(hover.encode(mode(bits, true)), None, "{bits}");
+        }
+        assert_eq!(hover.encode(mode(8, true)).unwrap(), b"\x1b[<35;4;2M");
+        assert_eq!(hover.encode(mode(8, false)).unwrap(), b"\x1b[MC$\"");
+        let (drag, _) = parse(b"\x1b[<32;4;2M").unwrap();
+        assert!(!drag.hover());
+    }
+
+    #[test]
+    fn the_host_is_asked_what_the_listeners_want() {
+        use HostMouse::{Clicks, Hover, Off};
+        assert_eq!(HostMouse::wanted(false, false), Off);
+        assert_eq!(HostMouse::wanted(true, false), Clicks);
+        assert_eq!(HostMouse::wanted(false, true), Hover);
+        assert_eq!(HostMouse::wanted(true, true), Hover);
+        let app = mode(2, false);
+        assert_eq!(Off.leave(Clicks, app), HOST_ON);
+        assert_eq!(Off.leave(Hover, app), b"\x1b[?1003h\x1b[?1006h");
+        assert_eq!(Clicks.leave(Hover, app), b"\x1b[?1003h\x1b[?1006h");
+        assert_eq!(
+            Hover.leave(Clicks, app),
+            b"\x1b[?1003l\x1b[?1002h\x1b[?1006h"
+        );
+        // The last listener gone: 1003 off, the app's own modes on.
+        let back = Hover.leave(Off, app);
+        assert!(back.starts_with(HOST_OFF) && back.ends_with(b"\x1b[?1000h\x1b[?1006l"));
+        assert!(Off.sequence().is_empty());
     }
 
     #[test]

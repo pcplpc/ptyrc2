@@ -1399,6 +1399,16 @@ that moves a snapshot is read in the diff of the `.snap`.
   The last listener gone, the host gets the app's modes back. A report
   cut by a read is not seen. `scripts/click-sprite.py`: a sprite button
   that counts its clicks.
+- Hover: while a client is subscribed to `hover`, and only then, the
+  driver asks the host for the moves with no button down too (1003 in
+  place of 1002; 1003 off again when the last such listener goes,
+  1002 kept while one of `mouse` stays). Such a move on a sprite is a
+  `hover` event; the first one off every sprite after it, one more
+  that names none. A move takes nothing from the app: it is written
+  again for an app that asked 1003, on a sprite or not, and dropped
+  for any other. With listeners of `hover` only, no report is taken:
+  a click on a sprite is the app's. One report a cell crossed, none
+  while the mouse rests or is out of the host's window.
 - `ptyrc shot`: a picture of the screen or of a frame's view: `--svg`
   (default; one `<text>` per run with its length fixed, wide glyphs
   alone), `--html` (one `<pre>`), `--ansi`. The app alone, or with
@@ -1486,7 +1496,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `widget.borders` | | `{"borders":[name,...]}` |
 | `app.list`, `app.start`, `app.stop`, `app.pause`, `app.resume`, `app.restart`, `app.forget`, `app.move` | | see Apps and the manager, Methods |
 | `batch` | `calls`: `[{"method","params"}]` | `{"results":[{"result"} or {"error"},...]}`, applied in one repaint |
-| `subscribe` | `topics`: `screen`, `cursor`, `frames`, `text`, `idle`, `draw`, `input`, `mouse`, `size`, `colors`, `widgets`, `apps`, `move`, `exit`; `snapshot` | `{}`; with `snapshot`, then the state now as events, to this client: `idle` per frame on screen, `cursor`, `frames`, `size`, `widgets` per widget, `apps` per app |
+| `subscribe` | `topics`: `screen`, `cursor`, `frames`, `text`, `idle`, `draw`, `input`, `mouse`, `hover`, `size`, `colors`, `widgets`, `apps`, `move`, `exit`; `snapshot` | `{}`; with `snapshot`, then the state now as events, to this client: `idle` per frame on screen, `cursor`, `frames`, `size`, `widgets` per widget, `apps` per app |
 | `debug.overlay` | `what`: `frames`, `heat`, `off` | `{}` |
 | `debug.dump` | | app grid, host grid, sprites, frames |
 
@@ -1528,7 +1538,12 @@ a collected island (`rows`) or a dropped frame (`null`). Event `mouse`:
 `button` as in `input.click`, or `none`; `action`: `press`, `release`,
 `drag`, `move`, `wheel`; `at`: the cell in the sprite, `x`, `y`: the
 screen cell, `pos`: the cell in `frame`; `at`, `frame` and `pos` are
-null for a drag or a release outside the sprite.
+null for a drag or a release outside the sprite. Event `hover`:
+`{"sprite":id|null,"at":[x,y]|null,"x","y","frame","pos":[x,y]|null,
+"mods":[...]}`, a move of the host mouse with no button down, the
+fields as in `mouse`; `sprite`, `at`, `frame` and `pos` are null in the
+one event sent when the mouse leaves the last sprite told for no
+sprite. Sent to every listener, whoever owns the sprite.
 
 ## CLI
 
@@ -1569,7 +1584,7 @@ ptyrc click X,Y | --text [-E] [--nth N] PATTERN  [-b BUTTON]
 ptyrc shot [--svg|--html|--ansi] [-f FRAME] [--sprites] [--no-cursor]
       [-o FILE]
 ptyrc events [TOPIC...] [--snapshot]   JSON events, one per line;
-      all topics but `mouse` when none is named
+      all topics but `mouse`, `hover` and `move` when none is named
 ptyrc debug overlay frames|heat|off ; ptyrc debug dump
 ptyrc call METHOD [JSON]          raw request
 ptyrc app [NAME [OPTION...]]      a client app: `ptyrc-app NAME...`

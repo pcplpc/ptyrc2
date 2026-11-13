@@ -122,9 +122,9 @@ enum Verb {
     Debug(verbs::Debug),
     /// Print events, one JSON object per line
     Events {
-        /// screen, cursor, frames, text, idle, draw, input, mouse, size,
-        /// colors, widgets, apps, move, exit [default: all but mouse
-        /// and move]
+        /// screen, cursor, frames, text, idle, draw, input, mouse, hover,
+        /// size, colors, widgets, apps, move, exit [default: all but
+        /// mouse, hover and move]
         topics: Vec<String>,
         /// The state now as the first events (cursor, frames, idle, size,
         /// widgets)
@@ -492,7 +492,7 @@ fn verb_events(common: &Common, topics: Vec<String>, snapshot: bool) -> Result<E
     let topics: Vec<&str> = if topics.is_empty() {
         // The mouse is asked of the host only when named; `move` is the
         // word of an app that moves.
-        let asked = |t: &&str| !["mouse", "move"].contains(t);
+        let asked = |t: &&str| !["mouse", "hover", "move"].contains(t);
         TOPICS.iter().copied().filter(asked).collect()
     } else {
         topics.iter().map(String::as_str).collect()

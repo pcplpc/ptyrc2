@@ -238,8 +238,10 @@ struct Driver {
     replies: Replies,
     /// When to stop waiting for the host's colours.
     replies_until: Option<Duration>,
-    /// The host was asked for mouse reports, for a client.
-    host_mouse: bool,
+    /// What the host was asked of its mouse, for the clients.
+    host_mouse: mouse::HostMouse,
+    /// The sprite the last `hover` event named.
+    hovered: Option<Value>,
     /// A press went to this sprite: so do the moves and the release.
     mouse_held: Option<Value>,
     /// A replay: makes the engine again when the tape is rewound.
@@ -456,7 +458,8 @@ impl Driver {
             colors,
             replies: Replies::default(),
             replies_until: None,
-            host_mouse: false,
+            host_mouse: mouse::HostMouse::Off,
+            hovered: None,
             mouse_held: None,
             factory: None,
             handoff: false,
@@ -512,7 +515,8 @@ impl Driver {
             colors,
             replies: Replies::default(),
             replies_until: None,
-            host_mouse: false,
+            host_mouse: mouse::HostMouse::Off,
+            hovered: None,
             mouse_held: None,
             factory: None,
             handoff: false,
@@ -884,9 +888,9 @@ impl Driver {
         }
         let mut out = Vec::with_capacity(burst.len() + 256);
         hook!(self, now, |ctx| engine.on_burst(&burst, now, &mut out, ctx));
-        if self.host_mouse && burst.windows(3).any(|w| w == b"\x1b[?") {
+        if burst.windows(3).any(|w| w == b"\x1b[?") {
             // The app may have set the mouse of the host: ours again.
-            out.extend_from_slice(mouse::HOST_ON);
+            out.extend_from_slice(self.host_mouse.sequence());
         }
         self.host.write(&out)?;
         Ok(true)
@@ -929,27 +933,53 @@ impl Driver {
         Ok(())
     }
 
-    /// Ask the host for mouse reports while a client listens to `mouse`;
-    /// give it back the modes of the app after.
+    /// Ask the host for mouse reports while a client listens to `mouse`,
+    /// for the moves too while one listens to `hover`; give it back the
+    /// modes of the app after.
     fn sync_host_mouse(&mut self, engine: &dyn Engine) {
-        let wanted = self.host.interactive && self.topics.contains("mouse");
+        let listens = |topic| self.host.interactive && self.topics.contains(topic);
+        let wanted = mouse::HostMouse::wanted(listens("mouse"), listens("hover"));
         if wanted == self.host_mouse {
             return;
         }
+        let out = self.host_mouse.leave(wanted, engine.mouse_mode());
         self.host_mouse = wanted;
-        let _ = if wanted {
-            self.host.write(mouse::HOST_ON)
-        } else {
+        if wanted == mouse::HostMouse::Off {
             self.mouse_held = None;
-            let mut out = mouse::HOST_OFF.to_vec();
-            out.extend(engine.mouse_mode().set_sequence());
-            self.host.write(&out)
-        };
+        }
+        if wanted != mouse::HostMouse::Hover {
+            self.hovered = None;
+        }
+        let _ = self.host.write(&out);
+    }
+
+    /// A move of the host mouse with no button down: a `hover` event
+    /// when on a sprite, one more (`sprite` null) when it leaves the
+    /// last one told.
+    fn hover(&mut self, report: mouse::Report, engine: &dyn Engine) {
+        if self.host_mouse != mouse::HostMouse::Hover {
+            return;
+        }
+        match engine.sprite_at(report.x, report.y) {
+            Some(mut data) => {
+                self.hovered = Some(data["sprite"].clone());
+                data["mods"] = json!(report.mods());
+                self.emit("hover", data);
+            }
+            None if self.hovered.take().is_some() => {
+                let data = json!({"sprite": null, "at": null, "x": report.x, "y": report.y,
+                                  "frame": null, "pos": null, "mods": report.mods()});
+                self.emit("hover", data);
+            }
+            None => {}
+        }
     }
 
     /// Take the mouse reports out of keyboard bytes: one on a sprite is
-    /// a `mouse` event; another is written again as the app asked, or
-    /// dropped when it did not.
+    /// a `mouse` event, when a client listens to `mouse`; another is
+    /// written again as the app asked, or dropped when it did not. A
+    /// move with no button down takes nothing from the app: a `hover`
+    /// event, and the app's when it asked 1003.
     fn sort_mouse(&mut self, bytes: &[u8], engine: &dyn Engine) -> Vec<u8> {
         let mut out = Vec::with_capacity(bytes.len());
         let mut rest = bytes;
@@ -962,6 +992,17 @@ impl Driver {
                 continue;
             };
             rest = &rest[len..];
+            let app = |report: mouse::Report| report.encode(engine.mouse_mode());
+            if report.hover() {
+                self.hover(report, engine);
+                out.extend(app(report).unwrap_or_default());
+                continue;
+            }
+            if !self.topics.contains("mouse") {
+                // Listeners of `hover` only: the clicks are the app's.
+                out.extend(app(report).unwrap_or_default());
+                continue;
+            }
             let hit = match self.mouse_held.clone() {
                 // Held: the sprite of the press, the cell of the report.
                 Some(mut held) if !report.press() => {
@@ -993,7 +1034,7 @@ impl Driver {
                     data["mods"] = json!(report.mods());
                     self.emit("mouse", data);
                 }
-                None => out.extend(report.encode(engine.mouse_mode()).unwrap_or_default()),
+                None => out.extend(app(report).unwrap_or_default()),
             }
         }
         out.extend_from_slice(rest);
@@ -1034,7 +1075,7 @@ impl Driver {
     /// Keyboard bytes on their way to the app.
     fn forward_input(&mut self, bytes: &[u8], engine: &mut dyn Engine) {
         let sorted;
-        let bytes = if self.host_mouse {
+        let bytes = if self.host_mouse != mouse::HostMouse::Off {
             sorted = self.sort_mouse(bytes, engine);
             &sorted[..]
         } else {
@@ -2150,7 +2191,7 @@ impl Driver {
             recorder.exit(self.clock.elapsed(), status);
         }
         let mut out = Vec::new();
-        if self.host_mouse {
+        if self.host_mouse != mouse::HostMouse::Off {
             out.extend_from_slice(mouse::HOST_OFF);
         }
         hook!(self, self.now(), |ctx| engine.on_exit(&mut out, ctx));

@@ -131,7 +131,13 @@ What to know:
   widget needs the place. Behind the text by default.
   Topic `widgets` tells the variant shown; `Widget.set` fills it.
   `_widgets.Deck` does both for an app: `deck.add(tag, sizes, render)`,
-  `deck.run(period)` (`clock.py`, `monitor.py`). `border=`: `plain`,
+  `deck.run(period)` (`clock.py`, `monitor.py`).
+  `deck.on_hover(widget, move, leave)`: `move(x, y)` when the host
+  mouse, no button down, is on a cell of the inner box; `leave()` when
+  it goes, or after `deck.hover_timeout` (1.5 s) without a move; the
+  widget is drawn again after each, unless the handler returns False.
+  The driver asks the host for the moves (1003) only while a deck has
+  a handler; they never reach an app that did not ask. `border=`: `plain`,
   `round`, `heavy`, `double`, `ascii`, `none`, `painting`, `baroque`,
   `mat`, `sketch`, or an object of glyphs.
 - **In which layer**: the app's text is layer 0. `layer="back"` (the
