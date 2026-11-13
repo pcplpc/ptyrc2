@@ -12,7 +12,7 @@ add confetti to its output.
 
 ![confetti](doc/confetti-all.gif)
 
-See [gallery](#Gallery) below.
+See [gallery](GALLERY.md) for more examples.
 
 # Usage
 
@@ -33,66 +33,6 @@ You can use `ptyrc python` to start an interactive session:
 ![pilot](doc/interact.gif)
 
 Running `ptyrc python script.py` runs the script with `pilot` defined.
-
-## Gallery
-
-If you already started a driver, you can bind a user app as follows:
-
-```sh
-ptyrc app bricks
-```
-
-You can also directly start a user app with the driver:
-
-```sh
-ptyrc run --app fishes -- vim LICENSE.txt
-```
-
-You then get fishes:
-
-![fishes](doc/fishes.gif)
-
-----
-
-You can also get the perfect weather to appreciate becoming obsolete:
-
-![rain](doc/rain.gif)
-
-----
-
-You can cool down your terminal as the planet gets hotter too:
-
-![sand](doc/snow.gif)
-
-----
-
-You can easily sandbox any of your favorite applications:
-
-![sand](doc/sand.gif)
-
-----
-
-If you want to work on your ADHD as you are reviewing bad code:
-
-![snake](doc/snake.gif)
-
-----
-
-If you want to feel productive as you take notes on meetings:
-
-![bricks](doc/bricks.gif)
-
-----
-
-Then finally, you remember what matters in life:
-
-![cats](doc/cats.gif)
-
-----
-
-These were made by a human banging its head on an agent, no code written.
-
-Open a push request to add your own :)
 
 # Install from source
 
