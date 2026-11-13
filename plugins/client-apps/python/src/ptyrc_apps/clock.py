@@ -359,11 +359,11 @@ def boxed(rows: Rows, w: int, h: int, colour: bool) -> list[str]:
     edge = (lambda t: f"\x1b[2m{t}\x1b[0m") if colour else (lambda t: t)
     paint = ansi if colour else (lambda run: str(run["t"]))
     title = " clock " if w >= 9 else ""
-    out = [edge("┌─" + title + "─" * (w - len(title) - 1) + "┐")]
+    out = [edge("┌" + "─" * w + "┐")]
     for row in rows + [[] for _ in range(h - len(rows))]:
         body = "".join(paint(run) for run in row) + " " * (w - _width(row))
         out.append(edge("│") + body + edge("│"))
-    out.append(edge("└" + "─" * w + "┘"))
+    out.append(edge("└" + "─" * (w - len(title)) + title + "┘"))
     return out
 
 

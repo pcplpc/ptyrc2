@@ -481,13 +481,14 @@ def test_merged() -> None:
 def test_box() -> None:
     rows = [[{"t": "hi", "fg": "red", "bold": True}]]
     assert monitor.box("glance", rows, 10, 2) == [
-        "┌ glance ──┐",
+        "┌──────────┐",
         "│hi        │",
         "│          │",
-        "└──────────┘",
+        "└── glance ┘",
     ]
-    assert monitor.box("a long title", [], 6, 1)[0] == "┌ a l… ┐"
-    assert monitor.box("t", [], 2, 1, border="round")[0] == "╭──╮"
+    assert monitor.box("a long title", [], 6, 1)[-1] == "└ a l… ┘"
+    assert monitor.box("t", [], 4, 1, border="round")[-1] == "╰────╯"
+    assert monitor.box("t", [], 5, 1, border="round")[-1] == "╰── t ╯"
     coloured = monitor.box("x", rows, 4, 1, colour=True)
     assert "\x1b[0;1;31mhi\x1b[0m" in coloured[1]
     assert monitor.sgr({"fg": "bright-cyan"}) == "\x1b[0;96m"
@@ -534,10 +535,10 @@ def test_main(
     )
     assert monitor.main(["--print", "--monitor", "tcp-listen"]) == 0
     out = capsys.readouterr().out
-    assert "┌ listening ─" in out and "sshd" in out and "\x1b[" not in out
+    assert "─ listening ┘" in out and "sshd" in out and "\x1b[" not in out
     assert monitor.main(["--print", "20x2", "--merged"]) == 0
     out = capsys.readouterr().out
-    assert out.count("┌ ") == 4 and "┌ disks ─" in out
+    assert out.count("┌─") == 4 and "─ disks ┘" in out
 
 
 def test_real_readers() -> None:

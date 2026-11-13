@@ -639,7 +639,7 @@ def box(
     title: str, rows: Rows, w: int, h: int, border: str = "plain", colour: bool = False
 ) -> list[str]:
     """`rows` as text in a border of `w` by `h` inner cells, the title
-    on the top edge as the driver draws it."""
+    on the bottom edge, at the right, as the driver draws it."""
     reset = "\x1b[0m" if colour else ""
 
     def ink(run: Run) -> str:
@@ -652,13 +652,13 @@ def box(
         return [body(row) for row in rows] + [" " * w] * (h - len(rows))
     tl, tr, bl, br, edge, side = BORDERS.get(border, BORDERS["plain"])
     dim = (lambda t: ink({"t": t, "fg": DIM})) if colour else (lambda t: t)
-    top = ""
-    if w >= 3 and title:
-        top = " " + clip(title, w - 2) + " "
-    lines = [dim(tl) + ink({"t": top}) + dim(edge * (w - len(top)) + tr)]
+    name = ""
+    if w >= 5 and title:
+        name = " " + clip(title, w - 2) + " "
+    lines = [dim(tl + edge * w + tr)]
     lines += [dim(side) + body(row) + dim(side) for row in rows]
     lines += [dim(side) + " " * w + dim(side)] * (h - len(rows))
-    return [*lines, dim(bl + edge * w + br)]
+    return [*lines, dim(bl + edge * (w - len(name))) + ink({"t": name}) + dim(br)]
 
 
 def show(args: argparse.Namespace) -> int:

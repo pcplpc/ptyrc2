@@ -25,12 +25,12 @@ def test_placed_set_hidden(shell: Pilot) -> None:
     assert note.variant == "12x3" and note.size == (12, 3)
     x, y, w, h = note.rect
     assert (w, h) == (14, 5)
-    top = shell.shown()[y]
-    assert top[x : x + 8] == "┌ note ─" and top[x + w - 1] == "┐"
+    edge = shell.shown()[y + h - 1]
+    assert edge[x] == "└" and edge[x + w - 8 : x + w] == "─ note ┘"
     assert shell.shown()[y + 1][x : x + w] == "│" + "?" * 12 + "│"
 
     note.set(["hello"], title="memo", fg="green")
-    assert shell.shown()[y][x : x + 8] == "┌ memo ─"
+    assert shell.shown()[y + h - 1][x + w - 8 : x + w] == "─ memo ┘"
     assert shell.shown()[y + 1][x + 1 : x + 6] == "hello"
     note.set(["small"], variant="4x1")  # kept for when it is shown
     assert [w["id"] for w in shell.widgets()] == [note.id]

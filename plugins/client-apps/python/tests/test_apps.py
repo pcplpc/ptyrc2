@@ -1458,7 +1458,7 @@ def clock_seen(
             ["".join(str(r["t"]) for r in row).ljust(w) for row in face]
             for face in rows
         )
-        return " clock " in lines[0][x : x + w + 2] and any(
+        return " clock " in lines[h + 1][x : x + w + 2] and any(
             inside == t + [" " * w] * (h - len(t)) for t in texts
         )
 
@@ -1477,7 +1477,7 @@ def monitor_seen(pilot: Pilot, argv: list[str], titles: set[str]) -> None:
             and all(w["state"] == "placed" for w in widgets)
             and {w["title"] for w in widgets} == titles
             and all(
-                f" {w['title']} " in lines[w["rect"][1]]
+                f" {w['title']} " in lines[w["rect"][1] + w["rect"][3] - 1]
                 for w in widgets
                 if w["size"][0] >= 20
             )

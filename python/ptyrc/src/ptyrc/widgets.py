@@ -150,7 +150,7 @@ class Widgets:
         another size when the room changes: topic `widgets`.
 
         `border`: a preset (`Pilot.borders()`) or its wire object;
-        `title`: on the top edge, the tag when absent. `content(w, h)`
+        `title`: on the bottom edge, the tag when absent. `content(w, h)`
         gives the first rows of each variant; without it they are
         blank until `Widget.set`."""
         named = (
