@@ -785,3 +785,257 @@ fn a_declared_layer_name_is_used_and_hinted() {
         fail("layer.define", params);
     }
 }
+
+impl Rig {
+    fn fail(&mut self, conn: u64, method: &str, params: Value) -> ptyrc_proto::RpcError {
+        let reply = self.ctx(|e, ctx| e.handle(ConnId(conn), Token(99), method, params, ctx));
+        match reply {
+            Reply::Err(e) => e,
+            other => panic!("{method}: {other:?}"),
+        }
+    }
+
+    fn call_as(&mut self, conn: u64, method: &str, params: Value) -> Value {
+        let reply = self.ctx(|e, ctx| e.handle(ConnId(conn), Token(98), method, params, ctx));
+        match reply {
+            Reply::Ok(value) => value,
+            other => panic!("{method}: {other:?}"),
+        }
+    }
+}
+
+fn clock(rig: &mut Rig) -> u64 {
+    let tags = rig.call(
+        "widget.declare",
+        json!({"widgets": [
+            {"tag": "clock", "size": [5, 1], "content": {"rows": ["12:00"]}},
+            {"tag": "clock", "name": "big", "size": [11, 3]},
+        ]}),
+    );
+    assert_eq!(tags, json!({"tags": ["clock"]}));
+    let shown = rig.call("widget.show", json!({"tag": "clock", "fill": 0.1}));
+    shown["widget"]["id"].as_u64().unwrap()
+}
+
+#[test]
+fn a_widget_is_laid_out_drawn_and_told() {
+    let mut rig = Rig::new(40, 10);
+    rig.topics.insert("widgets".into());
+    rig.burst(b"some text");
+    let id = clock(&mut rig);
+    // The screen is not quiet yet: hidden, then placed in the same look
+    // that finds the room.
+    assert_eq!(topic(&rig, "widgets")[0]["state"], "hidden");
+    rig.advance(1500);
+    let placed = topic(&rig, "widgets").last().copied().unwrap().clone();
+    assert_eq!(placed["state"], "placed");
+    assert_eq!(placed["variant"], "5x1");
+    assert_eq!(placed["size"], json!([5, 1]));
+    let [x, y] = [
+        placed["rect"][0].as_u64().unwrap(),
+        placed["rect"][1].as_u64().unwrap(),
+    ];
+    let (x, y) = (x as usize, y as u16);
+    assert_eq!(&rig.row(y)[x..], "┌ cl… ┐");
+    assert_eq!(&rig.row(y + 1)[x..], "│12:00│");
+    let list = rig.call("widget.list", json!({}));
+    assert_eq!(list["widgets"][0], placed);
+    assert_eq!(
+        rig.engine.snapshot("widgets", rig.now),
+        vec![placed.clone()]
+    );
+    let sprites = rig.call("draw.list", json!({}));
+    assert_eq!(sprites["sprites"][0]["id"], placed["sprite"]);
+    // A quiet screen: no wake for the widgets.
+    assert_eq!(rig.engine.widgets.next_wake(), None);
+
+    // Text written over it shows; pressed, it moves elsewhere.
+    let at = format!("\x1b[{};{}HOVER", y + 2, x + 2);
+    rig.burst(at.as_bytes());
+    assert!(rig.row(y + 1).contains("OVER"));
+    rig.advance(400);
+    let moved = topic(&rig, "widgets").last().copied().unwrap().clone();
+    assert_eq!(moved["id"], id);
+    assert_ne!(moved["rect"], placed["rect"]);
+    assert!(rig.row(y + 1).contains("OVER"));
+
+    rig.call(
+        "widget.set",
+        json!({"id": id, "content": {"rows": ["13:00"]}, "title": ""}),
+    );
+    rig.tick();
+    let (x, y) = (
+        moved["rect"][0].as_u64().unwrap() as usize,
+        moved["rect"][1].as_u64().unwrap() as u16,
+    );
+    let cells = |rig: &Rig, row: u16| rig.row(row).chars().skip(x).take(7).collect::<String>();
+    assert_eq!(cells(&rig, y), "┌─────┐");
+    assert_eq!(cells(&rig, y + 1), "│13:00│");
+
+    // The connection goes: so does the widget, and the host is clean.
+    rig.ctx(|e, ctx| e.on_disconnect(ConnId(7), ctx));
+    rig.tick();
+    assert_eq!(topic(&rig, "widgets").last().unwrap()["state"], "gone");
+    assert!(!rig.row(y).contains('┌'));
+    assert!(
+        rig.call("widget.list", json!({}))["widgets"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn widget_errors_and_hints() {
+    let mut rig = Rig::new(40, 10);
+    let e = rig.fail(7, "widget.show", json!({"tag": "clock"}));
+    assert_eq!(
+        (e.code, e.message.as_str()),
+        (ptyrc_proto::ErrorCode::BadParams, "no such tag: clock")
+    );
+    assert!(e.hint.unwrap().contains("`widget.declare` first"));
+    let id = clock(&mut rig);
+    let e = rig.fail(7, "widget.show", json!({"tag": "clok"}));
+    assert_eq!(
+        e.hint.unwrap(),
+        "did you mean clock? tags of this connection: clock"
+    );
+    let e = rig.fail(7, "widget.show", json!({"tag": "clock", "border": "rond"}));
+    assert_eq!(e.message, "no such border: rond");
+    assert!(
+        e.hint
+            .unwrap()
+            .starts_with("did you mean round? borders: plain, round")
+    );
+    let e = rig.fail(
+        7,
+        "widget.show",
+        json!({"tag": "clock", "border": {"corner": "++++"}}),
+    );
+    assert_eq!(e.message, "bad border");
+    assert!(e.hint.unwrap().contains("\"corners\""));
+    let e = rig.fail(7, "widget.show", json!({"tag": "clock", "frame": "activ"}));
+    assert_eq!(e.code, ptyrc_proto::ErrorCode::NoFrame);
+    assert!(e.hint.unwrap().starts_with("did you mean active?"));
+    let e = rig.fail(7, "widget.show", json!({"tag": "clock", "frame": 42}));
+    assert_eq!(e.code, ptyrc_proto::ErrorCode::NoFrame);
+    let e = rig.fail(7, "widget.show", json!({"tag": "clock", "fill": 2}));
+    assert!(e.hint.unwrap().contains("0.1 to 1"));
+    let e = rig.fail(7, "widget.show", json!({"tag": "clock", "layer": "bak"}));
+    assert!(e.hint.unwrap().starts_with("did you mean back?"));
+    let e = rig.fail(
+        7,
+        "widget.set",
+        json!({"id": id, "variant": "bgi", "title": "x"}),
+    );
+    assert_eq!(e.hint.unwrap(), "did you mean big? variants: 5x1, big");
+    // Not placed yet: no variant shown.
+    let e = rig.fail(
+        7,
+        "widget.set",
+        json!({"id": id, "content": {"rows": ["x"]}}),
+    );
+    assert_eq!(e.code, ptyrc_proto::ErrorCode::NotUsable);
+    assert_eq!(e.hint.unwrap(), "variants: 5x1, big");
+    let e = rig.fail(7, "widget.set", json!({"id": id, "rows": ["x"]}));
+    assert_eq!(e.code, ptyrc_proto::ErrorCode::BadParams);
+    assert!(e.message.contains("unknown field `rows`"), "{}", e.message);
+    // Another connection's widget is not there for this one.
+    let e = rig.fail(8, "widget.hide", json!({"id": id}));
+    assert_eq!(
+        (e.code, e.message.as_str()),
+        (ptyrc_proto::ErrorCode::NoSprite, "no such widget: 1")
+    );
+    assert_eq!(
+        e.hint.unwrap(),
+        "this connection shows no widget: `widget.show` first"
+    );
+    let e = rig.fail(7, "widget.set", json!({"id": 5, "title": "x"}));
+    assert_eq!(e.hint.unwrap(), "widgets of this connection: 1");
+    let e = rig.fail(
+        7,
+        "widget.declare",
+        json!({"widgets": [{"tag": "a", "size": [0, 2]}]}),
+    );
+    assert!(e.message.contains("from 1x1 to 200x60"));
+    let e = rig.fail(7, "widget.decalre", json!({}));
+    assert!(e.hint.unwrap().starts_with("did you mean widget.declare?"));
+    assert_eq!(
+        rig.call("widget.borders", json!({}))["borders"],
+        json!(["plain", "round", "heavy", "double", "ascii", "none"])
+    );
+    rig.call("widget.hide", json!({"id": id}));
+    assert!(
+        rig.call_as(8, "widget.list", json!({}))["widgets"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn widgets_of_two_connections_and_draw_remove() {
+    let mut rig = Rig::new(60, 16);
+    rig.advance(1500);
+    let decl = json!({"widgets": [{"tag": "w", "size": [10, 2]}, {"tag": "w", "size": [20, 4]}],
+                      "border": "heavy"});
+    rig.call_as(1, "widget.declare", decl.clone());
+    rig.call_as(2, "widget.declare", decl);
+    let a = rig.call_as(
+        1,
+        "widget.show",
+        json!({"tag": "w", "layer": "front", "prefer": "top-left"}),
+    );
+    let b = rig.call_as(2, "widget.show", json!({"tag": "w", "title": "two"}));
+    rig.tick();
+    let (a, b) = (&a["widget"], &b["widget"]);
+    assert_eq!(a["state"], "placed");
+    assert_eq!(b["state"], "placed");
+    assert_eq!(a["border"], "heavy");
+    let rect = |w: &Value| {
+        let r: Vec<u16> = (0..4)
+            .map(|i| w["rect"][i].as_u64().unwrap() as u16)
+            .collect();
+        ptyrc_vt::Rect::new(r[0], r[1], r[2], r[3])
+    };
+    assert!(!rect(a).intersects(&rect(b)));
+    let list = rig.call("draw.list", json!({}));
+    let layers: Vec<i64> = list["sprites"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["layer"].as_i64().unwrap())
+        .collect();
+    assert!(layers.contains(&1) && layers.contains(&-1));
+    // `draw.remove` on its sprite: the widget goes.
+    rig.call("draw.remove", json!({"id": b["sprite"]}));
+    rig.tick();
+    let left = rig.call("widget.list", json!({}));
+    assert_eq!(left["widgets"].as_array().unwrap().len(), 1);
+    assert_eq!(left["widgets"][0]["id"], a["id"]);
+}
+
+#[test]
+fn a_resize_lays_widgets_out_again() {
+    let mut rig = Rig::new(60, 16);
+    rig.advance(1500);
+    rig.call(
+        "widget.declare",
+        json!({"widgets": [{"tag": "w", "size": [8, 2]}, {"tag": "w", "size": [40, 10]}]}),
+    );
+    let shown = rig.call("widget.show", json!({"tag": "w"}));
+    assert_eq!(shown["widget"]["variant"], "40x10");
+    let now = rig.now;
+    let mut out = Vec::new();
+    rig.info.cols = 30;
+    rig.info.rows = 8;
+    rig.host.resize(30, 8);
+    rig.ctx(|e, ctx| e.on_resize(30, 8, now, &mut out, ctx));
+    rig.host.feed(&out);
+    rig.advance(3000);
+    let info = &rig.call("widget.list", json!({}))["widgets"][0];
+    assert_eq!(info["state"], "placed");
+    assert_eq!(info["variant"], "8x2");
+    let [x, _, w, _] = [0, 1, 2, 3].map(|i| info["rect"][i].as_u64().unwrap());
+    assert!(x + w <= 30);
+}
