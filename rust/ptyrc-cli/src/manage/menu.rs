@@ -1056,7 +1056,15 @@ impl Menu {
     /// A key, named as `input.grab` names it: `up`, `enter`, `esc`,
     /// `space`, `a`... What the front is to do.
     pub fn key(&mut self, key: &str) -> Vec<Action> {
-        let mut actions = self.key_(key);
+        // esc and a key in one read come as alt and the key: both are meant.
+        let mut actions = match key.strip_prefix("alt+") {
+            Some(then) if !then.is_empty() => {
+                let mut actions = self.key_("esc");
+                actions.extend(self.key_(then));
+                actions
+            }
+            _ => self.key_(key),
+        };
         actions.extend(self.light());
         actions
     }

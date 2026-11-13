@@ -1600,6 +1600,7 @@ def test_sand_follows_its_frame() -> None:
     sand.follow(wire, Frame(wire, old), Sprite(wire, 5))
     assert wire.calls == [
         ("subscribe", {"topics": ["frames", "exit"]}),
+        ("subscribe", {"topics": ["move"]}),
         ("draw.update", {"id": 5, "frame": 7}),
     ]
 

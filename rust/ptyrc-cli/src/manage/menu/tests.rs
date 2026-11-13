@@ -843,3 +843,12 @@ fn frames_in_an_argv() {
     );
     assert_eq!(with_frame(&s(&["sh"]), 1, "0"), s(&["sh", "-f", "0"]));
 }
+
+#[test]
+fn esc_and_a_key_in_one_read() {
+    let mut m = menu();
+    keys(&mut m, "enter");
+    assert_eq!(keys(&mut m, "alt+s"), []);
+    assert!(shown(&m, 48, 13).starts_with(" start an app"));
+    assert_eq!(keys(&mut m, "alt+q"), [Action::Quit]);
+}

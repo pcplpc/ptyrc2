@@ -10,6 +10,8 @@ from typing import Any
 
 from ptyrc import Pilot, Widget
 
+from . import _cli
+
 __all__ = ["Deck", "options"]
 
 Size = tuple[int, int]
@@ -47,7 +49,8 @@ class Deck:
 
     Driven by the topic `widgets`: a variant just put is drawn at once,
     the others once a period, in one batch. A hidden widget is not
-    rendered.
+    rendered. On the topic `move` its tags are shown again on the frame
+    named (`move`).
     """
 
     def __init__(self, pilot: Pilot, args: argparse.Namespace | None = None) -> None:
@@ -62,7 +65,9 @@ class Deck:
             }
         self.widgets: list[tuple[Widget, Render]] = []
         self._show: dict[int, dict[str, Any]] = {}
+        self._sizes: dict[int, Sequence[Size] | Mapping[str, Size]] = {}
         pilot.subscribe("widgets", "exit")
+        _cli.movable(pilot)
 
     def add(
         self,
@@ -78,6 +83,7 @@ class Deck:
         widget = self.pilot.widget(tag, sizes, content=render, **show)
         self.widgets.append((widget, render))
         self._show[id(widget)] = show
+        self._sizes[id(widget)] = sizes
         return widget
 
     def resize(
@@ -87,7 +93,16 @@ class Deck:
         again, every variant rendered; the driver lays it out again."""
         render = next(r for w, r in self.widgets if w is widget)
         show = self._show[id(widget)]
+        self._sizes[id(widget)] = sizes
         widget.info = self.pilot.widget(widget.tag, sizes, content=render, **show).info
+
+    def move(self, frame: int | str) -> None:
+        """Show every tag again on `frame`: the driver lays them out
+        there. What they show is rendered again."""
+        self.shared["frame"] = frame
+        for widget, _ in self.widgets:
+            self._show[id(widget)]["frame"] = frame
+            self.resize(widget, self._sizes[id(widget)])
 
     def draw(self, only: Widget | None = None) -> None:
         """Render the variant shown of each widget, or of `only`."""
@@ -131,6 +146,9 @@ class Deck:
                 continue
             if event[0] == "exit":
                 return
+            if event[0] == "move":
+                self.move(event[1]["frame"])
+                continue
             if event[0] != "widgets":
                 continue
             shown = {id(w): w.variant for w, _ in self.widgets}

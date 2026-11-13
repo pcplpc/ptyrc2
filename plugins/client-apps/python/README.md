@@ -30,6 +30,13 @@ prints the apps and their options as JSON (`_catalog.py`, from the
 argparse parser of each app): what the menu shows. `random`, there, is
 what `random app` draws from (`marks` is never drawn).
 
+An app that can change frame while it runs subscribes to the topic
+`move` (`_cli.movable`); `ptyrc manage move` then sends it `{"frame":
+id}` in place of restarting it. `_cli.follow` takes it (`sand`, `rain`,
+`snow`: the sprite goes to that frame), and `_widgets.Deck` (`clock`,
+`monitor`: the tags are shown again there). On a driver without the
+topic the subscription is refused and the app runs as before.
+
 `scripts/demo-apps.sh` runs them on a scrolling vim buffer;
 `scripts/demo-frames.sh` gives each pane of a tmux session its own
 drawing. Both take `--check`.
