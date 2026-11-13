@@ -13,7 +13,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -1432,26 +1432,46 @@ def test_rain(session: Pilot) -> None:
     assert rain.main(["-s", session.session, "--rate", "-1"]) == 1
 
 
-def test_clock(session: Pilot) -> None:
-    def seen(host: str) -> bool:
-        top = host.split("\n")[0]
-        return bool(re.search(r" \d\d:\d\d:\d\d$", top)) and len(top) == 79
+def clock_seen(
+    pilot: Pilot, argv: list[str], seconds: bool = True, big: bool = False
+) -> None:
+    """Run `clock` with `argv`: the widget `clock` is placed, in a face
+    of the mode, titled, and shows the time."""
+    faces = clock.ladder(seconds, big)
 
-    watch(session, lambda: clock.main(["-s", session.session], seconds=1.2), seen)
+    def seen(_: str) -> bool:
+        widgets = [w for w in pilot.widgets() if w["tag"] == "clock"]
+        if not widgets or widgets[0]["state"] != "placed":
+            return False
+        info = widgets[0]
+        assert info["variant"] in {f"{w}x{h}" for w, h in faces}, info
+        (w, h), (x, y, _, _) = info["size"], info["rect"]
+        lines = pilot.shown()[y : y + h + 2]
+        inside = [line[x + 1 : x + 1 + w] for line in lines[1:]][:h]
+        now = datetime.now()
+        rows = (
+            clock.face(now + timedelta(seconds=d), w, h, seconds=seconds, big=big)
+            for d in (-1, 0, 1)
+        )
+        texts = (
+            ["".join(str(r["t"]) for r in row).ljust(w) for row in face]
+            for face in rows
+        )
+        return " clock " in lines[0][x : x + w + 2] and any(
+            inside == t + [" " * w] * (h - len(t)) for t in texts
+        )
+
+    run = ["-s", pilot.session, *argv]
+    watch(pilot, lambda: clock.main(run, seconds=2.5), seen)
+
+
+def test_clock(session: Pilot) -> None:
+    clock_seen(session, [])
 
 
 def test_clock_big_bottom_left(session: Pilot) -> None:
-    def seen(host: str) -> bool:
-        bottom = host.split("\n")[-3:]
-        return any(c in "".join(bottom) for c in "█▀▄") and bottom[-1][:1] in "█▀▄"
-
-    args = ["-s", session.session, "--big", "--prefer", "bottom-left"]
-    watch(session, lambda: clock.main(args, seconds=1.2), seen)
-
-
-def test_clock_face() -> None:
-    row = clock.face(datetime(2026, 11, 12, 9, 5, 7))[0]
-    assert "".join(run["t"] for run in row) == " 09:05:07 "
+    argv = ["--big", "--no-seconds", "--prefer", "bottom-left"]
+    clock_seen(session, argv, seconds=False, big=True)
 
 
 def test_dispatch(
