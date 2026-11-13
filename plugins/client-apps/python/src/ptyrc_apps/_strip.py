@@ -5,7 +5,7 @@ Pure: a seed, a place along the strip and a `_sky.Sky` give the pixels.
 
 - `Strip(seed, kind)`: an endless profile; `height(x)` in `0..1` for
   any `x`, in pixels of its own layer. Kinds: `hills`, `mountains`,
-  `plain`, `dunes`, `city`, `flat`. `period`: the profile repeats.
+  `plain`, `dunes`, `city`, `mesas`, `flat`. `period`: the profile repeats.
 - `Layer`: a strip at a `depth`, 0 the nearest to 1 the farthest: its
   ground line (`base`, the pixel row of height 0), its relief (`amp`,
   pixels), its colour a season, and the things that stand on it
@@ -18,7 +18,10 @@ Pure: a seed, a place along the strip and a `_sky.Sky` give the pixels.
   near, then `stars(half, clear, sky, seed, t)`: stars only in the
   cells still as `heavens` left them.
 - `paint` returns `Mark`s, in pixels: the `window` and the `chimney`
-  of each house, for the scene to light and to smoke.
+  of each house, for the scene to light (`lights`) and to smoke.
+- `water(half, sky, horizon, seed, t)`: a sea under the horizon, the
+  sky mirrored. `fog`, `rain`, `snow`: the weather over what is
+  painted; rain and snow are braille, and move with `t`.
 - `Pointer`: the host pointer over a scene, for the hovers:
   `move(x, y)` and `leave()` are the handlers; `at`, `since`, `trail`.
 
@@ -33,7 +36,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
-from ._canvas import RGB, Half, mix
+from ._canvas import RGB, Braille, Half, mix
 from ._sky import Sky
 
 __all__ = [
@@ -44,20 +47,28 @@ __all__ = [
     "Strip",
     "Thing",
     "clouds",
+    "fog",
     "heavens",
+    "lights",
     "noise",
     "paint",
+    "rain",
+    "snow",
     "stars",
+    "water",
     "wave",
 ]
 
-KINDS = ("hills", "mountains", "plain", "dunes", "city", "flat")
+KINDS = ("hills", "mountains", "plain", "dunes", "city", "mesas", "flat")
 ALT_TOP = 76.0  # altitude, degrees, drawn at the top of the sky
 
 WHITE: RGB = (255, 255, 255)
 SNOW: RGB = (232, 236, 242)
 TRUNK: RGB = (125, 85, 30)
 LAMP: RGB = (255, 214, 120)
+SEA: RGB = (0, 92, 140)
+DROP: RGB = (150, 172, 208)
+MIST: RGB = (206, 210, 214)
 #: The ground of a season, in daylight.
 GROUND: dict[str, RGB] = {
     "spring": (135, 190, 70),
@@ -109,7 +120,7 @@ class Strip:
         self.period = period
 
     def block(self, x: float) -> tuple[int, int, int, float]:
-        """`city`: the building at `x`: its number, left edge, width
+        """`city`, `mesas`: the block at `x`: its number, left edge, width
         and height (`0..1`; 0: a gap)."""
         cell = max(3, round(self.scale))
         i = math.floor(x / cell)
@@ -125,16 +136,16 @@ class Strip:
         u = x / self.scale
         if self.kind == "flat":
             return 0.0
-        if self.kind == "city":
+        if self.kind in ("city", "mesas"):
             _, left, wide, tall = self.block(x)
             return tall if x - left < wide else 0.0
         if self.kind == "mountains":
             ridge = 1 - abs(2 * wave(s, u, p) - 1)
-            fine = 1 - abs(2 * wave(s + 1, u * 3.1, p and p * 31) - 1)
+            fine = 1 - abs(2 * wave(s + 1, u * 3, p and p * 3) - 1)
             return min(1.0, 0.78 * ridge**1.35 + 0.22 * fine * ridge)
         if self.kind == "dunes":
             return wave(s, u, p) ** 2 * 0.8 + 0.1 * wave(s + 1, u * 2, p and p * 2)
-        base = 0.68 * wave(s, u, p) + 0.32 * wave(s + 1, u * 2.3, p and p * 23)
+        base = 0.68 * wave(s, u, p) + 0.32 * wave(s + 1, u * 2, p and p * 2)
         return base * (0.3 if self.kind == "plain" else 1.0)
 
 
@@ -450,7 +461,7 @@ def _small(half: Half, x: int, y: int, s: int, thing: Thing, lit: _Lit) -> None:
     elif kind == "palm":
         for j in range(1, s):
             half.set(x + (1 if j > s // 2 else 0), y - j, lit((140, 110, 76)))
-        green = lit((52, 132, 72))
+        green = lit((0, 135, 60))
         cx = x + 1
         half.rect(cx - 2, y - s, 5, 1, green)
         half.rect(cx - 1, y - s - 1, 3, 1, green)
@@ -542,3 +553,90 @@ def paint(
         else:
             _small(half, x, y, s, thing, lit)
     return marks
+
+
+# --- water, weather, lamps -------------------------------------------
+
+
+def water(half: Half, sky: Sky, hz: int, seed: int, t: float) -> None:
+    w, rows = half.w, 2 * half.h
+    deep = sky.shade(SEA)
+    for y in range(hz, rows):
+        v = (y - hz + 0.5) / max(1, rows - hz)
+        for x in range(w):
+            # A mirror: the horizon far off, the zenith at one's feet.
+            murk = (0.3 + 0.15 * v) * (0.35 + 0.65 * sky.light)
+            c = mix(sky.colour((x + 0.5) / w, 1 - 0.85 * v), deep, murk)
+            if sky.light > 0.3 and noise(seed + 9, x + int(t * 1.3) + y * 3, y) < 0.04:
+                c = mix(c, WHITE, 0.3 * sky.light)
+            half.px[y][x] = c
+    for body, across, shine in (
+        (sky.sun, sky.sun_x, (255, 226, 160)),
+        (sky.moon, sky.moon_x, (236, 236, 220)),
+    ):
+        if not -2 < body < 50 or (shine[2] == 220 and sky.moonlight < 0.2):
+            continue
+        for y in range(hz, rows):
+            reach = 0.5 + (y - hz) * 0.22
+            for x in range(int(across * w - reach - 1), int(across * w + reach + 2)):
+                near = abs(x + 0.5 - across * w) <= reach
+                if near and noise(seed + 4, x * 31 + y, int(t * 2.2)) < 0.45:
+                    half.set(x, y, shine, 0.7 * (1 - 0.7 * sky.cover))
+
+
+def fog(half: Half, sky: Sky, hz: int) -> None:
+    grey = sky.shade(MIST)
+    rows = 2 * half.h
+    for y in range(rows):
+        d = (y - hz) / rows
+        thick = 0.82 - (1.5 * d if d > 0 else -0.9 * d)
+        for x in range(half.w):
+            half.set(x, y, grey, max(0.25, thick))
+
+
+def rain(half: Half, sky: Sky, seed: int, t: float, lean: float = 0.0) -> None:
+    """Drops over the scene; `lean`: dots aside a dot fallen."""
+    dots = Braille(half.w, half.h)
+    tall = 4 * half.h
+    for col in range(2 * half.w):
+        if noise(seed + 21, col) > 0.42:
+            continue
+        fall = 9 + 6 * noise(seed + 22, col)
+        y = int(t * fall + noise(seed + 23, col) * 97) % (tall + 5)
+        for k in range(2):
+            aside = int((y - k) * lean) if lean else (y - k) // 5 % 2
+            dots.set((col - aside) % (2 * half.w), y - k)
+    half.ink(dots, sky.shade(DROP), 0.75)
+
+
+def snow(half: Half, sky: Sky, seed: int, t: float) -> None:
+    dots = Braille(half.w, half.h)
+    wide, tall = 2 * half.w, 4 * half.h
+    for i in range(max(3, half.w * half.h // 7)):
+        fall = 1.6 + 1.8 * noise(seed + 31, i)
+        y = int(t * fall + noise(seed + 32, i) * tall) % tall
+        sway = math.sin(t * 0.7 + i) * 1.6
+        dots.set(int(noise(seed + 33, i) * wide + sway + t * 0.4) % wide, y)
+    half.ink(dots, mix(WHITE, sky.shade(WHITE), 0.5))
+
+
+def lights(
+    half: Half,
+    sky: Sky,
+    marks: Sequence[Mark],
+    seed: int,
+    pointer: Pointer | None,
+) -> None:
+    """The windows of the houses: lit at night, fewer late; lit under
+    the pointer at any time."""
+    late = sky.hour >= 23.25 or sky.hour < 5.5
+    for mark in marks:
+        if mark.kind != "window":
+            continue
+        home = noise(seed + 95, mark.n)
+        lit = sky.light < 0.4 and home < (0.25 if late else 0.85)
+        if pointer is not None and pointer.at is not None:
+            px, py = pointer.at
+            lit = lit or (abs(px - mark.x) <= 3 and abs(py - mark.y // 2) <= 2)
+        if lit:
+            half.set(mark.x, mark.y, LAMP)

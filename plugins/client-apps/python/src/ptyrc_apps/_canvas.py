@@ -9,14 +9,14 @@ Pure: no driver, no clock.
   its value. `hexa(c)`:
   `#rrggbb`.
 - `Braille(w, h)`: `2w` by `4h` dots, on or off. `set`, `get`, `line`;
-  `glyph(cx, cy)`: the cell, `""` when no dot is on; `rows()`: strings,
-  a space where empty.
+  `glyph(cx, cy)`: the cell, `""` when no dot is on; `cells()`: those
+  with a dot; `rows()`: strings, a space where empty.
 - `Half(w, h)`: `w` by `2h` pixels of colour, two a cell, drawn with
   `▀`. `fill`, `set` (with an `alpha`), `get`, `rect`, `disc`. Glyphs
   go over the pixels: `put(cx, cy, text, fg)` writes cells, the
   background the mean of the two pixels under each unless `bg` is
-  given; `ink(braille, fg)` puts every cell of a `Braille` that has a
-  dot. `rows()`: rows of runs `{"t", "fg", "bg"}`, colours of the 256;
+  given; `ink(braille, fg)` puts the cells of a `Braille` that have a
+  dot, where no glyph is yet and the two pixels are alike. `rows()`: rows of runs `{"t", "fg", "bg"}`, colours of the 256;
   `rows(deep=True)`: `#rrggbb`.
 - `ansi(rows)`: the rows with SGR escapes, for a terminal.
 
@@ -39,6 +39,7 @@ Rows = list[list[Run]]
 #: Bit of the dot `(x, y)` of a braille cell: `DOTS[y][x]`.
 DOTS = ((0x01, 0x08), (0x02, 0x10), (0x04, 0x20), (0x40, 0x80))
 _CUBE = (0, 95, 135, 175, 215, 255)
+NEAR = 24  # two pixels are alike: the sum of their differences at most
 
 
 def mix(a: RGB, b: RGB, t: float) -> RGB:
@@ -111,6 +112,15 @@ class Braille:
         bits = self.bits[cy][cx] if 0 <= cx < self.w and 0 <= cy < self.h else 0
         return chr(0x2800 + bits) if bits else ""
 
+    def cells(self) -> list[tuple[int, int]]:
+        """The cells that have a dot on, row by row."""
+        return [
+            (cx, cy)
+            for cy, row in enumerate(self.bits)
+            for cx, bits in enumerate(row)
+            if bits
+        ]
+
     def rows(self) -> list[str]:
         return [
             "".join(chr(0x2800 + bits) if bits else " " for bits in row)
@@ -170,13 +180,21 @@ class Half:
             if 0 <= cx + i < self.w and 0 <= cy < self.h:
                 self.over[cx + i, cy] = (char, fg, bg)
 
-    def ink(self, dots: Braille, fg: RGB | None = None) -> None:
-        """Put every cell of `dots` that has a dot on."""
-        for cy in range(min(self.h, dots.h)):
-            for cx in range(min(self.w, dots.w)):
-                glyph = dots.glyph(cx, cy)
-                if glyph:
-                    self.over[cx, cy] = (glyph, fg, None)
+    def ink(self, dots: Braille, fg: RGB | None = None, tint: float = 1.0) -> None:
+        """Put the cells of `dots` that have a dot on, where no glyph
+        is yet and the two pixels are alike or nearly: the background
+        is the pixel under most of the dots, and an edge is never
+        blurred. The ink: `fg` mixed over it by `tint`."""
+        for cx, cy in dots.cells():
+            if cx >= self.w or cy >= self.h or (cx, cy) in self.over:
+                continue
+            top, low = self.px[2 * cy][cx], self.px[2 * cy + 1][cx]
+            if sum(abs(a - b) for a, b in zip(top, low, strict=True)) > NEAR:
+                continue
+            bits = dots.bits[cy][cx]
+            bg = top if (bits & 0x1B).bit_count() > (bits & 0xE4).bit_count() else low
+            ink = fg if fg is None or tint >= 1.0 else mix(bg, fg, tint)
+            self.over[cx, cy] = (dots.glyph(cx, cy), ink, bg)
 
     def rows(self, deep: bool = False) -> Rows:
         """Rows of runs; cells alike are one run."""

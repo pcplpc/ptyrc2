@@ -98,7 +98,7 @@ def phase_of(when: datetime.datetime) -> float:
 def season_of(day: int, lat: float = 47.0) -> str:
     """The season of the day `day` of the year (1: 1 January)."""
     if lat < 0:
-        day = (day + 182) % 365
+        day = (day + 183) % 365
     for name, first in (("winter", 355), ("autumn", 266), ("summer", 172)):
         if day >= first:
             return name
@@ -195,8 +195,8 @@ class Sky:
         """The sky at `u` across and `v` down to the horizon."""
         c = self._clear(u, v)
         if self.cover:
-            grey = mix((14, 16, 30), (168, 174, 186), self.light)
-            grey = mix(grey, c, 0.25)
+            grey = mix((14, 16, 30), (146, 150, 158), self.light)
+            grey = mix(grey, c, 0.12)
             lower = mix(grey, (255, 255, 255), 0.12 * v * self.light)
             c = mix(c, lower, self.cover)
         return c
@@ -217,7 +217,8 @@ class Sky:
         """`c` under this light, hazed by `depth`."""
         a = self.ambient
         lit = (c[0] * a[0] // 255, c[1] * a[1] // 255, c[2] * a[2] // 255)
-        return mix(lit, self.colour(0.5, 0.9), 0.5 * depth)
+        haze = 0.5 * depth * (0.25 + 0.75 * self.light)
+        return mix(lit, self.colour(0.5, 0.9), haze)
 
 
 def at(when: datetime.datetime, lat: float = 47.0, cover: float = 0.0) -> Sky:
