@@ -424,7 +424,9 @@ fn presets_are_single_cell_glyphs() {
     let w = Widgets::new(WidgetConfig::default());
     assert_eq!(
         w.borders(),
-        ["plain", "round", "heavy", "double", "ascii", "none"]
+        [
+            "plain", "round", "heavy", "double", "ascii", "alert", "none"
+        ]
     );
     for (name, spec) in presets() {
         spec.check().unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -1106,4 +1108,273 @@ fn look_cost_at_200x60() {
         "look, one hidden: {:?}, {placed} of 9 placed",
         started.elapsed() / 20
     );
+}
+
+// Modal widgets.
+
+fn modal(tag: &str, prefer: Prefer) -> Show {
+    Show {
+        modal: true,
+        prefer,
+        ..Show::new(tag)
+    }
+}
+
+/// A screen with text on every cell.
+fn full(cols: u16, rows: u16) -> Rig {
+    let mut rig = Rig::new(cols, rows);
+    for y in 0..rows {
+        rig.grid
+            .put_ascii(0, y, "x".repeat(cols as usize).as_bytes(), Style::default());
+    }
+    rig
+}
+
+#[test]
+fn modal_in_a_room_as_any_widget() {
+    let mut rig = Rig::new(40, 12);
+    rig.declare(1, "m", &[[6, 1], [16, 4]]);
+    let id = rig.show(1, modal("m", Prefer::Any));
+    let info = rig.info(id);
+    assert!(info.modal && !info.over);
+    assert_eq!(info.variant.as_deref(), Some("16x4"));
+    assert_eq!(info.rect, Some([11, 3, 18, 6]));
+    let sprite = rig.scene.list().into_iter().next().unwrap();
+    assert_eq!(sprite.layer, Layer::HUD.0);
+}
+
+#[test]
+fn modal_over_the_text_at_each_prefer() {
+    // 40x12, gap (2, 1): the 30x6 variant (outer 32x8) fits with it.
+    let cases = [
+        (Prefer::Any, [4, 2]),
+        (Prefer::Center, [4, 2]),
+        (Prefer::TopLeft, [2, 1]),
+        (Prefer::Top, [4, 1]),
+        (Prefer::TopRight, [6, 1]),
+        (Prefer::Left, [2, 2]),
+        (Prefer::Right, [6, 2]),
+        (Prefer::BottomLeft, [2, 3]),
+        (Prefer::Bottom, [4, 3]),
+        (Prefer::BottomRight, [6, 3]),
+    ];
+    for (prefer, at) in cases {
+        let mut rig = full(40, 12);
+        rig.declare(1, "m", &[[6, 1], [30, 6], [38, 10]]);
+        let id = rig.show(1, modal("m", prefer));
+        let info = rig.info(id);
+        assert!(info.over, "{prefer:?}");
+        assert_eq!(info.variant.as_deref(), Some("30x6"), "{prefer:?}");
+        assert_eq!(info.rect, Some([at[0], at[1], 32, 8]), "{prefer:?}");
+    }
+}
+
+#[test]
+fn modal_over_blanks_the_gap_and_hides_the_text() {
+    let mut rig = full(40, 12);
+    rig.declare(1, "m", &[[30, 6]]);
+    let id = rig.show(1, modal("m", Prefer::Any));
+    assert_eq!(rig.rect(id), Some([4, 2, 32, 8]));
+    let shown = rig.shown();
+    assert_eq!(shown[0], "x".repeat(40));
+    // The row above the box: two cells of gap each side, blanked.
+    assert_eq!(shown[1], format!("xx{}xx", " ".repeat(36)));
+    assert_eq!(shown[2], format!("xx  ┌{}┐  xx", "─".repeat(30)));
+    assert_eq!(shown[3], format!("xx  │{}│  xx", " ".repeat(30)));
+    assert_eq!(shown[9], format!("xx  └{} m ┘  xx", "─".repeat(27)));
+    assert_eq!(shown[10], format!("xx{}xx", " ".repeat(36)));
+    assert_eq!(shown[11], "x".repeat(40));
+
+    // Text written under it: it stays, never pressed, the text hidden.
+    rig.write(6, 4, "TYPED");
+    rig.run(3000);
+    assert_eq!(rig.rect(id), Some([4, 2, 32, 8]));
+    assert!(!rig.shown()[4].contains("TYPED"));
+    // A room opens: it does not move there.
+    for y in 0..12 {
+        rig.clear(y);
+    }
+    rig.run(4000);
+    assert_eq!(rig.rect(id), Some([4, 2, 32, 8]));
+    assert!(rig.info(id).over);
+    // Shown again: laid out again, in the room.
+    rig.show(1, modal("m", Prefer::Any));
+    assert!(!rig.info(id).over);
+}
+
+#[test]
+fn modal_over_without_the_gap_then_clipped() {
+    // No variant fits with the gap: the largest that fits without.
+    let mut rig = full(20, 6);
+    rig.declare(1, "m", &[[16, 4], [17, 4], [30, 9]]);
+    let id = rig.show(1, modal("m", Prefer::Any));
+    let info = rig.info(id);
+    assert_eq!(info.variant.as_deref(), Some("17x4"));
+    assert_eq!(info.rect, Some([0, 0, 19, 6]));
+    // The column left of the view is blanked: what there is of the gap.
+    assert_eq!(rig.shown()[0], format!("┌{}┐", "─".repeat(17)));
+    // None fits at all: the smallest, clipped by the view.
+    let mut rig = full(8, 3);
+    rig.declare(1, "m", &[[10, 2], [17, 4]]);
+    let id = rig.show(1, modal("m", Prefer::Any));
+    let info = rig.info(id);
+    assert_eq!(info.variant.as_deref(), Some("10x2"));
+    assert_eq!(info.rect, Some([0, 0, 12, 4]));
+    assert_eq!(rig.shown()[0], "┌───────");
+}
+
+#[test]
+fn modal_laid_out_again_when_the_view_changes_size() {
+    let mut rig = full(40, 12);
+    rig.declare(1, "m", &[[10, 2], [30, 6]]);
+    let id = rig.show(1, modal("m", Prefer::Any));
+    assert_eq!(rig.info(id).variant.as_deref(), Some("30x6"));
+    // The screen shrinks.
+    rig.grid = Grid::new(24, 8);
+    for y in 0..8 {
+        rig.grid
+            .put_ascii(0, y, "x".repeat(24).as_bytes(), Style::default());
+    }
+    rig.mock.infos = vec![surface(RAW, Rect::new(0, 0, 24, 8))];
+    rig.w.touch();
+    rig.tick();
+    let info = rig.info(id);
+    assert_eq!(info.variant.as_deref(), Some("10x2"));
+    assert_eq!(info.rect, Some([6, 2, 12, 4]));
+}
+
+#[test]
+fn modal_is_an_obstacle_and_evicts_what_is_under() {
+    let mut rig = Rig::new(40, 12);
+    rig.declare(1, "a", &[[4, 1], [30, 8]]);
+    let a = rig.show(1, Show::new("a"));
+    assert_eq!(rig.info(a).variant.as_deref(), Some("30x8"));
+    let before = rig.rect(a).unwrap();
+    // No room is left for the modal: over, on the other widget.
+    rig.declare(2, "m", &[[26, 4]]);
+    let m = rig.show(2, modal("m", Prefer::Any));
+    assert!(rig.info(m).over);
+    let over = rig.rect(m).unwrap();
+    assert!(overlaps(before, over));
+    // The other is never shrunk for it; pressed, then evicted.
+    assert_eq!(rig.rect(a), Some(before));
+    rig.run(400);
+    let info = rig.info(a);
+    assert!(info.rect.is_none_or(|r| !overlaps(r, over)), "{info:?}");
+    assert_eq!(rig.rect(m), Some(over));
+}
+
+#[test]
+fn chase_goes_round_the_border() {
+    let mut rig = Rig::new(40, 12);
+    rig.now = Duration::ZERO;
+    let chase = ChaseSpec {
+        len: 2,
+        ms: 100,
+        runs: 1,
+        style: StyleSpec {
+            bold: true,
+            ..StyleSpec::default()
+        },
+    };
+    let decl = Declare {
+        widgets: vec![VariantDecl {
+            tag: "c".into(),
+            size: [4, 1],
+            ..VariantDecl::default()
+        }],
+        border: Some(Border::Object(Box::new(BorderPatch {
+            chase: Some(chase),
+            ..BorderPatch::default()
+        }))),
+    };
+    rig.w.declare(1, decl).unwrap();
+    let id = rig.w.show(1, Show::new("c")).unwrap();
+    // Outer 6x3: 14 cells around. The bold cells, as (x, y) of the box.
+    let bold = |rig: &Rig| -> Vec<(u16, u16)> {
+        let [x0, y0, w, h] = rig.rect(id).unwrap();
+        let grid = rig.scene.compose(&rig.grid, &rig.mock);
+        let mut out = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                if grid
+                    .cell(x0 + x, y0 + y)
+                    .style
+                    .attrs
+                    .contains(ptyrc_vt::Attrs::BOLD)
+                {
+                    out.push((x, y));
+                }
+            }
+        }
+        out
+    };
+    rig.now = Duration::from_millis(1000);
+    rig.tick();
+    // Step 10: the head on cell 10 (bottom edge, going left), then 9.
+    assert_eq!(bold(&rig), [(2, 2), (3, 2)]);
+    assert_eq!(rig.w.next_wake(), Some(Duration::from_millis(1100)));
+    rig.run(100);
+    assert_eq!(bold(&rig), [(1, 2), (2, 2)]);
+    rig.run(300);
+    // Step 14 is step 0: the top-left corner, and the cell before it.
+    assert_eq!(bold(&rig), [(0, 0), (0, 1)]);
+    assert_eq!(rig.w.next_wake(), Some(Duration::from_millis(1500)));
+    // Hidden with its owner: no wake-up.
+    rig.w.hide_owner(1, true);
+    rig.tick();
+    assert_eq!(rig.w.next_wake(), None);
+}
+
+#[test]
+fn alert_is_bright_and_chased() {
+    let spec = BorderSpec::alert();
+    assert!(!spec.style.dim && spec.style.bold);
+    assert_eq!(spec.chasing().map(|c| c.runs), Some(2));
+    let at = |step| compose_at(&spec, "manage", None, 8, 2, Some(step), [0; 4]);
+    assert_ne!(at(0), at(1));
+    // 24 cells around, two runs: the same picture every 12 steps.
+    assert_eq!(at(0), at(12));
+    assert_eq!(text_of(&at(3))[3], "┗ manage ┛");
+    // A plain border has no chase: nothing to play.
+    assert!(BorderSpec::default().chasing().is_none());
+}
+
+#[test]
+fn hidden_owner_keeps_its_place() {
+    let mut rig = Rig::new(40, 10);
+    rig.declare(1, "a", &[[20, 4]]);
+    rig.declare(2, "b", &[[20, 4]]);
+    let a = rig.show(1, Show::new("a"));
+    let place = rig.rect(a).unwrap();
+    rig.w.hide_owner(1, true);
+    rig.tick();
+    assert!(rig.w.owner_hidden(1));
+    let info = rig.info(a);
+    assert_eq!(info.state, WidgetState::Hidden);
+    assert_eq!((info.rect, info.sprite), (None, None));
+    assert!(rig.scene.is_empty());
+    assert!(
+        rig.events
+            .iter()
+            .any(|e| e.id == a && e.state == WidgetState::Hidden)
+    );
+    // Text under its place does not evict it.
+    rig.run(1000);
+    // Back where it was.
+    rig.w.hide_owner(1, false);
+    rig.tick();
+    assert_eq!(rig.rect(a), Some(place));
+    assert_eq!(rig.info(a).state, WidgetState::Placed);
+
+    // Hidden, it is no obstacle: another takes the place.
+    rig.w.hide_owner(1, true);
+    rig.tick();
+    let b = rig.show(2, Show::new("b"));
+    assert_eq!(rig.rect(b), Some(place));
+    // Back: the place is taken, it is laid out again (no room: hidden).
+    rig.w.hide_owner(1, false);
+    rig.tick();
+    assert_eq!(rig.rect(b), Some(place));
+    assert!(rig.rect(a).is_none_or(|r| !overlaps(r, place)));
 }

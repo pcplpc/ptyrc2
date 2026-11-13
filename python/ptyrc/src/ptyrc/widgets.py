@@ -74,6 +74,11 @@ class Widget:
     def placed(self) -> bool:
         return self.info.get("state") == "placed"
 
+    @property
+    def over(self) -> bool:
+        """A modal put over the text, for want of a room."""
+        return bool(self.info.get("over"))
+
     def update(self, info: dict[str, Any]) -> bool:
         """Take the data of a `widgets` event; False when it tells of
         another widget."""
@@ -141,6 +146,7 @@ class Widgets:
         prefer: str | None = None,
         fill: float | None = None,
         layer: int | str | None = None,
+        modal: bool = False,
         content: Callable[[int, int], Any] | None = None,
     ) -> Widget:
         """Declare `tag` and show it. `sizes`: the inner sizes `(w, h)`
@@ -152,7 +158,9 @@ class Widgets:
         `border`: a preset (`Pilot.borders()`) or its wire object;
         `title`: on the bottom edge, the tag when absent. `content(w, h)`
         gives the first rows of each variant; without it they are
-        blank until `Widget.set`."""
+        blank until `Widget.set`. `modal`: always shown, in front of
+        the text (layer `hud`), over it when no room takes it
+        (`Widget.over`); it stays where it is put."""
         named = (
             sizes.items() if isinstance(sizes, Mapping) else ((None, s) for s in sizes)
         )
@@ -166,6 +174,7 @@ class Widgets:
             variants.append(variant)
         show = {"tag": tag, "border": border, "title": title, "frame": frame}
         show |= {"prefer": prefer, "fill": fill, "layer": layer}
+        show |= {"modal": modal or None}
         widget = Widget(self, tag)  # type: ignore[arg-type]
         self._request("widget.declare", {"widgets": variants})
         self._request(

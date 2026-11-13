@@ -199,3 +199,5 @@ Supersedes `--spawn --rate` above.
 - Pause: freeze and hide. Scope: everything connected, clients started
   elsewhere too (stop, pause). The widget is modal: every key is its
   own. Flags: a checklist from the app's options, and a free line.
+- Apps are moved between frames from the menu; a list of the frames
+  with the apps on each, and a preview.

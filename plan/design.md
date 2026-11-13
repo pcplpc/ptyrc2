@@ -769,6 +769,7 @@ impl Widgets {
     pub fn set(&mut self, owner: OwnerId, set: Set) -> Result<(), WidgetError>;
     pub fn hide(&mut self, owner: OwnerId, id: WidgetId) -> bool;
     pub fn drop_owner(&mut self, owner: OwnerId);
+    pub fn hide_owner(&mut self, owner: OwnerId, hidden: bool);
     pub fn touch(&mut self);                      // the screen changed
     pub fn tick(&mut self, now: Duration, base: &Grid,
         cursor: Option<(u16, u16)>,               // when it shows
@@ -797,12 +798,14 @@ repaint.
   inner sizes from 1x1 to 200x60. Answer: `{"tags": [...]}`, every tag
   of the connection, in order of first declaration. Nothing is applied
   on error.
-- `widget.show {tag, frame, prefer, fill, title, border, layer}`: one
+- `widget.show {tag, frame, prefer, fill, title, border, layer,
+  modal}`: one
   widget per connection and tag; shown again, the same widget with the
   new options, those absent at their defaults. `frame`: an id or a
   name, resolved once, at the call (`raw`). `prefer`: as for `auto`
   (`any`). `fill`: `0.1..=1` (0.5). `title`: the tag when absent;
-  `""`: none. `layer`: `back` when absent, a declared name allowed. It
+  `""`: none. `layer`: `back` when absent (`hud` for a modal), a
+  declared name allowed. `modal` (false): see Modal. It
   is laid out at once: the answer `{"widget": info}` is placed when a
   room is there.
 - `widget.set {id, variant, content, title}`, `content` and `title`
@@ -834,7 +837,8 @@ pattern on both sides of the title. The title is not dim.
 `border`: a preset name, or an object: `{"base": NAME, "corners":
 "┌┐└┘", "top": "─", "bottom": "─", "left": "│", "right": "│", "style":
 {...}, "title": {"side": "top" | "bottom", "align": "left" | "center"
-| "right", "before": " ", "after": " ", "style": {...}}}`. `base`: the preset the other members
+| "right", "before": " ", "after": " ", "style": {...}}, "chase":
+{"len": 3, "ms": 80, "runs": 1, "style": {...}}}`. `base`: the preset the other members
 replace (`plain`), a member of `title` each; `style` replaces the
 whole style. An edge is a pattern, one glyph or several, repeated
 along it from the top or the left; glyphs of one cell only; four
@@ -843,12 +847,21 @@ border`. Given at `widget.declare` it is the connection's default
 (absent: kept); at `widget.show`, the widget's.
 
 Presets of the core: `plain` (thin, square, dim; the default), `round`,
-`heavy`, `double`, `ascii`, `none` (no border, no title: the outer
-size is the inner one). A draw extension adds presets
+`heavy`, `double`, `ascii`, `alert` (heavy, bright yellow, bold, not
+dim, the title too; a bright white chase: `len` 6, `ms` 50, `runs` 2),
+`none` (no border, no title: the outer size is the inner one). A draw extension adds presets
 (`DrawExt::borders`); `widget.borders` lists the names, the core's
 first. Extension `borders`: `painting` (gilt double frame, ticks along
 the edges), `baroque` (bronze, crossed corners, studded edges), `mat`
 (a pale mount of half blocks), `sketch` (dashed, rounded, dim).
+
+`chase`: `runs` runs of `len` border cells in that style (it replaces
+the border's), evenly spaced, go round the border clockwise, a cell
+every `ms` (20 to 10000; `len` 64, `runs` 16 at most; `len` 0: none),
+under the title. Played by the driver: the cell reached is the time
+over `ms` (`ChaseSpec::step`), no state; `next_wake` names the next
+step while a chased widget is drawn on a usable frame, and only then.
+A step is one content update of the sprite; no look.
 
 ### Layout
 
@@ -896,6 +909,38 @@ another:
   first cell, otherwise open, that turns quiet. A quiet screen costs
   nothing.
 
+### Modal
+
+`widget.show {modal: true}`: a widget that must be seen (the manager).
+
+- Layer `hud` when none is given: border and inside are opaque, in
+  front of the app's text.
+- Laid out as any widget, in a room. No room for any variant: it is
+  put **over** the text, with no look at the other widgets: the
+  largest variant whose outer size and the gap on both sides fit the
+  view; none: the largest that fits the view, no gap; none: the
+  smallest, clipped by the view. In the view less the gaps, on the
+  side `prefer` names, centred for `any`. The cells of the gap around
+  it (as far as the view goes) are blanked, opaque, by the same
+  sprite: the blackout moves and goes with the widget. In a room
+  there is no blackout.
+- It stays: never pressed, evicted, grown, nor shrunk for another,
+  and it shrinks none; text written under it is hidden. Laid out
+  again only when the view of its frame changes size, its declaration
+  changes, or it is shown again.
+- It is an obstacle to the others; a widget under a modal or its
+  blackout is pressed, and evicted after `evict_ms`.
+- Info: `"modal": true`, `"over"`: put over the text.
+
+### Hidden owners
+
+`Widgets::hide_owner(owner, hidden)` (`app.pause`): the widgets of
+that connection are not drawn (their sprites are removed; info
+`hidden`, as one without a room), keep their place and variant, are
+neither laid out nor pressed, and are no obstacle. Shown again: where
+they were; laid out again when another widget took the place, pressed
+as ever when text did. Contents set meanwhile are kept.
+
 The widget's sprite: frame and layer as shown, anchored in view cells,
 border and content in one `cells` content, owned by the connection.
 Hidden with its frame (not usable), back with it. It is listed by
@@ -911,7 +956,7 @@ another variant, hidden, gone.
 Widget info: `{"id","owner","tag","frame","state":"placed"|"hidden"|
 "gone","variant":name|null,"size":[w,h]|null,"rect":[x,y,w,h]|null,
 "sprite":id|null,"title","border":name|null,"variants":[{"name",
-"size"}]}`. `owner`: the connection. `frame`: null until a name is
+"size"}],"modal":bool,"over":bool}`. `owner`: the connection. `frame`: null until a name is
 resolved. `size`: inner, of the variant shown. `rect`: outer, screen
 cells. `title`: as drawn, `""` for none. `border`: null for one given
 as an object. Hidden or gone: `variant`, `size`, `rect`, `sprite`
@@ -948,7 +993,9 @@ at `app.start`; else the file name of `argv[0]`. `argv`: as started; of
 a client, `/proc/<pid>/cmdline` (empty when unreadable). `status`: of an
 exited child, 128 + signal when killed. `runs`: starts so far. `since`:
 seconds in the present state. `sprites`, `widgets`: those its
-connections own. `me`: the entry of the connection that asks.
+connections own. `frames`: the ids of the frames those are on, in
+order. `moves`: a connection of it is subscribed to `move`. `me`: the
+entry of the connection that asks.
 
 An exited child stays in the table (`exited`) until restarted or
 forgotten; 16 at most, the oldest forgotten first. A client that left is
@@ -965,6 +1012,7 @@ not kept.
 | `app.resume` | `app` | `{"app":info}` |
 | `app.restart` | `app`, `argv`, `name` (both optional: as before) | `{"app":info}`, at once; stopped as by `app.stop`, started again when it has ended, under the same id. A client: `not-usable` |
 | `app.forget` | `app` | `{}`; an exited child leaves the table; another state: `not-usable` |
+| `app.move` | `app`, `frame`: an id or a name, resolved at the call | `{"app":info,"frame":id}`; see Move |
 
 An unknown id: `no-sprite`, `no such app: N`, the hint naming the apps.
 An app may not stop, pause or restart itself (`me`): `not-usable`.
@@ -989,7 +1037,20 @@ connections is sent the snapshot of its topics (as `subscribe
 {snapshot}`); one subscribed to `text` gets a `text` event per frame on
 screen naming every row in view: an app that keeps the text reads it
 again. `Scene::hide_owner(owner, hidden, now)`,
-`Widgets::hide_owner(owner, hidden)`.
+`Widgets::hide_owner(owner, hidden)` (Widgets, Hidden owners).
+
+### Move
+
+An app that can change frame while it runs subscribes to the topic
+`move`: that is its word for it (`moves`). `app.move` sends each such
+connection the event `move`: `{"frame": id}`; the app moves what it
+drew: the driver moves nothing. Not `moves`, paused or exited:
+`not-usable`, the hint naming `ptyrc manage move --restart`. The topic
+is sent to the app moved only, never broadcast.
+
+Python: `_cli.follow` takes it (the sprite is updated to the frame, then
+followed there): `sand`, `rain`, `snow`; `_widgets.Deck` shows its tags
+again on the frame: `clock`, `monitor`. The others are restarted.
 
 ### Hotkey
 
@@ -1004,25 +1065,8 @@ words of `$PTYRC_HOTKEY`. `--no-hotkey` (`--no-demo` is read as it),
 
 ### Modal widgets
 
-`widget.show {modal: true}`: a widget that must be seen and takes the
-keyboard's attention (the manager).
-
-- Layer `hud` when none is given; the inside and the border are opaque
-  and in front of the app's text.
-- Laid out as any widget. When no room takes any of its variants it is
-  put **over** the text: the largest variant whose outer size and gap
-  fit the view of its frame (without the gap when none does; the
-  smallest, clipped, when none does), at `prefer` (`any`: centred); the
-  cells of the gap around it are blanked, opaque: the blackout. Info:
-  `"modal":true`, `"over":bool`.
-- It never shrinks another widget, is never pressed, evicted, grown nor
-  shrunk for another. It is laid out again when its frame's view
-  changes size, its declaration changes, or it is shown again. A modal
-  is an obstacle to the others.
-- Border member `"chase": {"len": 3, "ms": 80, "style": {...}}`: a run
-  of `len` border cells in that style goes round the border clockwise,
-  a cell every `ms`, played by the driver. Preset `alert`: heavy,
-  bright yellow, bold, not dim, a white chase; the title bold.
+`widget.show {modal: true}`, the border member `chase` and the preset
+`alert`: see "ptyrc-core: widgets", Modal and Borders.
 
 ### `ptyrc manage`
 
@@ -1036,6 +1080,9 @@ ptyrc manage pause   APP... | --all
 ptyrc manage resume  APP... | --all      (`unpause`)
 ptyrc manage restart APP [OPTION...]   options given: in place of the old
 ptyrc manage forget  APP... | --all     exited ones
+ptyrc manage move [--restart] APP FRAME   to that frame: live when it
+                                   `moves`, else restarted with `-f`
+ptyrc manage frames                the frames and the apps on each
 ptyrc manage log APP               what it wrote on stderr
 ptyrc manage --overlay             the menu in a modal widget (the hotkey)
 ```
@@ -1070,6 +1117,20 @@ widget of the session, border `alert`, variants 34x9, 48x13, 64x18,
   as typed lines; then `start` / `restart`. Restart with other options
   opens it filled from the `argv` running; words it does not know go to
   `more arguments`.
+- Frames (`f` on the main list, `frames…` among its rows): the
+  frames on screen, one a row: id, kind, size, key or preset, idle or
+  busy, and the apps on it (`app.list`, `frames`); beside or above the
+  list, a map of the screen: the rectangles of the panes to scale, the
+  selected one filled. In the overlay the selected frame is also shown
+  on the screen itself: a front tint over its view. enter on a frame:
+  the apps on it, then their actions.
+- Move (`m` on an app, `move to a frame…` among its actions): the same
+  list as a picker; enter moves it: `app.move` when it `moves`, its
+  state kept; else it is restarted with `-f FRAME` in place of the one
+  it had (`app.restart`, a child only; its state is not kept: the
+  picker says which of the two before enter). Besides the frames, the
+  names: `raw`, `active`, `largest`, `quietest`, `idle`. In the form the
+  option `-f` is chosen with the same picker.
 - A foot line names the keys of the screen. The list follows the topic
   `apps`. An app that ends within 400 ms of a start shows the last line
   of its log.
@@ -1574,11 +1635,11 @@ None on silence; both raise `PtyrcError` (`gone`) on a closed
 connection. Inside `batch()`, `text`, `find`, `sprites` and
 `Sprite.info` return a container filled when the batch is sent.
 `Cursor.pos`. Widgets: `Pilot.widget(tag, sizes, *, border=, title=,
-frame=, prefer=, fill=, layer=)` declares the tag and shows it: `sizes`
+frame=, prefer=, fill=, layer=, modal=)` declares the tag and shows it: `sizes`
 is a list of `(w, h)`, or a dict of names to `(w, h)`; it returns a
 `Widget`: `id`, `tag`, `info`, `variant` (the name shown, or None),
 `size`, `rect`, `set(rows, *, variant=, title=, **style)`, `hide()`,
-`placed`, `refresh()`, `update(info)` (the data of a `widgets` event;
+`placed`, `over`, `refresh()`, `update(info)` (the data of a `widgets` event;
 false for another widget's). `content=`: a function of `(w, h)`, the
 first rows of each variant. Rows are strings or rows of runs
 (`widget_content`). `Pilot.widgets()`: the infos; `Pilot.borders()`:
@@ -1741,7 +1802,9 @@ windows under the driver, one drawing per pane, sand in the idle one.
   (`ptyrc-core/src/widgets/tests.rs`): rooms against brute force,
   fill and centring, ranking, `prefer`, gap, cursor row, panel and
   changed cells, pressed and evicted, grown, two owners, declarations
-  replaced, borders and titles.
+  replaced, borders and titles, modals (over at each `prefer`, the
+  blackout, kept under text, a resize, an obstacle), the chase,
+  hidden owners.
 - `ptyrc-vt`: the repair property above; recorded streams of real programs.
 - `ptyrc-server`: headless end-to-end, a `Vt` fed with the host log stands
   for the host.

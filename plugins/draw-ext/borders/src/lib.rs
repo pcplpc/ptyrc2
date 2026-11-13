@@ -31,6 +31,7 @@ fn frame(corners: &str, edges: [&str; 4], style: StyleSpec, title: StyleSpec) ->
             style: title,
             ..TitleSpec::default()
         },
+        chase: None,
     }
 }
 
