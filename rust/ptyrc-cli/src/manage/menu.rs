@@ -146,10 +146,10 @@ pub struct AppInfo {
     pub frames: Vec<u64>,
     /// It changes frame while it runs (topic `move`).
     pub moves: bool,
-}
-
-fn file_name(path: &str) -> &str {
-    path.rsplit('/').next().unwrap_or(path)
+    /// As `manage::label`, `manage::options` (how many), `manage::is_manager`.
+    label: String,
+    options: usize,
+    manager: bool,
 }
 
 impl AppInfo {
@@ -179,34 +179,24 @@ impl AppInfo {
                 .filter_map(Value::as_u64)
                 .collect(),
             moves: value["moves"].as_bool().unwrap_or(false),
+            label: super::label(value),
+            options: super::options(value).len(),
+            manager: super::is_manager(value),
         })
     }
 
-    /// How many words of `argv` are the program and the name of the
-    /// app: `ptyrc-app bricks`, the words up to it included; else the
-    /// program alone.
+    /// How many words of `argv` come before the options: the program,
+    /// and the name of an app run by `ptyrc-app`.
     fn head(&self) -> usize {
-        let at = self.argv.iter().position(|a| file_name(a) == "ptyrc-app");
-        match at {
-            Some(at) if at + 1 < self.argv.len() => at + 2,
-            _ => self.argv.len().min(1),
-        }
+        self.argv.len() - self.options.min(self.argv.len())
     }
 
-    /// The name shown: the first word given to `ptyrc-app`; else the
-    /// name of the table; else the program.
+    /// The name shown (`manage::label`).
     pub fn label(&self) -> String {
-        let head = self.head();
-        if head >= 2 {
-            self.argv[head - 1].clone()
-        } else if !self.name.is_empty() {
-            self.name.clone()
-        } else {
-            (self.argv.first()).map_or_else(|| format!("pid {}", self.pid), |a| file_name(a).into())
-        }
+        self.label.clone()
     }
 
-    /// The arguments after the name.
+    /// The arguments after the name (`manage::options`).
     pub fn args(&self) -> &[String] {
         &self.argv[self.head()..]
     }
@@ -218,10 +208,7 @@ impl AppInfo {
 
     /// The manager itself, this one or another: not shown.
     pub fn is_manager(&self) -> bool {
-        let verb = self.argv.iter().position(|a| file_name(a) == "ptyrc");
-        self.me
-            || (self.child && self.name == "manage")
-            || verb.is_some_and(|at| self.argv.get(at + 1).is_some_and(|a| a == "manage"))
+        self.me || self.manager
     }
 }
 
@@ -259,25 +246,6 @@ impl FrameInfo {
 
 /// Names of frames an app may be given in place of an id.
 pub const FRAME_NAMES: [&str; 5] = ["raw", "active", "largest", "quietest", "idle"];
-
-/// `argv` with `-f FRAME` in place of the frame it named, after its
-/// first `head` words.
-pub fn with_frame(argv: &[String], head: usize, frame: &str) -> Vec<String> {
-    let head = head.min(argv.len());
-    let mut out = argv[..head].to_vec();
-    out.extend(["-f".to_string(), frame.to_string()]);
-    let mut rest = argv[head..].iter();
-    while let Some(word) = rest.next() {
-        if word == "-f" || word == "--frame" {
-            rest.next();
-        } else if !(word.starts_with("--frame=")
-            || word.starts_with("-f") && !word.starts_with("--") && word.len() > 2)
-        {
-            out.push(word.clone());
-        }
-    }
-    out
-}
 
 /// What a front does for the menu.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1268,7 +1236,7 @@ impl Menu {
                             true => Action::Move { id, frame },
                             false => Action::Restart {
                                 id,
-                                argv: Some(with_frame(&app.argv, app.head(), &frame)),
+                                argv: Some(super::with_frame(&app.argv, &frame)),
                             },
                         }];
                     }
@@ -1421,168 +1389,167 @@ impl Menu {
         };
         // What the screen is: title, rows, selection, keys, a hint.
         let mut hint: Option<String> = None;
-        let (title, rows, sel, keys): (String, Vec<Row>, Option<usize>, Keys) =
-            match screen {
-                Screen::Sessions { names, sel } => (
-                    "which session?".into(),
-                    names.iter().map(|n| vec![run(n.clone(), PLAIN)]).collect(),
-                    Some(*sel),
-                    vec![("↑↓ move", 1), ("enter choose", 1), ("esc leave", 0)],
-                ),
-                Screen::Main { sel, .. } => {
-                    let rows = self.main_rows(inner);
-                    let title = match self.session.as_str() {
-                        "" => "apps".to_string(),
-                        name => format!("apps of {name}"),
+        let (title, rows, sel, keys): (String, Vec<Row>, Option<usize>, Keys) = match screen {
+            Screen::Sessions { names, sel } => (
+                "which session?".into(),
+                names.iter().map(|n| vec![run(n.clone(), PLAIN)]).collect(),
+                Some(*sel),
+                vec![("↑↓ move", 1), ("enter choose", 1), ("esc leave", 0)],
+            ),
+            Screen::Main { sel, .. } => {
+                let rows = self.main_rows(inner);
+                let title = match self.session.as_str() {
+                    "" => "apps".to_string(),
+                    name => format!("apps of {name}"),
+                };
+                let on_app = matches!(self.entries().get(*sel), Some(Entry::App(_)));
+                let mut keys = vec![("↑↓ move", 1)];
+                if on_app {
+                    keys.extend([("enter open", 1), ("s start", 4), ("p pause", 2)]);
+                    keys.extend([("r restart", 5), ("e options", 6), ("x stop", 3)]);
+                    keys.extend([("m move", 6), ("l log", 7), ("f frames", 7)]);
+                } else {
+                    keys.extend([("enter open", 1), ("s start", 4), ("f frames", 5)]);
+                }
+                keys.push(("esc leave", 0));
+                (title, rows, Some(*sel), keys)
+            }
+            Screen::Actions { id, sel } => {
+                let app = self.info(*id);
+                let exited = app.is_some_and(|a| a.state == State::Exited);
+                let rows = (self.acts(*id).iter())
+                    .map(|act| {
+                        vec![
+                            run(format!("{:<34}", act.label(exited)), PLAIN),
+                            run(act.key(), DIM),
+                        ]
+                    })
+                    .collect();
+                let title = app.map_or_else(String::new, |a| {
+                    format!("{} {}", a.label(), line_of(a.args()))
+                });
+                hint = app.map(|a| self.state_line(a));
+                let keys = vec![("↑↓ move", 1), ("enter do", 1), ("esc back", 0)];
+                (title.trim().to_string(), rows, Some(*sel), keys)
+            }
+            Screen::Start { sel } => {
+                let apps = self.catalog.as_ref().map_or(&[][..], |c| &c.apps[..]);
+                let width = apps.iter().map(|a| len(&a.name)).max().unwrap_or(0);
+                let rows = (apps.iter())
+                    .map(|a| {
+                        vec![
+                            run(format!("{:<width$}", a.name), BOLD),
+                            run(format!("  {}", a.help), PLAIN),
+                        ]
+                    })
+                    .collect();
+                hint = apps.get(*sel).map(|a| a.help.clone());
+                let keys = vec![("↑↓ move", 1), ("enter options", 1), ("esc back", 0)];
+                ("start an app".into(), rows, Some(*sel), keys)
+            }
+            Screen::Form(form) => {
+                let rows = form_rows(form, inner);
+                let field = &form.fields[form.sel];
+                hint = Some(field.help.clone()).filter(|h| !h.is_empty());
+                let keys = if form.editing {
+                    vec![("type the value", 1), ("enter done", 0)]
+                } else {
+                    let change = match field.kind {
+                        FieldKind::Submit => "enter go",
+                        FieldKind::Flag { .. } => "space toggle",
+                        FieldKind::Count { .. } | FieldKind::Choice { .. } => "←→ change",
+                        _ => "enter edit",
                     };
-                    let on_app = matches!(self.entries().get(*sel), Some(Entry::App(_)));
-                    let mut keys = vec![("↑↓ move", 1)];
-                    if on_app {
-                        keys.extend([("enter open", 1), ("s start", 4), ("p pause", 2)]);
-                        keys.extend([("r restart", 5), ("e options", 6), ("x stop", 3)]);
-                        keys.extend([("m move", 6), ("l log", 7), ("f frames", 7)]);
-                    } else {
-                        keys.extend([("enter open", 1), ("s start", 4), ("f frames", 5)]);
+                    vec![("↑↓ move", 2), (change, 1), ("esc back", 0)]
+                };
+                let verb = match form.target {
+                    Target::Start => "start",
+                    Target::Restart { .. } => "restart",
+                };
+                let title = format!("{verb} {}: options", form.name);
+                // An edited row is not a bar: its cursor is.
+                let sel = (!form.editing).then_some(form.sel);
+                let mut all = self.body(title, rows, sel, keys, hint, w, h, Some(form.sel));
+                all.truncate(h);
+                return all;
+            }
+            Screen::Frames { sel, pick } => {
+                let choices = self.choices(pick.is_some());
+                let rows = choices.iter().map(|c| self.choice_row(*c)).collect();
+                let lit = match choices.get(*sel) {
+                    Some(Choice::Frame(id)) => Some(*id),
+                    _ => None,
+                };
+                let app = match pick {
+                    Some(Pick::Move(id)) => self.info(*id),
+                    _ => None,
+                };
+                let title = match (pick, app) {
+                    (Some(Pick::Move(_)), Some(app)) => format!("move {} to", app.label()),
+                    (Some(_), _) => "which frame?".to_string(),
+                    (None, _) => "frames".to_string(),
+                };
+                // Said before enter: what the move costs.
+                hint = match (pick, app, lit) {
+                    (Some(Pick::Move(_)), Some(app), _) if app.moves_live() => {
+                        Some("moves live: state kept".into())
                     }
-                    keys.push(("esc leave", 0));
-                    (title, rows, Some(*sel), keys)
-                }
-                Screen::Actions { id, sel } => {
-                    let app = self.info(*id);
-                    let exited = app.is_some_and(|a| a.state == State::Exited);
-                    let rows = (self.acts(*id).iter())
-                        .map(|act| {
-                            vec![
-                                run(format!("{:<34}", act.label(exited)), PLAIN),
-                                run(act.key(), DIM),
-                            ]
-                        })
-                        .collect();
-                    let title = app.map_or_else(String::new, |a| {
-                        format!("{} {}", a.label(), line_of(a.args()))
-                    });
-                    hint = app.map(|a| self.state_line(a));
-                    let keys = vec![("↑↓ move", 1), ("enter do", 1), ("esc back", 0)];
-                    (title.trim().to_string(), rows, Some(*sel), keys)
-                }
-                Screen::Start { sel } => {
-                    let apps = self.catalog.as_ref().map_or(&[][..], |c| &c.apps[..]);
-                    let width = apps.iter().map(|a| len(&a.name)).max().unwrap_or(0);
-                    let rows = (apps.iter())
-                        .map(|a| {
-                            vec![
-                                run(format!("{:<width$}", a.name), BOLD),
-                                run(format!("  {}", a.help), PLAIN),
-                            ]
-                        })
-                        .collect();
-                    hint = apps.get(*sel).map(|a| a.help.clone());
-                    let keys = vec![("↑↓ move", 1), ("enter options", 1), ("esc back", 0)];
-                    ("start an app".into(), rows, Some(*sel), keys)
-                }
-                Screen::Form(form) => {
-                    let rows = form_rows(form, inner);
-                    let field = &form.fields[form.sel];
-                    hint = Some(field.help.clone()).filter(|h| !h.is_empty());
-                    let keys = if form.editing {
-                        vec![("type the value", 1), ("enter done", 0)]
-                    } else {
-                        let change = match field.kind {
-                            FieldKind::Submit => "enter go",
-                            FieldKind::Flag { .. } => "space toggle",
-                            FieldKind::Count { .. } | FieldKind::Choice { .. } => "←→ change",
-                            _ => "enter edit",
-                        };
-                        vec![("↑↓ move", 2), (change, 1), ("esc back", 0)]
-                    };
-                    let verb = match form.target {
-                        Target::Start => "start",
-                        Target::Restart { .. } => "restart",
-                    };
-                    let title = format!("{verb} {}: options", form.name);
-                    // An edited row is not a bar: its cursor is.
-                    let sel = (!form.editing).then_some(form.sel);
-                    let mut all = self.body(title, rows, sel, keys, hint, w, h, Some(form.sel));
-                    all.truncate(h);
-                    return all;
-                }
-                Screen::Frames { sel, pick } => {
-                    let choices = self.choices(pick.is_some());
-                    let rows = choices.iter().map(|c| self.choice_row(*c)).collect();
-                    let lit = match choices.get(*sel) {
-                        Some(Choice::Frame(id)) => Some(*id),
-                        _ => None,
-                    };
-                    let app = match pick {
-                        Some(Pick::Move(id)) => self.info(*id),
-                        _ => None,
-                    };
-                    let title = match (pick, app) {
-                        (Some(Pick::Move(_)), Some(app)) => format!("move {} to", app.label()),
-                        (Some(_), _) => "which frame?".to_string(),
-                        (None, _) => "frames".to_string(),
-                    };
-                    // Said before enter: what the move costs.
-                    hint = match (pick, app, lit) {
-                        (Some(Pick::Move(_)), Some(app), _) if app.moves_live() => {
-                            Some("moves live: state kept".into())
-                        }
-                        (Some(Pick::Move(_)), _, _) => Some("restarts there: state lost".into()),
-                        (Some(Pick::Field), _, _) => Some("the frame it starts on".into()),
-                        (None, _, Some(id)) => {
-                            let frame = self.frames.iter().find(|f| f.id == id);
-                            frame.map(|f| f.what.clone()).filter(|w| !w.is_empty())
-                        }
-                        (None, _, None) => None,
-                    };
-                    let enter = match pick {
-                        Some(Pick::Move(_)) => "enter move",
-                        Some(Pick::Field) => "enter choose",
-                        None => "enter apps",
-                    };
-                    let keys = vec![("↑↓ move", 1), (enter, 1), ("esc back", 0)];
-                    let inner = w - 2;
-                    let ruled = usize::from(h >= 12);
-                    let side = match inner {
-                        74.. => screen_map(&self.frames, lit, 34, h.saturating_sub(3 + ruled)),
-                        60.. => screen_map(&self.frames, lit, 26, h.saturating_sub(3 + ruled)),
-                        44.. => screen_map(&self.frames, lit, 16, h.saturating_sub(3 + ruled)),
-                        _ => Vec::new(),
-                    };
-                    return self.body_beside(
-                        title,
-                        rows,
-                        Some(*sel),
-                        keys,
-                        hint,
-                        w,
-                        h,
-                        Some(*sel),
-                        side,
-                    );
-                }
-                Screen::FrameApps { frame, sel } => {
-                    let on = self.apps_on(*frame);
-                    let mut rows: Vec<Row> = on.iter().map(|a| self.app_row(a, inner)).collect();
-                    let sel = match rows.is_empty() {
-                        true => {
-                            rows.push(vec![run("no app draws on this frame", DIM)]);
-                            None
-                        }
-                        false => Some((*sel).min(rows.len() - 1)),
-                    };
-                    let keys = vec![("↑↓ move", 1), ("enter actions", 1), ("esc back", 0)];
-                    (format!("apps on frame {frame}"), rows, sel, keys)
-                }
-                Screen::Log { title, lines, top } => {
-                    let rows: Vec<Row> = match lines.is_empty() {
-                        true => vec![vec![run("nothing was written", DIM)]],
-                        false => lines.iter().map(|l| vec![run(l.clone(), PLAIN)]).collect(),
-                    };
-                    let keys = vec![("↑↓ scroll", 1), ("esc back", 0)];
-                    return self.body(title.clone(), rows, None, keys, None, w, h, Some(*top));
-                }
-            };
+                    (Some(Pick::Move(_)), _, _) => Some("restarts there: state lost".into()),
+                    (Some(Pick::Field), _, _) => Some("the frame it starts on".into()),
+                    (None, _, Some(id)) => {
+                        let frame = self.frames.iter().find(|f| f.id == id);
+                        frame.map(|f| f.what.clone()).filter(|w| !w.is_empty())
+                    }
+                    (None, _, None) => None,
+                };
+                let enter = match pick {
+                    Some(Pick::Move(_)) => "enter move",
+                    Some(Pick::Field) => "enter choose",
+                    None => "enter apps",
+                };
+                let keys = vec![("↑↓ move", 1), (enter, 1), ("esc back", 0)];
+                let inner = w - 2;
+                let ruled = usize::from(h >= 12);
+                let side = match inner {
+                    74.. => screen_map(&self.frames, lit, 34, h.saturating_sub(3 + ruled)),
+                    60.. => screen_map(&self.frames, lit, 26, h.saturating_sub(3 + ruled)),
+                    44.. => screen_map(&self.frames, lit, 16, h.saturating_sub(3 + ruled)),
+                    _ => Vec::new(),
+                };
+                return self.body_beside(
+                    title,
+                    rows,
+                    Some(*sel),
+                    keys,
+                    hint,
+                    w,
+                    h,
+                    Some(*sel),
+                    side,
+                );
+            }
+            Screen::FrameApps { frame, sel } => {
+                let on = self.apps_on(*frame);
+                let mut rows: Vec<Row> = on.iter().map(|a| self.app_row(a, inner)).collect();
+                let sel = match rows.is_empty() {
+                    true => {
+                        rows.push(vec![run("no app draws on this frame", DIM)]);
+                        None
+                    }
+                    false => Some((*sel).min(rows.len() - 1)),
+                };
+                let keys = vec![("↑↓ move", 1), ("enter actions", 1), ("esc back", 0)];
+                (format!("apps on frame {frame}"), rows, sel, keys)
+            }
+            Screen::Log { title, lines, top } => {
+                let rows: Vec<Row> = match lines.is_empty() {
+                    true => vec![vec![run("nothing was written", DIM)]],
+                    false => lines.iter().map(|l| vec![run(l.clone(), PLAIN)]).collect(),
+                };
+                let keys = vec![("↑↓ scroll", 1), ("esc back", 0)];
+                return self.body(title.clone(), rows, None, keys, None, w, h, Some(*top));
+            }
+        };
         self.body(title, rows, sel, keys, hint, w, h, sel)
     }
 

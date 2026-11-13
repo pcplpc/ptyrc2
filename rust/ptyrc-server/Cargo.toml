@@ -11,6 +11,6 @@ ptyrc-core.workspace = true
 ptyrc-proto.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-rustix = { version = "1", features = ["termios", "pty", "process", "event", "fs", "stdio"] }
+rustix = { version = "1", features = ["termios", "pty", "process", "event", "fs", "stdio", "net"] }
 libc = "0.2"
 signal-hook = "0.4"

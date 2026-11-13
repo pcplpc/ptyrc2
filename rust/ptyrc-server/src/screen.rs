@@ -799,6 +799,46 @@ impl Engine for ScreenEngine {
         }
     }
 
+    fn hide_owner(&mut self, conn: ConnId, hidden: bool, ctx: &mut Ctx) {
+        self.scene.hide_owner(conn.0, hidden, ctx.now());
+        self.widgets.hide_owner(conn.0, hidden);
+        self.widgets.touch();
+        ctx.request_repaint();
+    }
+
+    fn owned(&self, conn: ConnId) -> crate::engine::Owned {
+        let mut owned = crate::engine::Owned::default();
+        for sprite in self.scene.list().iter().filter(|s| s.owner == conn.0) {
+            owned.sprites += 1;
+            owned.frames.extend(sprite.frame);
+        }
+        for widget in self.widgets.list().iter().filter(|w| w.owner == conn.0) {
+            owned.widgets += 1;
+            owned.frames.extend(widget.frame);
+        }
+        owned
+    }
+
+    fn resume_events(&mut self, topic: &str, now: Duration) -> Vec<Value> {
+        if topic != "text" {
+            return self.snapshot(topic, now);
+        }
+        // Every row in view, as changed: who keeps the text reads it again.
+        let on_screen =
+            |info: &ptyrc_core::frames::FrameInfo| info.state != ptyrc_core::FrameState::Inactive;
+        let event = |info: ptyrc_core::frames::FrameInfo| {
+            let [_, _, _, h] = info.rect;
+            let rows: Vec<i64> = (0..h as i64).map(|i| info.origin[1] + i).collect();
+            json!({"frame": info.id, "rows": rows, "origin": info.origin, "rect": info.rect})
+        };
+        self.frames
+            .list()
+            .into_iter()
+            .filter(on_screen)
+            .map(event)
+            .collect()
+    }
+
     fn stall_wake(&self) -> Option<std::time::Instant> {
         self.waits.iter().map(|w| w.real_deadline).min()
     }

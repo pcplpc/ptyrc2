@@ -13,7 +13,7 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 /// An app that ends this soon after its start did not start.
-pub const EARLY: Duration = Duration::from_millis(400);
+pub const EARLY: Duration = super::START_WAIT;
 /// Lines of a log shown.
 const LOG_LINES: usize = 200;
 
@@ -187,8 +187,6 @@ impl<B: Backend> Runner<B> {
 /// A session of a driver, as the menu's backend.
 pub struct Session {
     pub client: Client,
-    /// `ptyrc-app`, when there is one.
-    program: Option<String>,
     /// The frames last read: a highlight is of the size of its view.
     frames: Vec<FrameInfo>,
     /// Highlights are drawn (the overlay); the sprite of the one shown.
@@ -198,10 +196,9 @@ pub struct Session {
 
 impl Session {
     pub fn new(client: Client) -> (Session, Option<Catalog>) {
-        let (program, catalog) = catalog::load().unzip();
+        let catalog = catalog::load();
         let session = Session {
             client,
-            program,
             frames: Vec::new(),
             lights: false,
             light: None,
@@ -224,8 +221,7 @@ impl Session {
 
 impl Backend for Session {
     fn apps(&mut self) -> Result<Vec<AppInfo>, Fail> {
-        let list = self.call("app.list", json!({}))?;
-        let apps = list["apps"].as_array().map_or(&[][..], Vec::as_slice);
+        let apps = super::list(&mut self.client)?;
         Ok(apps.iter().filter_map(AppInfo::from_json).collect())
     }
 
@@ -237,9 +233,9 @@ impl Backend for Session {
     }
 
     fn start(&mut self, name: &str, args: &[String]) -> Result<u64, Fail> {
-        let program = self.program.clone().ok_or("ptyrc-app was not found")?;
-        let mut argv = vec![program, name.to_string()];
-        argv.extend_from_slice(args);
+        let mut words = vec![name.to_string()];
+        words.extend_from_slice(args);
+        let (argv, name) = super::app_argv(&words)?;
         let started = self.call("app.start", json!({"argv": argv, "name": name}))?;
         started["app"]["id"]
             .as_u64()

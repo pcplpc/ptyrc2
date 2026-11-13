@@ -128,7 +128,7 @@ impl Catalog {
 
 /// `ptyrc-app`, found as by `ptyrc app`, and its catalog. `None`: no
 /// `ptyrc-app`, or one that has no catalog.
-pub fn load() -> Option<(String, Catalog)> {
+pub fn load() -> Option<Catalog> {
     let program = apps::program(apps::APP)?;
     let output = Command::new(&program)
         .arg("--catalog")
@@ -138,7 +138,7 @@ pub fn load() -> Option<(String, Catalog)> {
         .ok()?;
     let json = String::from_utf8(output.stdout).ok()?;
     let catalog = Catalog::parse(&json).ok()?;
-    (output.status.success() && !catalog.apps.is_empty()).then_some((program, catalog))
+    (output.status.success() && !catalog.apps.is_empty()).then_some(catalog)
 }
 
 #[cfg(test)]

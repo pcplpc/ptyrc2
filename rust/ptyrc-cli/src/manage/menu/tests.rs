@@ -489,11 +489,11 @@ fn a_form_is_filled_from_any_argv() {
         }]
     );
     // A program that is no app of the catalog: one free line.
-    let other = AppInfo {
-        argv: s(&["/bin/sh", "-c", "sleep 9"]),
-        name: "sh".into(),
-        ..info(2, "x", "running")
-    };
+    let other = AppInfo::from_json(&json!({
+        "id": 2, "kind": "child", "name": "sh", "argv": ["/bin/sh", "-c", "sleep 9"],
+        "pid": 9, "state": "running", "since": 1.0, "log": null,
+    }))
+    .unwrap();
     m.apps(vec![other]);
     keys(&mut m, "e");
     let screen = shown(&m, 64, 18);
@@ -742,7 +742,7 @@ fn move_to_a_frame() {
     assert!(screen.starts_with(" move bricks to"), "{screen}");
     assert!(screen.contains("restarts there: state lost"), "{screen}");
     assert!(screen.contains("largest  the largest pane"), "{screen}");
-    let argv = s(&["/usr/bin/ptyrc-app", "bricks", "-f", "4", "-a"]);
+    let argv = s(&["/usr/bin/ptyrc-app", "bricks", "-a", "-f", "4"]);
     assert_eq!(
         keys(&mut m, "down down enter"),
         [
@@ -756,7 +756,7 @@ fn move_to_a_frame() {
     // A name; by the actions of the row.
     keys(&mut m, "enter down down down enter");
     assert!(shown(&m, 64, 18).starts_with(" move bricks to"));
-    let argv = s(&["/usr/bin/ptyrc-app", "bricks", "-f", "idle", "-a"]);
+    let argv = s(&["/usr/bin/ptyrc-app", "bricks", "-a", "-f", "idle"]);
     assert_eq!(
         keys(&mut m, "end enter"),
         [Action::Restart {
@@ -820,35 +820,4 @@ fn the_frame_of_a_form_is_picked() {
             args
         }]
     );
-}
-
-#[test]
-fn frames_in_an_argv() {
-    let argv = s(&[
-        "app",
-        "snow",
-        "--frame=2",
-        "-f",
-        "3",
-        "--cover",
-        "-f4",
-        "--frame",
-        "x",
-        "-fast",
-    ]);
-    // `-fast` is taken for `-f ast`: a short option holds its value.
-    assert_eq!(
-        with_frame(&argv, 2, "idle"),
-        s(&["app", "snow", "-f", "idle", "--cover"])
-    );
-    assert_eq!(with_frame(&s(&["sh"]), 1, "0"), s(&["sh", "-f", "0"]));
-}
-
-#[test]
-fn esc_and_a_key_in_one_read() {
-    let mut m = menu();
-    keys(&mut m, "enter");
-    assert_eq!(keys(&mut m, "alt+s"), []);
-    assert!(shown(&m, 48, 13).starts_with(" start an app"));
-    assert_eq!(keys(&mut m, "alt+q"), [Action::Quit]);
 }

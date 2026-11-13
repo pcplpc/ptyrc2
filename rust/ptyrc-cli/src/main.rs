@@ -110,10 +110,10 @@ enum Verb {
     },
     /// Run a client app: `ptyrc app bricks`; `ptyrc app` lists them
     App(apps::App),
-    /// The apps of a session: start, stop, pause, restart; a menu
-    Manage(manage::Manage),
     /// An interactive Python session with `pilot` connected
     Python(apps::Python),
+    /// The apps of the session: start, stop, pause, restart; alone, a menu
+    Manage(manage::Manage),
     /// A running tmux session under ptyrc: `ptyrc tmux attach`, `detach`
     #[command(subcommand)]
     Tmux(tmux::Tmux),
@@ -123,7 +123,8 @@ enum Verb {
     /// Print events, one JSON object per line
     Events {
         /// screen, cursor, frames, text, idle, draw, input, mouse, size,
-        /// colors, widgets, exit [default: all but mouse]
+        /// colors, widgets, apps, move, exit [default: all but mouse
+        /// and move]
         topics: Vec<String>,
         /// The state now as the first events (cursor, frames, idle, size,
         /// widgets)
@@ -169,9 +170,9 @@ struct Run {
     /// Record what is typed too (passwords included)
     #[arg(long, requires = "record")]
     record_input: bool,
-    /// No demo: ctrl+t twice in a row is the app's, as any key
-    #[arg(long)]
-    no_demo: bool,
+    /// No hotkey: ctrl+t twice in a row is the app's, as any key
+    #[arg(long, alias = "no-demo")]
+    no_hotkey: bool,
     /// Run a client app on the session from the start: `--app bricks`,
     /// `--app "snow -a"`; repeatable
     #[arg(long, value_name = "APP")]
@@ -417,27 +418,30 @@ fn verb_run(args: Run) -> Result<ExitCode, Fail> {
         record_input: args.record_input,
         presets: !args.no_presets && !args.transparent,
         // Nothing is drawn on a transparent stream.
-        demo: (!args.no_demo && !args.transparent).then(|| demo_command(None)),
+        hotkey: (!args.no_hotkey && !args.transparent).then(hotkey_command),
         handoff: false,
         apps,
+        transparent: args.transparent,
     };
     let exit = ptyrc_server::run(config, plugins::engine(args.transparent, !args.no_presets))?;
     Ok(ExitCode::from(exit.status.clamp(0, 255) as u8))
 }
 
-/// What the demo runs: the words of `$PTYRC_DEMO`; else `ptyrc-app demo`,
-/// `ptyrc-app` being `program`, or found as by `ptyrc app`.
-pub fn demo_command(program: Option<&str>) -> Vec<String> {
-    let words = std::env::var("PTYRC_DEMO").unwrap_or_default();
+/// What ctrl+t ctrl+t runs: the words of `$PTYRC_HOTKEY`; else the menu
+/// of this binary in a modal widget, `ptyrc manage --overlay`.
+pub fn hotkey_command() -> Vec<String> {
+    let words = std::env::var("PTYRC_HOTKEY").unwrap_or_default();
     let words: Vec<String> = words.split_whitespace().map(str::to_string).collect();
     if !words.is_empty() {
         return words;
     }
-    let program = program
-        .map(str::to_string)
-        .or_else(|| apps::program(apps::APP))
-        .unwrap_or_else(|| apps::APP.into());
-    vec![program, "demo".into()]
+    let exe = std::env::current_exe().ok();
+    let exe = exe.and_then(|p| p.into_os_string().into_string().ok());
+    vec![
+        exe.unwrap_or_else(|| "ptyrc".into()),
+        "manage".into(),
+        "--overlay".into(),
+    ]
 }
 
 fn verb_ls(common: &Common) -> Result<ExitCode, Fail> {
@@ -486,8 +490,10 @@ fn verb_ls(common: &Common) -> Result<ExitCode, Fail> {
 fn verb_events(common: &Common, topics: Vec<String>, snapshot: bool) -> Result<ExitCode, Fail> {
     let mut client = connect(common)?;
     let topics: Vec<&str> = if topics.is_empty() {
-        // The mouse is asked of the host only when named.
-        TOPICS.iter().copied().filter(|t| *t != "mouse").collect()
+        // The mouse is asked of the host only when named; `move` is the
+        // word of an app that moves.
+        let asked = |t: &&str| !["mouse", "move"].contains(t);
+        TOPICS.iter().copied().filter(asked).collect()
     } else {
         topics.iter().map(String::as_str).collect()
     };

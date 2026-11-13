@@ -70,7 +70,7 @@ pub fn run(client: Client) -> Result<ExitCode, Fail> {
     client.call("widget.declare", json!({"widgets": variants}))?;
     let show = json!({
         "tag": TAG, "modal": true, "border": "alert", "prefer": "center",
-        "fill": 0.8, "title": "ptyrc manage",
+        "fill": 1.0, "title": "manage",
     });
     let info = client.call("widget.show", show)?;
     let mut shown = Shown {

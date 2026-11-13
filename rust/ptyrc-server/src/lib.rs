@@ -5,8 +5,8 @@
 //! The driver is transparent plumbing. What is drawn and what the protocol
 //! methods answer is the `Engine`'s business.
 
+mod apps;
 mod conn;
-mod demo;
 pub mod driver;
 pub mod engine;
 mod grab;
@@ -14,6 +14,7 @@ pub use grab::{key_len, name as key_name};
 mod hints;
 pub mod host;
 pub mod hostcolors;
+mod hotkey;
 pub mod keys;
 pub mod mouse;
 mod paging;
@@ -27,7 +28,7 @@ mod screen_tests;
 pub mod start;
 
 pub use driver::{Config, Exit, replay, run};
-pub use engine::{ConnId, Ctx, Engine, PassThrough, Reply, SessionInfo, Token};
+pub use engine::{ConnId, Ctx, Engine, Owned, PassThrough, Reply, SessionInfo, Token};
 pub use player::Replay;
 pub use record::Tape;
 pub use screen::ScreenEngine;

@@ -15,13 +15,11 @@ use ptyrc_tui_tmux::server::{OPTION, OPTION_ERROR, Server, Session, session_name
 use serde_json::json;
 use std::io::IsTerminal;
 use std::os::unix::process::CommandExt;
-use std::process::{Command, ExitCode, Stdio};
+use std::process::{Command, ExitCode};
 use std::time::{Duration, Instant};
 
 /// How long a swap may take.
 const SWAP_WAIT: Duration = Duration::from_secs(5);
-/// How long an app is watched for an early end.
-const APP_WAIT: Duration = Duration::from_millis(400);
 
 #[derive(Subcommand)]
 pub enum Tmux {
@@ -138,36 +136,30 @@ fn wait_for<T>(mut look: impl FnMut() -> Option<T>) -> Option<T> {
     }
 }
 
-/// Run `ptyrc-app WORDS` on the session `name`, left behind: it ends with
-/// the session. An app that ends at once with an error is one.
+/// Start `ptyrc-app WORDS` as children of the driver `name`. An app
+/// that ends at once with an error is one.
 fn start_apps(program: &str, apps: &[String], name: &str) -> Result<(), Fail> {
-    let spawn = |app: &String| {
-        Command::new(program)
-            .args(app.split_whitespace())
-            .env(session::ENV_SESSION, name)
-            .env_remove(session::ENV_SOCKET)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .process_group(0)
-            .spawn()
-            .map_err(|e| fail(5, format!("{program}: {e}"), ""))
+    if apps.is_empty() {
+        return Ok(());
+    }
+    let named = Common {
+        session: Some(name.to_string()),
+        json: false,
     };
-    let mut children = apps.iter().map(spawn).collect::<Result<Vec<_>, _>>()?;
-    let deadline = Instant::now() + APP_WAIT;
-    while Instant::now() < deadline {
-        for (app, child) in apps.iter().zip(&mut children) {
-            if let Ok(Some(status)) = child.try_wait()
-                && !status.success()
-            {
-                return Err(fail(
-                    1,
-                    format!("app `{app}` ended at once"),
-                    &format!("try it: ptyrc -s {name} app {app}"),
-                ));
-            }
-        }
-        std::thread::sleep(Duration::from_millis(10));
+    let mut driver = connect(&named)?;
+    for app in apps {
+        let mut argv = vec![program.to_string()];
+        argv.extend(app.split_whitespace().map(str::to_string));
+        let label = argv.get(1).cloned().unwrap_or_default();
+        crate::manage::start(&mut driver, &argv, &label).map_err(|e| match e.status {
+            1 => fail(
+                1,
+                format!("app `{app}` ended at once"),
+                &e.hint
+                    .unwrap_or_else(|| format!("try it: ptyrc -s {name} app {app}")),
+            ),
+            _ => e,
+        })?;
     }
     Ok(())
 }
@@ -346,7 +338,7 @@ fn wrap(args: Wrap) -> Result<ExitCode, Fail> {
     let config = ptyrc_server::Config {
         argv: plain.clone(),
         name: Some(name.clone()),
-        demo: Some(crate::demo_command(program.as_deref())),
+        hotkey: Some(crate::hotkey_command()),
         apps: args.app.iter().map(command).collect(),
         handoff: true,
         ..Default::default()

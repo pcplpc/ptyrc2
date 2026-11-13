@@ -202,6 +202,6 @@ fn events_and_frames() {
     r.event("apps", &serde_json::Value::Null);
     keys(&mut r, "m home enter", t0);
     let asked = &r.backend.asked;
-    assert_eq!(asked[0], "restart 1 /usr/bin/ptyrc-app bricks -f idle -a");
+    assert_eq!(asked[0], "restart 1 /usr/bin/ptyrc-app bricks -a -f idle");
     assert_eq!(asked[1], "move 1 0");
 }

@@ -393,6 +393,62 @@ class Tools:
         """Give the grabbed keys back to the app."""
         self.call("input.release")
 
+    def apps(self) -> list[dict[str, Any]]:
+        """The apps of the session, by id: the programs the driver started
+        (`kind` `child`) and the processes connected from elsewhere
+        (`client`). `id`, `kind`, `name`, `argv`, `pid`, `state`
+        (`running`, `paused`, `exited`), `status`, `runs`, `since`,
+        `conns`, `sprites`, `widgets`, `frames`, `moves`, `log`, `me`."""
+        return self.call("app.list")["apps"]
+
+    def app_start(
+        self, argv: Sequence[str], *, name: str | None = None
+    ) -> dict[str, Any]:
+        """Start `argv` as a child of the driver; its info. `name`: the
+        file name of `argv[0]` when absent."""
+        params: dict[str, Any] = {"argv": list(argv)}
+        if name is not None:
+            params["name"] = name
+        return self.call("app.start", **params)["app"]
+
+    def app_stop(self, app: int) -> dict[str, Any]:
+        """SIGTERM, SIGKILL after 2 s. The info, at once."""
+        return self.call("app.stop", app=app)["app"]
+
+    def app_pause(self, app: int) -> dict[str, Any]:
+        """Freeze the app and hide what it draws."""
+        return self.call("app.pause", app=app)["app"]
+
+    def app_resume(self, app: int) -> dict[str, Any]:
+        """Let a paused app go on, shown again."""
+        return self.call("app.resume", app=app)["app"]
+
+    def app_restart(
+        self,
+        app: int,
+        *,
+        argv: Sequence[str] | None = None,
+        name: str | None = None,
+    ) -> dict[str, Any]:
+        """Stop a child and start it again when it has ended, under the
+        same id; `argv`, `name`: as before when absent. The info, at
+        once."""
+        params: dict[str, Any] = {"app": app}
+        if argv is not None:
+            params["argv"] = list(argv)
+        if name is not None:
+            params["name"] = name
+        return self.call("app.restart", **params)["app"]
+
+    def app_forget(self, app: int) -> None:
+        """Drop an exited child from the table."""
+        self.call("app.forget", app=app)
+
+    def app_move(self, app: int, frame: int | str) -> int:
+        """Tell an app that moves by itself (`moves`: subscribed to
+        `move`) to go to `frame`; the id of the frame."""
+        return self.call("app.move", app=app, frame=frame)["frame"]
+
     def shown(
         self,
         frame: int | str | None = None,
