@@ -10,7 +10,7 @@ with the love of a human, but now with slop and unreviewed code.
 The initial goal was to wrap a CLI application like [`vim`](https://vim.org) to
 add confetti to its output.
 
-![confetti](doc/confetti.gif) # TODO make a new one
+![confetti](doc/confetti-all.gif)
 
 # Quick setup
 
@@ -64,7 +64,31 @@ If no pilot is attached `ctrl+t ctrl+t` twice starts an app at random.
 
 ## Gallery
 
-`# TODO one per beautiful custom app we have`
+### fishes
+
+![fishes](doc/fishes.gif)
+
+### rain
+
+![rain](doc/rain.gif)
+
+### snow
+
+![sand](doc/sand.gif)
+
+### sand
+
+![sand](doc/sand.gif)
+
+### misc
+
+Showcase of manual piloting with an interactive shell:
+
+![pilot](doc/interact.gif)
+
+Use `ctrl+t ctrl+t` to start apps in idle drivers:
+
+![ctrl-t](doc/ctrl-t.gif)
 
 ## Development
 
