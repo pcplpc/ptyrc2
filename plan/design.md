@@ -1100,7 +1100,8 @@ Unix stream socket `$XDG_RUNTIME_DIR/ptyrc/<session>.sock` (directory 0700,
 socket 0600), `/tmp/ptyrc-<uid>/` without `XDG_RUNTIME_DIR`. `<session>` is
 `--name` or the driver pid. The driver exports `PTYRC_SESSION` and
 `PTYRC_SOCKET` to the app. A client picks, in order: `--session` /
-`PTYRC_SESSION`, else the only live session, else fails with the list.
+`PTYRC_SESSION`, else the live session its tmux session names (`@ptyrc`,
+see `ptyrc tmux`), else the only live session, else fails with the list.
 
 UTF-8 JSON, one object per line. Version 1.
 
@@ -1125,9 +1126,10 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 
 | method | params | result |
 |---|---|---|
-| `session.info` | | hello data, `alt_screen`, `title`, `driver_pid`, `headless`, `grabbed`, `tape` (a replay), `"modes":{"app_cursor","bracketed_paste","mouse":[1000,...],"mouse_sgr"}`, `"host_colors":{"fg","bg","from":{"fg","bg"}}` (`from`: `host`, `option`, `client`, `default`) |
+| `session.info` | | hello data, `alt_screen`, `title`, `driver_pid`, `headless`, `grabbed`, `handoff` (a successor waits), `tape` (a replay), `"modes":{"app_cursor","bracketed_paste","mouse":[1000,...],"mouse_sgr"}`, `"host_colors":{"fg","bg","from":{"fg","bg"}}` (`from`: `host`, `option`, `client`, `default`) |
 | `session.resize` | `size`: `[c, r]` | `{}`; headless only |
 | `session.colors` | `fg`, `bg`, `ask` | `host_colors`, and `asked`; see Rendering |
+| `session.handoff` | `hangup` (true) | `{}`; the end of the app is a handoff: the driver ends as ever, then its caller puts a successor on the host terminal. `hangup`: SIGHUP to the app, SIGKILL after 1 s; false: the client makes the app leave. `bad-request` without a successor (`ptyrc run`) |
 | `screen.text` | `frame`, `rect`, `ansi`, `sprites` | `{"lines":[...],"size":[c,r],"rect":[x,y,w,h]}` |
 | `screen.cells` | `frame`, `rect`, `sprites` | `{"rows":[[run,...],...],"size":[c,r],"rect":[x,y,w,h]}` |
 | `screen.find` | `pattern`, `regex`, `ignore_case`, `frame`, `known` | `{"matches":[{"frame","x","y","len","text","screen":[c,r]\|null}]}` |
@@ -1252,6 +1254,8 @@ ptyrc call METHOD [JSON]          raw request
 ptyrc app [NAME [OPTION...]]      a client app: `ptyrc-app NAME...`
 ptyrc python [FILE [ARG...]]      Python with `pilot` connected:
       a console, or FILE run as `__main__`
+ptyrc tmux attach [-t SESSION] [-L NAME | -S PATH] [--app APP]...
+ptyrc tmux detach [-t SESSION] [-L NAME | -S PATH]
 ```
 
 `ptyrc app` executes `ptyrc-app` with its arguments as given, `ptyrc
@@ -1267,6 +1271,51 @@ end. Repeatable. Not with `--transparent` (status 2); no `ptyrc-app`:
 status 127, nothing runs. The options of `run` come before the program: a
 first word that starts with `-` is one (unknown: status 2); `--` before a
 program that does.
+
+### tmux
+
+`ptyrc tmux attach` puts a driver under a running tmux session; `ptyrc
+tmux detach` takes it away. The session stays in the tmux server: only
+its client is replaced, on the same terminal. Windows, panes and size
+are those of before; the screen is redrawn once.
+
+- The session: `-t`, else the one of the pane the verb runs in
+  (`$TMUX_PANE`), else the one tmux takes. The server: `-S`, `-L`, else
+  that of `$TMUX`, else tmux's default.
+- `attach`: the client of the session last active is replaced
+  (`detach-client -E`) by `ptyrc tmux wrap` (hidden): a driver named
+  `tmux-<session>` (`-2`, `-3`... when taken; what a name cannot hold is
+  `_`) whose app is `tmux attach-session -t <id>`, as `ptyrc run` with
+  its defaults. The verb returns when the driver answers, 5 s at most.
+  The tmux session names the driver in its option `@ptyrc`, unset when
+  the driver ends: client verbs typed in a pane need no `-s`.
+- No client on the session and a terminal that is not a pane of its
+  server: the driver starts here, in place of the verb. In a pane, or
+  without a terminal: status 3.
+- Attached already: nothing is replaced, status 0. One driver per tmux
+  session.
+- `--app APP`: `ptyrc-app` with the words of APP on the session, once
+  the driver answers, and on a session attached already; left behind,
+  it ends with the driver. One that ends within 400 ms with an error:
+  status 1, the session stays attached. No `ptyrc-app`: status 127,
+  nothing is replaced.
+- `detach`: `session.handoff`, then the client leaves through tmux,
+  without a word on the terminal (hung up when tmux does not know it);
+  the driver ends and executes a plain `tmux attach-session` in its
+  place. Not attached: status 0, nothing is done. `-s` names the driver.
+- Detached by tmux (`prefix d`), or the session killed: the driver ends
+  with its client, as tmux would; nothing takes its place.
+- The driver that does not start, or that breaks: a plain client is
+  executed in its place, and `attach` fails with its message (status 5,
+  carried by the option `@ptyrc-error`). The terminal is never left
+  without a client by a failure of ptyrc.
+- The hooks `client-detached` and `client-attached` of tmux run at each
+  replacement. Other clients of the session are not touched.
+- Code: `ptyrc-cli/src/tmux.rs` (the verbs), `ptyrc-tui-tmux::server`
+  (the tmux server, asked through the `tmux` program),
+  `ptyrc-proto::session` and `ptyrc._wire` (`@ptyrc`). The one place
+  where the binary and the clients name a program: decided with the
+  owner.
 
 ### Errors
 
@@ -1456,6 +1505,11 @@ windows under the driver, one drawing per pane, sand in the idle one.
 - `scripts/e2e-render.sh`: the driver in a detached tmux; what tmux shows
   is compared, text and styles, with the driver's model of the host.
 - `scripts/e2e-heat.sh`: heat classes and idle on a shell, vim and htop.
+- `scripts/e2e-tmux-attach.sh`: `ptyrc tmux attach` and `detach` on two
+  private tmux servers, one for the terminal: the swap and what the
+  terminal shows, the session found from a pane, apps, `prefix d`, the
+  verbs typed in a pane, the driver that does not start, the terminal
+  outside tmux.
 - `scripts/bench.sh`: throughput and key-echo latency, bare, transparent,
   engine, engine without presets, engine with sprites. Then one
   `Frames::update` at 200x60 (scan, heat, update, tick);

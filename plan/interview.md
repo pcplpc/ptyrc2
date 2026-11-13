@@ -180,3 +180,10 @@ Supersedes `--spawn --rate` above.
   glances; free space on the local disks. `--merged`: one big widget
   that cycles; else one each. `--monitor
   glance,connected,tcp-listen,disk-space`.
+
+## 2026-11-13
+
+- Native tmux integration: `ptyrc tmux attach` puts a driver under the
+  tmux session one is in, `ptyrc tmux detach` removes it, `--app` starts
+  a client app with it. The rule "the core names no program" bends here:
+  the CLI and the session lookup of the clients know tmux.
