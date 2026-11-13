@@ -22,13 +22,22 @@ __all__ = ["RANDOM", "catalog", "dump", "parser_of"]
 RANDOM: dict[str, tuple[tuple[str, ...], ...]] = {
     "bricks": ((), ("-a",)),
     "confetti": ((), ("-a",)),
-    "fishes": ((), ("-a",)),
+    "fire": ((), ("-a",)),
+    "fishes": ((), ("-a",), ("--tank",), ("--tank", "-a")),
     "flower": (("-a",),),  # bare, it wants its word on the screen
+    "gallery": ((), ("-a",)),
+    "git": ((), ("-a",)),
+    "globe": ((), ("-a",)),
     "life": ((), ("-a",)),
     "marks": (),  # it wants patterns
+    "note": (),  # it wants a file: TODO.md of the working directory
+    "pace": ((), ("-a",)),
     "sand": (("--now",),),
     "snake": ((), ("-a",)),
     "stars": ((), ("-a",)),
+    "timer": (("5m",), ("5m", "-a")),
+    "train": ((), ("-a",)),
+    "window": ((), ("-a",)),
 }
 
 #: Options of every app the menu does not show: help, the session.
