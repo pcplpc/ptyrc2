@@ -24,6 +24,7 @@ pub fn draw_ext() -> Vec<Box<dyn DrawExt>> {
         Box::new(ptyrc_draw_sand::SandExt),
         Box::new(ptyrc_draw_rain::RainExt),
         Box::new(ptyrc_draw_snow::SnowExt),
+        Box::new(ptyrc_draw_borders::Borders),
     ]
 }
 

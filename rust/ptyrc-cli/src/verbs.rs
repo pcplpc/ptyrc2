@@ -270,6 +270,72 @@ pub fn frames(common: &Common, args: Frames) -> Done {
     }
 }
 
+fn print_widgets(list: &[Value]) {
+    println!(
+        "{:>4}  {:>5}  {:<12}  {:<6}  {:<10}  {:<14}  {:>5}  {:<8}  TITLE",
+        "ID", "OWNER", "TAG", "STATE", "VARIANT", "RECT", "FRAME", "BORDER"
+    );
+    let text = |v: &Value| v.as_str().map_or("-".to_string(), str::to_string);
+    for w in list {
+        let r = &w["rect"];
+        let rect = if r.is_array() {
+            format!("{}x{}+{}+{}", r[2], r[3], r[0], r[1])
+        } else {
+            "-".into()
+        };
+        println!(
+            "{:>4}  {:>5}  {:<12}  {:<6}  {:<10}  {:<14}  {:>5}  {:<8}  {}",
+            w["id"].to_string(),
+            w["owner"].to_string(),
+            text(&w["tag"]),
+            text(&w["state"]),
+            text(&w["variant"]),
+            rect,
+            w["frame"].as_u64().map_or("-".into(), |f| f.to_string()),
+            text(&w["border"]),
+            text(&w["title"]),
+        );
+    }
+}
+
+#[derive(Args)]
+pub struct Widgets {
+    /// Print each change, one widget a line
+    #[arg(short, long)]
+    watch: bool,
+}
+
+pub fn widgets(common: &Common, args: Widgets) -> Done {
+    let mut client = connect(common)?;
+    let result = client.call("widget.list", json!({}))?;
+    let list = result["widgets"].as_array().cloned().unwrap_or_default();
+    if common.json {
+        print_json(&result, false);
+    } else {
+        print_widgets(&list);
+    }
+    if !args.watch {
+        return Ok(ExitCode::SUCCESS);
+    }
+    client.subscribe(&["widgets", "exit"])?;
+    loop {
+        match client.next_event(None) {
+            Ok(Some(event)) if event.event == "widgets" => {
+                if common.json {
+                    print_json(&event.data, false);
+                } else {
+                    println!();
+                    print_widgets(std::slice::from_ref(&event.data));
+                }
+            }
+            Ok(Some(event)) if event.event == "exit" => return Ok(ExitCode::SUCCESS),
+            Ok(_) => {}
+            Err(ClientError::Closed) => return Ok(ExitCode::SUCCESS),
+            Err(e) => return Err(e.into()),
+        }
+    }
+}
+
 pub fn heat(common: &Common, frame: &str, classes: bool) -> Done {
     let result = call(common, "frame.heat", json!({"frame": frame_value(frame)}))?;
     if common.json {
