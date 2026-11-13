@@ -506,11 +506,15 @@ fn move_to(common: &Common, word: &str, frame: &str, restart: bool) -> Result<Ex
     let mut client = connect(common)?;
     let apps = list(&mut client)?;
     let app = one(&apps, word, "one app is moved: name it by id")?;
-    if app["moves"] == true && !restart {
-        let frame = match frame.parse::<u64>() {
-            Ok(id) => json!(id),
-            Err(_) => json!(frame),
-        };
+    let sel = match frame.parse::<u64>() {
+        Ok(id) => json!(id),
+        Err(_) => json!(frame),
+    };
+    if app["moves"] != true || restart {
+        // An app restarted on a frame that is not there would only fail.
+        client.call("frame.get", json!({"frame": sel}))?;
+    } else {
+        let frame = sel;
         let mut moved = client.call("app.move", json!({"app": app["id"], "frame": frame}))?;
         if common.json {
             print_json(&moved, false);

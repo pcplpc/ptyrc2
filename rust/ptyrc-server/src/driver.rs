@@ -1647,7 +1647,10 @@ impl Driver {
                             .map(|w| w.as_str().map(str::to_string))
                             .collect::<Option<Vec<_>>>()
                     })
-                    .ok_or_else(|| RpcError::bad_params("argv: [program, arg...], strings"))?,
+                    .ok_or_else(|| {
+                        RpcError::bad_params("argv: [program, arg...], strings")
+                            .with_hint(r#"as in {"argv": ["ptyrc-app", "clock"]}"#)
+                    })?,
             ),
         };
         let name = match member("name") {
@@ -1669,10 +1672,14 @@ impl Driver {
         let refused = |apps: &Apps, id: u64, e: Refused| match e {
             Refused::Unknown => Self::no_app(apps, id),
             Refused::NotUsable(message) => RpcError::new(ErrorCode::NotUsable, message),
-            Refused::Spawn(message) => RpcError::bad_params(message),
+            Refused::Spawn(message) => RpcError::bad_params(message)
+                .with_hint("argv: a program of the driver's PATH, or its path, then its arguments"),
         };
         let id = if method == "app.start" {
-            let argv = argv.ok_or_else(|| RpcError::bad_params("argv: [program, arg...]"))?;
+            let argv = argv.ok_or_else(|| {
+                RpcError::bad_params("argv: [program, arg...]")
+                    .with_hint(r#"as in {"argv": ["ptyrc-app", "clock"]}"#)
+            })?;
             apps.start(argv, name, false, now)
                 .map_err(|e| refused(apps, 0, e))?
         } else {
@@ -1698,10 +1705,12 @@ impl Driver {
                 _ => apps.forget(id).map(|()| None),
             };
             let hint = |e: RpcError| match verb {
-                "restart" if e.code == ErrorCode::NotUsable => {
+                _ if e.code != ErrorCode::NotUsable => e,
+                "restart" => {
                     e.with_hint("stop it, then start it as a child: ptyrc manage start APP")
                 }
-                _ => e,
+                "forget" => e.with_hint(format!("stop it first: ptyrc manage stop {id}")),
+                _ => e.with_hint(format!("start it again: ptyrc manage restart {id}")),
             };
             let paused = done.map_err(|e| hint(refused(apps, id, e)))?;
             if let Some(paused) = paused {

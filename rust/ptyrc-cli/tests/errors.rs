@@ -428,3 +428,49 @@ fn session_that_ends_under_a_client() {
     sb.ptyrc(&["-s", "one", "text"])
         .fails(3, "session one is dead", "ptyrc run --name one");
 }
+
+#[test]
+fn manage_errors() {
+    let mut sb = Sandbox::new("manage");
+    sb.session("one");
+    let manage = |args: &[&str]| sb.ptyrc(&[&["manage"], args].concat());
+    manage(&["stop", "7"]).fails(
+        4,
+        "no such app: 7",
+        "no app; start one: ptyrc manage start APP",
+    );
+    manage(&["pause", "bricks"]).fails(4, "no such app: bricks", "no app; start one");
+    manage(&["log", "bricks"]).fails(4, "no such app: bricks", "no app");
+    manage(&["start", "--cmd", "/no/such/program"]).fails(
+        2,
+        "cannot run /no/such/program",
+        "a program of the driver's PATH",
+    );
+    manage(&["start", "--cmd", "sh", "-c", "echo broken >&2; exit 4"]).fails(
+        1,
+        "app 1 (sh) ended at once, status 4",
+        "broken",
+    );
+    let started = manage(&["start", "--cmd", "sleep", "60"]);
+    assert_eq!(
+        (started.status, started.stdout.as_str()),
+        (0, "2 sleep: running\n")
+    );
+    manage(&["start", "--cmd", "sleep", "61"]);
+    manage(&["move", "2", "nowhere"]).fails(4, "no such frame: nowhere", "names: raw, active");
+    manage(&["restart", "sleep", "5"]).fails(2, "sleep: 2 apps of that name", "ids: 2, 3");
+    manage(&["forget", "2"]).fails(4, "app 2 has not exited", "stop it first");
+    manage(&["move", "--restart", "sleep", "raw"]).fails(2, "2 apps of that name", "name it by id");
+    let call = |method: &str, params: &str| sb.ptyrc(&["call", method, params]);
+    call("app.move", r#"{"app": 2, "frame": "raw"}"#).fails(
+        4,
+        "app 2 does not move by itself",
+        "restart it there: ptyrc manage move --restart 2 FRAME",
+    );
+    call("app.stop", r#"{"app": 2, "now": true}"#).fails(2, "no member `now`", "members: app");
+    call("app.start", r#"{"argv": []}"#).fails(2, "argv: [program, arg...]", "as in");
+    call("app.kill", "{}").fails(2, "app.kill", "app methods: app.list");
+    let stopped = manage(&["stop", "--all"]);
+    assert_eq!(stopped.status, 0, "{}", stopped.stderr);
+    assert_eq!(stopped.stdout.lines().count(), 2);
+}
