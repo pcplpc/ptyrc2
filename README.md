@@ -66,9 +66,33 @@ You can cool down your terminal as the planet gets hotter too:
 
 ----
 
-You can easy sandbox any of your favorite applications:
+You can easily sandbox any of your favorite applications:
 
 ![sand](doc/sand.gif)
+
+----
+
+If you want to work on your ADHD as you are reviewing bad code:
+
+![snake](doc/snake.gif)
+
+----
+
+If you want to feel productive as you take notes on meetings:
+
+![bricks](doc/bricks.gif)
+
+----
+
+Then finally, you remember what matters in life:
+
+![cats](doc/cats.gif)
+
+----
+
+These were made by a human banging its head on an agent, no code written.
+
+Open a push request to add your own :)
 
 # Install from source
 
@@ -124,9 +148,7 @@ just test           # cargo test --workspace && uv run pytest
 just lint           # clippy, rustfmt, ruff
 ```
 
-Honestly, the codebase is still full of slop:
-
-- this human have NOT pour in the time (yet) to make it good to look at :(
+Honestly, the codebase is still full of slop, it needs way more work.
 
 You can still point your agent at it to write custom apps.
 
