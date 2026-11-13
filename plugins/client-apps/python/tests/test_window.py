@@ -254,6 +254,10 @@ def test_app(session: Pilot) -> None:
         session, "window", lambda: window.main(run, seconds=3), window.SIZES, "═"
     )
     assert info["title"] == ""
+    for _ in range(50):  # the driver drops them once it reads the close
+        if not session.widgets():
+            break
+        session_clock.sleep(0.1)
     assert session.widgets() == []
 
 

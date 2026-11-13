@@ -187,4 +187,8 @@ def test_fire(session: Pilot, argv: list[str]) -> None:
     thread.join()
     assert seen and {w["tag"] for w in seen} == {"fire"}
     assert all(tuple(w["size"]) in fire.SIZES for w in seen)
+    for _ in range(50):  # the driver drops them once it reads the close
+        if not session.widgets():
+            break
+        session_clock.sleep(0.1)
     assert session.widgets() == []

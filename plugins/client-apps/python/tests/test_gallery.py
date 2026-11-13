@@ -309,4 +309,8 @@ def test_gallery_live(session: Pilot, tmp_path: Path) -> None:
     run.join()
     assert status == [0]
     assert seen == {"ONE", "TWO"} and plates
+    for _ in range(50):  # the driver drops them once it reads the close
+        if not session.widgets():
+            break
+        session_clock.sleep(0.1)
     assert session.widgets() == []

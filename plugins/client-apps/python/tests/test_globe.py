@@ -213,4 +213,8 @@ def test_globe(session: Pilot, argv: list[str]) -> None:
     # No border: the outer box is the dome.
     assert all(tuple(w["rect"][2:]) == tuple(w["size"]) for w in seen)
     assert any("'-----" in row for row in host)
+    for _ in range(50):  # the driver drops them once it reads the close
+        if not session.widgets():
+            break
+        session_clock.sleep(0.1)
     assert session.widgets() == []

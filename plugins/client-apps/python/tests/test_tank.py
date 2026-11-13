@@ -163,4 +163,8 @@ def test_tank(session: Pilot, argv: list[str]) -> None:
     assert all(tuple(w["size"]) in fishes.TANKS for w in seen)
     assert any("║" in row and "~" in row for row in host)  # glass, water
     assert any(fishes.LEFT in row or fishes.RIGHT in row for row in host) or argv
+    for _ in range(50):  # the driver drops them once it reads the close
+        if not session.widgets() and not session.sprites():
+            break
+        session_clock.sleep(0.1)
     assert session.sprites() == [] and session.widgets() == []
