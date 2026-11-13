@@ -15,9 +15,11 @@ What it shows:
   the pane changed or scrolled; the map is read again then, and only
   then. Between two changes a move costs one batch of drawing.
 - Frame coordinates: the snake and the apple belong to the text, not to
-  the window. Scroll and they move with it; when the snake is scrolled
-  out of sight it starts again where you look, and an apple the text
-  cuts off from it goes elsewhere.
+  the window. Scroll and they move with it; an apple the text cuts off
+  from the snake goes elsewhere. Scrolled out of sight, or written on,
+  the snake is a ghost: brought to the edge of the view, unseen, it
+  goes through the text to the nearest safe cell, and nothing hurts it
+  on the way.
 - One sprite for the whole snake, redrawn in place each step with
   `Sprite.update`: anchor and content change together, in one repaint.
 
@@ -270,6 +272,7 @@ class Game:
         self.foe_due = rng.randint(20, 50) if enemies else 0
         self.beam_due = rng.randint(20, 50) if lasers else 0
         self.map: tuple[Box, set[Cell]] | None = None  # the last seen
+        self.ghost = False  # on its way back into the view
 
     def free_cell(self, box: Box, walls: set[Cell]) -> Cell | None:
         x0, y0, x1, y1 = box
@@ -281,10 +284,10 @@ class Game:
 
     def spot(self, box: Box, walls: set[Cell], taken: set[Cell]) -> Cell | None:
         """A cell for the apple, or for a new snake: in `room` of the
-        head (the largest region with no snake), out of `taken` and the
+        head (the largest region with no snake or a ghost), out of `taken` and the
         body; a pocket must hold the snake twice, grown, else any size.
         Any free cell when there is none."""
-        head = self.body[0] if self.body else None
+        head = self.body[0] if self.body and not self.ghost else None
         body = set(self.body)
         for need in (2 * (len(self.body) + self.grow + 5), 0):
             cells = [
@@ -346,13 +349,17 @@ class Game:
         def bold(c: Cell) -> bool:
             return clear(c) and c not in firing
 
-        if not self.body or not inside(self.body[0]) or self.body[0] in walls:
-            # Start, or scrolled out of sight, or text written on its head.
-            self.body = deque()
+        if not self.body:
             start = self.spot(box, walls, taken)
             self.body = deque([start] if start else [])
             self.grow = 3
             self.apple = None  # maybe out of its reach
+        elif self.ghost or not inside(self.body[0]) or self.body[0] in walls:
+            # Scrolled out of sight, or text written on its head.
+            self._haunt(box, walls)
+            if self.apple is None or not inside(self.apple) or self.apple in walls:
+                self._plant(box, walls, taken)
+            return
         elif self.apple is not None and self.map != (box, walls):
             # The text moved or changed: an apple cut off from the head
             # goes elsewhere.
@@ -394,6 +401,41 @@ class Game:
         else:
             self.body.pop()
 
+    def _haunt(self, box: Box, walls: set[Cell]) -> None:
+        """The ghost's move: through anything, one cell towards the
+        nearest cell of `room` (the largest region) off its body.
+        Farther than a cell out of the view, the body is first shifted,
+        unseen, to its edge. Solid again on that cell; it waits while
+        there is none."""
+        self.ghost = True
+        x0, y0, x1, y1 = box
+        hx, hy = self.body[0]
+        dx = min(max(hx, x0 - 1), x1) - hx
+        dy = min(max(hy, y0 - 1), y1) - hy
+        if dx or dy:
+            self.body = deque((x + dx, y + dy) for x, y in self.body)
+        hx, hy = self.body[0]
+        body = set(self.body)
+        for need in (2 * (len(self.body) + self.grow + 5), 0):
+            safe = [c for c in room(box, walls, None, need) if c not in body]
+            if safe:
+                break
+        else:
+            return
+        gx, gy = min(safe, key=lambda c: (abs(c[0] - hx) + abs(c[1] - hy), c))
+        if abs(gx - hx) >= abs(gy - hy):
+            to = (hx + (gx > hx) - (gx < hx), hy)
+        else:
+            to = (hx, hy + (gy > hy) - (gy < hy))
+        self.body.appendleft(to)
+        if self.grow:
+            self.grow -= 1
+        else:
+            self.body.pop()
+        if to == (gx, gy):
+            self.ghost = False
+            self.map = None  # the apple is checked again from there
+
     def _hunt(self, box: Box, walls: set[Cell], inside: Callable[[Cell], bool]) -> None:
         """A foe comes; foes move every other step; one that reaches the
         body bites it off there and is gone."""
@@ -417,7 +459,8 @@ class Game:
             def free(c: Cell, taken: set = taken) -> bool:
                 return inside(c) and c not in walls and c not in taken
 
-            goal = self.body[len(self.body) // 2] if len(self.body) >= 4 else None
+            big = len(self.body) >= 4 and not self.ghost
+            goal = self.body[len(self.body) // 2] if big else None
             to = route(foe.at, goal, free) if goal else None
             if to is None:
                 x, y = foe.at
@@ -441,7 +484,7 @@ class Game:
                 beam.left -= 1
         self.beams = [b for b in self.beams if b.left > 0]
         hot = {c for b in self.beams if b.firing for c in b.cells}
-        hit = [i for i, c in enumerate(self.body) if c in hot]
+        hit = [] if self.ghost else [i for i, c in enumerate(self.body) if c in hot]
         if hit:
             self._cut(hit[0])
         for foe in [f for f in self.foes if f.at in hot]:
@@ -482,7 +525,8 @@ class Game:
         self, fancy: bool = False
     ) -> tuple[Cell, list[list[dict[str, object]]]]:
         """The snake as a sprite: its top-left cell and rows of runs.
-        `fancy`: shaded from head to tail, a lump where an apple is."""
+        `fancy`: shaded from head to tail, a lump where an apple is. A
+        ghost is dim, its head over the rest."""
         xs = [c[0] for c in self.body]
         ys = [c[1] for c in self.body]
         left, top = min(xs), min(ys)
@@ -491,7 +535,7 @@ class Game:
             for _ in range(max(ys) - top + 1)
         ]
         shades, n = _arcade.BODY, len(self.body)
-        for i, (x, y) in enumerate(self.body):
+        for i, (x, y) in reversed(list(enumerate(self.body))):
             if i == 0:
                 run = {"t": "@", "fg": "bright-green", "bold": True}
             elif not fancy:
@@ -500,6 +544,8 @@ class Game:
                 run = {"t": "O", "fg": _arcade.LUMP, "bold": True}
             else:
                 run = {"t": "o", "fg": shades[i * len(shades) // n]}
+            if self.ghost:
+                run = {**run, "dim": True}
             rows[y - top][x - left] = run
         return (left, top), rows
 

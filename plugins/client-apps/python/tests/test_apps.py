@@ -15,6 +15,7 @@ from collections import deque
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from ptyrc import Frame, Match, Pilot, Sprite
@@ -100,7 +101,17 @@ def apart(origins: list[tuple[int, int]]) -> bool:
 
 
 def test_confetti(session: Pilot) -> None:
-    args = ["-s", session.session, "--duration", "0.6", "--bursts", "2", "--sparkle"]
+    args = ["-s", session.session, "--one-shot", "--bursts", "2", "--sparkle"]
+    watch(
+        session,
+        lambda: confetti.main(args, random.Random(3)),
+        lambda host: any(
+            a[x : x + 3] == "· ·" and b[x : x + 3] == " o " and c[x : x + 3] == "· ·"
+            for a, b, c in zip(*(host.split("\n")[i:] for i in range(3)), strict=False)
+            for x in range(len(a))
+        ),
+    )
+    args += ["--fancy", "--duration", "0.6"]
     watch(
         session,
         lambda: confetti.main(args, random.Random(3)),
@@ -110,7 +121,16 @@ def test_confetti(session: Pilot) -> None:
 
 def test_confetti_bursts(session: Pilot, monkeypatch: pytest.MonkeyPatch) -> None:
     log = record(monkeypatch, Clock())
-    args = ["-s", session.session, "--bursts", "3", "--duration", "0.3"]
+    args = [
+        "-s",
+        session.session,
+        "--one-shot",
+        "--bursts",
+        "3",
+        "--duration",
+        "0.3",
+        "--fancy",
+    ]
     assert confetti.main(args, random.Random(1)) == 0
     times = [t for t, _ in log]
     assert len(set(times)) == 3 and all(0 <= t < confetti.PERIOD for t in times)
@@ -126,7 +146,17 @@ def test_confetti_stays_behind_busy_text(session: Pilot) -> None:
     )
     session.wait_for("st", frame="raw")
     time.sleep(0.3)
-    args = ["-s", session.session, "--duration", "0.8", "--size", "200", "--sparkle"]
+    args = [
+        "-s",
+        session.session,
+        "--one-shot",
+        "--duration",
+        "0.8",
+        "--size",
+        "200",
+        "--sparkle",
+    ]
+    args.append("--fancy")
     status: list[int] = []
     thread = threading.Thread(
         target=lambda: status.append(confetti.main(args, random.Random(5)))
@@ -149,7 +179,7 @@ def test_confetti_stays_behind_busy_text(session: Pilot) -> None:
 
 def test_confetti_party(session: Pilot, monkeypatch: pytest.MonkeyPatch) -> None:
     log = record(monkeypatch, Clock(), stop=9)
-    args = ["-s", session.session, "--party", "--bursts", "3", "--sparkle"]
+    args = ["-s", session.session, "--bursts", "3", "--sparkle", "--fancy"]
     assert confetti.main(args, random.Random(2)) == 0
     # Three rounds of three, one round per period; then ^C.
     rounds = [int(t // confetti.PERIOD) for t, _ in log[:9]]
@@ -160,6 +190,120 @@ def test_confetti_party(session: Pilot, monkeypatch: pytest.MonkeyPatch) -> None
     while session.sprites() and time.monotonic() < deadline:
         time.sleep(0.02)
     assert session.sprites() == []
+
+
+def calls(
+    monkeypatch: pytest.MonkeyPatch, clock: Clock, stop: int | None = None
+) -> list[tuple[float, str, dict[str, Any]]]:
+    """Patch what `confetti` draws with to log `(time, name, arguments)`;
+    ^C after `stop` calls."""
+    log: list[tuple[float, str, dict[str, Any]]] = []
+
+    def logged(name: str) -> Callable[..., object]:
+        real = getattr(confetti, name)
+
+        def call(pilot: Pilot, **kw: Any) -> object:
+            log.append((clock.now, name, kw))
+            if stop is not None and len(log) > stop:
+                raise KeyboardInterrupt
+            return real(pilot, **kw)
+
+        return call
+
+    monkeypatch.setattr(confetti, "time", clock)
+    for name in ("pop", "burst", "rocket"):
+        monkeypatch.setattr(confetti, name, logged(name))
+    return log
+
+
+def test_confetti_pops(session: Pilot, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Plain: a burst is the four pops of the first ptyrc, in a second.
+    log = calls(monkeypatch, Clock())
+    args = ["-s", session.session, "--one-shot", "--bursts", "2"]
+    assert confetti.main(args, random.Random(4)) == 0
+    assert [name for _, name, _ in log] == ["pop"] * 8
+    assert sorted(kw["color"] for _, _, kw in log) == sorted(confetti.COLORS * 2)
+    assert all(kw["art"] is confetti.POP and kw["persist"] for _, _, kw in log)
+    assert apart([kw["origin"] for _, _, kw in log]), log
+    times = [t for t, _, _ in log]
+    assert times == sorted(times) and times[-1] < confetti.PERIOD + 1.01
+    # The driver plays them out and removes them.
+    deadline = time.monotonic() + 3
+    while session.sprites() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert session.sprites() == []
+    # `--random`: of several kinds.
+    log.clear()
+    args = ["-s", session.session, "--one-shot", "--bursts", "5", "--random"]
+    assert confetti.main(args, random.Random(1)) == 0
+    assert len({kw["art"] for _, _, kw in log}) > 2
+    for art in confetti.POPS:
+        assert len({(len(rows), *map(len, rows)) for rows in art}) == 1, art
+
+
+def test_confetti_fireworks(session: Pilot, monkeypatch: pytest.MonkeyPatch) -> None:
+    log = calls(monkeypatch, Clock())
+    args = [
+        "-s",
+        session.session,
+        "--one-shot",
+        "--bursts",
+        "3",
+        "--fireworks",
+        "--fancy",
+    ]
+    assert confetti.main(args, random.Random(6)) == 0
+    rockets = [(t, kw) for t, name, kw in log if name == "rocket"]
+    bursts = [(t, kw) for t, name, kw in log if name == "burst"]
+    assert len(rockets) == len(bursts) == 3 and len(log) == 6
+    for at, shot in rockets:
+        # From the last row of the view to a cell of its upper part,
+        # where the explosion starts when the rocket stops.
+        x, y = shot["origin"]
+        assert y < 16 and y + shot["rise"] == 23
+        (then, bang) = next(b for b in bursts if b[1]["origin"] == (x, y))
+        assert then == pytest.approx(at + shot["seconds"])
+        assert bang["shape"] == "ball"
+    # Plain: a rocket for each pop.
+    log.clear()
+    args = ["-s", session.session, "--one-shot", "--fireworks"]
+    assert confetti.main(args, random.Random(6)) == 0
+    assert sorted(name for _, name, _ in log) == ["pop"] * 4 + ["rocket"] * 4
+
+
+def test_confetti_all(session: Pilot, monkeypatch: pytest.MonkeyPatch) -> None:
+    log = calls(monkeypatch, Clock(), stop=40)
+    args = ["-s", session.session, "-a", "--bursts", "4"]
+    assert confetti.main(args, random.Random(8)) == 0
+    assert {name for _, name, _ in log} == {"rocket", "burst"}
+    bursts = [kw for _, name, kw in log if name == "burst"]
+    assert {kw["shape"] for kw in bursts} == set(confetti.SHAPES)
+    assert len({kw["size"] for kw in bursts}) > 5
+    assert any("colors" in kw for kw in bursts)
+    assert not all("colors" in kw for kw in bursts)
+    assert len({kw["look"] for _, name, kw in log if name == "rocket"}) > 2
+
+
+def test_confetti_rocket(session: Pilot) -> None:
+    # The driver alone flies it: up a column, slower and slower, to its
+    # origin; then it is gone.
+    session.send("clear\n")
+    time.sleep(0.3)
+    confetti.rocket(
+        session, origin=(30, 4), rise=18, seconds=0.9, look=("^", "!:'"), persist=True
+    )
+    rows: list[tuple[float, int]] = []
+    start = time.monotonic()
+    while session.sprites():
+        heads = [y for y, row in enumerate(session.dump()["host"]) if row[30:31] == "^"]
+        if heads:
+            rows.append((time.monotonic() - start, heads[0]))
+        time.sleep(0.01)
+    ys = [y for _, y in rows]
+    assert ys == sorted(ys, reverse=True) and ys[0] > 14 and ys[-1] <= 6, rows
+    # More rows in the first half of the flight than in the second.
+    mid = next(y for t, y in rows if t >= 0.45)
+    assert ys[0] - mid > mid - ys[-1], rows
 
 
 def test_confetti_spot() -> None:
@@ -232,7 +376,8 @@ def test_confetti_party_avoids_hot(
     hot = session.frame("raw").heat_classes()
     assert all(set(row[:79]) == {"h"} for row in hot[:12]), hot
     log = record(monkeypatch, Clock(), stop=12)
-    args = ["-s", session.session, "--party", "--bursts", "2", "--duration", "0.3"]
+    args = ["-s", session.session, "--bursts", "2", "--duration", "0.3"]
+    args.append("--fancy")
     assert confetti.main(args, random.Random(2)) == 0
     assert len(log) == 13
     assert all(y >= 12 for _, (_, y) in log), log
@@ -671,9 +816,41 @@ def test_snake_game() -> None:
     assert game.eaten >= 5
     at, cells = game.picture()
     assert at == (min(x for x, _ in game.body), min(y for _, y in game.body))
-    # Scrolled out of sight: it starts again in the new view.
+    # Scrolled out of sight: back in from the edge, whole.
+    size = len(game.body)
     game.step((10, 200, 30, 205), set())
-    assert len(game.body) <= 2 and 200 <= game.body[0][1] < 205
+    assert not game.ghost and game.body[0][1] == 200
+    assert size - 1 <= len(game.body) <= size
+
+
+def test_snake_ghost() -> None:
+    """Out of sight or under text: through anything, unhurt, to a safe cell."""
+    rows = ["", "", "####################", "####################", "", "", ""]
+    walls = snake.walls_of(rows)
+    box = (0, 0, 20, 7)
+    game = snake.Game(random.Random(2), enemies=True, lasers=True)
+    game.body = deque([(5, -40 - i) for i in range(6)])
+    game.beams = [snake.Beam(1, tuple((5, y) for y in range(2)), False, fuse=0)]
+    safe = set(snake.room(box, walls, None, 0))
+    seen = []
+    for _ in range(10):
+        game.step(box, walls)
+        seen.append(game.ghost)
+        assert len(game.body) == 6
+        if not game.ghost:
+            break
+    # In from the edge, through the beam and the text, into the
+    # largest region; solid on its first cell.
+    assert seen[0] and not seen[-1] and game.body[0] == (5, 4) in safe
+    # Text written on its head: it goes through the text.
+    game = snake.Game(random.Random(2))
+    game.body = deque([(5, 2), (5, 1), (5, 0)])
+    game.step(box, walls)
+    assert game.ghost
+    runs = [run for row in game.picture()[1] for run in row if run["t"] != " "]
+    assert all(run.get("dim") for run in runs) and len(runs) == 3
+    game.step(box, walls)
+    assert not game.ghost and list(game.body) == [(5, 4), (5, 3), (5, 2)]
 
 
 def test_snake_room() -> None:
@@ -1111,7 +1288,7 @@ def test_dispatch(
     out = capsys.readouterr().out
     assert all(name in out for name in APPS)
     assert main(["nope"]) == 2
-    assert main(["confetti", "-s", session.session, "--duration", "0.1"]) == 0
+    assert main(["confetti", "-s", session.session, "--one-shot"]) == 0
     assert main(["confetti", "-s", "no-such-session"]) == 1
     assert "ptyrc-app: gone" in capsys.readouterr().err
 
