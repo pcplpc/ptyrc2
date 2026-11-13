@@ -1128,41 +1128,63 @@ ptyrc manage --overlay             the menu in a modal widget (the hotkey)
 - No session chosen and several live, on a terminal: the menu asks.
 
 The menu (`ptyrc-cli/src/manage/`): one model (`menu.rs`: keys in, rows
-of styled runs out, for a given size; no clock, no I/O), two fronts:
-`tty.rs` (this terminal, alternate screen) and `overlay.rs` (a modal
-widget of the session, border `alert`, variants 34x9, 48x13, 64x18,
-78x22, prefer centre; `input.grab` of every key, escape ctrl+t).
+of styled runs out, for a given size; no clock, no I/O), a runner
+(`ui.rs`: the actions of the model done on a `Backend`, the session or
+a fake) and two fronts: `tty.rs` (this terminal, alternate screen, at
+most 100x30) and `overlay.rs` (a modal widget of the session, tag and
+title `manage`, border `alert`, variants 34x9, 48x13, 64x18, 78x22,
+prefer centre, fill 1; `input.grab` of every key, escape ctrl+t). Keys
+are named as `input.grab` names them, on both.
 
-- Main list: the apps (state mark, name and arguments, state, since),
-  then `start an app…`, `random app`. enter: the actions of the row.
-  Keys: `↑↓`/`jk`, `enter`, `esc`/`q` back or leave, `s` start, `p`
-  pause or resume, `r` restart, `e` restart with other options, `x` or
-  `delete` stop (an exited one: forget), `l` log.
+- Every screen: a title, the rows (the selected one an inverse bar; a
+  list too long says `3/12` and shows `↑` `↓`), a line for a note or
+  the help of the row, a foot line of keys. The foot drops the least
+  useful keys first and always holds the way back (`esc back`, `esc
+  leave`). `esc`, `q`, `←` go back; `↑↓`, `jk`, `tab`, `home`, `end`,
+  page keys move. esc and a key in one read (`alt+x`) are both meant.
+- Main list: the apps the driver started, then the clients from
+  elsewhere (with their pid), by id: state mark (`●` running, `‖`
+  paused, `○` ended), name and arguments, state, since; then `start an
+  app…`, `random app`, `frames…`. A manager is not listed. enter: the
+  actions of the row. Keys: `s` start, `p` pause or resume, `r`
+  restart, `e` restart with other options, `m` move, `x` or `delete`
+  stop (an exited one: forget), `l` log, `f` frames. The selection
+  follows its app, and goes to an app just started.
 - Start: the apps of the catalog with their line of help; enter: the
   form.
-- Form: a row per option of the app: a flag is a checkbox (`space`,
-  `enter`), a choice goes round with `←→`, a value is typed (`enter`
-  edits, `enter` or `esc` ends); then positionals and `more arguments`
-  as typed lines; then `start` / `restart`. Restart with other options
-  opens it filled from the `argv` running; words it does not know go to
-  `more arguments`.
+- Form: first the row that starts (`▶ start bricks`: enter twice from
+  the list starts with the defaults); then a row per option, the frame
+  last: a flag is a checkbox (`space`, `enter`), a count and a choice
+  change with `←→`, a value is typed (`enter` edits, `enter` or `esc`
+  ends, `backspace` clears; unset, its default shows dim); then the
+  positionals and `more arguments` as typed lines (quotes as a shell).
+  Wide (64 and more), the help of each option is a column. Restart
+  with other options opens it filled from the `argv` running; words it
+  does not know go to `more arguments`; a program that is no app of
+  the catalog has that line alone.
 - Frames (`f` on the main list, `frames…` among its rows): the
-  frames on screen, one a row: id, kind, size, key or preset, idle or
-  busy, and the apps on it (`app.list`, `frames`); beside or above the
-  list, a map of the screen: the rectangles of the panes to scale, the
-  selected one filled. In the overlay the selected frame is also shown
-  on the screen itself: a front tint over its view. enter on a frame:
-  the apps on it, then their actions.
+  frames on screen but chrome, one a row: id, kind, size, idle or
+  busy, the apps on it (`app.list`, `frames`); its key or preset is the
+  hint. Beside the list, from 48 columns (not at 34x9), a map of the
+  screen to scale: a tile per pane with its id, the selected one
+  filled; the whole screen selected: the border too. In the overlay
+  the selected frame is also shown on the screen itself: a front tint
+  over its view (`Action::Highlight`). enter on a frame: the apps on
+  it, then their actions.
 - Move (`m` on an app, `move to a frame…` among its actions): the same
-  list as a picker; enter moves it: `app.move` when it `moves`, its
-  state kept; else it is restarted with `-f FRAME` in place of the one
-  it had (`app.restart`, a child only; its state is not kept: the
-  picker says which of the two before enter). Besides the frames, the
-  names: `raw`, `active`, `largest`, `quietest`, `idle`. In the form the
-  option `-f` is chosen with the same picker.
-- A foot line names the keys of the screen. The list follows the topic
-  `apps`. An app that ends within 400 ms of a start shows the last line
-  of its log.
+  list as a picker, open on the frame the app is on; enter moves it:
+  `app.move` when it `moves` and runs, its state kept; else it is
+  restarted with `-f FRAME` in place of the one it had (`app.restart`,
+  a child only; its state is not kept). The hint says which before
+  enter: `moves live: state kept`, `restarts there: state lost`.
+  Besides the frames, the names: `raw`, `active`, `largest`,
+  `quietest`, `idle`. In the form the option `-f` is chosen with the
+  same picker.
+- The list follows the topic `apps` and is read again every second
+  (the times, the frames of an app); the frames follow the topic
+  `frames`. A refusal of the driver is shown on the note line. An app
+  that ends with an error within 400 ms of a start shows the last line
+  of its log there.
 
 Catalog: `ptyrc-app --catalog` prints `{"apps":[{"name","help",
 "options":[{"flags":["-r","--rules"],"kind":"flag"|"value"|"choice"|
@@ -1836,6 +1858,13 @@ windows under the driver, one drawing per pane, sand in the idle one.
   for the host.
 - `ptyrc-cli/tests/errors.rs`: every error case of the CLI, message, hint
   and exit status.
+- `ptyrc-cli/src/manage/`: the menu by its keys and its rows, at the
+  four sizes (`menu/tests.rs`; `screens`, `screens_of_frames`, ignored,
+  print them); the runner on a fake table (`ui/tests.rs`).
+  `tests/overlay.rs`: ctrl+t twice on a host pty, a start by the form,
+  pause, resume, stop, the ways out. `scripts/e2e-manage.sh [--show]`:
+  the same under `ptyrc tmux attach` on two private tmux servers, with
+  the frames, a live move and the real `ptyrc-app`.
 - `ptyrc-cli/tests/tapes.rs`: tapes of real programs replayed against
   their snapshots; `tests/tools.rs`: grab, click, host mouse, shot, attach on a pty;
   `tests/hotkey.rs`: the pair on a pty; `tests/manage.rs`: the verbs of

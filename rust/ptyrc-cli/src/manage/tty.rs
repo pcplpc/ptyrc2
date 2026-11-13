@@ -141,10 +141,7 @@ impl Term {
         // The events come on a connection of their own: a call never
         // waits behind them.
         let mut events = Client::connect_session(client.hello()["session"].as_str())?;
-        events.subscribe(&["frames", "exit"])?;
-        // An older driver has no such topic: the list is then read
-        // again at each beat.
-        let pushed = events.subscribe(&["apps"]).is_ok();
+        events.subscribe(&["apps", "frames", "exit"])?;
         let told = self.sender.clone();
         std::thread::spawn(move || {
             loop {
@@ -196,11 +193,8 @@ impl Term {
             let now = Instant::now();
             runner.tick(now);
             if now >= beat + BEAT {
-                runner.menu.elapsed((now - beat).as_secs_f64());
+                runner.beat();
                 beat = now;
-                if !pushed {
-                    runner.event("apps", &serde_json::Value::Null);
-                }
             }
         };
         drop(self);

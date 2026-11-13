@@ -527,9 +527,6 @@ fn the_table_changes_under_the_menu() {
     m.app(info(2, "fishes", "gone"));
     assert!(shown(&m, 48, 13).starts_with(" apps of"));
     assert!(bar(&m).starts_with("○ clock"), "{}", bar(&m));
-    // Time passes.
-    m.elapsed(3600.0);
-    assert!(bar(&m).ends_with("1h"), "{}", bar(&m));
     // Nothing left, nothing to start.
     m.apps(Vec::new());
     m.catalog(None);

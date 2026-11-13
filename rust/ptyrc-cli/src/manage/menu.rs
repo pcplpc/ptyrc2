@@ -845,13 +845,6 @@ impl Menu {
         self.follow();
     }
 
-    /// Time passed: the apps have been that much longer in their state.
-    pub fn elapsed(&mut self, seconds: f64) {
-        for app in &mut self.apps {
-            app.since += seconds;
-        }
-    }
-
     /// The apps that can be started. `None`: no `ptyrc-app`.
     pub fn catalog(&mut self, catalog: Option<Catalog>) {
         self.catalog = catalog;

@@ -151,6 +151,12 @@ impl<B: Backend> Runner<B> {
         }
     }
 
+    /// A second passed: the table is read again. The times shown
+    /// follow, and what an app draws on, which changes without an event.
+    pub fn beat(&mut self) {
+        self.refresh();
+    }
+
     /// When `tick` has something to do.
     pub fn deadline(&self) -> Option<Instant> {
         self.watch.iter().map(|w| w.1).min()

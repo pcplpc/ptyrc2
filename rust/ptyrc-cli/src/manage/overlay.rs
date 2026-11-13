@@ -134,7 +134,7 @@ pub fn run(client: Client) -> Result<ExitCode, Fail> {
             let now = Instant::now();
             runner.tick(now);
             if now >= beat + BEAT {
-                runner.menu.elapsed((now - beat).as_secs_f64());
+                runner.beat();
                 beat = now;
             }
         }
