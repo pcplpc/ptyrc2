@@ -4,6 +4,10 @@
 //! Recognised from its status line (`[session] 0:zsh* 1:vim-`), on the
 //! last or the first row. The frame key names the session and the current
 //! window, so the panes of a window are found again when it comes back.
+//!
+//! `server`: a running tmux server, for `ptyrc tmux`.
+
+pub mod server;
 
 use ptyrc_core::plugin::{PaneView, TuiSupport};
 use regex::Regex;
