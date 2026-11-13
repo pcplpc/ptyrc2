@@ -20,6 +20,7 @@ APPS = {
     "snake": "snake game that plays alone",
     "bricks": "brick breaker game that plays alone",
     "life": "game of life in braille behind the text",
+    "stars": "night sky, a moon and grass in a breeze",
     "flower": 'add flowers next to the word "flower"',
     "marks": "highlights a selected pattern",
     "monitor": "load, logins, open ports and disks in widgets",

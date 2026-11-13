@@ -28,6 +28,7 @@ RANDOM: dict[str, tuple[tuple[str, ...], ...]] = {
     "marks": (),  # it wants patterns
     "sand": (("--now",),),
     "snake": ((), ("-a",)),
+    "stars": ((), ("-a",)),
 }
 
 #: Options of every app the menu does not show: help, the session.
