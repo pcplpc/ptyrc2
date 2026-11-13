@@ -70,7 +70,7 @@ impl Grab {
 
 /// Length of the first key of `bytes`: a control sequence, an escaped
 /// character, a UTF-8 character, a byte.
-pub(crate) fn key_len(bytes: &[u8]) -> usize {
+pub fn key_len(bytes: &[u8]) -> usize {
     let utf8 = |b: u8| match b {
         0xc0..=0xdf => 2,
         0xe0..=0xef => 3,
@@ -154,7 +154,7 @@ pub(crate) fn is_release(key: &[u8]) -> bool {
 /// Name of a key, as `input.send` takes it; a printable character is its
 /// own name. CSI u and modifyOtherKeys forms are named as their legacy
 /// bytes.
-pub(crate) fn name(key: &[u8]) -> Option<String> {
+pub fn name(key: &[u8]) -> Option<String> {
     if let Some(bytes) = legacy(key) {
         return name(&bytes);
     }

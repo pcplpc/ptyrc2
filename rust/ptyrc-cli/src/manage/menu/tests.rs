@@ -721,7 +721,7 @@ fn frames_and_their_apps() {
     assert!(shown(&m, 64, 18).contains("resume"));
     // Done: the main list, the frame no longer shown.
     assert_eq!(keys(&mut m, "enter"), [Action::Resume(2)]);
-    assert_eq!(keys(&mut m, "end enter down down down enter"), []);
+    assert_eq!(keys(&mut m, "end enter enter"), []);
     assert!(shown(&m, 64, 18).contains("no app draws on this frame"));
     assert_eq!(keys(&mut m, "enter esc"), []);
     assert_eq!(keys(&mut m, "esc"), [Action::Highlight(None)]);

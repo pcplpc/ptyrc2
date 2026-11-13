@@ -10,6 +10,7 @@ mod demo;
 pub mod driver;
 pub mod engine;
 mod grab;
+pub use grab::{key_len, name as key_name};
 mod hints;
 pub mod host;
 pub mod hostcolors;

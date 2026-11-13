@@ -112,6 +112,7 @@ fn selected(row: Row) -> Row {
 }
 
 /// The text of rows, a line each: what tests and logs read.
+#[cfg(test)]
 pub fn text(rows: &[Row]) -> String {
     let line = |row: &Row| row.iter().map(|r| r.text.as_str()).collect::<String>();
     rows.iter().map(line).collect::<Vec<_>>().join("\n")
@@ -817,6 +818,9 @@ fn step(sel: &mut usize, n: usize, key: &str, page: usize) -> bool {
     true
 }
 
+/// The keys of a screen, for its foot: text, and how soon it is dropped.
+type Keys<'a> = Vec<(&'a str, u8)>;
+
 /// Rows of a page of a list.
 const PAGE: usize = 5;
 
@@ -1409,7 +1413,7 @@ impl Menu {
         };
         // What the screen is: title, rows, selection, keys, a hint.
         let mut hint: Option<String> = None;
-        let (title, rows, sel, keys): (String, Vec<Row>, Option<usize>, Vec<(&str, u8)>) =
+        let (title, rows, sel, keys): (String, Vec<Row>, Option<usize>, Keys) =
             match screen {
                 Screen::Sessions { names, sel } => (
                     "which session?".into(),
@@ -1954,4 +1958,4 @@ fn form_rows(form: &Form, inner: usize) -> Vec<Row> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
