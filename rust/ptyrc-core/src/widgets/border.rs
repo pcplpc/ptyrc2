@@ -160,8 +160,8 @@ impl BorderSpec {
                 ..TitleSpec::default()
             },
             chase: Some(ChaseSpec {
-                len: 4,
-                ms: 60,
+                len: 6,
+                ms: 50,
                 runs: 2,
                 style: bright(15),
             }),
