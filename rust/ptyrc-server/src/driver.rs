@@ -2,7 +2,7 @@
 //! The event loop: app pty, host terminal, signals, clients, one timer.
 
 use crate::conn::Conn;
-use crate::demo::Demo;
+use crate::demo::{self, Demo};
 use crate::engine::{ConnId, Ctx, Effects, Engine, Reply, SessionInfo, Token};
 use crate::grab::{self, Grab};
 use crate::host::Host;
@@ -31,6 +31,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
+use std::process::Child;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -79,6 +80,9 @@ pub struct Config {
     /// arguments: a seed and the number of runs before; twice again
     /// replaces it by the next run. `None`: no demo.
     pub demo: Option<Vec<String>>,
+    /// Commands run on the session once the app has started, as the
+    /// demo's but without the two arguments; terminated at the end.
+    pub apps: Vec<Vec<String>>,
 }
 
 impl Default for Config {
@@ -97,6 +101,7 @@ impl Default for Config {
             record_input: false,
             presets: true,
             demo: None,
+            apps: Vec::new(),
         }
     }
 }
@@ -156,6 +161,8 @@ struct Driver {
     /// A client holds keys of the host keyboard.
     grab: Option<Grab>,
     demo: Option<Demo>,
+    /// The commands of `Config::apps` that started.
+    apps: Vec<Child>,
     /// The pty returned end of file or EIO.
     pty_eof: bool,
     /// Bytes waiting to be typed into the app.
@@ -318,6 +325,7 @@ impl Driver {
                     .map_or(0, |d| d.as_nanos() as u64);
                 Demo::new(command, env.clone(), seed ^ u64::from(std::process::id()))
             });
+            let clients = env.clone();
             if std::env::var_os("TERM").is_none() {
                 env.push(("TERM".to_string(), "xterm-256color".to_string()));
             }
@@ -340,9 +348,12 @@ impl Driver {
             };
             let pty = pty::spawn(&cfg.argv, &env, cols, rows)
                 .map_err(|e| start::exec_error(program, &e))?;
-            Ok::<_, RunError>((signals, host, pty, cols, rows, recorder, demo))
+            let apps = (cfg.apps.iter())
+                .filter_map(|command| demo::spawn(command, &[], &clients))
+                .collect();
+            Ok::<_, RunError>((signals, host, pty, cols, rows, recorder, demo, apps))
         })();
-        let (signals, host, pty, cols, rows, recorder, demo) = match built {
+        let (signals, host, pty, cols, rows, recorder, demo, apps) = match built {
             Ok(parts) => parts,
             Err(e) => {
                 let _ = fs::remove_file(&socket);
@@ -370,6 +381,7 @@ impl Driver {
             player: None,
             grab: None,
             demo,
+            apps,
             pty_eof: false,
             pty_queue: Vec::new(),
             host,
@@ -423,6 +435,7 @@ impl Driver {
             player: Some(Player::new(replay)),
             grab: None,
             demo: None,
+            apps: Vec::new(),
             pty_eof: true,
             pty_queue: Vec::new(),
             host: Host::headless(None),
@@ -1085,6 +1098,8 @@ impl Driver {
         if let Some(demo) = &mut self.demo {
             demo.reap();
         }
+        self.apps
+            .retain_mut(|child| matches!(child.try_wait(), Ok(None)));
         Ok(())
     }
 
@@ -1683,6 +1698,7 @@ impl Driver {
         if let Some(demo) = &mut self.demo {
             demo.stop();
         }
+        self.apps.iter().for_each(demo::terminate);
         if let Some(recorder) = &mut self.recorder {
             recorder.exit(self.start.elapsed(), status);
         }

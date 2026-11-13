@@ -91,30 +91,16 @@ impl Demo {
     /// Replace the running app by the next. False: it did not start.
     pub fn next(&mut self) -> bool {
         self.stop();
-        let Some((program, args)) = self.command.split_first() else {
-            return false;
-        };
-        let spawned = Command::new(program)
-            .args(args)
-            .arg(self.seed.to_string())
-            .arg(self.started.to_string())
-            .envs(self.env.iter().map(|(k, v)| (k, v)))
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .process_group(0)
-            .spawn();
+        let extra = [self.seed.to_string(), self.started.to_string()];
         self.started += 1;
-        self.child = spawned.ok();
+        self.child = spawn(&self.command, &extra, &self.env);
         self.child.is_some()
     }
 
     /// Terminate the running app: its sprites go with its connection.
     pub fn stop(&mut self) {
         if let Some(child) = self.child.take() {
-            if let Some(group) = Pid::from_raw(child.id() as i32) {
-                let _ = kill_process_group(group, Signal::TERM);
-            }
+            terminate(&child);
             self.dying.push(child);
         }
         self.reap();
@@ -126,6 +112,32 @@ impl Demo {
             .take_if(|child| !matches!(child.try_wait(), Ok(None)));
         self.dying
             .retain_mut(|child| matches!(child.try_wait(), Ok(None)));
+    }
+}
+
+/// `command` and `extra`, in its own process group, stdio null.
+pub(crate) fn spawn(
+    command: &[String],
+    extra: &[String],
+    env: &[(String, String)],
+) -> Option<Child> {
+    let (program, args) = command.split_first()?;
+    Command::new(program)
+        .args(args)
+        .args(extra)
+        .envs(env.iter().map(|(k, v)| (k, v)))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()
+        .ok()
+}
+
+/// SIGTERM to the process group of `child`.
+pub(crate) fn terminate(child: &Child) {
+    if let Some(group) = Pid::from_raw(child.id() as i32) {
+        let _ = kill_process_group(group, Signal::TERM);
     }
 }
 

@@ -57,6 +57,19 @@ pub fn find(program: &str) -> Option<PathBuf> {
     in_path().or_else(near_cwd).or_else(near_exe)
 }
 
+/// The failure of `find(name)`: status 127.
+pub fn not_found(name: &str) -> impl FnOnce() -> Fail {
+    move || Fail {
+        status: 127,
+        message: format!("{name}: not found"),
+        hint: Some(
+            "looked in PATH, then .venv/bin and venv/bin here and above; \
+             install ptyrc and ptyrc-apps, or `uv sync` in the source tree"
+                .into(),
+        ),
+    }
+}
+
 /// Replace this process with `ptyrc-app ARGS...`.
 pub fn app(common: &Common, args: App) -> Result<ExitCode, Fail> {
     exec(APP, common, &args.args)
@@ -70,17 +83,7 @@ pub fn python(common: &Common, args: Python) -> Result<ExitCode, Fail> {
 /// Replace this process with `name ARGS...`; `-s` becomes `$PTYRC_SESSION`,
 /// and drops `$PTYRC_SOCKET`, which would win over it.
 fn exec(name: &str, common: &Common, args: &[String]) -> Result<ExitCode, Fail> {
-    let Some(program) = find(name) else {
-        return Err(Fail {
-            status: 127,
-            message: format!("{name}: not found"),
-            hint: Some(
-                "looked in PATH, then .venv/bin and venv/bin here and above; \
-                 install ptyrc and ptyrc-apps, or `uv sync` in the source tree"
-                    .into(),
-            ),
-        });
-    };
+    let program = find(name).ok_or_else(not_found(name))?;
     let mut command = Command::new(&program);
     command.args(args);
     if let Some(session) = &common.session {

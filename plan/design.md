@@ -916,6 +916,8 @@ that moves a snapshot is read in the diff of the `.snap`.
   One grab at a time (`not-usable` for another client).
   `scripts/grab-sprite.py`: the arrows move a sprite in vim's pane; vim
   does not see them.
+- `Config::apps` (`demo.rs`): commands run on the session after the
+  program, as the demo's without `SEED NTH`; terminated with the driver.
 - The demo (`demo.rs`): ctrl+t typed twice in a row on the host
   keyboard, while no client is connected and no key is grabbed, runs a
   client app on the session; the pair reaches nobody. While that app
@@ -1076,7 +1078,8 @@ form exists.
 ptyrc run [--name N] [--headless --size CxR] [--host-log F]
           [--transparent] [--no-presets] [--coalesce-ms N]
           [--host-fg COLOR] [--host-bg COLOR]
-          [--record FILE [--record-input]] [--no-demo] [--] CMD...
+          [--record FILE [--record-input]] [--no-demo] [--app APP]...
+          [--] CMD...
 ptyrc replay FILE [--name N] [--speed X] [--until T] [--step] [--hold]
           [--no-presets | --presets] [--snap | --check SNAPS] [--at T,...]
 ptyrc tape [status | step [N] | seek T | play [SPEED] | pause | quit]
@@ -1116,6 +1119,14 @@ python` `ptyrc-python`; `-s` becomes `$PTYRC_SESSION` and unsets
 `$PTYRC_SOCKET`. The program is taken from `PATH`; else from `.venv/bin`
 or `venv/bin` in the current directory or one above it; else from the same
 above the `ptyrc` binary. None: status 127.
+
+`ptyrc run --app APP`: `ptyrc-app` (found as above) with the words of APP
+runs on the session once the program has started; `PTYRC_SESSION` and
+`PTYRC_SOCKET` are set, stdio is null; SIGTERM to its process group at the
+end. Repeatable. Not with `--transparent` (status 2); no `ptyrc-app`:
+status 127, nothing runs. The options of `run` come before the program: a
+first word that starts with `-` is one (unknown: status 2); `--` before a
+program that does.
 
 ### Errors
 

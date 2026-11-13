@@ -26,6 +26,12 @@ Wrap any application with `ptyrc` as follows:
 ptyrc run vim ~/.vimrc
 ```
 
+Start it with a client app already on it:
+
+```sh
+ptyrc run --app bricks -- vim ~/.vimrc
+```
+
 You can use `ptyrc python` to start an interactive session:
 
 ```py

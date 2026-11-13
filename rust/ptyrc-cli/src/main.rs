@@ -162,8 +162,13 @@ struct Run {
     /// No demo: ctrl+t twice in a row is the app's, as any key
     #[arg(long)]
     no_demo: bool,
-    /// The program and its arguments [default: $SHELL]
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    /// Run a client app on the session from the start: `--app bricks`,
+    /// `--app "snow -a"`; repeatable
+    #[arg(long, value_name = "APP")]
+    app: Vec<String>,
+    /// The program and its arguments [default: $SHELL]; options of
+    /// `run` come first, `--` before a program that starts with `-`
+    #[arg(trailing_var_arg = true)]
     command: Vec<String>,
 }
 
@@ -361,6 +366,23 @@ fn verb_run(args: Run) -> Result<ExitCode, Fail> {
     } else {
         args.command
     };
+    let apps = if args.app.is_empty() {
+        Vec::new()
+    } else {
+        if args.transparent {
+            return Err(Fail::usage(
+                "--app with --transparent",
+                "nothing is drawn on a transparent stream",
+            ));
+        }
+        let program = app_program().ok_or_else(apps::not_found(apps::APP))?;
+        let words = |app: &String| {
+            let mut argv = vec![program.clone()];
+            argv.extend(app.split_whitespace().map(str::to_string));
+            argv
+        };
+        args.app.iter().map(words).collect()
+    };
     let config = ptyrc_server::Config {
         argv,
         name: args.name,
@@ -382,6 +404,7 @@ fn verb_run(args: Run) -> Result<ExitCode, Fail> {
         presets: !args.no_presets && !args.transparent,
         // Nothing is drawn on a transparent stream.
         demo: (!args.no_demo && !args.transparent).then(demo_command),
+        apps,
     };
     let status = ptyrc_server::run(config, plugins::engine(args.transparent, !args.no_presets))?;
     Ok(ExitCode::from(status.clamp(0, 255) as u8))
@@ -395,10 +418,13 @@ fn demo_command() -> Vec<String> {
     if !words.is_empty() {
         return words;
     }
-    let program = apps::find(apps::APP)
-        .and_then(|p| p.into_os_string().into_string().ok())
-        .unwrap_or_else(|| apps::APP.into());
+    let program = app_program().unwrap_or_else(|| apps::APP.into());
     vec![program, "demo".into()]
+}
+
+/// `ptyrc-app`, found as by `ptyrc app`.
+fn app_program() -> Option<String> {
+    apps::find(apps::APP).and_then(|p| p.into_os_string().into_string().ok())
 }
 
 fn verb_ls(common: &Common) -> Result<ExitCode, Fail> {

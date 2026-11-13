@@ -88,3 +88,69 @@ fn python_found_and_session_wins_over_socket() {
     );
     assert_eq!(run(&["-s", "x", "python"]), "py x unset\n");
 }
+
+#[test]
+fn run_with_apps_from_the_start() {
+    let sb = Sandbox::new("runapp");
+    let bin = sb.dir.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let log = sb.dir.join("log");
+    // A stand-in for `ptyrc-app`: it notes its session and arguments,
+    // stays, and notes its SIGTERM.
+    let script = format!(
+        "#!/bin/sh\nlog={}\necho \"$PTYRC_SESSION $*\" >> $log\n\
+         trap 'echo \"term $1\" >> $log; exit' TERM\nsleep 60 & wait\n",
+        log.display()
+    );
+    let app = bin.join("ptyrc-app");
+    std::fs::write(&app, script).unwrap();
+    std::fs::set_permissions(&app, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:/usr/bin:/bin", bin.display());
+    let run = |path: &str, args: &[&str]| {
+        sb.ptyrc()
+            .current_dir(&sb.dir)
+            .env("PATH", path)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap()
+    };
+    let logged = |text: &str| {
+        let mut lines: Vec<String> = std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_string)
+            .collect();
+        lines.sort();
+        lines.join("\n") == text
+    };
+
+    // Both started on the session; `--app` after the program is its own.
+    let sh = "sh -c 'echo \"$@\"; sleep 0.2' x --app y";
+    let out = run(
+        &path,
+        &[
+            "run",
+            "--headless",
+            "--name",
+            "r",
+            "--app",
+            "bricks",
+            "--app",
+            "snow -a",
+            "--",
+            "sh",
+            "-c",
+            sh,
+        ],
+    );
+    assert!(out.status.success(), "{out:?}");
+    common::wait_for(
+        || logged("r bricks\nr snow -a\nterm bricks\nterm snow"),
+        "the apps, started then terminated",
+    );
+
+    // A first argument that starts with `-` is an option of `run`.
+    let out = run(&path, &["run", "--headless", "--bogus", "true"]);
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+}
