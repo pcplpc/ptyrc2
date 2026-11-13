@@ -18,6 +18,7 @@ __all__ = [
     "heir",
     "hold",
     "in_sight",
+    "movable",
     "on_screen",
     "parse",
     "parser",
@@ -145,6 +146,20 @@ def heir(
     return max(heirs, key=shared, default=None)
 
 
+def movable(pilot: Pilot) -> bool:
+    """Subscribe to the topic `move`: the app says it changes frame
+    while it runs (`ptyrc manage move`); the event `{"frame": id}` then
+    comes to it alone. False on a driver that has no such topic: the
+    app runs as before, and is restarted to be moved."""
+    try:
+        pilot.subscribe("move")
+    except PtyrcError as exc:
+        if exc.code != "bad-params":
+            raise
+        return False
+    return True
+
+
 def follow(
     pilot: Pilot,
     frame: Frame,
@@ -157,7 +172,8 @@ def follow(
     topic `frames`: every change of layout comes with the frames as
     they are, so nothing is asked. The size of the screen is noted
     while the frame is settled: after a resize the place is looked for
-    in proportion.
+    in proportion. It takes the topic `move` too: the sprite goes to
+    the frame named, and is followed there.
 
     `beats`: the app's own work between two events. Each `next()` gives
     the seconds to wait before the one after: a generator does its work
@@ -167,6 +183,7 @@ def follow(
     beat = None if beats is None else now + next(beats)
     screen: tuple[int, int] | None = None  # when `frame` was last settled
     pilot.subscribe("frames", "exit", snapshot=True)
+    movable(pilot)
     while True:
         now = time.monotonic()
         if end is not None and now >= end:
@@ -179,6 +196,16 @@ def follow(
             continue
         if event[0] == "exit":
             return
+        if event[0] == "move":
+            try:
+                new = pilot.frame(event[1]["frame"])
+                sprite.update(frame=new.id)
+            except PtyrcError as exc:
+                if exc.code not in ("no-frame", "not-usable"):
+                    raise
+                continue  # gone since it was asked: it stays
+            frame, screen = new, None
+            continue
         if event[0] != "frames" or frame.kind == "raw":
             continue
         frames = [Frame(pilot, info) for info in event[1]["frames"]]

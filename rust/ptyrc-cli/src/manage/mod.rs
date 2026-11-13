@@ -2,6 +2,10 @@
 //! `ptyrc manage`: the apps of a session, by sub-verbs. The menu is
 //! `ui.rs`.
 
+pub mod catalog;
+pub mod menu;
+mod overlay;
+mod tty;
 pub mod ui;
 
 use crate::{Common, Fail, apps, connect, print_json};

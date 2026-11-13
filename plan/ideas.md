@@ -724,3 +724,26 @@ extension `borders`, `ptyrc widgets`. Left:
 - The hotkey's child is started with the driver's environment, not the
   one of the terminal the keys come from.
 - `ptyrc-cli/src/manage/ui.rs` is a stand-in until the menu is merged.
+
+## Manage, the menu (seventh session)
+
+- Widths are counted in characters, not cells: a wide glyph in an
+  argument shifts its row by a cell.
+- A modal takes a room when one is there: on a screen with a small
+  free corner the menu is 34x9 where a larger one over the text would
+  read better. `prefer` a size, or a least variant before going over.
+- The catalog holds `--print`, `--one-shot`, `--grab`: options that
+  make little sense for an app started from the menu; a mark in the
+  catalog (`"menu": false`) would hide them.
+- An option with an optional value (`nargs="?"`) is a typed value:
+  given empty it is not passed at all.
+- The form does not check a value before the start; the error comes
+  back as the last line of the log, 400 ms later.
+- The log is read once when opened: no follow.
+- `random app` draws among all the apps, one that runs already too.
+- The tty front takes the top left 100x30 of a larger terminal.
+- Clients are listed below the apps, with stop and pause one key away:
+  a `ptyrc show` in another terminal can be stopped by mistake. A
+  confirmation for clients may be worth a key.
+- `tests/overlay.rs` and others that read the screen become rows of
+  the list they look at (a client is entered at its first request).

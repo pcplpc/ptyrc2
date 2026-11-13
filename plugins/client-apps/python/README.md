@@ -24,12 +24,18 @@ python -m ptyrc_apps.clock -s NAME
 | `rain` | a native effect from a draw extension that sees the text: drops fall behind it and splash on the top of its lines, on the cursor and on the floor; less rain on columns that changed in the last 10 s (the heat, given to the effect) |
 | `snow` | a native effect that sees cells and heat: flakes fall behind the text; with `--cover`, snow lies over the lines of text, a cell away from the words of its own row, and on the floor, in smooth piles up to three rows deep; it melts where the screen changed lately and around the cursor; it lies on frame rows, so it scrolls with the text; the wind is tuned in place (`Sprite.tune(wind=...)`), the effect keeps its state |
 
-In a `ptyrc run` with no client connected, ctrl+t typed twice runs one
-of them on the session; twice again replaces it by the next
-(`demo.py`: rounds of all the apps shuffled, the `-a` version one time
-in two; `marks` is not shown). `ptyrc-app` is taken from `PATH`, else
-from the `.venv/bin` of the source tree `ptyrc` was built in;
-`PTYRC_DEMO` names another command: `PTYRC_DEMO="uv run ptyrc-app demo"`.
+`ptyrc manage` starts, stops, pauses and restarts them on a session; in
+a `ptyrc run`, ctrl+t typed twice opens its menu. `ptyrc-app --catalog`
+prints the apps and their options as JSON (`_catalog.py`, from the
+argparse parser of each app): what the menu shows. `random`, there, is
+what `random app` draws from (`marks` is never drawn).
+
+An app that can change frame while it runs subscribes to the topic
+`move` (`_cli.movable`); `ptyrc manage move` then sends it `{"frame":
+id}` in place of restarting it. `_cli.follow` takes it (`sand`, `rain`,
+`snow`: the sprite goes to that frame), and `_widgets.Deck` (`clock`,
+`monitor`: the tags are shown again there). On a driver without the
+topic the subscription is refused and the app runs as before.
 
 `scripts/demo-apps.sh` runs them on a scrolling vim buffer;
 `scripts/demo-frames.sh` gives each pane of a tmux session its own
