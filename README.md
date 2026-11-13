@@ -10,7 +10,7 @@ with the love of a human, now with slop and unreviewed code.
 The initial goal was to wrap a CLI application like [`vim`](https://vim.org) to
 add confetti to its output.
 
-See the [`GALLERY.md`](GALLERY.md) if you want to see only the pictures..
+See the [`GALLERY.md`](GALLERY.md) if you want to see only the pictures.
 
 ![confetti](doc/confetti-all.gif)
 
