@@ -2529,7 +2529,11 @@ fn hidden_owner_stands_still() {
     let frames = json!([{"rows": ["1"], "ms": 100}, {"rows": ["2"], "ms": 100}]);
     let mut scene = Scene::new();
     scene
-        .add(1, spec(json!({"frames": frames, "ttl_ms": 1000})), ms(0))
+        .add(
+            1,
+            spec(json!({"frames": frames, "loop": true, "ttl_ms": 1000})),
+            ms(0),
+        )
         .unwrap();
     scene
         .add(
