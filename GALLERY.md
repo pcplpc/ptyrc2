@@ -63,4 +63,4 @@ Open a push request to add your own :)
 
 This project uses `GPL-3.0-or-later` where applicable.
 
-See `LICENSE.txt`.
+See `LICENSE.txt`

@@ -5,14 +5,14 @@
 # `ptyrc2` – the pty remote controller
 
 This started as [`ptyrc`](https://github.com/pcplpc/ptyrc) a work done by hand
-with the love of a human, but now with slop and unreviewed code.
+with the love of a human. Now done with slop and unreviewed code.
 
 The initial goal was to wrap a CLI application like [`vim`](https://vim.org) to
 add confetti to its output.
 
-![confetti](doc/confetti-all.gif)
+See the [`GALLERY.md`](GALLERY.md) for more than confetti in the output.
 
-See [gallery](GALLERY.md) for more examples.
+![confetti](doc/confetti-all.gif)
 
 # Usage
 
@@ -96,4 +96,4 @@ You can still point your agent at it to write custom apps.
 
 This project uses `GPL-3.0-or-later` where applicable.
 
-See `LICENSE.txt`.
+See `LICENSE.txt`
