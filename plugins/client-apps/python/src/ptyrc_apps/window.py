@@ -52,10 +52,15 @@ from ._strip import (
     Pointer,
     Strip,
     clouds,
+    fog,
     heavens,
+    lights,
     noise,
     paint,
+    rain,
+    snow,
     stars,
+    water,
 )
 
 __all__ = [
@@ -89,10 +94,7 @@ MIDDLE = {"spring": (4, 20), "summer": (7, 20), "autumn": (10, 20), "winter": (1
 FRAME: RGB = (196, 156, 116)
 FABRICS: tuple[RGB, ...] = ((178, 62, 66), (222, 208, 180), (70, 110, 140))
 COATS: tuple[RGB, ...] = ((26, 24, 28), (206, 126, 56), (120, 118, 122))
-SLATE: RGB = (150, 156, 176)
-DEEP: RGB = (0, 92, 140)  # the sea
-RAIN: RGB = (150, 172, 208)
-FOG: RGB = (206, 210, 214)
+SLATE: RGB = (128, 130, 140)
 
 PERIOD = 0.25  # seconds a frame, when something moves
 STILL = 20.0  # seconds a frame, else
@@ -207,7 +209,7 @@ def _city(look: Look, w: int, rows: int) -> tuple[int, list[Layer]]:
     if rows <= 6:
         return hz, [far]
     near = Layer(Strip(s + 1, "city", 5 if w < 26 else 6), 0.12, rows, rows * 0.62)
-    near.colour = (104, 110, 136)
+    near.colour = (92, 94, 104)
     if not look.land or rows < 8:
         return hz, [far, near]
     hills = Layer(
@@ -225,81 +227,6 @@ _LAND = {
 
 
 # --- what the scene is made of ---------------------------------------
-
-
-def _water(half: Half, sky: _sky.Sky, hz: int, seed: int, t: float) -> None:
-    w, rows = half.w, 2 * half.h
-    deep = sky.shade(DEEP)
-    for y in range(hz, rows):
-        v = (y - hz + 0.5) / max(1, rows - hz)
-        for x in range(w):
-            # A mirror: the horizon far off, the zenith at one's feet.
-            murk = (0.3 + 0.15 * v) * (0.35 + 0.65 * sky.light)
-            c = mix(sky.colour((x + 0.5) / w, 1 - 0.85 * v), deep, murk)
-            if sky.light > 0.3 and noise(seed + 9, x + int(t * 1.3) + y * 3, y) < 0.04:
-                c = mix(c, WHITE, 0.3 * sky.light)
-            half.px[y][x] = c
-    for body, across, shine in (
-        (sky.sun, sky.sun_x, (255, 226, 160)),
-        (sky.moon, sky.moon_x, (236, 236, 220)),
-    ):
-        if not -2 < body < 50 or (shine[2] == 220 and sky.moonlight < 0.2):
-            continue
-        for y in range(hz, rows):
-            reach = 0.5 + (y - hz) * 0.22
-            for x in range(int(across * w - reach - 1), int(across * w + reach + 2)):
-                near = abs(x + 0.5 - across * w) <= reach
-                if near and noise(seed + 4, x * 31 + y, int(t * 2.2)) < 0.45:
-                    half.set(x, y, shine, 0.7 * (1 - 0.7 * sky.cover))
-
-
-def _fog(half: Half, sky: _sky.Sky, hz: int) -> None:
-    grey = sky.shade(FOG)
-    rows = 2 * half.h
-    for y in range(rows):
-        d = (y - hz) / rows
-        thick = 0.82 - (1.5 * d if d > 0 else -0.9 * d)
-        for x in range(half.w):
-            half.set(x, y, grey, max(0.25, thick))
-
-
-def _rain(half: Half, sky: _sky.Sky, seed: int, t: float) -> None:
-    dots = Braille(half.w, half.h)
-    tall = 4 * half.h
-    for col in range(2 * half.w):
-        if noise(seed + 21, col) > 0.42:
-            continue
-        fall = 9 + 6 * noise(seed + 22, col)
-        y = int(t * fall + noise(seed + 23, col) * 97) % (tall + 5)
-        for k in range(2):
-            dots.set(col - (y - k) // 5 % 2, y - k)
-    for (cx, cy), _ in list(_cells(dots)):
-        if (cx, cy) not in half.over:
-            under = mix(half.px[2 * cy][cx], half.px[2 * cy + 1][cx], 0.5)
-            half.put(cx, cy, dots.glyph(cx, cy), mix(under, sky.shade(RAIN), 0.75))
-
-
-def _snow(half: Half, sky: _sky.Sky, seed: int, t: float) -> None:
-    dots = Braille(half.w, half.h)
-    wide, tall = 2 * half.w, 4 * half.h
-    for i in range(max(3, half.w * half.h // 7)):
-        fall = 1.6 + 1.8 * noise(seed + 31, i)
-        y = int(t * fall + noise(seed + 32, i) * tall) % tall
-        sway = math.sin(t * 0.7 + i) * 1.6
-        dots.set(int(noise(seed + 33, i) * wide + sway + t * 0.4) % wide, y)
-    flake = mix(WHITE, sky.shade(WHITE), 0.5)
-    for (cx, cy), _ in list(_cells(dots)):
-        if (cx, cy) not in half.over:
-            half.put(cx, cy, dots.glyph(cx, cy), flake)
-
-
-def _cells(dots: Braille) -> list[tuple[tuple[int, int], int]]:
-    return [
-        ((cx, cy), bits)
-        for cy, row in enumerate(dots.bits)
-        for cx, bits in enumerate(row)
-        if bits
-    ]
 
 
 WINGS = ("⠑⠊", "⠒⠒", "⠊⠑", "⠒⠒")
@@ -341,9 +268,7 @@ def _meteor(half: Half, sky: _sky.Sky, seed: int, t: float, hz: int) -> None:
     run = 0.55 * min(wide, 2 * tall)
     head, tail = p * run, max(0.0, p * run - 0.3 * run)
     dots.line(x0 + lean * tail, y0 + tail * 0.5, x0 + lean * head, y0 + head * 0.5)
-    for (cx, cy), _ in _cells(dots):
-        if (cx, cy) not in half.over:
-            half.put(cx, cy, dots.glyph(cx, cy), (255, 250, 226))
+    half.ink(dots, (255, 250, 226))
 
 
 def _smoke(
@@ -403,28 +328,6 @@ def _boat(half: Half, sky: _sky.Sky, seed: int, t: float, hz: int) -> None:
     half.set(x + 1, y - 1, sail)
     if sky.light < 0.3:
         half.set(x, y - 3, LAMP)
-
-
-def _lights(
-    half: Half,
-    sky: _sky.Sky,
-    marks: Sequence[Mark],
-    seed: int,
-    pointer: Pointer | None,
-) -> None:
-    """The windows of the houses: lit at night, fewer late; lit under
-    the pointer at any time."""
-    late = sky.hour >= 23.25 or sky.hour < 5.5
-    for mark in marks:
-        if mark.kind != "window":
-            continue
-        home = noise(seed + 95, mark.n)
-        lit = sky.light < 0.4 and home < (0.25 if late else 0.85)
-        if pointer is not None and pointer.at is not None:
-            px, py = pointer.at
-            lit = lit or (abs(px - mark.x) <= 3 and abs(py - mark.y // 2) <= 2)
-        if lit:
-            half.set(mark.x, mark.y, LAMP)
 
 
 def _mullions(half: Half, sky: _sky.Sky) -> None:
@@ -537,19 +440,19 @@ def scene(
     hz, layers = _LAND[look.place](look, w, rows)
     clear = heavens(half, sky, hz)
     if kind is not None:
-        amount = {"clear": 0.14, "clouds": 0.6, "fog": 0.3}.get(kind, 0.8)
+        amount = {"clear": 0.14, "clouds": 0.6}.get(kind, 0.3)
         clouds(half, sky, seed + 7, hz, amount, t * 0.25)
         if cover < 0.5:  # stars and birds show between the clouds
             clear = [list(row) for row in half.px]
     marks: list[Mark] = []
     for layer in layers:
         if look.place == "sea" and layer.depth == 0.0:
-            _water(half, sky, hz, seed, t)
+            water(half, sky, hz, seed, t)
         marks += paint(half, layer, sky, season=season)
     if look.place == "sea" and layers[-1].depth != 0.0:
-        _water(half, sky, hz, seed, t)
+        water(half, sky, hz, seed, t)
     if look.land:
-        _lights(half, sky, marks, seed, pointer)
+        lights(half, sky, marks, seed, pointer)
     if look.passing:
         _smoke(half, sky, marks, seed, t)
         _balloon(half, sky, seed, t, hz)
@@ -557,19 +460,19 @@ def scene(
         if look.place == "sea":
             _boat(half, sky, seed, t, hz)
     if kind == "fog":
-        _fog(half, sky, hz)
+        fog(half, sky, hz)
     stars(half, clear, sky, seed + 3, t if look.passing else None, hz)
     if look.passing and kind not in ("rain", "fog", "snow"):
         _birds(half, sky, seed, t, hz)
         _meteor(half, sky, seed, t, hz)
     if kind == "rain":
-        _rain(half, sky, seed, t)
+        rain(half, sky, seed, t)
     elif kind == "snow":
-        _snow(half, sky, seed, t)
+        snow(half, sky, seed, t)
     _mullions(half, sky)
     if look.cosy:
         ease = pointer.ease(t) if pointer is not None else 0.0
-        _cat(half, sky, seed, t, pointer, curtain(w, ease))
+        _cat(half, sky, seed, t, pointer, curtain(w, 0.0))
         _curtains(half, sky, seed, ease)
     return half.rows(look.deep)
 
@@ -625,8 +528,8 @@ def show(args: argparse.Namespace) -> int:
 def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
     era = _era(args)
     look = _look(args, era.start)
-    pointer = Pointer(clock.monotonic)
     start = clock.monotonic()
+    pointer = Pointer(lambda: clock.monotonic() - start)
 
     def render(w: int, h: int) -> Rows:
         t = clock.monotonic() - start
