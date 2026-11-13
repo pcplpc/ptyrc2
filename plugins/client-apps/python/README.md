@@ -26,8 +26,9 @@ python -m ptyrc_apps.clock -s NAME
 In a `ptyrc run` with no client connected, ctrl+t typed twice runs one
 of them on the session; twice again replaces it by the next
 (`demo.py`: rounds of all the apps shuffled, the `-a` version one time
-in two; `marks` is not shown). `ptyrc-app` must be in `PATH`, or
-`PTYRC_DEMO` name the command: `PTYRC_DEMO="uv run ptyrc-app demo"`.
+in two; `marks` is not shown). `ptyrc-app` is taken from `PATH`, else
+from the `.venv/bin` of the source tree `ptyrc` was built in;
+`PTYRC_DEMO` names another command: `PTYRC_DEMO="uv run ptyrc-app demo"`.
 
 `scripts/demo-apps.sh` runs them on a scrolling vim buffer;
 `scripts/demo-frames.sh` gives each pane of a tmux session its own

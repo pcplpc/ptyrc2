@@ -924,7 +924,8 @@ that moves a snapshot is read in the diff of the `.snap`.
   connected. A first ctrl+t is held 350 ms, or until the next key: alone
   it goes to the app, late. CSI u and modifyOtherKeys forms count; a
   release event between the two does not break the pair. The driver
-  runs `$PTYRC_DEMO` (words split on spaces), else `ptyrc-app demo`,
+  runs `$PTYRC_DEMO` (words split on spaces), else `ptyrc-app demo`
+  (from `PATH`, else from a `.venv/bin` above the `ptyrc` binary),
   with two more arguments, `SEED NTH`: a number drawn once for the
   session and the count of runs before; `PTYRC_SESSION` and
   `PTYRC_SOCKET` are set, stdio is null. A command that does not start

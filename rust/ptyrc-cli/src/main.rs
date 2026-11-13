@@ -380,15 +380,30 @@ fn verb_run(args: Run) -> Result<ExitCode, Fail> {
     Ok(ExitCode::from(status.clamp(0, 255) as u8))
 }
 
-/// What the demo runs: the words of `$PTYRC_DEMO`, else `ptyrc-app demo`.
+/// What the demo runs: the words of `$PTYRC_DEMO`; else `ptyrc-app demo`,
+/// from `PATH` or, when it is not there, from a `.venv/bin` in a
+/// directory above this program (a source tree).
 fn demo_command() -> Vec<String> {
     let words = std::env::var("PTYRC_DEMO").unwrap_or_default();
     let words: Vec<String> = words.split_whitespace().map(str::to_string).collect();
-    if words.is_empty() {
-        vec!["ptyrc-app".into(), "demo".into()]
-    } else {
-        words
+    if !words.is_empty() {
+        return words;
     }
+    let app = "ptyrc-app";
+    let in_path = std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(app).is_file()));
+    let exe = std::env::current_exe().and_then(|exe| exe.canonicalize());
+    let in_tree = || {
+        let exe = exe.ok()?;
+        let found = exe
+            .ancestors()
+            .skip(1)
+            .map(|dir| dir.join(".venv/bin").join(app))
+            .find(|path| path.is_file())?;
+        found.into_os_string().into_string().ok()
+    };
+    let program = if in_path { None } else { in_tree() };
+    vec![program.unwrap_or_else(|| app.into()), "demo".into()]
 }
 
 fn verb_ls(common: &Common) -> Result<ExitCode, Fail> {
