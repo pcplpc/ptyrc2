@@ -12,13 +12,9 @@ add confetti to its output.
 
 ![confetti](doc/confetti-all.gif)
 
-# Quick setup
+See [gallery](#Gallery) below.
 
-This is not yet published on [PyPI](https://pypi.org):
-
-```sh
-# install instructions assuming https://github.com/pcplpc/ptyrc2 as url
-```
+# Usage
 
 Wrap any application with `ptyrc` as follows:
 
@@ -58,51 +54,94 @@ Sprite(1)
 False
 ```
 
+For example, if you want to pilot manually:
+
+![pilot](doc/interact.gif)
+
 Running `ptyrc python script.py` runs the script with `pilot` defined.
 
-You can also start a user-provided app that draws on screen:
+## Gallery
+
+If you already started a driver, you can bind a user app as follows:
 
 ```sh
 ptyrc app bricks
 ```
 
-If no pilot is attached `ctrl+t ctrl+t` twice starts an app at random.
+You can also directly start a user app with the driver:
 
-## Gallery
+```sh
+ptyrc run --app fishes -- vim LICENSE.txt
+```
 
-### fishes
+You then get fishes:
 
 ![fishes](doc/fishes.gif)
 
-### rain
+Perfect weather for a coding session:
 
 ![rain](doc/rain.gif)
 
-### snow
+Freeze-cold `htop` monitoring:
+
+![sand](doc/snow.gif)
+
+Sand pouring on your screen:
 
 ![sand](doc/sand.gif)
 
-### sand
+# Install from source
 
-![sand](doc/sand.gif)
+It's not published
+on [crates.io](https://crates.io)
+nor [PyPI](https://pypi.org), install from source.
 
-### misc
+Likely requires Linux, a Rust toolchain, `Python 3.13`
+and optionally [just](https://just.systems).
 
-Showcase of manual piloting with an interactive shell:
+```sh
+git clone https://github.com/pcplpc/ptyrc2
+cd ptyrc2
+just install
+```
 
-![pilot](doc/interact.gif)
+This installs `ptyrc` into:
 
-Use `ctrl+t ctrl+t` to start apps in idle drivers:
+- `~/.cargo/bin` for the `ptyrc` native driver;
+- `ptyrc-app` and `ptyrc-python` into `~/.local/bin` for pilot clients;
+- both must be in your `PATH` to work.
+
+Without using `just` you can:
+
+```sh
+cd ptyrc2
+cargo install --locked --path rust/ptyrc-cli
+uv tool install \
+    --with ./python/ptyrc \
+    --with-executables-from ptyrc \
+    ./plugins/client-apps/python
+```
+
+Use `just uninstall` to remove them.
+
+To try without installing anything outside the clone:
+
+```sh
+just run vim        # cargo build --release && uv sync, then ptyrc run vim
+```
+
+Use double `ctrl+t ctrl+t` to start a random user app in an idle driver:
 
 ![ctrl-t](doc/ctrl-t.gif)
+
 
 ## Development
 
 You can use:
 
 ```sh
-cargo test --workspace
-uv sync && uv run pytest
+just test           # cargo test --workspace && uv run pytest
+just lint           # clippy, rustfmt, ruff
 ```
 
 Honestly, the codebase is still full of slop:
