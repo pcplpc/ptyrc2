@@ -26,6 +26,7 @@ ptyrc-draw-bigtext = { path = "../../plugins/draw-ext/bigtext" }
 ptyrc-draw-rain = { path = "../../plugins/draw-ext/rain" }
 ptyrc-draw-snow = { path = "../../plugins/draw-ext/snow" }
 ptyrc-draw-sand = { path = "../../plugins/draw-ext/sand" }
+ptyrc-draw-borders = { path = "../../plugins/draw-ext/borders" }
 clap = { version = "4", features = ["derive"] }
 
 [dev-dependencies]

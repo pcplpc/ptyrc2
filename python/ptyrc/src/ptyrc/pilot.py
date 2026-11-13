@@ -16,6 +16,7 @@ from typing import Any, Self
 
 from ._wire import Connection, PtyrcError, live_sessions, runtime_dir, socket_path
 from .tools import Locator, Tools, frame_locator
+from .widgets import Widgets
 
 __all__ = ["Cursor", "Frame", "Match", "Pilot", "Sprite", "find_binary", "sprite_spec"]
 
@@ -415,7 +416,7 @@ class Frame:
         return f"Frame({self.id}, {self.kind}, {self.state}, rect={self.rect})"
 
 
-class Pilot(Tools):
+class Pilot(Tools, Widgets):
     """Client of one driver session.
 
     `Pilot()` connects to the session named by the environment or the only
@@ -782,7 +783,8 @@ class Pilot(Tools):
         frame: the frame rows whose text changed, the origin after a
         scroll), `cursor`, `frames`, `idle` (a frame became idle, or
         busy), `draw` (sprites removed with the rows or the frame they
-        were on), `input`, `size`, `exit`.
+        were on), `widgets` (a widget placed, moved, resized, hidden),
+        `input`, `size`, `exit`.
 
         `snapshot`: the state now comes first, as events: `idle` of each
         frame on screen, `cursor`, `frames`, `size`. No poll at start."""

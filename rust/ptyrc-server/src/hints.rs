@@ -5,10 +5,12 @@
 //! Python pilot and any other client read the same hint.
 
 use crate::screen::ScreenEngine;
+use ptyrc_core::OwnerId;
+use ptyrc_core::widgets::WidgetId;
 use ptyrc_proto::{ErrorCode, RpcError, suggest};
 
 /// Every method of the protocol, for the nearest-name hint.
-const METHODS: [&str; 37] = [
+const METHODS: [&str; 43] = [
     "session.info",
     "session.resize",
     "session.colors",
@@ -42,6 +44,12 @@ const METHODS: [&str; 37] = [
     "draw.exts",
     "layer.define",
     "layer.list",
+    "widget.declare",
+    "widget.show",
+    "widget.set",
+    "widget.hide",
+    "widget.list",
+    "widget.borders",
     "batch",
     "subscribe",
     "debug.overlay",
@@ -52,6 +60,7 @@ const FRAME_NAMES: [&str; 5] = ["raw", "active", "largest", "quietest", "idle"];
 const COLOURS: [&str; 10] = [
     "default", "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "grey",
 ];
+const BORDER: &str = r#"{"base":NAME,"corners":"┌┐└┘","top":"─","bottom":"─","left":"│","right":"│","style":{...},"title":{"align":"left"|"center"|"right","before":" ","after":" ","style":{...}}}"#;
 const ANCHORS: &str = r#"one of {"at":[x,y],"space":"frame"|"view"}, {"text":"...","side":"right"|"left"|"above"|"below"|"over"}, {"auto":{"prefer":"top-left"|"top"|"top-right"|"left"|"center"|"right"|"bottom-left"|"bottom"|"bottom-right"|"any"}}, {"cursor":{"dx":1,"dy":0}}"#;
 
 pub(crate) fn unknown_method(method: &str) -> RpcError {
@@ -130,6 +139,14 @@ fn bad_params(engine: &ScreenEngine, error: &mut RpcError) -> Option<String> {
             declared.join(", ")
         ));
     }
+    if message.contains("untagged enum Border") {
+        error.message = "bad border".into();
+        return Some(format!(
+            "a preset name ({}), or {}",
+            engine.widgets.borders().join(", "),
+            BORDER
+        ));
+    }
     if message.contains("untagged enum Anchor") {
         error.message = "bad anchor".into();
         return Some(ANCHORS.into());
@@ -182,6 +199,79 @@ fn bad_params(engine: &ScreenEngine, error: &mut RpcError) -> Option<String> {
         return Some("without `regex` (-E) the pattern is searched as it is written".into());
     }
     None
+}
+
+/// The hint of an error of a `widget.*` method of `owner`; `id`: the
+/// widget named, for its variants.
+pub(crate) fn widget(
+    engine: &ScreenEngine,
+    owner: OwnerId,
+    id: Option<WidgetId>,
+    mut error: RpcError,
+) -> RpcError {
+    let message = error.message.clone();
+    let word = subject(&message);
+    let list = |names: &[String]| names.join(", ");
+    error.hint = if message.starts_with("no such widget") {
+        let ids: Vec<String> = engine
+            .widgets
+            .ids_of(owner)
+            .iter()
+            .map(|id| id.to_string())
+            .collect();
+        Some(if ids.is_empty() {
+            "this connection shows no widget: `widget.show` first".into()
+        } else {
+            format!("widgets of this connection: {}", list(&ids))
+        })
+    } else if message.starts_with("no such tag") {
+        let tags = engine.widgets.tags_of(owner);
+        Some(if tags.is_empty() {
+            "this connection declared no tag: `widget.declare` first".into()
+        } else {
+            format!(
+                "{}tags of this connection: {}",
+                suggest::did_you_mean(word, tags.iter().map(String::as_str)),
+                list(&tags)
+            )
+        })
+    } else if message.starts_with("no such border") {
+        let names = engine.widgets.borders();
+        Some(format!(
+            "{}borders: {}",
+            suggest::did_you_mean(word, names.iter().map(String::as_str)),
+            list(&names)
+        ))
+    } else if message.starts_with("no such variant") || error.code == ErrorCode::NotUsable {
+        let names = id
+            .map(|id| engine.widgets.variants_named(id))
+            .unwrap_or_default();
+        let near = if error.code == ErrorCode::NotUsable {
+            String::new()
+        } else {
+            suggest::did_you_mean(word, names.iter().map(String::as_str))
+        };
+        Some(format!("{near}variants: {}", list(&names)))
+    } else if ["size of", "tag", "variant"]
+        .iter()
+        .any(|p| message.starts_with(p))
+        || message.contains("declared twice")
+    {
+        Some(
+            r#"a variant: {"tag", "name", "size": [w, h], "content"}; names unique in a tag; 16 variants a tag, 64 tags a connection, sizes 1x1 to 200x60"#
+                .into(),
+        )
+    } else if message.starts_with("border ") {
+        Some(
+            "corners: four glyphs; an edge: a pattern of one glyph or more; glyphs of one cell"
+                .into(),
+        )
+    } else if message.starts_with("fill") {
+        Some("fill: the share of the room the widget takes, 0.1 to 1 (0.5)".into())
+    } else {
+        None
+    };
+    explain(engine, error)
 }
 
 /// Add a hint to an error of the engine that has none.

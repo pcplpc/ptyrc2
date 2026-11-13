@@ -2,6 +2,7 @@
 //! Plugin traits. Implementations live in `plugins/`.
 
 use crate::scene::{EffectFactory, SpriteSpec};
+use crate::widgets::BorderSpec;
 use ptyrc_vt::{Grid, Rect};
 
 /// A pane as a plugin sees it: a rectangle of the screen.
@@ -112,6 +113,11 @@ pub trait DrawExt: Send {
 
     /// Native effects, registered in the scene under these names.
     fn effects(&self) -> Vec<(&'static str, EffectFactory)> {
+        vec![]
+    }
+
+    /// Border presets of widgets, registered under these names.
+    fn borders(&self) -> Vec<(&'static str, BorderSpec)> {
         vec![]
     }
 }

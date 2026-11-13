@@ -8,6 +8,7 @@ use crate::rpc;
 use ptyrc_core::frames::{FrameConfig, FrameEvent, Frames, ScreenInput};
 use ptyrc_core::plugin::{DrawExt, TuiSupport};
 use ptyrc_core::scene::Scene;
+use ptyrc_core::widgets::{WidgetConfig, Widgets};
 use ptyrc_core::{FrameId, FrameSel, OwnerId, TextQuery};
 use ptyrc_proto::{ErrorCode, RpcError};
 use ptyrc_vt::{Grid, Rect, Vt, VtEvent, repair};
@@ -95,6 +96,7 @@ pub struct ScreenEngine {
     host_stale: bool,
     pub(crate) frames: Frames,
     pub(crate) scene: Scene,
+    pub(crate) widgets: Widgets,
     pub(crate) exts: Vec<Box<dyn DrawExt>>,
     pub(crate) waits: Vec<Wait>,
     /// Last time the app grid changed.
@@ -128,9 +130,13 @@ pub struct ScreenEngine {
 impl ScreenEngine {
     pub fn new(supports: Vec<Box<dyn TuiSupport>>, exts: Vec<Box<dyn DrawExt>>) -> ScreenEngine {
         let mut scene = Scene::new();
+        let mut widgets = Widgets::new(WidgetConfig::default());
         for ext in &exts {
             for (name, make) in ext.effects() {
                 scene.register_effect(name, make);
+            }
+            for (name, border) in ext.borders() {
+                widgets.register_border(name, border);
             }
         }
         ScreenEngine {
@@ -141,6 +147,7 @@ impl ScreenEngine {
             host_stale: false,
             frames: Frames::new(FrameConfig::default(), supports),
             scene,
+            widgets,
             exts,
             waits: Vec::new(),
             last_change: Duration::ZERO,
@@ -184,6 +191,7 @@ impl ScreenEngine {
             events,
         };
         let changes = self.frames.update(&input, now);
+        self.widgets.touch();
         if !changes.is_empty() {
             self.idle_poke(now);
         }
@@ -225,12 +233,29 @@ impl ScreenEngine {
         }
     }
 
-    /// Steps 4 and 5: tick the scene, compose, repair the host.
-    fn paint(&mut self, now: Duration, out: &mut Vec<u8>) {
+    /// Lay the widgets out and update their sprites; topic `widgets`.
+    pub(crate) fn tick_widgets(&mut self, now: Duration, ctx: &mut Ctx) {
+        if self.widgets.is_empty() {
+            return;
+        }
+        let cursor = self.app.cursor();
+        let cursor = cursor.visible.then_some((cursor.col, cursor.row));
+        let changed =
+            self.widgets
+                .tick(now, self.app.grid(), cursor, &self.frames, &mut self.scene);
+        for info in changed {
+            ctx.emit("widgets", json!(info));
+        }
+    }
+
+    /// Steps 4 and 5: tick the widgets and the scene, compose, repair the
+    /// host.
+    fn paint(&mut self, now: Duration, out: &mut Vec<u8>, ctx: &mut Ctx) {
         if self.overlay != Overlay::Off && now >= self.overlay_due {
             self.overlay_due = now + DEBUG_PERIOD;
             rpc::refresh_overlay(self, now);
         }
+        self.tick_widgets(now, ctx);
         self.scene.tick_on(now, self.app.grid(), &self.frames);
         self.scene.take_dirty();
         if self.scene.is_empty() && !self.painted {
@@ -583,7 +608,7 @@ impl Engine for ScreenEngine {
             self.idle_poke(now);
         }
         self.observe(&events, now, ctx);
-        self.paint(now, out);
+        self.paint(now, out, ctx);
         if !tail.is_empty() {
             out.extend_from_slice(tail);
             self.fresh_host();
@@ -613,6 +638,7 @@ impl Engine for ScreenEngine {
         self.shift_sprites(&changes, ctx);
         if !changes.is_empty() {
             self.idle_poke(now);
+            self.widgets.touch();
             if ctx.has_subscribers("frames") {
                 ctx.emit("frames", json!({"frames": self.frames.list()}));
             }
@@ -622,7 +648,7 @@ impl Engine for ScreenEngine {
             // A first subscriber: what the frames show now is the base.
             self.watch_text(ctx);
         }
-        self.paint(now, out);
+        self.paint(now, out, ctx);
         self.close_sync(out);
         self.watch_idle(now, ctx);
         self.settle_waits(now, ctx);
@@ -636,6 +662,7 @@ impl Engine for ScreenEngine {
             }
         };
         merge(self.frames.next_wake());
+        merge(self.widgets.next_wake());
         if self.overlay != Overlay::Off {
             merge(Some(self.overlay_due));
         }
@@ -663,7 +690,7 @@ impl Engine for ScreenEngine {
         self.last_change = now;
         self.idle_poke(now);
         self.observe(&[], now, ctx);
-        self.paint(now, out);
+        self.paint(now, out, ctx);
         self.close_sync(out);
         self.emit_cursor(ctx);
         self.watch_text(ctx);
@@ -699,6 +726,7 @@ impl Engine for ScreenEngine {
 
     fn on_disconnect(&mut self, conn: ConnId, ctx: &mut Ctx) {
         self.waits.retain(|w| w.conn != conn);
+        self.widgets.drop_owner(conn.0);
         self.scene.drop_owner(conn.0);
         ctx.request_repaint();
     }
@@ -756,6 +784,7 @@ impl Engine for ScreenEngine {
         match topic {
             "cursor" => vec![self.cursor_json()],
             "frames" => vec![json!({"frames": self.frames.list()})],
+            "widgets" => self.widgets.list().into_iter().map(|w| json!(w)).collect(),
             "idle" => self
                 .frames
                 .list()

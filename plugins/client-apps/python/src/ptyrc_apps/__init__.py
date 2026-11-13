@@ -21,4 +21,5 @@ APPS = {
     "bricks": "brick breaker game that plays alone",
     "flower": 'add flowers next to the word "flower"',
     "marks": "highlights a selected pattern",
+    "monitor": "load, logins, open ports and disks in widgets",
 }
