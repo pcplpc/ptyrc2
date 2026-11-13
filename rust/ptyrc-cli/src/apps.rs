@@ -57,6 +57,11 @@ pub fn find(program: &str) -> Option<PathBuf> {
     in_path().or_else(near_cwd).or_else(near_exe)
 }
 
+/// `find`, as a string.
+pub fn program(name: &str) -> Option<String> {
+    find(name).and_then(|p| p.into_os_string().into_string().ok())
+}
+
 /// The failure of `find(name)`: status 127.
 pub fn not_found(name: &str) -> impl FnOnce() -> Fail {
     move || Fail {

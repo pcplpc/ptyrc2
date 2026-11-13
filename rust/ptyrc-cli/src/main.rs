@@ -4,6 +4,7 @@
 mod apps;
 mod plugins;
 mod replay;
+mod tmux;
 mod tools;
 mod verbs;
 
@@ -108,6 +109,9 @@ enum Verb {
     App(apps::App),
     /// An interactive Python session with `pilot` connected
     Python(apps::Python),
+    /// A running tmux session under ptyrc: `ptyrc tmux attach`, `detach`
+    #[command(subcommand)]
+    Tmux(tmux::Tmux),
     /// Debug tools
     #[command(subcommand)]
     Debug(verbs::Debug),
@@ -272,7 +276,8 @@ pub fn json_arg(what: &str, text: &str) -> Result<Value, Fail> {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    if !matches!(cli.verb, Verb::Run(_) | Verb::Replay(_)) {
+    let driver = matches!(cli.verb, Verb::Run(_) | Verb::Replay(_) | Verb::Tmux(_));
+    if !driver {
         // A client verb piped into `head` ends quietly.
         ptyrc_server::host::default_sigpipe();
     }
@@ -332,6 +337,7 @@ fn run(cli: Cli) -> Result<ExitCode, Fail> {
         Verb::Tape { verb } => replay::tape(&common, verb),
         Verb::App(args) => apps::app(&common, args),
         Verb::Python(args) => apps::python(&common, args),
+        Verb::Tmux(verb) => tmux::tmux(&common, verb),
         Verb::Debug(verb) => verbs::debug(&common, verb),
         Verb::Events { topics, snapshot } => verb_events(&common, topics, snapshot),
     }
@@ -375,7 +381,7 @@ fn verb_run(args: Run) -> Result<ExitCode, Fail> {
                 "nothing is drawn on a transparent stream",
             ));
         }
-        let program = app_program().ok_or_else(apps::not_found(apps::APP))?;
+        let program = apps::program(apps::APP).ok_or_else(apps::not_found(apps::APP))?;
         let words = |app: &String| {
             let mut argv = vec![program.clone()];
             argv.extend(app.split_whitespace().map(str::to_string));
@@ -403,7 +409,7 @@ fn verb_run(args: Run) -> Result<ExitCode, Fail> {
         record_input: args.record_input,
         presets: !args.no_presets && !args.transparent,
         // Nothing is drawn on a transparent stream.
-        demo: (!args.no_demo && !args.transparent).then(demo_command),
+        demo: (!args.no_demo && !args.transparent).then(|| demo_command(None)),
         handoff: false,
         apps,
     };
@@ -412,20 +418,18 @@ fn verb_run(args: Run) -> Result<ExitCode, Fail> {
 }
 
 /// What the demo runs: the words of `$PTYRC_DEMO`; else `ptyrc-app demo`,
-/// found as by `ptyrc app`.
-fn demo_command() -> Vec<String> {
+/// `ptyrc-app` being `program`, or found as by `ptyrc app`.
+pub fn demo_command(program: Option<&str>) -> Vec<String> {
     let words = std::env::var("PTYRC_DEMO").unwrap_or_default();
     let words: Vec<String> = words.split_whitespace().map(str::to_string).collect();
     if !words.is_empty() {
         return words;
     }
-    let program = app_program().unwrap_or_else(|| apps::APP.into());
+    let program = program
+        .map(str::to_string)
+        .or_else(|| apps::program(apps::APP))
+        .unwrap_or_else(|| apps::APP.into());
     vec![program, "demo".into()]
-}
-
-/// `ptyrc-app`, found as by `ptyrc app`.
-fn app_program() -> Option<String> {
-    apps::find(apps::APP).and_then(|p| p.into_os_string().into_string().ok())
 }
 
 fn verb_ls(common: &Common) -> Result<ExitCode, Fail> {
