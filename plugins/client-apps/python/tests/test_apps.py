@@ -1090,6 +1090,24 @@ def test_cat_art() -> None:
     left = cat.look("walk", right=False, step=0)["cells"]
     assert "".join(run["t"] for run in left[1]) == "(o.o)___.~ "
     assert len(cat.look("sleep")["frames"]) == len(cat.POSES["sleep"])
+    # A skin changes glyphs, not the box; the plain one changes nothing.
+    for ears, eyes, nose in itertools.product(cat.EARS, cat.EYES, cat.NOSES):
+        skin = cat.Skin(ears, eyes, nose)
+        for pose, frames in cat.POSES.items():
+            for rows, _ in frames:
+                assert [len(row) for row in cat.dress(rows, skin)] == [cat.W] * 3, pose
+    assert cat.dress(cat.POSES["walk"][0][0], cat.PLAIN) == cat.POSES["walk"][0][0]
+    odd = cat.Skin("|\\_/|", "*O", "w")
+    assert cat.dress(cat.POSES["sit"][0][0], odd)[:2] == ("     |\\_/| ", "    ( *w* )")
+    assert cat.dress(cat.POSES["yawn"][2][0], odd)[1] == "    ( -O- )"
+    assert len({(c.fur, c.shade) for c in cat.COATS}) == len(cat.COATS)
+    grey = cat.look("alert", coat=cat.COATS[1])["cells"][1]
+    assert {run.get("fg") for run in grey} == {None, 250, 117, 244}
+    # The plate and the mouse.
+    assert {len(row) for row in (*cat.PLATE, cat.BOWL)} == {cat.PW}
+    assert {len(row) for row in cat.MOUSE} == {cat.MW}
+    left = cat.mouse_look(right=False, step=0)["cells"][0]
+    assert "".join(run["t"] for run in left) == '<°",_,)~~'
 
 
 def test_cat_ledges() -> None:
@@ -1132,7 +1150,8 @@ def test_cat_life(session: Pilot) -> None:
     session.wait_for("0" * 60, frame="raw")
     time.sleep(0.3)
     frame = session.frame("raw")
-    it = cat.Cat(session, frame, random.Random(4))
+    home = cat.Home(session, frame, random.Random(4))
+    (it,) = home.cats
     now = 0.0
 
     def run(until: Callable[[], bool], limit: float = 20.0) -> None:
@@ -1146,33 +1165,123 @@ def test_cat_life(session: Pilot) -> None:
 
     run(lambda: it.act == "alert")  # it dropped in
     assert it.sprite is not None and it.sprite.visible
-    assert cat.perch(it.spots, it.x, it.g) is not None
+    assert cat.perch(home.spots, it.x, it.g) is not None
     # The pane goes idle: a yawn, then sleep, until something happens.
-    it.on("idle", {"frame": frame.id, "idle": True}, now)
+    home.on("idle", {"frame": frame.id, "idle": True}, now)
     run(lambda: it.act == "sleep")
     assert it.due == float("inf")
     assert "-.-" in shown(session)
-    it.on("idle", {"frame": frame.id, "idle": False}, now)
+    home.on("idle", {"frame": frame.id, "idle": False}, now)
     assert it.act == "alert"
     # The cursor comes near: it jumps, and lands away from it.
     col, row = frame.to_screen(it.x + 2, it.g - 1)
-    it.on("cursor", {"x": col, "y": row, "visible": True}, now)
+    home.on("cursor", {"x": col, "y": row, "visible": True}, now)
     assert it.act == "leap"
     run(lambda: it.act == "alert")
-    assert not cat.near(it.x, it.g, it.cursor)
+    assert not cat.near(it.x, it.g, home.cursor)
     # Text written over it: `covered` says so, and it moves.
     was = (it.x, it.g)
-    it.cursor = None
+    home.cursor = None
     col, row = frame.to_screen(it.x, it.g - 2)
     session.send(f"printf '\\033[{row + 1};{col + 1}H%s\\033[20;1H' ::::::::::\n")
     session.wait_for("::::::::::", frame="raw")
     time.sleep(0.2)
     assert it.sprite.info()["covered"] > cat.COVERED
-    it.check(now)
+    home.check(now)
     assert it.act == "leap"
     run(lambda: it.act == "alert")
     assert (it.x, it.g) != was and it.sprite.info()["covered"] == 0
     it.sprite.remove()
+
+
+def cat_house(session: Pilot, text: str, **kw: Any) -> tuple[Any, Callable[..., None]]:
+    """A home on `text`, and its loop with a clock of our own."""
+    session.send(f"clear; printf '{text}'\n")
+    session.wait_for("0" * 60, frame="raw")
+    time.sleep(0.3)
+    home = cat.Home(session, session.frame("raw"), random.Random(7), **kw)
+    now = 0.0
+
+    def run(until: Callable[[], bool], limit: float = 60.0) -> None:
+        nonlocal now
+        end = now + limit
+        while not until():
+            assert now < end, [it.act for it in home.cats]
+            now = max(now + 0.01, min(home.due(now), end))
+            home.step(now)
+
+    return home, run
+
+
+def test_cat_count(session: Pilot) -> None:
+    text = "\\n\\n\\n%060d\\n\\n\\n\\n\\n%060d\\n"
+    home, run = cat_house(session, f"{text}' 0 '0", count=3, varied=True)
+    assert len({it.coat for it in home.cats}) == 3
+    resting = ("alert", "sit", "groom", "walk")
+    run(lambda: all(it.act in resting for it in home.cats))
+    for _ in range(40):  # and a while more: they move, never onto each other
+        for a, b in itertools.combinations(home.cats, 2):
+            assert abs(a.x - b.x) >= cat.W or abs(a.g - b.g) >= cat.H, (a.x, b.x)
+        run(lambda: True)
+    assert len(session.sprites()) == 3
+
+
+def test_cat_food(session: Pilot) -> None:
+    text = "\\n\\n\\n%060d\\n\\n\\n\\n\\n%060d\\n"
+    home, run = cat_house(session, f"{text}' 0 '0", count=2)
+    run(lambda: all(it.act in ("alert", "sit") for it in home.cats))
+    assert not home.plates
+    # The word, in the middle of a free row: a plate right of it.
+    session.send("printf '\\033[14;30Hfood\\033[20;1H'\n")
+    session.wait_for("    food ", frame="raw")
+    time.sleep(0.2)
+    home.stale = True
+    run(lambda: bool(home.plates))
+    (plate,) = home.plates
+    (word,) = session.find(r"\bfood\b", regex=True)
+    assert (plate.x, plate.g) == (word.x + 5, word.y + 1)
+    assert "\\_____/" in shown(session)
+    # They come, one on each side that is free, and face it.
+    run(lambda: any(it.act == "eat" for it in home.cats))
+    eater = next(it for it in home.cats if it.act == "eat")
+    assert eater.meal is plate and eater.g == plate.g
+    assert eater.x == plate.x + cat.PW and not eater.right
+    # Emptied, the plate goes, and the word gets no other.
+    run(lambda: not home.plates)
+    assert plate.left == 0 and home.eaten == {(word.x, word.y)}
+    home.stale = True
+    run(lambda: all(it.meal is None and it.act != "eat" for it in home.cats))
+    assert not home.plates and "\\_____/" not in shown(session)
+
+
+def test_cat_served_and_mice(session: Pilot) -> None:
+    text = "\\n\\n\\n%060d\\n\\n\\n\\n\\n%060d\\n"
+    home, run = cat_house(session, f"{text}' 0 '0", count=2, food=True, mice=True)
+    # A plate comes by itself, on a ledge, with a seat.
+    run(lambda: bool(home.plates))
+    (plate,) = home.plates
+    assert plate.word is None and home.chairs(plate.x, plate.g)
+    # A mouse comes, walks, and goes: caught, or out by an end.
+    home.next_mouse = 0.0
+    run(lambda: home.mouse is not None)
+    mouse = home.mouse
+    assert mouse.lo <= mouse.x <= mouse.hi
+    run(lambda: mouse.sprite is not None)
+    assert '"' in shown(session)
+    run(lambda: any(it.tries for it in home.cats))  # a cat pounced
+    run(lambda: home.mouse is not mouse)
+    assert '"' not in shown(session)
+
+
+def test_cat_options(session: Pilot) -> None:
+    settle(session)
+    watch(
+        session,
+        lambda: cat.main(["-s", session.session, "--count", "3", "-a"], seconds=2.0),
+        lambda host: "_/" in host,
+    )
+    with pytest.raises(SystemExit):
+        cat.main(["-s", session.session, "--count", "0"])
 
 
 def test_marks_wanted() -> None:
