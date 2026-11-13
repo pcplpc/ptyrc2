@@ -5,7 +5,8 @@ Pure: no driver, no clock.
 
 - A colour is `(r, g, b)`, each `0..255`. `mix(a, b, t)`: from `a`
   (`t` 0) to `b` (`t` 1). `xterm(c)`: the nearest of the 240 fixed
-  colours of the 256 (16 to 255); `rgb(n)`: its value. `hexa(c)`:
+  colours of the 256 (16 to 255), a grey only for a grey; `rgb(n)`:
+  its value. `hexa(c)`:
   `#rrggbb`.
 - `Braille(w, h)`: `2w` by `4h` dots, on or off. `set`, `get`, `line`;
   `glyph(cx, cy)`: the cell, `""` when no dot is on; `rows()`: strings,
@@ -59,23 +60,20 @@ def rgb(n: int) -> RGB:
     return (_CUBE[n // 36], _CUBE[n // 6 % 6], _CUBE[n % 6])
 
 
-def _near(v: int) -> int:
-    return min(range(6), key=lambda i: abs(_CUBE[i] - v))
-
-
 @cache
 def xterm(c: RGB) -> int:
     """The nearest colour of the 256 to `c`, among 16 to 255."""
     r, g, b = c
-    cube = 16 + 36 * _near(r) + 6 * _near(g) + _near(b)
-    grey = 232 + min(23, max(0, round((sum(c) / 3 - 8) / 10)))
+    chroma = max(c) - min(c)
 
     def far(n: int) -> int:
         x, y, z = rgb(n)
-        # Eyes weigh green most, blue least.
-        return 3 * (x - r) ** 2 + 4 * (y - g) ** 2 + 2 * (z - b) ** 2
+        # Eyes weigh green most, blue least; a dark colour keeps its
+        # hue rather than turn grey.
+        lost = max(0, chroma - (max(x, y, z) - min(x, y, z)))
+        return 3 * (x - r) ** 2 + 4 * (y - g) ** 2 + 2 * (z - b) ** 2 + 2 * lost**2
 
-    return min(cube, grey, key=far)
+    return min(range(16, 256), key=far)
 
 
 def hexa(c: RGB) -> str:
