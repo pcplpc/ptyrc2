@@ -743,6 +743,138 @@ ptyrc draw text --layer front --auto top-right ... a display in front of all
 ptyrc draw text --layer wallpaper --bg '#804000' --opaque --alpha 0.4 ...
 ```
 
+## ptyrc-core: widgets
+
+A widget is a small window a client keeps on screen: a content in a
+border. The client says what; the driver says where, in which size, and
+when it moves. Clients share the screen: their widgets pave it.
+
+- **Variant**: one way to show a piece of information: a `name`, an
+  inner `size` `[w, h]`, a content of that size.
+- **Tag**: names the information. The variants of a tag show the same
+  thing, laid out for different sizes.
+- **Widget**: a tag shown. At most one of its variants at a time, in a
+  border, as one sprite of the scene owned by the client's connection.
+
+```rust
+pub struct Widgets;
+impl Widgets {
+    pub fn new(cfg: WidgetConfig) -> Widgets;
+    pub fn register_border(&mut self, name: &str, border: BorderSpec);
+    pub fn borders(&self) -> Vec<String>;
+    pub fn declare(&mut self, owner: OwnerId, decl: Declare)
+        -> Result<Vec<String>, WidgetError>;
+    pub fn show(&mut self, owner: OwnerId, show: Show)
+        -> Result<WidgetId, WidgetError>;
+    pub fn set(&mut self, owner: OwnerId, set: Set) -> Result<(), WidgetError>;
+    pub fn hide(&mut self, owner: OwnerId, id: WidgetId) -> bool;
+    pub fn drop_owner(&mut self, owner: OwnerId);
+    pub fn touch(&mut self);                      // the screen changed
+    pub fn tick(&mut self, now: Duration, base: &Grid,
+        surfaces: &dyn Surfaces, scene: &mut Scene) -> Vec<WidgetInfo>;
+    pub fn next_wake(&self) -> Option<Duration>;
+    pub fn list(&self) -> Vec<WidgetInfo>;
+}
+```
+
+No clock inside. `tick` lays out, adds, updates and removes the sprites,
+and returns the widgets whose info changed (one `widgets` event each).
+
+### Declared, shown, set
+
+- `widget.declare {widgets: [{tag, name, size, content}], border}`:
+  the collection of the connection. A tag declared again has its
+  variants replaced; a widget of it is laid out again. `name`: `WxH`
+  when absent, unique in the tag. `content`: optional, as a sprite's
+  (`rows` and a style, or `cells`). Limits: 64 tags a connection, 16
+  variants a tag, inner sizes from 1x1 to 200x60.
+- `widget.show {tag, frame, prefer, fill, title, border, layer}`: one
+  widget per connection and tag; shown again, the same widget with the
+  new options. `frame`: an id or a name, resolved once (`raw`).
+  `prefer`: as for `auto` (`any`). `fill`: `0.1..=1` (0.5). `title`:
+  the tag when absent; `""`: none. `layer`: `back` when absent.
+- `widget.set {id, variant, content..., title}`: the content of one
+  variant (`variant` absent: the one shown; `not-usable` when none is),
+  kept by the driver; and, or, the title. A variant never set is blank.
+- `widget.hide {id}`: the widget goes; the declaration stays.
+- A widget dies with its connection.
+
+Content is clipped to the inner size and padded with blanks. The
+inside is opaque: nothing of the layers behind shows through. The
+app's text does: the default layer is `back`, a widget never hides
+what the app writes.
+
+### Borders
+
+One cell thick, dim. The title is on the top edge, after one cell of
+it: `┌ clock ───┐`; cut with `…` when it does not fit, absent under 3
+cells of room.
+
+`border`: a preset name, or an object: `{"base": NAME, "corners":
+"┌┐└┘", "top": "─", "bottom": "─", "left": "│", "right": "│", "style":
+{...}, "title": {"align": "left" | "center" | "right", "before": " ",
+"after": " ", "style": {...}}}`. `base`: the preset the other members
+replace (`plain`). An edge is a pattern, one glyph or several, repeated
+along it from the top or the left; glyphs of one cell only. Given at
+`widget.declare` it is the connection's default; at `widget.show`, the
+widget's.
+
+Presets of the core: `plain` (thin, square, dim; the default), `round`,
+`heavy`, `double`, `ascii`, `none` (no border, no title: the outer
+size is the inner one). A draw extension adds presets
+(`DrawExt::borders`); `widget.borders` lists the names. Extension
+`borders`: `painting` and others, frames as of pictures.
+
+### Layout
+
+In screen cells. Widgets are laid out one at a time, the oldest first;
+each one placed is an obstacle to the next.
+
+- **Open cell**, for a widget: inside the view of its frame; no ink in
+  the app's grid; not of class `panel`; no visible change for
+  `quiet_ms` (1000); not on the row of a visible cursor; not under
+  another widget, nor within `gap` of one (2 columns, 1 row).
+- **Room**: a maximal rectangle of open cells.
+- A variant fits a room that holds its outer size and the gap on every
+  side.
+- In a room: of the variants that fit, the one whose outer area is the
+  nearest to `fill` of the room's; the larger on a tie. It is centred
+  in the room.
+- Of the rooms: the one that gives the largest variant; then the
+  nearest to `prefer`, when not `any`; then the largest; then the
+  topmost, the leftmost.
+- No room for any variant: the widget is hidden until one opens.
+
+A placed widget stays where it is, as it is:
+
+- **Pressed**: an app cell under its outer rectangle has ink, or the
+  rectangle is no longer whole inside the view. It stays drawn (the
+  text shows over it). Pressed for `evict_ms` (300), it is laid out
+  again as a new one: elsewhere, smaller, or hidden.
+- **Grown**: at each look, when a layout as a new widget, its own cells
+  counted open, gives a larger variant, and the same one for
+  `replace_ms` (2000) of looks, it moves there. Never for a variant of
+  the same size or a smaller one: no jitter.
+- A look: when the screen, an obstacle or a declaration changed
+  (`touch`), `look_ms` (250) apart at least; and when a timer above is
+  due. A quiet screen costs nothing.
+
+The widget's sprite: frame and layer as shown, anchored in view cells,
+border and content in one `cells` content. Hidden with its frame
+(not usable), back with it. It is listed by `draw.list`; `draw.remove`
+on it hides the widget.
+
+### Events
+
+Topic `widgets`: the info of a widget, when it changes: placed, moved,
+another variant, hidden, gone.
+
+Widget info: `{"id","tag","frame","state":"placed"|"hidden"|"gone",
+"variant":name|null,"size":[w,h]|null,"rect":[x,y,w,h]|null,
+"sprite":id|null,"title","border":name|null,"variants":[{"name",
+"size"}]}`. `size`: inner, of the variant shown. `rect`: outer, screen
+cells. `border`: null for one given as an object.
+
 ## Plugins
 
 Rust crates linked into `ptyrc-cli` and registered at startup
@@ -764,6 +896,7 @@ pub trait DrawExt: Send {
     fn draw(&self, function: &str, params: &serde_json::Value)
         -> Result<SpriteSpec, String>;
     fn effects(&self) -> Vec<(&'static str, EffectFactory)> { vec![] }
+    fn borders(&self) -> Vec<(&'static str, BorderSpec)> { vec![] }
 }
 ```
 
@@ -1024,8 +1157,14 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `draw.exts` | | `{"exts":[{"name","functions":[...]}],"effects":[...]}` |
 | `layer.define` | `name`, `z` | `{"layers":[{"name","z"}]}`; see Layers |
 | `layer.list` | | the same |
+| `widget.declare` | `widgets`: `[{tag, name, size, content}]`, `border` | `{"tags":[...]}`; see Widgets |
+| `widget.show` | `tag`, `frame`, `prefer`, `fill`, `title`, `border`, `layer` | `{"widget":info}` |
+| `widget.set` | `id`, `variant`, content, `title` | `{}` |
+| `widget.hide` | `id` | `{}` |
+| `widget.list` | | `{"widgets":[info,...]}`, every connection's |
+| `widget.borders` | | `{"borders":[name,...]}` |
 | `batch` | `calls`: `[{"method","params"}]` | `{"results":[{"result"} or {"error"},...]}`, applied in one repaint |
-| `subscribe` | `topics`: `screen`, `cursor`, `frames`, `text`, `idle`, `draw`, `input`, `mouse`, `size`, `colors`, `exit`; `snapshot` | `{}`; with `snapshot`, then the state now as events, to this client: `idle` per frame on screen, `cursor`, `frames`, `size` |
+| `subscribe` | `topics`: `screen`, `cursor`, `frames`, `text`, `idle`, `draw`, `input`, `mouse`, `size`, `colors`, `widgets`, `exit`; `snapshot` | `{}`; with `snapshot`, then the state now as events, to this client: `idle` per frame on screen, `cursor`, `frames`, `size` |
 | `debug.overlay` | `what`: `frames`, `heat`, `off` | `{}` |
 | `debug.dump` | | app grid, host grid, sprites, frames |
 
@@ -1093,6 +1232,7 @@ ptyrc keys KEY...                 press keys
 ptyrc wait [PATTERN] [--stable MS] [--idle] [--gone] [--timeout MS]
 ptyrc frames [--watch]
 ptyrc heat [-f FRAME] [--classes]
+ptyrc widgets [--watch]           widgets, their variant and place
 ptyrc idle [-f FRAME]             score; status 0 when idle, 1 when not
 ptyrc draw text|ext|effect|exts|rm|ls|clear ...   (sprites persist)
       [--layer back|front|N] [--blend normal|tint] [-z N]
@@ -1175,7 +1315,14 @@ started it, else asked once (`draw.list`). `Pilot.host_colors`; `spawn(host_fg=,
 None on silence; both raise `PtyrcError` (`gone`) on a closed
 connection. Inside `batch()`, `text`, `find`, `sprites` and
 `Sprite.info` return a container filled when the batch is sent.
-`Cursor.pos`. Tools (`ptyrc/tools.py`):
+`Cursor.pos`. Widgets: `Pilot.widget(tag, sizes, *, border=, title=,
+frame=, prefer=, fill=, layer=)` declares the tag and shows it: `sizes`
+is a list of `(w, h)`, or a dict of names to `(w, h)`; it returns a
+`Widget`: `id`, `tag`, `info`, `variant` (the name shown, or None),
+`size`, `rect`, `set(rows, *, variant=, title=, **style)`, `hide()`,
+`refresh()`, `update(info)` (the data of a `widgets` event).
+`Pilot.widgets()`: the infos; `Pilot.borders()`: the names.
+Tools (`ptyrc/tools.py`):
 `Pilot.locator(pattern)` and `Frame.locator(pattern)` give a `Locator`,
 a place named by the text there and looked up at each use: `.nth(n)`,
 `.right(n)` (from the last cell of the match), `.left(n)` (from the

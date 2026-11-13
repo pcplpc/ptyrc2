@@ -156,3 +156,27 @@ Supersedes `--spawn --rate` above.
 - `--cursor`: the falling piece follows the user's cursor: blocks
   played in vim. `--count`: pieces falling at once, 3 by default; with
   `--cursor` the player has the closest.
+
+## Widgets, sixth session (2026-11-13)
+
+- Widgets: small windows a client app uses. An app declares a
+  collection of them, each of a size, grouped by tags; within a tag
+  they show the same information, laid out for different boxes. It
+  asks to show one widget of a tag: the driver picks a place with
+  enough room, fits a variant there, fills about half of the room and
+  centres it. Less room: a smaller one of the same tag.
+- The information is shown as the user works, without disturbing.
+  A scroll, or text that takes more space: the widget moves, another
+  size is put.
+- Several client apps share the screen; their widgets arrange
+  themselves little by little, a paving of paintings.
+- Borders: one cell thick, dim, not fancy; the tag on the top border,
+  as the title of a small floating window. Border decorations are
+  pluggable: an app has its borders as of paintings, another sober and
+  square.
+- A better `clock` comes of it.
+- `monitor`: who is connected (as `w`, cleaner); who listens on ports
+  and addresses seen from outside (`0.0.0.0:8000`), if any; a minimal
+  glances; free space on the local disks. `--merged`: one big widget
+  that cycles; else one each. `--monitor
+  glance,connected,tcp-listen,disk-space`.
