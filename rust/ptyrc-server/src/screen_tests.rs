@@ -962,7 +962,9 @@ fn widget_errors_and_hints() {
     assert!(e.hint.unwrap().starts_with("did you mean widget.declare?"));
     assert_eq!(
         rig.call("widget.borders", json!({}))["borders"],
-        json!(["plain", "round", "heavy", "double", "ascii", "none"])
+        json!([
+            "plain", "round", "heavy", "double", "ascii", "alert", "none"
+        ])
     );
     rig.call("widget.hide", json!({"id": id}));
     assert!(

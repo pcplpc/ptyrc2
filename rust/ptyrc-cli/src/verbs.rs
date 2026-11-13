@@ -288,7 +288,12 @@ fn print_widgets(list: &[Value]) {
             w["id"].to_string(),
             w["owner"].to_string(),
             text(&w["tag"]),
-            text(&w["state"]),
+            // A modal placed: `modal`, or `over` the text.
+            match (w["state"].as_str(), w["modal"] == true, w["over"] == true) {
+                (Some("placed"), _, true) => "over".into(),
+                (Some("placed"), true, _) => "modal".into(),
+                _ => text(&w["state"]),
+            },
             text(&w["variant"]),
             rect,
             w["frame"].as_u64().map_or("-".into(), |f| f.to_string()),

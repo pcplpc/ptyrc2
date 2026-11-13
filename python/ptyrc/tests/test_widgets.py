@@ -62,6 +62,29 @@ def test_events_and_smaller(spawn) -> None:  # type: ignore[no-untyped-def]
     assert pilot.shown()[y][x] == "╭"
 
 
+def test_modal_over_the_text(spawn) -> None:  # type: ignore[no-untyped-def]
+    fill = "for i in $(seq 9); do printf '%039d\\n' 0; done; printf '%039d' 0; sleep 60"
+    pilot = spawn(["sh", "-c", fill], size=(40, 10))
+    pilot.wait_for("0" * 39)
+    until(lambda: pilot.frame("raw").usable)
+    sizes = [(10, 2), (30, 4), (60, 12)]
+    menu = pilot.widget("menu", sizes, modal=True, border="alert", fill=1.0)
+    until(lambda: menu.refresh().placed)
+    assert menu.over and menu.info["modal"] and menu.variant == "30x4"
+    assert menu.rect == (4, 2, 32, 6)
+    menu.set(["> start an app"])
+    shown = pilot.shown()
+    assert shown[0] == "0" * 39
+    assert shown[1] == "00" + " " * 36 + "0"  # the gap, blanked
+    assert shown[2] == "00  ┏" + "━" * 30 + "┓  0"
+    assert shown[3] == "00  ┃> start an app" + " " * 16 + "┃  0"
+    assert shown[7] == "00  ┗" + "━" * 24 + " menu ┛  0"
+    sprite = next(s for s in pilot.sprites() if s["id"] == menu.info["sprite"])
+    assert sprite["layer"] == 100 and sprite["anchor"]["at"] == [2, 1]
+    menu.hide()
+    assert pilot.shown()[3] == "0" * 39
+
+
 def test_errors(shell: Pilot) -> None:
     with pytest.raises(PtyrcError) as err:
         shell.call("widget.show", tag="nope")

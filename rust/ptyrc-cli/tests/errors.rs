@@ -341,7 +341,7 @@ fn widget_errors() {
     call("widget.declare", r#"{"border": "paintng"}"#).fails(
         2,
         "no such border: paintng",
-        "did you mean painting? borders: plain, round, heavy, double, ascii, none, painting",
+        "did you mean painting? borders: plain, round, heavy, double, ascii, alert, none, painting",
     );
     call("widget.declare", r#"{"border": {"top": "日"}}"#).fails(
         2,
