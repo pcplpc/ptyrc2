@@ -948,7 +948,8 @@ at `app.start`; else the file name of `argv[0]`. `argv`: as started; of
 a client, `/proc/<pid>/cmdline` (empty when unreadable). `status`: of an
 exited child, 128 + signal when killed. `runs`: starts so far. `since`:
 seconds in the present state. `sprites`, `widgets`: those its
-connections own. `me`: the entry of the connection that asks.
+connections own. `frames`: the ids of the frames those are on, in
+order. `me`: the entry of the connection that asks.
 
 An exited child stays in the table (`exited`) until restarted or
 forgotten; 16 at most, the oldest forgotten first. A client that left is
@@ -1036,6 +1037,8 @@ ptyrc manage pause   APP... | --all
 ptyrc manage resume  APP... | --all      (`unpause`)
 ptyrc manage restart APP [OPTION...]   options given: in place of the old
 ptyrc manage forget  APP... | --all     exited ones
+ptyrc manage move APP FRAME        restart it on that frame (`-f`)
+ptyrc manage frames                the frames and the apps on each
 ptyrc manage log APP               what it wrote on stderr
 ptyrc manage --overlay             the menu in a modal widget (the hotkey)
 ```
@@ -1070,6 +1073,19 @@ widget of the session, border `alert`, variants 34x9, 48x13, 64x18,
   as typed lines; then `start` / `restart`. Restart with other options
   opens it filled from the `argv` running; words it does not know go to
   `more arguments`.
+- Frames (`f` on the main list, `frames…` among its rows): the
+  frames on screen, one a row: id, kind, size, key or preset, idle or
+  busy, and the apps on it (`app.list`, `frames`); beside or above the
+  list, a map of the screen: the rectangles of the panes to scale, the
+  selected one filled. In the overlay the selected frame is also shown
+  on the screen itself: a front tint over its view. enter on a frame:
+  the apps on it, then their actions.
+- Move (`m` on an app, `move to a frame…` among its actions): the same
+  list as a picker; enter restarts the app with `-f FRAME` in place of
+  the one it had (`app.restart`): an app is given its frame when it
+  starts, its state is not kept. A child only. Besides the frames, the
+  names: `raw`, `active`, `largest`, `quietest`, `idle`. In the form the
+  option `-f` is chosen with the same picker.
 - A foot line names the keys of the screen. The list follows the topic
   `apps`. An app that ends within 400 ms of a start shows the last line
   of its log.
