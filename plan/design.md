@@ -824,17 +824,17 @@ widget never hides what the app writes.
 
 ### Borders
 
-One cell thick, dim. The title is on the top edge, between the
-corners: `before`, the title, `after`, from the cell after the corner
-(`align` left): `┌ clock ───┐`. Room: the cells between the corners
-less `before` and `after`. Cut with `…` when it does not fit, absent
+One cell thick, dim. The title is on the bottom edge, between the
+corners: `before`, the title, `after`, up to the cell before the
+corner (`side` bottom, `align` right): `└─── clock ┘`. Room: the
+cells between the corners less `before` and `after`. Cut with `…` when it does not fit, absent
 (with `before` and `after`) under 3 cells of room. The edge keeps its
 pattern on both sides of the title. The title is not dim.
 
 `border`: a preset name, or an object: `{"base": NAME, "corners":
 "┌┐└┘", "top": "─", "bottom": "─", "left": "│", "right": "│", "style":
-{...}, "title": {"align": "left" | "center" | "right", "before": " ",
-"after": " ", "style": {...}}}`. `base`: the preset the other members
+{...}, "title": {"side": "top" | "bottom", "align": "left" | "center"
+| "right", "before": " ", "after": " ", "style": {...}}}`. `base`: the preset the other members
 replace (`plain`), a member of `title` each; `style` replaces the
 whole style. An edge is a pattern, one glyph or several, repeated
 along it from the top or the left; glyphs of one cell only; four
