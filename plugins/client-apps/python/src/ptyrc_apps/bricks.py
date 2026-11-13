@@ -10,8 +10,8 @@
 What it shows:
 
 - The screen read as a map: glyphs are walls, the ball bounces off
-  them, off the sides of the view and off the bricks. The top and the
-  bottom of the view are open.
+  them, off the sides of the view and off the bricks. The bottom
+  of the view is open; with two rackets (`-m`), the top too.
 - A racket that moves in two dimensions and is hit on either side. No
   one plays: it foresees the ball, gets in its way before it leaves
   the view, and of the places it reaches in time takes the one whose
@@ -26,10 +26,11 @@ What it shows:
   in large groups, a colour a row: medium walls of 2 rows by 3 to 5
   bricks, a row or a pile where the place is tight; now and then a
   big wall of 3 or 4 rows by 6 to 8. The others in groups of 2 or
-  3. A group goes 10 to 20 s after it is laid,
-  a second later for each brick over three, dim for its last second.
+  3. A group goes 50 to 100 s after it is laid,
+  two seconds later for each brick over three, dim for its last second.
 
-The game never ends. The last ball out sets the score to 0. 30 s with
+The game never ends. The last ball out sets the score to 0; the racket
+keeps the bottom, the top sends the ball back. 30 s with
 no brick broken: the game starts again, on a new map, the rackets
 elsewhere; the scores stay.
 
@@ -57,7 +58,9 @@ a step along the row or one row a step: a key held down, repeated by
 the terminal, keeps it going; the opposite arrow stops it. The racket
 moves as the others do: stopped by bricks, rackets and the sides of
 the view, not by text. Twins play alone; no racket of a player keeps
-away from a duel. ctrl+t gives the arrows back and ends.
+away from a duel. With a player the balls go half as fast; rackets,
+capsules and the rest keep their pace. ctrl+t gives the arrows back and
+ends.
 
 Rules count in steps of the game, not in seconds; `second` is the
 steps in a second.
@@ -108,7 +111,7 @@ BW = 3  # cells of a brick
 SMALL, RACKET, WIDE = 3, 5, 7  # cells of a racket
 VY = 0.5  # rows a move
 VX = 1.0  # columns a move, at most
-PACE = 12  # eighths of a move a ball makes in a step
+PACE = 12  # eighths of a move a ball makes in a step; sixteenths with a player
 RALLY = 4  # bricks in a row that speed it up, an eighth each
 KICK = 6  # eighths more for a fast one
 MOVES = 2  # cells a racket moves in a step
@@ -118,8 +121,10 @@ ARROWS = {"left": (0, -1), "right": (0, 1), "up": (1, -1), "down": (1, 1)}  # ax
 BRICKS = 240  # bricks in the view, at most; one a `PLOT` cells, 8 at least
 PLOT = 48
 FILL = 12  # seconds to lay as many
-AGE = (10, 20)  # seconds a group lasts
-LONG = 1  # second more for each brick over three
+SLOW = 5  # times slower once the view has `KEPT` of them
+KEPT = 0.55
+AGE = (50, 100)  # seconds a group lasts
+LONG = 2  # seconds more for each brick over three
 BIG = ((3, 4), (6, 8))  # rows and columns of a big wall, in bricks
 LARGE = 2  # bricks laid in large groups for one in a small group
 OFTEN = 0.2  # share of the large groups a big wall is tried for
@@ -328,7 +333,7 @@ class Game:
 
     `rules`: kinds of bricks; `bonuses`: capsules; `multiplayer`: two
     teams; `second`: steps in a second; `player`: the team whose racket
-    is not steered but moved by `press`. Same `rng`, same game: no clock.
+    is not steered but moved by `press`; the balls then go half as fast. Same `rng`, same game: no clock.
     Each step leaves in `events` what happened, a cell or bricks second:
 
     - `("group", bricks)`: laid; `("fade", bricks)`: about to go;
@@ -361,6 +366,7 @@ class Game:
     ) -> None:
         self.rng = rng
         self.player = player  # team whose racket is moved by `press`
+        self.gear = 3 if player is None else 4  # a move is 2 ** gear of `PACE`
         self.held = [(0, 0), (0, 0)]  # along x, along y: way, steps left
         self.rules, self.bonuses, self.teams = rules, bonuses, 1 + multiplayer
         self.second = second
@@ -602,8 +608,8 @@ class Game:
     def _spawn(self, box: Box, walls: set[Cell]) -> None:
         """A group at a time, while the view has fewer bricks than it
         takes; `FILL` seconds to lay as many, a group of more bricks
-        being followed by a longer wait; four times faster under a
-        quarter of them."""
+        being followed by a longer wait; `SLOW` times slower once the
+        view has `KEPT` of them."""
         if self.steps < self.spawn_due:
             return
         x0, y0, x1, y1 = box
@@ -613,7 +619,8 @@ class Game:
             return
         laid = len(self._group(box, walls, most)) or 2
         gap = laid * FILL * self.second / most
-        self.spawn_due = self.steps + max(1, round(gap / (4 if 4 * here < most else 1)))
+        slow = SLOW if here >= KEPT * most else 1
+        self.spawn_due = self.steps + max(1, round(gap * slow))
 
     def _reset(self, box: Box) -> None:
         """Start again: no brick, ball, capsule, falling brick or twin;
@@ -738,8 +745,11 @@ class Game:
             fx, fy = self.home
             hx = x0 + int((x1 - x0 - racket.w) * fx)
             hy = y0 + int((y1 - y0) * (racket.team + fy) / self.teams)
+            if self.teams == 1:  # the bottom is its side: in the lower half
+                hy = y0 + int((y1 - y0) * (1 + fy) / 2)
             if racket.left is not None:  # a twin: off its team's racket
-                hy += (y1 - y0) // 4 * (1 if racket.n % 2 else -1)
+                up = self.teams == 1 or not racket.n % 2
+                hy += (y1 - y0) // 4 * (-1 if up else 1)
             if not room:
                 racket.dead = 4
                 continue
@@ -781,8 +791,9 @@ class Game:
         rackets.sort(key=lambda r: (r.team != self.server, r.n))
         mid = rackets[0].w // 2
         for racket in rackets:
-            # Towards the far side: time to get in its way.
-            far = 1 if 2 * racket.y < y0 + y1 else -1
+            # Towards the far side: time to get in its way. With one
+            # team, up: the top sends it back.
+            far = 1 if self.teams > 1 and 2 * racket.y < y0 + y1 else -1
             for dy in (far, -far):
                 for dx in sorted(range(racket.w), key=lambda i: abs(i - mid)):
                     if free((racket.x + dx, racket.y + dy)):
@@ -811,13 +822,15 @@ class Game:
 
     def _terrain(self, box: Box, walls: set[Cell], fire: bool = False) -> Solid:
         """What a ball bounces off, rackets apart: text, the sides of
-        the view, bricks unless on `fire`."""
+        the view, its top with one team, bricks unless on `fire`."""
         x0, y0, x1, y1 = box
         solid = self.solid
 
+        shut = self.teams == 1
+
         def hard(c: Cell) -> bool:
             if not y0 <= c[1] < y1:
-                return False
+                return shut and c[1] < y0
             return c in walls or not x0 <= c[0] < x1 or (not fire and c in solid)
 
         return hard
@@ -826,9 +839,10 @@ class Game:
         y0, y1 = box[1], box[3]
         terrain = self._terrain(box, walls, bool(ball.fire))
         rackets = self._cells(walls)
-        # The pace is counted in eighths: what is left is owed.
+        # The pace is counted in eighths, in sixteenths with a player:
+        # what is left is owed.
         ball.phase += PACE + min(ball.combo, RALLY) + (KICK if ball.fast else 0)
-        moves, ball.phase = ball.phase >> 3, ball.phase & 7
+        moves, ball.phase = ball.phase >> self.gear, ball.phase & ((1 << self.gear) - 1)
         for _ in range(moves):
             ball.x, ball.y, ball.vx, ball.vy, hits = fly(
                 ball.x, ball.y, ball.vx, ball.vy, lambda c: terrain(c) or c in rackets
@@ -1034,6 +1048,8 @@ class Game:
         end = lx + w
         gain, last, index = 0.0, 0, 0
         now = self.steps + at - 1
+        shut = self.teams == 1
+        gear = self.gear
         k = 0
 
         def there(brick: Brick) -> bool:
@@ -1042,7 +1058,7 @@ class Game:
         def hard(c: Cell) -> bool:
             cx, cy = c
             if not y0 <= cy < y1:
-                return False
+                return shut and cy < y0
             if c in walls or not x0 <= cx < x1 or (cy == row and lx <= cx < end):
                 return True
             if fire:
@@ -1067,7 +1083,7 @@ class Game:
 
         for k in range(1, steps + 1):
             phase += PACE + min(combo, RALLY) + (KICK if fast else 0)
-            moves, phase = phase >> 3, phase & 7
+            moves, phase = phase >> gear, phase & ((1 << gear) - 1)
             weight = max(0.25, 1 - (at + k) / 200)
             for _ in range(moves):
                 x, y, vx, vy, hits = fly(x, y, vx, vy, hard)
@@ -1561,11 +1577,7 @@ class Game:
 
             path = min(flights, key=near).path
             rows = [p[2] for p in path[:AHEAD]]
-            mid = (y0 + y1) / 2
-            if self.teams > 1:
-                r.guard = 1 if r.team else -1
-            elif (max(rows) - mid if r.guard > 0 else mid - min(rows)) < -2:
-                r.guard = -r.guard
+            r.guard = 1 if r.team or self.teams == 1 else -1
             tx = floor(path[min(len(path) - 1, 8)][1]) - r.w // 2
             edge = max(rows) if r.guard > 0 else min(rows)
             ty = min(max(floor(edge) + r.guard * GAP, y0 + 1), y1 - 2)
@@ -1815,7 +1827,7 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
         "--grab",
         action="store_true",
         help="the arrows of the keyboard move the racket (with -m, the bottom "
-        "one); ctrl+t gives them back and ends",
+        "one), the balls go half as fast; ctrl+t gives them back and ends",
     )
     args = _cli.parse(out, argv)
     if args.all:
