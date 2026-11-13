@@ -789,7 +789,8 @@ repaint.
 
 - `widget.declare {widgets: [{tag, name, size, content}], border}`:
   the collection of the connection. A tag declared again has its
-  variants replaced; a widget of it is laid out again. `name`: `WxH`
+  variants replaced; a widget of it is laid out again; a variant of
+  the same name and size, given no `content`, keeps its own. `name`: `WxH`
   when absent, unique in the tag. `content`: optional, the member of a
   sprite (`{"rows": [...], "style": {...}}` or `{"cells": [[run,
   ...], ...]}`). Limits: 64 tags a connection, 16 variants a tag,
@@ -865,15 +866,20 @@ each one placed is an obstacle to the next.
   widget keeps the gap from text, from other widgets, from the cursor
   row.
 - In a room: of the variants that fit, the one whose outer area is the
-  nearest to `fill` of the room's; the larger on a tie. It is centred
-  in the room less its gaps.
+  nearest to `fill` of the room's; the larger on a tie. In the room
+  less its gaps it is on the side `prefer` names (`top-right`: the
+  top right corner; `top`: the top, centred), centred for `any`.
 - Of the rooms: the one that gives the largest variant (outer area);
   then the nearest to `prefer`, when not `any` (the widget's centre to
   the point named, each axis over the view's size); then the largest;
   then the topmost, the leftmost.
-- No room for any variant: the widget is hidden until one opens.
+- No room for any variant: a widget placed in the same frame, not
+  pressed, the largest first, takes a smaller variant, laid out as a
+  new one: the largest that lets this one in. Both move in the same
+  look. None does: the widget is hidden until a room opens.
 
-A placed widget stays where it is, as it is:
+A placed widget stays where it is, as it is, unless shrunk for
+another:
 
 - **Pressed**: an app cell under its outer rectangle has ink, or the
   rectangle is no longer whole inside the view. Seen at the first tick

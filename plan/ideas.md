@@ -661,26 +661,26 @@ extension `borders`, `ptyrc widgets`. Left:
 - The gap is kept on every side of a room that is not on an edge of
   the view, even where what closes that side is far from the widget:
   a room may refuse a variant that would fit.
-- A widget is centred in its room; `prefer` chooses among rooms only.
-  A blank screen puts a `top-right` widget in the middle.
 - `fill` is a share of the room with its gaps.
 - The frame is resolved once: a widget shown on `largest` stays on
   that pane when another becomes larger. A frame forgotten takes the
   widget away (`gone`); the client shows it again.
-- A tag declared again loses the contents set on its variants.
+- A tag declared again keeps the contents of the variants of the same
+  name and size only.
 - A `draw.update` on a widget's sprite lasts until the widget is next
   drawn.
 - A look costs a rooms pass per widget to place or to grow: 0.6 ms
-  for 8 widgets at 200x60 (release, `look_cost_at_200x60`). Many
-  widgets on a busy screen: one pass per frame and a shared ranking
-  would do.
+  for 8 widgets at 200x60 (release, `look_cost_at_200x60`); 2 ms
+  with a ninth hidden that nothing lets in: two passes per smaller
+  variant of each widget placed, at every look. Many widgets on a
+  busy screen: one pass per frame and a shared ranking would do.
 - No click on a widget beyond the host mouse on its sprite (`mouse`
   events name the sprite, not the widget).
-- First come, first served: a widget placed large does not shrink to
-  let a hidden one in. On a small screen the last app shown may wait
-  for ever. A layout of all the widgets at once, each given a share.
-- Not merged in `main` by the pilot: another session held uncommitted
-  work on `rust/ptyrc-cli/src/main.rs` there. Branch `fork/wclients`
-  holds it all (`fork/widgets`, `fork/wmonitor` merged in).
-  `Cargo.lock` is not committed and lacks `ptyrc-draw-borders`:
-  `just install` (`--locked`) fails until it is.
+- Built: `prefer` names the side of the room; a placed widget shrinks
+  to let a hidden one in. One widget shrinks, not several; it grows
+  back by the common rule (`replace_ms`) when the other goes. A widget
+  of another frame, or pressed, is not asked. No shares: the oldest
+  keep the larger variants.
+- Merged in `main` (`fork/wclients`). `Cargo.lock` is not committed
+  and lacks `ptyrc-draw-borders`: `just install` (`--locked`) fails
+  until it is.

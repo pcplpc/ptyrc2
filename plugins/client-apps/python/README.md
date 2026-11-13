@@ -116,9 +116,10 @@ What to know:
 - **Widgets**: a small window the driver places, sizes and moves.
   `pilot.widget(tag, [(8, 1), (20, 5)], content=render)` declares the
   variants of a tag, the same information for boxes of those inner
-  sizes, and shows one: where there is room, about half of it,
-  centred, in a border with the title; a smaller one, or elsewhere,
-  when the app's text takes the place. Behind the text by default.
+  sizes, and shows one: where there is room, about half of it, on
+  the side `prefer` names (centred by default), in a border with the
+  title; a smaller one, or elsewhere, when the app's text or another
+  widget needs the place. Behind the text by default.
   Topic `widgets` tells the variant shown; `Widget.set` fills it.
   `_widgets.Deck` does both for an app: `deck.add(tag, sizes, render)`,
   `deck.run(period)` (`clock.py`, `monitor.py`). `border=`: `plain`,
