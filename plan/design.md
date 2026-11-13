@@ -949,7 +949,8 @@ a client, `/proc/<pid>/cmdline` (empty when unreadable). `status`: of an
 exited child, 128 + signal when killed. `runs`: starts so far. `since`:
 seconds in the present state. `sprites`, `widgets`: those its
 connections own. `frames`: the ids of the frames those are on, in
-order. `me`: the entry of the connection that asks.
+order. `moves`: a connection of it is subscribed to `move`. `me`: the
+entry of the connection that asks.
 
 An exited child stays in the table (`exited`) until restarted or
 forgotten; 16 at most, the oldest forgotten first. A client that left is
@@ -966,6 +967,7 @@ not kept.
 | `app.resume` | `app` | `{"app":info}` |
 | `app.restart` | `app`, `argv`, `name` (both optional: as before) | `{"app":info}`, at once; stopped as by `app.stop`, started again when it has ended, under the same id. A client: `not-usable` |
 | `app.forget` | `app` | `{}`; an exited child leaves the table; another state: `not-usable` |
+| `app.move` | `app`, `frame`: an id or a name, resolved at the call | `{"app":info,"frame":id}`; see Move |
 
 An unknown id: `no-sprite`, `no such app: N`, the hint naming the apps.
 An app may not stop, pause or restart itself (`me`): `not-usable`.
@@ -991,6 +993,19 @@ connections is sent the snapshot of its topics (as `subscribe
 screen naming every row in view: an app that keeps the text reads it
 again. `Scene::hide_owner(owner, hidden, now)`,
 `Widgets::hide_owner(owner, hidden)`.
+
+### Move
+
+An app that can change frame while it runs subscribes to the topic
+`move`: that is its word for it (`moves`). `app.move` sends each such
+connection the event `move`: `{"frame": id}`; the app moves what it
+drew: the driver moves nothing. Not `moves`, paused or exited:
+`not-usable`, the hint naming `ptyrc manage move --restart`. The topic
+is sent to the app moved only, never broadcast.
+
+Python: `_cli.follow` takes it (the sprite is updated to the frame, then
+followed there): `sand`, `rain`, `snow`; `_widgets.Deck` shows its tags
+again on the frame: `clock`, `monitor`. The others are restarted.
 
 ### Hotkey
 
@@ -1037,7 +1052,8 @@ ptyrc manage pause   APP... | --all
 ptyrc manage resume  APP... | --all      (`unpause`)
 ptyrc manage restart APP [OPTION...]   options given: in place of the old
 ptyrc manage forget  APP... | --all     exited ones
-ptyrc manage move APP FRAME        restart it on that frame (`-f`)
+ptyrc manage move [--restart] APP FRAME   to that frame: live when it
+                                   `moves`, else restarted with `-f`
 ptyrc manage frames                the frames and the apps on each
 ptyrc manage log APP               what it wrote on stderr
 ptyrc manage --overlay             the menu in a modal widget (the hotkey)
@@ -1081,9 +1097,10 @@ widget of the session, border `alert`, variants 34x9, 48x13, 64x18,
   on the screen itself: a front tint over its view. enter on a frame:
   the apps on it, then their actions.
 - Move (`m` on an app, `move to a frame…` among its actions): the same
-  list as a picker; enter restarts the app with `-f FRAME` in place of
-  the one it had (`app.restart`): an app is given its frame when it
-  starts, its state is not kept. A child only. Besides the frames, the
+  list as a picker; enter moves it: `app.move` when it `moves`, its
+  state kept; else it is restarted with `-f FRAME` in place of the one
+  it had (`app.restart`, a child only; its state is not kept: the
+  picker says which of the two before enter). Besides the frames, the
   names: `raw`, `active`, `largest`, `quietest`, `idle`. In the form the
   option `-f` is chosen with the same picker.
 - A foot line names the keys of the screen. The list follows the topic
