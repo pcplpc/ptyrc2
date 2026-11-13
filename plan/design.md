@@ -1151,7 +1151,10 @@ are named as `input.grab` names them, on both.
   stop (an exited one: forget), `l` log, `f` frames. The selection
   follows its app, and goes to an app just started.
 - Start: the apps of the catalog with their line of help; enter: the
-  form.
+  form. Letters typed filter it, any case, in the title: names that
+  start with them first, then names, then helps that hold them (`s`
+  `sno` enter enter starts snow). There `jkqh` are letters: `↑↓`
+  move, `backspace` edits, `esc` or `←` clears, then goes back.
 - Form: first the row that starts (`▶ start bricks`: enter twice from
   the list starts with the defaults); then a row per option, the frame
   last: a flag is a checkbox (`space`, `enter`), a count and a choice
