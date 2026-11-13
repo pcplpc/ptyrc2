@@ -935,3 +935,23 @@ fn quiet_screen_costs_nothing() {
     rig.run(3000);
     assert_eq!(rig.w.next_wake(), None);
 }
+
+#[test]
+#[ignore]
+fn look_cost_at_200x60() {
+    let mut rig = Rig::new(200, 60);
+    for y in (0..60).step_by(3) {
+        rig.write((y * 7 % 120) as u16, y, &"word ".repeat(12));
+    }
+    rig.run(2000);
+    for owner in 1..=8 {
+        rig.declare(owner, "t", &[[8, 2], [20, 5], [40, 10]]);
+        rig.show(owner, Show::new("t"));
+    }
+    let started = std::time::Instant::now();
+    for _ in 0..20 {
+        rig.w.urgent = true;
+        rig.tick();
+    }
+    eprintln!("look: {:?}", started.elapsed() / 20);
+}
