@@ -701,3 +701,26 @@ extension `borders`, `ptyrc widgets`. Left:
   `len` 0. No chase for `none`.
 - Two modals over the same frame overlap; the newest sprite is not
   on top by rule (same layer, order by id).
+
+## Apps and the manager, seventh session (sibling `mapps`)
+
+- `frames` of an app info is computed when the info is made: no `apps`
+  event when an app's sprites change frame. `sprites` and `widgets`
+  alike.
+- A paused app that added `persist` sprites: hidden too; they are
+  shown if its connection closes while paused.
+- `Scene::update` on a hidden sprite (`ttl_ms`, a new effect) sets
+  clocks at `now`; they are shifted again at `hide_owner(false)`.
+- A client is one pid: a client app that forks workers with their own
+  connections is several entries. A child that leaves its process
+  group (`setsid`) is a client.
+- `app.stop` of a client signals its pid only; a wrapper (`uv run`)
+  may survive its child or the reverse.
+- The log of a child grows without bound while it runs.
+- `manage restart APP` with no option keeps the old ones; there is no
+  way to restart with none (`manage restart 3 --` could).
+- `manage stop --all` ends every client too (`ptyrc attach`, a Python
+  console): as decided, but worth a second look.
+- The hotkey's child is started with the driver's environment, not the
+  one of the terminal the keys come from.
+- `ptyrc-cli/src/manage/ui.rs` is a stand-in until the menu is merged.

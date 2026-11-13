@@ -801,7 +801,7 @@ impl Engine for ScreenEngine {
 
     fn hide_owner(&mut self, conn: ConnId, hidden: bool, ctx: &mut Ctx) {
         self.scene.hide_owner(conn.0, hidden, ctx.now());
-        // TODO(merge): self.widgets.hide_owner(conn.0, hidden);
+        self.widgets.hide_owner(conn.0, hidden);
         self.widgets.touch();
         ctx.request_repaint();
     }
