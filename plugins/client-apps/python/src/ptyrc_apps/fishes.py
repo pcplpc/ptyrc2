@@ -5,6 +5,7 @@
     ptyrc-app fishes
     ptyrc-app fishes --count 12 --shy 2 -f active
     ptyrc-app fishes -a              # the whole aquarium
+    ptyrc-app fishes --tank -a       # in a widget, a bowl to a tank
 
 What it shows:
 
@@ -41,6 +42,15 @@ More, each on its own flag; `-a` for all (see `_reef`):
 
 What was populated is remembered in frame cells (`Reef`): scroll away
 and back, the same castle stands on the same line.
+
+`--tank`: the fishes in one widget (`Tank`), from a bowl of 9x4 with
+one fish to a tank of 40x10; border `tank`. The water is composed in
+the content, a `widget.set` a tick: a sprite is clipped to its frame,
+not to a widget, and the content follows the widget when the driver
+moves, sizes or hides it. The same `swim`, no text and no cursor; `-d`:
+sand, and decorations on it; `-b`: bubbles; `-r`: random species.
+Hover: the fishes come to the pointer, as to a finger on the glass.
+`--print [WxH]`: no driver, the variants on stdout.
 """
 
 from __future__ import annotations
@@ -48,21 +58,26 @@ from __future__ import annotations
 import argparse
 import math
 import random
+import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from ptyrc import Frame, Pilot, Sprite, clock
 
-from . import _cli
-from ._reef import Events, Reef, mirror, pad
+from . import _cli, _widgets
+from ._reef import DECOR, Events, Reef, Shape, mirror, pad
 
 __all__ = [
+    "BORDERS",
     "CLASSIC",
     "SPECIES",
     "STAY",
+    "TANKS",
     "WAIT",
     "Fish",
     "Species",
+    "Tank",
     "cover",
     "depart",
     "entry",
@@ -444,6 +459,280 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
                     fish.shown = fish.cell
 
 
+TANKS: tuple[tuple[int, int], ...] = ((9, 4), (14, 5), (20, 6), (28, 8), (40, 10))
+WATER, SAND = (67, 74), (180, 143, 137)
+BORDERS: dict[str, dict[str, Any]] = {
+    # Glass: thin walls, a rim, a thick floor.
+    "tank": {
+        "corners": "╓╖╚╝",
+        "top": "╌",
+        "bottom": "═",
+        "left": "║",
+        "right": "║",
+        "style": {"fg": 67},
+        "title": {"style": {"fg": 110}},
+    },
+}
+_NAMED = {
+    "cyan": 6,
+    "bright-cyan": 14,
+    "bright-yellow": 11,
+    "bright-magenta": 13,
+    "bright-green": 10,
+}
+
+
+@dataclass
+class _Bubble:
+    x: float
+    y: float
+    speed: float  # rows per second
+    phase: float
+
+
+class Tank:
+    """An aquarium of `w` by `h` cells, in its own cells: `step(dt)`,
+    then `rows()`. As many fishes as the water holds, `count` at most:
+    one in a bowl. A row of surface over the water when there are four
+    rows; with `decorate`, sand under it and decorations on the sand,
+    some in front of the fishes."""
+
+    def __init__(
+        self,
+        w: int,
+        h: int,
+        rng: random.Random,
+        count: int = 8,
+        decorate: bool = False,
+        bubbles: bool = False,
+        species: bool = False,
+    ) -> None:
+        self.w, self.h, self.rng = w, h, rng
+        self.t = 0.0
+        self.top = 1 if h >= 4 else 0
+        self.floor = h - 1  # the lowest row of water
+        self.sand = decorate and h >= 4
+        self.decor: list[tuple[Shape, int, dict[str, Any], bool, int]] = []
+        if self.sand:
+            self._plant()
+        self.vents: list[int] = []
+        if bubbles:
+            self.vents = sorted(rng.sample(range(1, w - 1), max(1, w // 14)))
+        self.air: list[_Bubble] = []
+        self.finger: tuple[int, int] | None = None
+        kinds = [k for k in SPECIES if k.length <= w - 3] if species else [CLASSIC]
+        # A small tank is a slow one.
+        self.pace = 0.3 + 0.5 * min(1.0, w / 40)
+        self.school = []
+        for i in range(max(1, min(count, round(w * h / 45)))):
+            kind = rng.choice(kinds)
+            self.school.append(
+                Fish(
+                    x=rng.uniform(0, max(0, w - kind.length)),
+                    y=rng.randint(self.top, self._low),
+                    vx=rng.choice((-1, 1)) * rng.uniform(0.5, 1.0) * CALM * self.pace,
+                    color=rng.choice(kind.colors) if species else COLORS[i % 5],
+                    kind=kind,
+                )
+            )
+
+    @property
+    def _low(self) -> int:
+        """The lowest row a fish swims on: over the sand."""
+        return max(self.top, self.floor - 1) if self.sand else self.floor
+
+    def _plant(self) -> None:
+        """Decorations along the sand, left to right, a gap between."""
+        rng, room = self.rng, self.floor - self.top
+        fit = [s for s in DECOR if s.h <= room and s.w <= max(3, self.w // 3)]
+        x = rng.randint(0, 3)
+        big = False
+        while fit:
+            shape = rng.choices(fit, [s.weight for s in fit])[0]
+            if shape.h >= 4 and big:  # one castle a tank
+                continue
+            if x + shape.w > self.w:
+                break
+            big = big or shape.h >= 4
+            ink = rng.choice(shape.inks)
+            front = rng.random() < shape.front
+            self.decor.append((shape, x, ink, front, rng.randrange(8)))
+            x += shape.w + rng.randint(2, 2 + self.w // 5)
+            if self.w < 12:  # a bowl: one thing in it
+                break
+
+    def on_move(self, x: int, y: int) -> None:
+        """The pointer on the cell `(x, y)`: the fishes come."""
+        self.finger = (x, y)
+
+    def on_leave(self) -> None:
+        self.finger = None
+
+    def step(self, dt: float) -> None:
+        self.t += dt
+        rng = self.rng
+        box = (0, self.top, self.w, self._low)
+        for i, fish in enumerate(self.school):
+            fish.home = None
+            if self.finger is not None:
+                # Around the pointer, each at its place, nose to it.
+                side = -1 if i % 2 else 1
+                x = self.finger[0] + (1 if side > 0 else -fish.length - 1)
+                y = self.finger[1] + ((i + 1) // 2) * (-1 if i % 4 < 2 else 1)
+                fish.home = (
+                    max(0, min(self.w - fish.length, x)),
+                    max(self.top, min(self._low, y)),
+                )
+            swim(fish, dt, box, None, False, rng)
+            if fish.home is not None and abs(fish.vx) < 0.5:
+                # Still: it looks at the pointer.
+                middle = fish.x + fish.length / 2
+                fish.vx = math.copysign(0.0, self.finger[0] - middle)  # type: ignore[index]
+            elif fish.home is None and abs(fish.vx) < 1.0:
+                fish.vx = math.copysign(
+                    rng.uniform(0.5, 1.0) * CALM * self.pace, fish.vx
+                )
+        for vent in self.vents:
+            if rng.random() < 0.6 * dt:
+                self.air.append(
+                    _Bubble(vent, self._low, rng.uniform(1.2, 2.2), rng.uniform(0, 6))
+                )
+        for bubble in self.air:
+            bubble.y -= bubble.speed * dt
+        self.air = [b for b in self.air if b.y >= self.top - 0.5]
+
+    def rows(self) -> list[list[dict[str, Any]]]:
+        """The tank as rows of runs, `w` cells each."""
+        w, h, t = self.w, self.h, self.t
+        grid: list[list[dict[str, Any]]] = [
+            [{"t": " "} for _ in range(w)] for _ in range(h)
+        ]
+
+        def put(x: int, y: int, glyph: str, **style: Any) -> None:
+            if 0 <= x < w and 0 <= y < h and glyph != " ":
+                grid[y][x] = {"t": glyph, **style}
+
+        def stand(front: bool) -> None:
+            for shape, x0, ink, ahead, phase in self.decor:
+                if ahead != front:
+                    continue
+                frames = shape.frames
+                art = frames[(int(t * 1000 / shape.ms) + phase) % len(frames)]
+                for dy, row in enumerate(art):
+                    for dx, glyph in enumerate(row):
+                        fg = next(
+                            (c for k, c in ink.items() if k and glyph in k), ink[""]
+                        )
+                        put(x0 + dx, self.floor - shape.h + dy, glyph, fg=fg)
+
+        if self.top:
+            # The surface: ripples that drift.
+            for x in range(w):
+                wave = math.sin(0.9 * x - 1.7 * t) + math.sin(0.37 * x + 0.9 * t)
+                if wave > -0.6:
+                    put(
+                        x, 0, "~" if wave < 0.9 else "≈", fg=WATER[wave > 0.3], dim=True
+                    )
+        if self.sand:
+            for x in range(w):
+                grain = (x * 2654435761 + w * 40503) >> 7
+                glyph = ".,.:. .._"[grain % 9]
+                put(x, self.floor, glyph, fg=SAND[grain % 3], dim=True)
+        stand(False)
+        for bubble in self.air:
+            x = round(bubble.x + 0.9 * math.sin(bubble.phase + 2.5 * bubble.y))
+            high = (self._low - bubble.y) / max(1, self._low - self.top)
+            glyph = "." if high < 0.35 else "o" if high < 0.8 else "O"
+            put(x, round(bubble.y), glyph, fg=110, dim=True)
+        for fish in self.school:
+            x, y, glyph = fish.cell
+            for dx, ch in enumerate(glyph):
+                put(x + dx, y, ch, fg=fish.color, bold=True)
+        stand(True)
+        out = []
+        for row in grid:
+            runs: list[dict[str, Any]] = []
+            for cell in row:
+                if runs and {**runs[-1], "t": ""} == {**cell, "t": ""}:
+                    runs[-1]["t"] += cell["t"]
+                else:
+                    runs.append(dict(cell))
+            out.append(runs)
+        return out
+
+
+def _tank(args: argparse.Namespace, rng: random.Random, w: int, h: int) -> Tank:
+    return Tank(w, h, rng, args.count, args.decorate, args.bubbles, args.random)
+
+
+def _ansi(run: dict[str, Any]) -> str:
+    fg = run.get("fg")
+    if fg is None:
+        return run["t"]
+    bold = "1;" if run.get("bold") else "2;" if run.get("dim") else ""
+    return f"\x1b[{bold}38;5;{_NAMED.get(fg, fg)}m{run['t']}\x1b[0m"
+
+
+def show(args: argparse.Namespace) -> int:
+    """`--tank --print`: the variants after a while, or one size; no
+    driver."""
+    rng = random.Random(args.seed)
+    colour = sys.stdout.isatty()
+    for w, h in TANKS if args.print == (0, 0) else (args.print,):
+        tank = _tank(args, rng, w, h)
+        for _ in range(80):
+            tank.step(TICK)
+        print("┌" + "─" * w + "┐")
+        for row in tank.rows():
+            text = "".join(_ansi(run) if colour else run["t"] for run in row)
+            print(f"│{text}│")
+        print("└" + "─" * w + "┘")
+    return 0
+
+
+def aquarium(
+    pilot: Pilot, args: argparse.Namespace, seconds: float | None = None
+) -> None:
+    """`--tank`: one widget, a `Tank` a variant; the one shown swims."""
+    rng = random.Random(args.seed)
+    tanks = {size: _tank(args, rng, *size) for size in TANKS}
+    seen = dict.fromkeys(TANKS, clock.monotonic())
+
+    def render(w: int, h: int) -> list[list[dict[str, Any]]]:
+        now = clock.monotonic()
+        # Not shown for a while, it was still: no leap.
+        tanks[w, h].step(min(now - seen[w, h], 3 * TICK))
+        seen[w, h] = now
+        return tanks[w, h].rows()
+
+    def come(x: int, y: int) -> bool:
+        for tank in tanks.values():
+            tank.finger = None
+        if widget.size is not None:
+            tanks[widget.size].on_move(x, y)
+        return False  # the next tick shows it
+
+    def go() -> bool:
+        for tank in tanks.values():
+            tank.on_leave()
+        return False
+
+    deck = _widgets.Deck(pilot, args)
+    widget = deck.add("fishes", list(TANKS), render)
+    deck.on_hover(widget, come, go)
+    deck.run(period=TICK, seconds=seconds)
+
+
+def _size(text: str) -> tuple[int, int]:
+    try:
+        w, h = (int(n) for n in text.lower().split("x"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not WxH: {text}") from None
+    if w < 8 or h < 2:
+        raise argparse.ArgumentTypeError(f"too small, 8x2 at least: {text}")
+    return (w, h)
+
+
 def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> int:
     """`seconds`: stop after this long (tests); else until interrupted."""
     out = _cli.parser(
@@ -464,9 +753,29 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
         "-r", "--random", action="store_true", help="random species, events"
     )
     out.add_argument("-a", "--all", action="store_true", help="-d -b -r")
+    out.add_argument(
+        "--tank", action="store_true", help="in one widget, a bowl to a tank"
+    )
+    tank = out.add_argument_group("with --tank")
+    _widgets.options(tank, border="tank")
+    tank.add_argument(
+        "--print",
+        nargs="?",
+        type=_size,
+        const=(0, 0),
+        metavar="WxH",
+        help="no driver: print every variant, or the size given",
+    )
     args = _cli.parse(out, argv)
     if args.all:
         args.decorate = args.bubbles = args.random = True
+    if args.print is not None and not args.tank:
+        out.error("--print: with --tank")
+    if args.tank:
+        args.border = BORDERS.get(args.border, args.border)
+        if args.print is not None:
+            return show(args)
+        return _cli.run(lambda pilot, args: aquarium(pilot, args, seconds), args)
     return _cli.run(lambda pilot, args: app(pilot, args, seconds), args)
 
 
