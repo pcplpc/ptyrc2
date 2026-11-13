@@ -759,6 +759,106 @@ def test_duel() -> None:
     assert not g.events and not g.rackets[0].away
 
 
+def test_player() -> None:
+    """The racket of a player goes where the arrows say, as the others
+    do: stopped by bricks and the sides, not by text; no one steers it."""
+    box = (0, 0, 40, 16)
+    line = {(x, 6) for x in range(40)}
+    g = still(player=0)
+    g.step(box, line)
+    racket = g.rackets[0]
+    assert g.mine is racket and (racket.x, racket.y) == (17, 8)
+    # A ball on its way out: it is not sent after it.
+    ball = shoot(g, 30.5, 5.5)
+    ball.vx = -0.3
+    for _ in range(12):
+        g.step(box, line)
+    assert (racket.x, racket.y) == (17, 8) and not g.balls
+    g.serve_due = 10**9
+    # A press: `HELD` steps, `REACH_X` cells a step; then it stops.
+    g.press("right")
+    seen = []
+    for _ in range(4):
+        g.step(box, line)
+        seen.append(racket.x)
+    assert seen == [20, 23, 23, 23] and bricks.REACH_X >= bricks.MOVES
+    # Held down, it goes on, to the side of the view.
+    for _ in range(8):
+        g.press("right")
+        g.step(box, line)
+    assert racket.x == 35
+    # The opposite arrow stops it; a key that is no arrow does nothing.
+    racket.x = 20
+    g.press("right")
+    g.step(box, line)
+    g.press("left")
+    g.press("a")
+    g.step(box, line)
+    g.step(box, line)
+    assert racket.x == 23
+    racket.x = 35
+    # Up, a row a step, under the text and out; both ways at once.
+    rows = []
+    for _ in range(4):
+        g.press("up")
+        g.press("left")
+        g.step(box, line)
+        checks(g, box, line)
+        rows.append((racket.x, racket.y))
+    assert rows == [(32, 7), (29, 6), (26, 5), (23, 4)]
+    for _ in range(3):
+        g.step(box, line)
+    assert (racket.x, racket.y) == (20, 3)  # what was held is done
+    # A brick stops it.
+    lay(g, 20, 1)
+    lay(g, 10, 2)
+    for key, at in (("up", (20, 2)), ("left", (13, 2))):
+        for _ in range(6):
+            g.press(key)
+            g.step(box, line)
+            checks(g, box, line)
+        assert (racket.x, racket.y) == at
+    # Killed, it comes back.
+    g._kill(racket)
+    for _ in range(bricks.DEAD):
+        g.step(box, line)
+    assert not racket.dead and g.mine is racket
+    # Two teams: the player has the bottom one; the top one plays alone,
+    # and so does a twin of the player.
+    g = still(multiplayer=True, bonuses=True, player=1)
+    g.step(box, set())
+    top, low = g.rackets
+    assert g.mine is low and (low.team, top.team) == (1, 0)
+    at = (low.x, low.y)
+    ball = shoot(g, 30.5, 9.5)
+    ball.vx = -0.3
+    hits = []
+    for _ in range(40):
+        g.step(box, set())
+        hits += [e[2] for e in g.events if e[0] == "bounce"]
+    assert hits and hits[0] is top and (low.x, low.y) == at and low not in hits
+    g._award(bricks.Capsule(54, 0, 0, "twin"), low, box)
+    twin = g.rackets[-1]
+    assert twin.team == 1 and g.mine is low
+    ball = shoot(g, 30.5, 4.5, 0.5)
+    ball.vx = -0.3
+    hits = []
+    for _ in range(30):
+        g.step(box, set())
+        hits += [e[2] for e in g.events if e[0] == "bounce"]
+    assert twin in hits and (low.x, low.y) == at
+    g.press("down")
+    g.step(box, set())
+    assert (low.x, low.y) == (at[0], at[1] + 1)
+    # Face to face: the one that keeps away is never the player's.
+    for seed in range(8):
+        g = still(multiplayer=True, player=1)
+        g.rng.seed(seed)
+        for i in range(4):
+            g._duel(g.rackets[i % 2], bricks.Ball(5, 1.5, 1.5, 0.0, 0.5))
+        assert [e[2] for e in g.events] == [g.rackets[0]] and not g.rackets[1].away
+
+
 def test_racket() -> None:
     box = (0, 0, 40, 16)
     g = still()
@@ -822,6 +922,21 @@ def test_bricks(session: Pilot) -> None:
         return all(it in host for it in ("(━━━)", "⟦=⟧", "◆")) and bool(seen & {*"▀▄"})
 
     watch(session, lambda: bricks.main(args, seconds=1.5), look)
+
+
+def test_bricks_grab(session: Pilot) -> None:
+    """`--grab`: the arrows are taken while it runs, given back after.
+    No key of a host keyboard can be typed here."""
+    page(session)
+    args = ["-s", session.session, "--seed", "4", "--speed", "40", "--grab"]
+    grabbed = []
+
+    def look(host: str) -> bool:
+        grabbed.append(session.info()["grabbed"])
+        return "←↑↓→  ctrl+t  ◆" in host and "(━━━)" in host
+
+    watch(session, lambda: bricks.main(args, seconds=1.5), look)
+    assert any(grabbed) and not session.info()["grabbed"]
 
 
 def test_bricks_all(session: Pilot) -> None:

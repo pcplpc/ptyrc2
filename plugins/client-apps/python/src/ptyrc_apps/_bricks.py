@@ -239,10 +239,11 @@ def label(text: str, ink: Color, seconds: float = 0.5) -> dict[str, Any]:
 
 
 def board(
-    score: list[int], best: list[int] | None = None
+    score: list[int], best: list[int] | None = None, hint: str | None = None
 ) -> list[list[dict[str, Any]]]:
     """The score; two: the keeper of the top, then of the bottom. With
-    `best`, the highest so far."""
+    `best`, the highest so far; `hint`: the keys of a player, dim,
+    before it."""
     if len(score) == 1:
         runs = [{"t": f"◆ {score[0]}", "fg": "bright-white", "bold": True}]
     else:
@@ -253,6 +254,8 @@ def board(
         ]
     if best is not None:
         runs.append({"t": "  best " + " ".join(map(str, best)), "dim": True})
+    if hint:
+        runs.insert(0, {"t": hint + "  ", "dim": True})
     return [runs]
 
 
@@ -267,6 +270,7 @@ class Stage:
         self.frame = frame
         self.rng = rng
         self.effects = effects
+        self.hint: str | None = None  # the keys of a player, by the score
         self.bricks: dict[int, tuple[Sprite, Any]] = {}  # by serial: sprite, key
         self.dim: set[int] = set()  # serials of the bricks about to go
         self.moving: dict[int, tuple[Sprite, Any]] = {}  # sprite, what is shown
@@ -354,7 +358,8 @@ class Stage:
         for n, (at, key, z, look) in things.items():
             self._put(n, at, key, z, look)
 
-        self.board.show(board(game.score, game.best if self.effects else None))
+        best = game.best if self.effects else None
+        self.board.show(board(game.score, best, self.hint))
 
     def glide(self) -> None:
         """Between two steps, inside a batch: the balls shown half way

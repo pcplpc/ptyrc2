@@ -5,6 +5,7 @@
     ptyrc-app bricks
     ptyrc-app bricks -r -b           # rules and bonuses
     ptyrc-app bricks -a              # the arcade
+    ptyrc-app bricks --grab          # the arrows are yours
 
 What it shows:
 
@@ -49,6 +50,15 @@ More, each on its own flag; `-a` for all (see `_bricks`):
   apart. Face to face, one of the two keeps away for 2 to 3 s.
 - `-e`: particles, a trail, combos, a best score.
 
+`--grab`, not in `-a`: the four arrows of the host keyboard are taken
+before the program and move the racket; with `-m`, the bottom one, the
+other plays alone. A press moves it for `HELD` steps, `REACH_X` cells
+a step along the row or one row a step: a key held down, repeated by
+the terminal, keeps it going; the opposite arrow stops it. The racket
+moves as the others do: stopped by bricks, rackets and the sides of
+the view, not by text. Twins play alone; no racket of a player keeps
+away from a duel. ctrl+t gives the arrows back and ends.
+
 Rules count in steps of the game, not in seconds; `second` is the
 steps in a second.
 """
@@ -56,6 +66,7 @@ steps in a second.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import random
 from collections import deque
 from collections.abc import Callable, Sequence
@@ -64,7 +75,7 @@ from itertools import pairwise
 from math import floor
 from typing import Any
 
-from ptyrc import Frame, Pilot
+from ptyrc import Frame, Pilot, PtyrcError
 
 from . import _bricks, _cli
 from .snake import walls_of
@@ -101,6 +112,9 @@ PACE = 12  # eighths of a move a ball makes in a step
 RALLY = 4  # bricks in a row that speed it up, an eighth each
 KICK = 6  # eighths more for a fast one
 MOVES = 2  # cells a racket moves in a step
+REACH_X = 3  # cells a step the racket of a player moves along its row; one row
+HELD = 2  # steps a press of an arrow moves it
+ARROWS = {"left": (0, -1), "right": (0, 1), "up": (1, -1), "down": (1, 1)}  # axis, way
 BRICKS = 240  # bricks in the view, at most; one a `PLOT` cells, 8 at least
 PLOT = 48
 FILL = 12  # seconds to lay as many
@@ -313,7 +327,8 @@ class Game:
     """Bricks, balls, rackets and the rules. No drawing here.
 
     `rules`: kinds of bricks; `bonuses`: capsules; `multiplayer`: two
-    teams; `second`: steps in a second. Same `rng`, same game: no clock.
+    teams; `second`: steps in a second; `player`: the team whose racket
+    is not steered but moved by `press`. Same `rng`, same game: no clock.
     Each step leaves in `events` what happened, a cell or bricks second:
 
     - `("group", bricks)`: laid; `("fade", bricks)`: about to go;
@@ -342,8 +357,11 @@ class Game:
         bonuses: bool = False,
         multiplayer: bool = False,
         second: int = 16,
+        player: int | None = None,
     ) -> None:
         self.rng = rng
+        self.player = player  # team whose racket is moved by `press`
+        self.held = [(0, 0), (0, 0)]  # along x, along y: way, steps left
         self.rules, self.bonuses, self.teams = rules, bonuses, 1 + multiplayer
         self.second = second
         self.solid: dict[Cell, Brick] = {}  # every cell of every brick
@@ -648,6 +666,7 @@ class Game:
             self._reset(box)
         self._spawn(box, walls)
         self._wake(box, walls)
+        self._play(box)
         self._steer(box, walls)
         self._serve(box, walls)
         for ball in list(self.balls):
@@ -860,11 +879,52 @@ class Game:
             or abs(hits[-1].y - hits[-2].y) > NEAR
         ):
             return
-        one = self.rng.choice(hits[-2:])
+        one = self.rng.choice([r for r in hits[-2:] if r is not self.mine] or hits[-1:])
+        if one is self.mine:
+            return
         one.away = self.steps + round(self.rng.uniform(*AWAY) * self.second)
         one.plan = None
         rally.clear()
         self.events.append(("retreat", (one.x + one.w // 2, one.y), one))
+
+    # -- the player ----------------------------------------------------------
+
+    @property
+    def mine(self) -> Racket | None:
+        """The racket of the player: the one of its team that is no twin."""
+        if self.player is None:
+            return None
+        return next(
+            (r for r in self.rackets if r.team == self.player and r.left is None), None
+        )
+
+    def press(self, key: str) -> None:
+        """An arrow (`up`, `down`, `left`, `right`): the racket of the
+        player goes that way for `HELD` steps; the opposite one stops
+        it. Anything else is ignored."""
+        if key not in ARROWS:
+            return
+        axis, way = ARROWS[key]
+        was, left = self.held[axis]
+        self.held[axis] = (0, 0) if left and was == -way else (way, HELD)
+
+    def _play(self, box: Box) -> None:
+        """Move the racket of the player as held: `REACH_X` cells along
+        its row, then a row; a cell at a time, as far as it fits."""
+        r = self.mine
+        moves = []
+        for axis, (way, left) in enumerate(self.held):
+            if left:
+                self.held[axis] = (way, left - 1)
+                moves += [(way, 0)] * REACH_X if axis == 0 else [(0, way)]
+        if r is None or r.dead or not moves:
+            return
+        room = self._free(box, r.w)
+        bad = {(x - i, y) for x, y in self._blocked(r) for i in range(r.w)}
+        for dx, dy in moves:
+            there = (r.x + dx, r.y + dy)
+            if there in room and there not in bad:
+                r.x, r.y = there
 
     def _out(self, ball: Ball, box: Box) -> None:
         """Out by the top or the bottom. The last one: the score of who
@@ -1169,8 +1229,9 @@ class Game:
         that keeps away from a duel only stops the balls about to
         leave by its side, as late as it can, and waits in its den.
         Text is no obstacle; a hit is never planned on a cell of text:
-        a ball is never foreseen in one."""
-        alive = [r for r in self.rackets if not r.dead]
+        a ball is never foreseen in one. The racket of a player is left
+        alone."""
+        alive = [r for r in self.rackets if not r.dead and r is not self.mine]
         if not alive:
             return
         self.lure = [(b.x + BW / 2, b.y) for b in self.bricks(box)]
@@ -1653,10 +1714,43 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
         bonuses=args.bonuses,
         multiplayer=args.multiplayer,
         second=max(1, round(args.speed)),
+        player=int(args.multiplayer) if args.grab else None,
     )
     frame = _cli.pick(pilot, args.frame)
     # Its own dice: the particles do not change the game of a seed.
     stage = _bricks.Stage(pilot, frame, random.Random(args.seed), args.effects)
+    keys: list[dict[str, Any]] = []
+    if args.grab:
+        stage.hint = "←↑↓→  ctrl+t"
+        # The keys come among the events `Sight.look` takes: set apart.
+        events = pilot.event
+
+        def event(timeout: float | None = None) -> tuple[str, Any] | None:
+            while (one := events(timeout)) is not None:
+                if one[0] != "input":
+                    return one
+                keys.append(one[1] or {})
+            return None
+
+        pilot.event = event  # type: ignore[method-assign]
+        pilot.grab(*ARROWS)
+    try:
+        _run(pilot, args, game, frame, stage, keys, seconds)
+    finally:
+        if args.grab:
+            with contextlib.suppress(PtyrcError, OSError):
+                pilot.release()
+
+
+def _run(
+    pilot: Pilot,
+    args: argparse.Namespace,
+    game: Game,
+    frame: Frame,
+    stage: _bricks.Stage,
+    keys: list[dict[str, Any]],
+    seconds: float | None,
+) -> None:
     # The walls are read when the driver says the text changed or the
     # view moved (topic `text`), not at each step.
     sight = _cli.Sight(pilot, frame)
@@ -1665,7 +1759,13 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     # were shown half way (`Stage.glide`).
     step = False
     for _ in _cli.ticks(0.5 / args.speed, seconds):
-        if not sight.look():
+        seen = sight.look()
+        for data in keys:
+            if "released" in data:  # the escape key: the end
+                return
+            game.press(data.get("key") or "")
+        keys.clear()
+        if not seen:
             continue
         box = view(frame)
         if sight.changed:
@@ -1711,6 +1811,12 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
         help="particles, a trail, combos, a best score",
     )
     out.add_argument("-a", "--all", action="store_true", help="-r -b -m -e")
+    out.add_argument(
+        "--grab",
+        action="store_true",
+        help="the arrows of the keyboard move the racket (with -m, the bottom "
+        "one); ctrl+t gives them back and ends",
+    )
     args = _cli.parse(out, argv)
     if args.all:
         args.rules = args.bonuses = args.multiplayer = args.effects = True
