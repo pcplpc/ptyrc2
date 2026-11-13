@@ -960,7 +960,7 @@ fn quiet_screen_costs_nothing() {
 fn look_cost_at_200x60() {
     let mut rig = Rig::new(200, 60);
     for y in (0..60).step_by(3) {
-        rig.write((y * 7 % 120) as u16, y, &"word ".repeat(12));
+        rig.write(y * 7 % 120, y, &"word ".repeat(12));
     }
     rig.run(2000);
     for owner in 1..=8 {
