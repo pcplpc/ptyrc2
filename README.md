@@ -14,7 +14,7 @@ ptyrc find flower             # where
 ptyrc keys esc : q enter      # type
 ptyrc frames                  # the panes found on screen
 ptyrc draw text --auto top-right ' 12:00 '
-ptyrc-app fishes              # or: sand, snow, snake, bricks, cat...
+ptyrc app fishes              # or: sand, snow, snake, bricks, cat...
 ```
 
 Read: `text`, `find`, `cursor`, `wait`, `frames`, `heat`, `idle`, `snap`,

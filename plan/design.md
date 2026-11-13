@@ -925,13 +925,12 @@ that moves a snapshot is read in the diff of the `.snap`.
   it goes to the app, late. CSI u and modifyOtherKeys forms count; a
   release event between the two does not break the pair. The driver
   runs `$PTYRC_DEMO` (words split on spaces), else `ptyrc-app demo`
-  (from `PATH`, else from a `.venv/bin` above the `ptyrc` binary),
-  with two more arguments, `SEED NTH`: a number drawn once for the
-  session and the count of runs before; `PTYRC_SESSION` and
-  `PTYRC_SOCKET` are set, stdio is null. A command that does not start
-  rings the bell. `ptyrc_apps.demo` picks the app from them: rounds of
-  all the apps shuffled, none twice in a row, the `-a` version one time
-  in two. `--no-demo`, `--transparent`: no demo.
+  (found as by `ptyrc app`), with two more arguments, `SEED NTH`: a
+  number drawn once for the session and the count of runs before;
+  `PTYRC_SESSION` and `PTYRC_SOCKET` are set, stdio is null. A command
+  that does not start rings the bell. `ptyrc_apps.demo` picks the app
+  from them: rounds of all the apps shuffled, none twice in a row, the
+  `-a` version one time in two. `--no-demo`, `--transparent`: no demo.
 - `input.click`: a click at a screen cell, written as the app asked:
   SGR (1006) or X10 bytes, press and release, press alone under mode 9
   or for the wheel. `mods`: `shift`, `alt`, `ctrl` held. `count`: 2 is
@@ -1107,7 +1106,13 @@ ptyrc events [TOPIC...] [--snapshot]   JSON events, one per line;
       all topics but `mouse` when none is named
 ptyrc debug overlay frames|heat|off ; ptyrc debug dump
 ptyrc call METHOD [JSON]          raw request
+ptyrc app [NAME [OPTION...]]      a client app: `ptyrc-app NAME...`
 ```
+
+`ptyrc app` executes `ptyrc-app` with its arguments as given, `-s` as
+`$PTYRC_SESSION`. `ptyrc-app` is taken from `PATH`; else from `.venv/bin`
+or `venv/bin` in the current directory or one above it; else from the same
+above the `ptyrc` binary. None: status 127.
 
 ### Errors
 

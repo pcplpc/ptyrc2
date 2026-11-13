@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! `ptyrc <verb>`.
 
+mod apps;
 mod plugins;
 mod replay;
 mod tools;
@@ -103,6 +104,8 @@ enum Verb {
         #[command(subcommand)]
         verb: Option<replay::TapeVerb>,
     },
+    /// Run a client app: `ptyrc app bricks`; `ptyrc app` lists them
+    App(apps::App),
     /// Debug tools
     #[command(subcommand)]
     Debug(verbs::Debug),
@@ -320,6 +323,7 @@ fn run(cli: Cli) -> Result<ExitCode, Fail> {
         Verb::Snap => replay::snap(&common),
         Verb::Replay(args) => replay::replay(args),
         Verb::Tape { verb } => replay::tape(&common, verb),
+        Verb::App(args) => apps::app(&common, args),
         Verb::Debug(verb) => verbs::debug(&common, verb),
         Verb::Events { topics, snapshot } => verb_events(&common, topics, snapshot),
     }
@@ -381,29 +385,17 @@ fn verb_run(args: Run) -> Result<ExitCode, Fail> {
 }
 
 /// What the demo runs: the words of `$PTYRC_DEMO`; else `ptyrc-app demo`,
-/// from `PATH` or, when it is not there, from a `.venv/bin` in a
-/// directory above this program (a source tree).
+/// found as by `ptyrc app`.
 fn demo_command() -> Vec<String> {
     let words = std::env::var("PTYRC_DEMO").unwrap_or_default();
     let words: Vec<String> = words.split_whitespace().map(str::to_string).collect();
     if !words.is_empty() {
         return words;
     }
-    let app = "ptyrc-app";
-    let in_path = std::env::var_os("PATH")
-        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(app).is_file()));
-    let exe = std::env::current_exe().and_then(|exe| exe.canonicalize());
-    let in_tree = || {
-        let exe = exe.ok()?;
-        let found = exe
-            .ancestors()
-            .skip(1)
-            .map(|dir| dir.join(".venv/bin").join(app))
-            .find(|path| path.is_file())?;
-        found.into_os_string().into_string().ok()
-    };
-    let program = if in_path { None } else { in_tree() };
-    vec![program.unwrap_or_else(|| app.into()), "demo".into()]
+    let program = apps::find()
+        .and_then(|p| p.into_os_string().into_string().ok())
+        .unwrap_or_else(|| apps::APP.into());
+    vec![program, "demo".into()]
 }
 
 fn verb_ls(common: &Common) -> Result<ExitCode, Fail> {
