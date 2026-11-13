@@ -337,6 +337,10 @@ impl Scene {
         self.sprites.is_empty()
     }
 
+    pub fn contains(&self, id: SpriteId) -> bool {
+        self.sprites.iter().any(|s| s.id == id)
+    }
+
     /// Something visible may have changed since the last `take_dirty`.
     pub fn dirty(&self) -> bool {
         self.dirty
