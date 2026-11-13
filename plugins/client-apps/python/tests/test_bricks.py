@@ -137,8 +137,8 @@ def test_game() -> None:
 
 
 def test_groups() -> None:
-    """Small groups, one at a time, all over the view, where a ball
-    gets: between the lines, after the short ones, in the blanks."""
+    """Groups, one at a time, all over the view, where a ball gets:
+    between the lines, after the short ones, in the blanks."""
     rows = [
         "" if i % 4 == 3 else "words " * (2 + i % 5) if i < 16 else ""
         for i in range(24)
@@ -146,17 +146,20 @@ def test_groups() -> None:
     walls = walls_of(rows)
     box = (0, 0, 80, 24)
     game = bricks.Game(random.Random(5))
-    laid = []
-    for _ in range(900):
+    laid, large = [], []
+    for _ in range(1200):
         game.step(box, walls)
         checks(game, box, walls)
         new = [e[1] for e in game.events if e[0] == "group"]
         assert len(new) <= 1  # one at a time
-        laid += new
+        if new:
+            (large if game.groups[-1].large else laid).append(new[0])
+            assert game.groups[-1].bricks == new[0]
     assert len(laid) >= 30 and all(2 <= len(group) <= 3 for group in laid)
     assert all(
         abs(a.y - b.y) <= 1 and abs(a.x - b.x) <= 6 for g in laid for a in g for b in g
     )
+    assert large and all(len(group) >= 4 for group in large)
     sectors = {(4 * g[0].x // 80, 3 * g[0].y // 24) for g in laid}
     assert len(sectors) == 12  # every twelfth of the view
     lines = {y for _, y in walls}
@@ -179,12 +182,83 @@ def test_groups() -> None:
     assert not game.solid and game._group((0, 0, 30, 4), full) == []
 
 
+def test_walls() -> None:
+    """Half the bricks are laid in large groups: medium walls, a block,
+    a row or a pile where the place is tight, now and then a big wall."""
+    rows = {
+        "blank": [""] * 24,
+        "lines": ["" if i % 4 == 3 else "words " * (2 + i % 5) for i in range(24)],
+        "dense": ["" if i % 6 == 5 else "words " * 12 for i in range(24)],
+    }
+    box = (0, 0, 80, 24)
+    for name, page in rows.items():
+        walls = walls_of(page)
+        game = bricks.Game(random.Random(7), rules=name == "lines")
+        shapes = set()
+        for _ in range(2500):
+            game.step(box, walls)
+            if not any(e[0] == "group" for e in game.events):
+                continue
+            group = game.groups[-1]
+            cells = [(b.x, b.y) for b in group.bricks]
+            xs, ys = {x for x, _ in cells}, sorted({y for _, y in cells})
+            if not group.large:
+                assert len(cells) <= 3
+                continue
+            # A block: rows one under the other, bricks side by side,
+            # a colour a row, a row whole; alone.
+            wide, high = (max(xs) - min(xs)) // 3 + 1, len(ys)
+            shapes.add((group.size, high, wide))
+            assert ys == list(range(ys[0], ys[0] + high)) and len(cells) >= 4
+            assert all((x - min(xs)) % 3 == 0 for x in xs)
+            if group.size == 2:
+                assert high in (3, 4) and wide in (6, 7, 8)
+            else:
+                assert (high, wide) in [
+                    *[(2, w) for w in (3, 4, 5)],
+                    *[(1, w) for w in (4, 5, 6)],
+                    *[(h, 2) for h in (3, 4)],
+                ]
+            assert any(
+                [x for x, y in cells if y == row]
+                == list(range(min(xs), max(xs) + 1, 3))
+                for row in (ys[0], ys[-1])
+            )
+            assert len({(b.y, b.color) for b in group.bricks}) == high
+            around = {
+                (x, y)
+                for y in range(ys[0] - 1, ys[-1] + 2)
+                for x in range(min(xs) - 2, max(xs) + 5)
+            }
+            mine = {c for b in group.bricks for c in b.cells}
+            assert around & game.solid.keys() <= mine and not around & walls & mine
+            assert 10 + len(cells) - 3 <= (group.due - game.steps) / game.second
+            assert (group.due - game.steps) / game.second <= 20 + len(cells) - 3
+            if name == "lines":
+                assert all(b.kind in bricks.KINDS for b in group.bricks)
+        small, big = game.laid
+        share = big / (small + big)
+        assert small + big >= 150 and 0.45 <= share <= 0.55, (name, share)
+        sizes = [size for size, _, _ in shapes]
+        assert sizes.count(1) >= 3  # medium ones of several shapes, everywhere
+        if name == "blank":  # room: every medium one is a wall, some are big
+            assert sizes.count(2) >= 2
+            assert all(h == 2 for size, h, _ in shapes if size == 1)
+    # No room for a large one: small ones, no stall.
+    gaps = ("w" + " " * 9) * 8
+    walls = walls_of([gaps if i % 2 else "words " * 13 for i in range(24)])
+    game = bricks.Game(random.Random(7))
+    for _ in range(600):
+        game.step(box, walls)
+    assert game.laid[0] >= 40 and game.laid[1] == 0
+
+
 def test_terrain() -> None:
     walls = walls_of(["", "", "  a line of words, long enough  "])
     box = (0, 0, 60, 20)
     game = bricks.Game(random.Random(2))
     game.step(box, walls)
-    assert len(game.bricks(box)) in (2, 3)  # a group at the first step
+    assert 4 <= len(game.bricks(box)) <= 25  # a wall at the first step
     for _ in range(40):
         game.step(box, walls)
     kept = {b.n: (b.x, b.y) for b in game.bricks(box)}
@@ -214,7 +288,8 @@ def test_age() -> None:
         (group,) = game.groups
         there = list(group.bricks)
         assert all(b.due == group.due for b in there)
-        assert 10 * 8 < group.due <= 1 + 20 * 8
+        more = len(there) - 3  # a second more a brick over three
+        assert (10 + more) * 8 < group.due <= 1 + (20 + more) * 8
         dues.add(group.due)
         seen = {}
         while game.steps < group.due:

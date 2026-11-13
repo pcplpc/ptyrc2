@@ -19,10 +19,14 @@ What it shows:
 - Text does not stop a racket: sprites are drawn behind the text, a
   racket under it is hidden, and the ball meets the text, not the
   racket. A racket keeps off the text when it has the choice.
-- Terrain in frame cells: groups of 2 or 3 bricks, laid one at a time
-  all over the view, far from each other, where a ball gets: between
-  the lines, after the short ones, in the blanks. A group goes 10 to
-  20 s after it is laid, dim for its last second.
+- Terrain in frame cells: groups of bricks, laid one at a time all
+  over the view, far from each other, where a ball gets: between the
+  lines, after the short ones, in the blanks. Half the bricks are laid
+  in large groups, a colour a row: medium walls of 2 rows by 3 to 5
+  bricks, a row or a pile where the place is tight; now and then a
+  big wall of 3 or 4 rows by 6 to 8. The other half in groups of 2 or
+  3. A group goes 10 to 20 s after it is laid,
+  a second later for each brick over three, dim for its last second.
 
 The game never ends. The last ball out sets the score to 0. 30 s with
 no brick broken: the game starts again, on a new map, the rackets
@@ -96,16 +100,22 @@ PACE = 12  # eighths of a move a ball makes in a step
 RALLY = 4  # bricks in a row that speed it up, an eighth each
 KICK = 6  # eighths more for a fast one
 MOVES = 2  # cells a racket moves in a step
-GROUPS = 24  # groups in the view, at most; one a `PLOT` cells, 3 at least
-PLOT = 160
+BRICKS = 240  # bricks in the view, at most; one a `PLOT` cells, 8 at least
+PLOT = 48
 FILL = 12  # seconds to lay as many
 AGE = (10, 20)  # seconds a group lasts
+LONG = 1  # second more for each brick over three
+BIG = ((3, 4), (6, 8))  # rows and columns of a big wall, in bricks
+OFTEN = 0.2  # share of the large groups a big wall is tried for
+#: Of a medium one, in the order tried: a wall, a block, a row, a pile.
+MEDIUM = (((2, 2), (3, 5)), ((2, 2), (3, 3)), ((1, 1), (4, 6)), ((3, 4), (2, 2)))
+STYLES = ("full", "full", "full", "checker", "frame", "slope")  # of a wall
 FADE = 1  # second it is dim before it goes
 CLEAR = 60  # moves of a ball no group is laid in the way of
 TRIES = 60  # places drawn for a group
 PICK = 10  # of which the farthest from the others is kept
 ROOM = 40  # free cells a group must be next to
-#: Shapes of a group: left cells of its bricks.
+#: Shapes of a small group: left cells of its bricks.
 SHAPES = (
     ((0, 0), (BW, 0)),
     ((0, 0), (BW, 0)),
@@ -123,6 +133,7 @@ AIM = 50  # steps of a shot it weighs
 FETCH = 48  # moves it goes for a capsule
 CHASE = 40  # steps ahead within which it goes for a ball that is safe
 THINK = 4  # steps between two looks for such a shot
+SHOTS = 60  # shots weighed in a step after which a racket looks at one row
 EDGE = 0.5  # bricks a shot must win over no shot
 DENT = 0.3  # of a brick: a hit that does not break it
 RISK = 0.25  # of a brick: a shot that has to be saved again
@@ -193,12 +204,18 @@ class Brick:
 
 @dataclass(eq=False)
 class Group:
-    """Bricks laid together: they go together at step `due`."""
+    """Bricks laid together: they go together at step `due`. Medium
+    and big ones are large: 4 bricks or more."""
 
     bricks: list[Brick]
     at: tuple[float, float]  # its middle
     due: int
+    size: int = 0  # 0 small, 1 medium, 2 big
     dim: bool = False  # about to go
+
+    @property
+    def large(self) -> bool:
+        return self.size > 0
 
 
 @dataclass(eq=False)
@@ -338,6 +355,7 @@ class Game:
         self.steps = 0
         self.serial = self.teams
         self.groups: list[Group] = []
+        self.laid = [0, 0]  # bricks laid so far: in small groups, in large ones
         self.spawn_due = 0
         self.last = 0  # step of the last brick broken, or of the start
         self.home = (0.5, 0.5)  # of a racket, in shares of its part of the view
@@ -345,7 +363,9 @@ class Game:
         self.serve_due = SERVE
         self.server = rng.randrange(self.teams)
         self.version = 0  # of the terrain
+        self.shots = 0  # weighed in this step
         self.fits: dict[int, Any] = {}  # `_free`, by width
+        self.spans: dict[int, tuple[Box, set[Cell]]] = {}  # of `_room`, by width
         self.rally: deque[tuple[int, Racket, int]] = deque(maxlen=DUEL)  # bounces
 
     # -- the terrain -------------------------------------------------------
@@ -374,12 +394,13 @@ class Game:
             del self.solid[cell]
         return True
 
-    def _group(self, box: Box, walls: set[Cell]) -> list[Brick]:
-        """Lay a group of 2 or 3 bricks on free cells of the view: of
-        `PICK` places a ball can get to (`_open`), drawn at random, the
-        farthest from the other groups, a row counting for two columns.
-        Not on a racket or the two rows about it, nor where a ball is
-        about to go."""
+    def _group(self, box: Box, walls: set[Cell], most: int = 32) -> list[Brick]:
+        """Lay a group on free cells of the view. Half the bricks go to
+        large groups: while those have no more bricks laid than the
+        small ones, a medium one, the first of `MEDIUM` that fits;
+        once in five a big wall is tried first, of `most` bricks at
+        most. Where none fits, or else, a small group of 2 or 3. Not on a racket or the two rows about it, nor where a ball
+        is about to go."""
         rng = self.rng
         x0, y0, x1, y1 = box
         if x1 - x0 < 3 * BW or y1 - y0 < 4:
@@ -404,31 +425,25 @@ class Game:
                 and c not in solid
             )
 
-        others = [g.at for g in self.groups]
-        best = None
-        found = 0
-        for _ in range(TRIES):
-            shape = rng.choice(SHAPES)
-            x, y = rng.randrange(x0, x1), rng.randrange(y0 + 1, y1 - 1)
-            cells = [(x + dx + i, y + dy) for dx, dy in shape for i in range(BW)]
-            if not all(free(c) and c not in keep for c in cells):
-                continue
-            if not self._open(cells, free):
-                continue
-            mx = sum(c[0] for c in cells) / len(cells) + 0.5
-            my = sum(c[1] for c in cells) / len(cells) + 0.5
-            far = min(
-                ((mx - gx) ** 2 + (2 * (my - gy)) ** 2 for gx, gy in others),
-                default=0.0,
-            )
-            if best is None or far > best[0]:
-                best = (far, shape, x, y, (mx, my))
-            found += 1
-            if found >= PICK:
-                break
-        if best is None:
+        found, size = None, 0
+        if self.laid[1] <= self.laid[0]:
+            big = rng.random() < OFTEN
+            for n, sizes in enumerate((BIG, *MEDIUM) if big else MEDIUM):
+                (r0, r1), (c0, c1) = sizes
+                rows = rng.randint(r0, min(r1, max(r0, y1 - y0 - 4)))
+                cols = rng.randint(c0, max(c0, min(c1, most // rows)))
+                style = rng.choice(STYLES) if rows > 2 and cols > 3 else "full"
+                shape = self._wall(rows, cols, style, rng.random() < 0.5)
+                if rows * c0 <= most:
+                    found = self._spot([shape], box, free, keep, True)
+                if found is not None:
+                    size = 2 if big and not n else 1
+                    break
+        if found is None:
+            found = self._spot(SHAPES, box, free, keep, False)
+        if found is None:
             return []
-        _, shape, x, y, at = best
+        shape, x, y, at = found
         tint = rng.randrange(COLORS)
         out = []
         for dx, dy in shape:
@@ -443,17 +458,90 @@ class Game:
             )
             self._lay(brick)
             out.append(brick)
-        due = self.steps + round(rng.uniform(*AGE) * self.second)
+        life = rng.uniform(*AGE) + LONG * max(0, len(out) - 3)
+        due = self.steps + round(life * self.second)
         for brick in out:
             brick.due = due
-        self.groups.append(Group(out, at, due))
+        self.laid[size > 0] += len(out)
+        self.groups.append(Group(out, at, due, size))
         self.events.append(("group", out))
         return out
 
     @staticmethod
-    def _open(cells: list[Cell], free: Solid) -> bool:
-        """Whether a ball can get to `cells`: two free cells or more
-        next to them, that lead to `ROOM` free cells."""
+    def _wall(rows: int, cols: int, style: str, up: bool) -> list[Cell]:
+        """Left cells of the bricks of a wall of `rows` by `cols`: full,
+        or but for its first row (the last when `up`) a checker, a
+        frame or a slope."""
+        out = []
+        for j in range(rows):
+            d = rows - 1 - j if up else j  # rows from the whole one
+            for i in range(cols):
+                if d and (
+                    (style == "checker" and (i + d) % 2)
+                    or (style == "frame" and 0 < i < cols - 1 and d < rows - 1)
+                    or (style == "slope" and not d <= i < cols - d)
+                ):
+                    continue
+                out.append((i * BW, j))
+        return out
+
+    def _spot(
+        self,
+        shapes: Sequence[Sequence[Cell]],
+        box: Box,
+        free: Solid,
+        keep: set[Cell],
+        large: bool,
+    ) -> tuple[Sequence[Cell], int, int, tuple[float, float]] | None:
+        """Where a group goes: of `TRIES` places drawn for a shape of
+        `shapes`, of the first `PICK` that are free and that a ball can
+        get to (`_open`), the farthest from the other groups, a row
+        counting for two columns. A large one touches no brick and,
+        of two rows or more, has as many free cells next to it as its
+        longest row has cells."""
+        rng = self.rng
+        x0, y0, x1, y1 = box
+        solid = self.solid
+        others = [g.at for g in self.groups]
+        best = None
+        found = 0
+        for _ in range(TRIES):
+            shape = rng.choice(shapes)
+            x, y = rng.randrange(x0, x1), rng.randrange(y0 + 1, y1 - 1)
+            cells = [(x + dx + i, y + dy) for dx, dy in shape for i in range(BW)]
+            if not all(free(c) and c not in keep for c in cells):
+                continue
+            need = 2
+            if large:
+                ay, by = cells[0][1], cells[-1][1]
+                xs = [c[0] for c in cells]
+                ax, bx = min(xs), max(xs)
+                if any(
+                    (cx, cy) in solid
+                    for cy in range(ay - 1, by + 2)
+                    for cx in range(ax - 2, bx + 3)
+                ):
+                    continue
+                need = bx - ax + 1 if by > ay else 2
+            if not self._open(cells, free, need):
+                continue
+            mx = sum(c[0] for c in cells) / len(cells) + 0.5
+            my = sum(c[1] for c in cells) / len(cells) + 0.5
+            far = min(
+                ((mx - gx) ** 2 + (2 * (my - gy)) ** 2 for gx, gy in others),
+                default=0.0,
+            )
+            if best is None or far > best[0]:
+                best = (far, shape, x, y, (mx, my))
+            found += 1
+            if found >= PICK:
+                break
+        return best[1:] if best else None
+
+    @staticmethod
+    def _open(cells: list[Cell], free: Solid, need: int = 2) -> bool:
+        """Whether a ball can get to `cells`: `need` free cells or more
+        next to them, that lead to `ROOM` free cells more."""
         group = set(cells)
         seen = {
             n
@@ -461,17 +549,18 @@ class Game:
             for dx, dy in STEPS
             if (n := (x + dx, y + dy)) not in group and free(n)
         }
-        if len(seen) < 2:
+        if len(seen) < need:
             return False
+        room = need + ROOM
         queue = deque(sorted(seen))
-        while queue and len(seen) < ROOM:
+        while queue and len(seen) < room:
             x, y = queue.popleft()
             for dx, dy in STEPS:
                 n = (x + dx, y + dy)
                 if n not in seen and n not in group and free(n):
                     seen.add(n)
                     queue.append(n)
-        return len(seen) >= ROOM
+        return len(seen) >= room
 
     def _age(self) -> None:
         """Groups go when due, dim `FADE` seconds before."""
@@ -490,18 +579,20 @@ class Game:
                 self.events.append(("fade", left))
 
     def _spawn(self, box: Box, walls: set[Cell]) -> None:
-        """A group at a time, `FILL` seconds to the most the view
-        takes; four times faster under three groups."""
+        """A group at a time, while the view has fewer bricks than it
+        takes; `FILL` seconds to lay as many, a group of more bricks
+        being followed by a longer wait; four times faster under a
+        quarter of them."""
         if self.steps < self.spawn_due:
             return
         x0, y0, x1, y1 = box
-        most = max(3, min(GROUPS, (x1 - x0) * (y1 - y0) // PLOT))
-        here = sum(x0 <= g.at[0] < x1 and y0 <= g.at[1] < y1 for g in self.groups)
+        most = max(8, min(BRICKS, (x1 - x0) * (y1 - y0) // PLOT))
+        here = len(self.bricks(box))
         if here >= most:
             return
-        self._group(box, walls)
-        gap = max(2, round(FILL * self.second / most))
-        self.spawn_due = self.steps + (gap if here >= 2 else max(1, gap // 4))
+        laid = len(self._group(box, walls, most)) or 2
+        gap = laid * FILL * self.second / most
+        self.spawn_due = self.steps + max(1, round(gap / (4 if 4 * here < most else 1)))
 
     def _reset(self, box: Box) -> None:
         """Start again: no brick, ball, capsule, falling brick or twin;
@@ -583,16 +674,21 @@ class Game:
         """Left cells of the places where a racket of `w` cells fits:
         in the view, off the bricks and `taken`. Text is no obstacle."""
         x0, y0, x1, y1 = box
-        out = set()
-        solid = self.solid
-        for y in range(y0, y1):
-            run = 0
-            for x in range(x0, x1):
-                c = (x, y)
-                run = 0 if c in solid or c in taken else run + 1
-                if run >= w:
-                    out.add((x - w + 1, y))
-        return out
+        kept = self.spans.get(w)
+        if kept is None or kept[0] != box:
+            # The places of the view, with nothing on it.
+            cells = {(x, y) for y in range(y0, y1) for x in range(x0, x1 - w + 1)}
+            kept = self.spans[w] = (box, cells)
+        rows = self.rows
+        shut = {
+            (x - i, y)
+            for y in range(y0, y1)
+            for brick in rows.get(y, ())
+            for x in range(brick.x, brick.x + BW)
+            for i in range(w)
+        }
+        shut.update((x - i, y) for x, y in taken for i in range(w))
+        return kept[1] - shut
 
     def _wake(self, box: Box, walls: set[Cell]) -> None:
         """Timers of the rackets; one away comes back near its home,
@@ -976,6 +1072,7 @@ class Game:
         then leaves by a side `r` keeps, `LOSS` when `r` cannot be there;
         a ball out by the other's side and the way to the nearest brick
         only tell equal shots apart."""
+        self.shots += 1
         before, after = flight.path[i], flight.path[i + 1]
         lx, row = place
         half = r.w / 2
@@ -1006,23 +1103,57 @@ class Game:
             kept = self.fits[w] = (key, self._room(box, w, set()))
         return kept[1]
 
-    def _reach(self, r: Racket, room: set[Cell], depth: int) -> dict[Cell, int]:
+    def _reach(
+        self,
+        r: Racket,
+        room: set[Cell],
+        depth: int,
+        goals: set[Cell] | None = None,
+        first: bool = False,
+    ) -> tuple[dict[Cell, int], bool]:
         """Moves from `r` to each place it fits, `depth` at most, the
-        nearest first."""
+        nearest first. With `goals` the search ends once it has them
+        all, or the `first` of them, and those as near. Also returns
+        whether it went to its end."""
         bad = {(x - i, y) for x, y in self._blocked(r) for i in range(r.w)}
-        fits = room - bad
         edge = {(r.x, r.y)}
         dist = dict.fromkeys(edge, 0)
+        left = None
+        if goals is not None:
+            left = (goals & room) - bad - edge
+            if not left or (first and goals & edge):
+                return dist, False
         for moves in range(1, depth + 1):
             around: set[Cell] = set()
             for x, y in edge:
                 around.update(((x, y + 1), (x, y - 1), (x + 1, y), (x - 1, y)))
-            around = {c for c in around & fits if c not in dist}
+            around = {c for c in around & room if c not in dist and c not in bad}
             if not around:
                 break
             dist.update(dict.fromkeys(around, moves))
             edge = around
-        return dist
+            if left is not None:
+                found = left & around
+                left -= found
+                if not left or (first and found):
+                    return dist, False
+        return dist, True
+
+    @staticmethod
+    def _spots(r: Racket, flights: list[_Flight], steps: int) -> set[Cell]:
+        """The places where `r` is hit by a ball of `flights` as it
+        enters a row, within `steps` steps."""
+        out = set()
+        for flight in flights:
+            path = flight.path
+            for i in flight.entries:
+                k, x, y = path[i + 1][:3]
+                if k > steps:
+                    break
+                out.update(
+                    (lx, floor(y)) for lx in range(floor(x) - r.w + 1, floor(x) + 1)
+                )
+        return out
 
     def _steer(self, box: Box, walls: set[Cell]) -> None:
         """Each racket chooses a place and moves towards it. In order:
@@ -1039,18 +1170,34 @@ class Game:
         if not alive:
             return
         self.lure = [(b.x + BW / 2, b.y) for b in self.bricks(box)]
+        self.shots = 0
         flights = {b.n: self._foresee(b, box, walls) for b in self.balls}
-        reach: dict[Racket, tuple[int, dict[Cell, int]]] = {}
+        # By racket: the last search, its depth, whether whole, what for.
+        reach: dict[Racket, tuple[dict[Cell, int], int, bool, str]] = {}
 
-        def ways(r: Racket, depth: int) -> dict[Cell, int]:
-            if r not in reach or reach[r][0] < depth:
-                reach[r] = (depth, self._reach(r, self._free(box, r.w), depth))
-            return reach[r][1]
+        def ways(
+            r: Racket,
+            depth: int,
+            goals: set[Cell] | None = None,
+            first: bool = False,
+            why: str = "",
+        ) -> dict[Cell, int]:
+            """`_reach`; one kept is used again when whole and as
+            deep, or made for the same `why`."""
+            kept = reach.get(r)
+            if kept is None or not (
+                (kept[2] and kept[1] >= depth) or (why and kept[3] == why)
+            ):
+                room = self._free(box, r.w)
+                kept = (*self._reach(r, room, depth, goals, first), why)
+                reach[r] = kept = (kept[0], depth, kept[1], why)
+            return kept[0]
 
         def way(r: Racket, goal: Cell, depth: int) -> list[Cell]:
             """From `r` to `goal`, less where it is: along the rows
             first, to be on the row of a ball before the ball."""
-            dist = ways(r, depth)
+            kept = reach.get(r)
+            dist = kept[0] if kept and goal in kept[0] else ways(r, depth)
             out = []
             left = dist.get(goal, 0)
             x, y = goal
@@ -1077,7 +1224,7 @@ class Game:
             ):
                 # A ball or a racket in the way: another way, if in time.
                 depth = MOVES * (plan.step - self.steps)
-                if plan.place in ways(r, depth):
+                if plan.place in ways(r, depth, {plan.place}):
                     plan.way = way(r, plan.place, depth)
                 else:
                     r.plan = None
@@ -1086,7 +1233,9 @@ class Game:
         minded = set()  # balls a racket goes for
         threats = [f for f in flights.values() if f.side is not None]
         threats.sort(key=lambda f: (f.path[-1][0], f.ball.n))
-        # One search a racket: as far as the last of them.
+        # One search a racket: as far as the last of them, until it has
+        # every place where it would be hit.
+        aims: dict[Racket, set[Cell]] = {}
         depth = int(MOVES * threats[-1].path[-1][0]) + SPARE if threats else 0
         for flight in threats:
             team = 0 if self.teams == 1 or flight.side < 0 else 1
@@ -1100,7 +1249,13 @@ class Game:
                 continue
             plans = []
             for r in free:
-                found = self._intercept(r, flight, ways(r, depth), box, walls)
+                if r not in aims:
+                    mine = [f for f in threats if (f.side > 0) == (r.team > 0)]
+                    aims[r] = self._spots(
+                        r, mine if self.teams > 1 else threats, FORESEE
+                    )
+                dist = ways(r, depth, aims[r], why="stop")
+                found = self._intercept(r, flight, dist, box, walls)
                 if found is not None:
                     plans.append((found[0], r.n, r, found))
             if not plans:
@@ -1119,6 +1274,16 @@ class Game:
             for y in range(f.y, f.y + WARN)
         }
         good = [cap for cap in self.capsules if cap.kind not in BAD]
+
+        def treats(r: Racket) -> set[Cell]:
+            """Where `r` takes a good capsule: on it, or under it."""
+            return {
+                (x, y)
+                for cap in good
+                for y in range(cap.y, cap.y + 4)
+                for x in range(cap.x - r.w + 1, cap.x + 1)
+            }
+
         for r in alive:
             away = r.away > self.steps
             if r in goals:
@@ -1126,14 +1291,8 @@ class Game:
                 spare = slack[r] - SPARE
                 if away or not good or spare < 2 or danger.intersection(r.cells):
                     continue
-                dist = ways(r, spare // 2)
-                spots = [
-                    (dist[c], c)
-                    for cap in good
-                    for y in range(cap.y, cap.y + 4)
-                    for x in range(cap.x - r.w + 1, cap.x + 1)
-                    if (c := (x, y)) in dist and 2 * dist[c] <= spare
-                ]
+                dist = ways(r, spare // 2, treats(r), True)
+                spots = [(dist[c], c) for c in treats(r) if c in dist]
                 if spots:
                     goals[r], r.plan = way(r, min(spots)[1], spare // 2), None
                 continue
@@ -1148,14 +1307,8 @@ class Game:
                     goals[r], r.plan = way(r, goal, 4 * WARN), None
                     continue
             elif good and not away:
-                dist = ways(r, FETCH)
-                spots = [
-                    (dist[c], c)
-                    for cap in good
-                    for y in range(cap.y, cap.y + 4)
-                    for x in range(cap.x - r.w + 1, cap.x + 1)
-                    if (c := (x, y)) in dist
-                ]
+                dist = ways(r, FETCH, treats(r), True)
+                spots = [(dist[c], c) for c in treats(r) if c in dist]
                 if spots:
                     goals[r], r.plan = way(r, min(spots)[1], FETCH), None
                     continue
@@ -1165,7 +1318,8 @@ class Game:
                 r.think = self.steps + THINK
                 depth = int(MOVES * CHASE)
                 rest = [f for f in flights.values() if f.ball.n not in minded]
-                found = self._chase(r, rest, ways(r, depth), box, walls)
+                dist = ways(r, depth, self._spots(r, rest, CHASE))
+                found = self._chase(r, rest, dist, box, walls)
                 if found is not None:
                     flight, goal, i = found
                     k, x = flight.path[i + 1][:2]
@@ -1233,7 +1387,8 @@ class Game:
         row the ball enters, under it or over it. The rows `r` reaches
         in time are ranked: those of the last leg with `SPARE` moves to
         spare first, the latest first; of the places on the best three
-        of a rank, the one worth the most (`_shot`). None in time: the
+        of a rank, the one worth the most (`_shot`); on the best one
+        only once `SHOTS` shots were weighed in the step. None in time: the
         row where it is the least late. Returns `(lateness, place,
         index of the move)`."""
         path = flight.path
@@ -1261,7 +1416,8 @@ class Game:
             return short, c, -i
         found.sort()
         best = None
-        for _, i, spots in [f for f in found[:3] if f[0] == found[0][0]]:
+        rows = 3 if self.shots < SHOTS else 1
+        for _, i, spots in [f for f in found[:rows] if f[0] == found[0][0]]:
             for c in spots:
                 worth = path[-i][5] + self._shot(r, flight, -i, c, box, walls)
                 worth -= HIDE * self._hidden(c, r.w, walls)
@@ -1290,7 +1446,7 @@ class Game:
             return abs(f.ball.x - r.x) + 2 * abs(f.ball.y - r.y), f.ball.n
 
         best = None
-        for flight in sorted(flights, key=near)[:2]:
+        for flight in sorted(flights, key=near)[: 2 if self.shots < SHOTS else 0]:
             path = flight.path
             share = 1.0 if flight.ball.owner == r.team else 0.5
             rows = []
