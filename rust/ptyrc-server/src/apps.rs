@@ -3,7 +3,7 @@
 //! (children) and the processes connected from elsewhere (clients).
 //! No clock inside: time is an argument.
 
-use crate::engine::ConnId;
+use crate::engine::{ConnId, Owned};
 use crate::start;
 use rustix::process::{Pid, Signal, getpgid, kill_process, kill_process_group};
 use serde_json::{Value, json};
@@ -507,27 +507,32 @@ impl Apps {
             info["log"] = Value::Null;
             info["sprites"] = json!(0);
             info["widgets"] = json!(0);
+            info["frames"] = json!([]);
             info
         };
         gone.into_iter().map(json).collect()
     }
 
-    /// The info of an app. `owned`: the sprites and widgets of a
-    /// connection. `me`: the connection that asks.
+    /// The info of an app. `owned`: what a connection owns. `me`: the connection that asks.
     pub fn info(
         &self,
         id: u64,
         now: Duration,
         me: Option<ConnId>,
-        owned: &dyn Fn(ConnId) -> (usize, usize),
+        owned: &dyn Fn(ConnId) -> Owned,
     ) -> Option<Value> {
         let app = self.get(id)?;
         let mut info = app.json(now);
-        let (sprites, widgets) = (app.conns.iter())
-            .map(|c| owned(*c))
-            .fold((0, 0), |a, b| (a.0 + b.0, a.1 + b.1));
-        info["sprites"] = json!(sprites);
-        info["widgets"] = json!(widgets);
+        let mut all = Owned::default();
+        for conn in &app.conns {
+            let owned = owned(*conn);
+            all.sprites += owned.sprites;
+            all.widgets += owned.widgets;
+            all.frames.extend(owned.frames);
+        }
+        info["sprites"] = json!(all.sprites);
+        info["widgets"] = json!(all.widgets);
+        info["frames"] = json!(all.frames);
         if let Some(me) = me {
             info["me"] = json!(app.conns.contains(&me));
         }
@@ -566,8 +571,8 @@ mod tests {
         panic!("timed out");
     }
 
-    fn none(_: ConnId) -> (usize, usize) {
-        (0, 0)
+    fn none(_: ConnId) -> Owned {
+        Owned::default()
     }
 
     #[test]
@@ -686,10 +691,17 @@ mod tests {
         assert_ne!(client, id);
         assert_eq!(apps.attach(ConnId(3), Some(me), T0), Some(client));
         assert_eq!(apps.attach(ConnId(4), None, T0), None);
-        let info = apps.info(client, T0, Some(ConnId(3)), &|_| (2, 1)).unwrap();
+        let info = apps
+            .info(client, T0, Some(ConnId(3)), &|c| Owned {
+                sprites: 2,
+                widgets: 1,
+                frames: [0, c.0 as u32].into(),
+            })
+            .unwrap();
         assert_eq!(info["kind"], "client");
         assert_eq!(info["conns"], json!([2, 3]));
         assert_eq!((&info["sprites"], &info["widgets"]), (&json!(4), &json!(2)));
+        assert_eq!(info["frames"], json!([0, 2, 3]));
         assert_eq!(info["me"], true);
         assert_eq!(info["pid"], me);
         assert!(!info["argv"].as_array().unwrap().is_empty());

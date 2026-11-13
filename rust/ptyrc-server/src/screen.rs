@@ -806,20 +806,17 @@ impl Engine for ScreenEngine {
         ctx.request_repaint();
     }
 
-    fn owned(&self, conn: ConnId) -> (usize, usize) {
-        let sprites = self
-            .scene
-            .list()
-            .iter()
-            .filter(|s| s.owner == conn.0)
-            .count();
-        let widgets = self
-            .widgets
-            .list()
-            .iter()
-            .filter(|w| w.owner == conn.0)
-            .count();
-        (sprites, widgets)
+    fn owned(&self, conn: ConnId) -> crate::engine::Owned {
+        let mut owned = crate::engine::Owned::default();
+        for sprite in self.scene.list().iter().filter(|s| s.owner == conn.0) {
+            owned.sprites += 1;
+            owned.frames.extend(sprite.frame);
+        }
+        for widget in self.widgets.list().iter().filter(|w| w.owner == conn.0) {
+            owned.widgets += 1;
+            owned.frames.extend(widget.frame);
+        }
+        owned
     }
 
     fn resume_events(&mut self, topic: &str, now: Duration) -> Vec<Value> {

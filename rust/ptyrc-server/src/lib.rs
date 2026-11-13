@@ -27,7 +27,7 @@ mod screen_tests;
 pub mod start;
 
 pub use driver::{Config, Exit, replay, run};
-pub use engine::{ConnId, Ctx, Engine, PassThrough, Reply, SessionInfo, Token};
+pub use engine::{ConnId, Ctx, Engine, Owned, PassThrough, Reply, SessionInfo, Token};
 pub use player::Replay;
 pub use record::Tape;
 pub use screen::ScreenEngine;

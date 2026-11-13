@@ -29,6 +29,15 @@ pub struct SessionInfo {
     pub headless: bool,
 }
 
+/// What a connection owns: how many sprites and widgets, and the ids
+/// of the frames they are on, in order.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Owned {
+    pub sprites: usize,
+    pub widgets: usize,
+    pub frames: std::collections::BTreeSet<u32>,
+}
+
 /// Answer of `Engine::handle`.
 #[derive(Debug)]
 pub enum Reply {
@@ -193,9 +202,9 @@ pub trait Engine {
     /// paused, or resumed): hidden, its clocks stand still.
     fn hide_owner(&mut self, _conn: ConnId, _hidden: bool, _ctx: &mut Ctx) {}
 
-    /// How many sprites and widgets the connection owns.
-    fn owned(&self, _conn: ConnId) -> (usize, usize) {
-        (0, 0)
+    /// What the connection owns.
+    fn owned(&self, _conn: ConnId) -> Owned {
+        Owned::default()
     }
 
     /// For a connection that was paused and got no event meanwhile: the
