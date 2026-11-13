@@ -5,6 +5,8 @@
     ptyrc-app snake
     ptyrc-app snake --speed 20 -f active
     ptyrc-app snake -a               # the arcade
+    ptyrc-app snake --grab           # the arrows are yours
+    ptyrc-app snake --front          # over the text
 
 What it shows:
 
@@ -36,12 +38,24 @@ More, each on its own flag; `-a` for all (see `_arcade`):
   first segment hit, foes too. The snake keeps out of an announced
   beam when it can.
 
+`--front`, not in `-a`: the game is drawn over the text, not behind
+it; a ghost is seen as it goes through the text.
+
+`--grab`, not in `-a`: the four arrows of the host keyboard are taken
+before the program and steer the snake. It goes straight on the last
+arrow pressed; the arrow back over its neck is ignored. Before the
+first press, and against a wall, a foe or the side of the view, it
+waits. Into its own body it bites itself off there. A ghost goes its
+own way. With a player it moves at half the speed. ctrl+t gives the
+arrows back and ends.
+
 Rules count in steps of the game, not in seconds.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import random
 import unicodedata
 from collections import deque
@@ -49,11 +63,12 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from ptyrc import Frame, Pilot, Sprite
+from ptyrc import Frame, Pilot, PtyrcError, Sprite
 
 from . import _arcade, _cli
 
 __all__ = [
+    "ARROWS",
     "BEAMS",
     "BEAM_EVERY",
     "FIRE",
@@ -81,6 +96,7 @@ BEAMS = 2  # at once
 BEAM_EVERY = (80, 200)  # steps between two beams
 FUSE, FIRE = 14, 5  # steps a beam is announced, then fires
 SNAKE_Z = 4  # over the foes (2) and the particles (3), under the score (5)
+ARROWS = {"left": (-1, 0), "right": (1, 0), "up": (0, -1), "down": (0, 1)}
 
 
 def walls_of(rows: Sequence[str], x0: int = 0, y0: int = 0) -> set[Cell]:
@@ -243,7 +259,8 @@ class Beam:
 class Game:
     """The snake, the apple and the rules. No drawing here.
 
-    `golden`: golden apples; `enemies`: foes; `lasers`: beams. Each
+    `golden`: golden apples; `enemies`: foes; `lasers`: beams;
+    `player`: steered by `press`, not by the search. Each
     step leaves in `events` what happened: `("eat", cell, golden)`,
     `("lost", cells)` (a tail gone), `("pop", cell)` (a foe gone),
     `("zap", beam)` (a beam fires)."""
@@ -255,8 +272,11 @@ class Game:
         golden: bool = False,
         enemies: bool = False,
         lasers: bool = False,
+        player: bool = False,
     ) -> None:
         self.rng = rng
+        self.player = player
+        self.heading: Cell | None = None  # the player's last arrow
         self.body: deque[Cell] = deque()  # head first
         self.apple: Cell | None = None
         self.grow = 0
@@ -273,6 +293,17 @@ class Game:
         self.beam_due = rng.randint(20, 50) if lasers else 0
         self.map: tuple[Box, set[Cell]] | None = None  # the last seen
         self.ghost = False  # on its way back into the view
+
+    def press(self, key: str) -> None:
+        """An arrow (`up`, `down`, `left`, `right`): the heading of the
+        player, unless back over the neck. Anything else is ignored."""
+        way = ARROWS.get(key)
+        if way is None or len(self.body) < 2:
+            self.heading = way or self.heading
+            return
+        (hx, hy), (nx, ny) = self.body[0], self.body[1]
+        if (hx + way[0], hy + way[1]) != (nx, ny):
+            self.heading = way
 
     def free_cell(self, box: Box, walls: set[Cell]) -> Cell | None:
         x0, y0, x1, y1 = box
@@ -374,6 +405,9 @@ class Game:
         if not self.body:
             return
         head = self.body[0]
+        if self.player:
+            self._steer(head, inside, walls | foes)
+            return
         around = [(head[0] + dx, head[1] + dy) for dx, dy in STEPS]
         to = None
         # Through an announced beam only when there is no other way.
@@ -391,6 +425,10 @@ class Game:
             self.grow = 3
             return
         self.body.appendleft(to)
+        self._grown(to)
+
+    def _grown(self, to: Cell) -> None:
+        """The head just moved to `to`: eat, grow or drag the tail."""
         if to == self.apple:
             self.events.append(("eat", to, self.golden))
             self.grow += 5 if self.golden else 2
@@ -400,6 +438,23 @@ class Game:
             self.grow -= 1
         else:
             self.body.pop()
+
+    def _steer(
+        self, head: Cell, inside: Callable[[Cell], bool], stops: set[Cell]
+    ) -> None:
+        """The player's move: one cell along `heading`; none against
+        `stops` or the side of the view. Into the body, it is bitten
+        off there."""
+        if self.heading is None:
+            return
+        to = (head[0] + self.heading[0], head[1] + self.heading[1])
+        if not inside(to) or to in stops:
+            return
+        tail = self.body[-1] if not self.grow else None  # moves away
+        if to in self.body and to != tail:
+            self._cut(self.body.index(to))
+        self.body.appendleft(to)
+        self._grown(to)
 
     def _haunt(self, box: Box, walls: set[Cell]) -> None:
         """The ghost's move: through anything, one cell towards the
@@ -561,10 +616,44 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
         golden=args.effects,
         enemies=args.enemies,
         lasers=args.lasers,
+        player=args.grab,
     )
     frame = _cli.pick(pilot, args.frame)
     # Its own dice: the particles do not change the game of a seed.
     stage = _arcade.Stage(pilot, frame, random.Random(args.seed), args.effects)
+    stage.layer = "front" if args.front else "back"
+    keys: list[dict[str, Any]] = []
+    if args.grab:
+        stage.hint = "←↑↓→  ctrl+t"
+        # The keys come among the events `Sight.look` takes: set apart.
+        events = pilot.event
+
+        def event(timeout: float | None = None) -> tuple[str, Any] | None:
+            while (one := events(timeout)) is not None:
+                if one[0] != "input":
+                    return one
+                keys.append(one[1] or {})
+            return None
+
+        pilot.event = event  # type: ignore[method-assign]
+        pilot.grab(*ARROWS)
+    try:
+        _run(pilot, args, game, frame, stage, keys, seconds)
+    finally:
+        if args.grab:
+            with contextlib.suppress(PtyrcError, OSError):
+                pilot.release()
+
+
+def _run(
+    pilot: Pilot,
+    args: argparse.Namespace,
+    game: Game,
+    frame: Frame,
+    stage: _arcade.Stage,
+    keys: list[dict[str, Any]],
+    seconds: float | None,
+) -> None:
     snake: Sprite | None = None
     apple: Sprite | None = None
     shown_apple = None
@@ -572,8 +661,20 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     # moved (topic `text`), not at each move.
     sight = _cli.Sight(pilot, frame)
     walls: set[Cell] = set()
-    for _ in _cli.ticks(1.0 / args.speed, seconds):
-        if not sight.look():
+    # With a player, a move every other tick; the keys at each.
+    tick = 0.5 / args.speed if args.grab else 1.0 / args.speed
+    step = False
+    for _ in _cli.ticks(tick, seconds):
+        seen = sight.look()
+        for data in keys:
+            if "released" in data:  # the escape key: the end
+                return
+            game.press(data.get("key") or "")
+        keys.clear()
+        if not seen:
+            continue
+        step = not step
+        if args.grab and step:
             continue
         box = view(frame)
         if sight.changed:
@@ -591,20 +692,16 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
             anchor = {"at": list(at), "space": "frame"}
             if snake is None:
                 # Over the particles: the head is never hidden.
-                snake = pilot.draw(
-                    cells=cells, frame=frame.id, at=at, space="frame", z=SNAKE_Z
-                )
+                snake = stage.draw(at, cells=cells, z=SNAKE_Z)
             else:
                 snake.update(anchor=anchor, content={"cells": cells})
             now = (game.apple, game.golden)
             if now != shown_apple and game.apple is not None:
                 look = _arcade.apple(game.golden) if args.effects else {}
                 if apple is None:
-                    apple = pilot.draw(
+                    apple = stage.draw(
+                        game.apple,
                         None if look else ["●"],
-                        frame=frame.id,
-                        at=game.apple,
-                        space="frame",
                         **(look or {"fg": "bright-red"}),
                     )
                 else:
@@ -636,6 +733,13 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
         "-l", "--lasers", action="store_true", help="beams that burn what they cross"
     )
     out.add_argument("-a", "--all", action="store_true", help="-e -x -l")
+    out.add_argument("--front", action="store_true", help="over the text")
+    out.add_argument(
+        "--grab",
+        action="store_true",
+        help="the arrows of the keyboard steer the snake, at half the speed; "
+        "ctrl+t gives them back and ends",
+    )
     args = _cli.parse(out, argv)
     if args.all:
         args.effects = args.enemies = args.lasers = True

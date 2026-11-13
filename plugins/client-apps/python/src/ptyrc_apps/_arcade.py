@@ -146,14 +146,19 @@ def beam(length: int, across: bool, firing: bool) -> dict[str, Any]:
     return {"frames": [{"cells": cells(c), "ms": ms} for c in inks], "loop": True}
 
 
-def tally(length: int, best: int) -> list[list[dict[str, Any]]]:
-    """The score: the length of the snake, and the longest it was."""
-    return [
-        [
-            {"t": f"◆ {length}", "fg": "bright-green", "bold": True},
-            {"t": f"  best {best}", "dim": True},
-        ]
+def tally(
+    length: int, best: int | None = None, hint: str | None = None
+) -> list[list[dict[str, Any]]]:
+    """The score: the length of the snake; with `best`, the longest it
+    was; `hint`: the keys of a player, dim, before it."""
+    runs: list[dict[str, Any]] = [
+        {"t": f"◆ {length}", "fg": "bright-green", "bold": True}
     ]
+    if best is not None:
+        runs.append({"t": f"  best {best}", "dim": True})
+    if hint:
+        runs.insert(0, {"t": hint + "  ", "dim": True})
+    return [runs]
 
 
 class Board:
@@ -186,7 +191,8 @@ class Board:
 
 class Stage:
     """The sprites of a game's foes and beams; when `effects`, its
-    particles and its score. `game`: a `snake.Game`."""
+    particles and its score; the score too with a `hint`. `layer`:
+    `back`, or `front` over the text. `game`: a `snake.Game`."""
 
     def __init__(
         self, pilot: Pilot, frame: Frame, rng: random.Random, effects: bool
@@ -199,9 +205,12 @@ class Stage:
         self.beams: dict[int, tuple[Sprite, bool]] = {}
         self.board = Board(pilot, frame)
         self.best = 0
+        self.hint: str | None = None  # the keys of a player, by the score
+        self.layer = "back"
 
-    def draw(self, at: Cell, **kw: Any) -> Sprite:
-        return self.pilot.draw(frame=self.frame.id, at=at, space="frame", **kw)
+    def draw(self, at: Cell, rows: Any = None, **kw: Any) -> Sprite:
+        kw["layer"] = self.layer
+        return self.pilot.draw(rows, frame=self.frame.id, at=at, space="frame", **kw)
 
     def show(self, game: Any) -> None:
         """One step: inside a batch."""
@@ -220,7 +229,7 @@ class Stage:
         for n, it in lit.items():
             look = beam(len(it.cells), it.across, it.firing)
             if n not in self.beams:
-                sprite = self.draw(it.cells[0], layer="back", z=-1, **look)
+                sprite = self.draw(it.cells[0], z=-1, **look)
                 self.beams[n] = (sprite, it.firing)
             elif self.beams[n][1] != it.firing:
                 self.beams[n][0].set(**look)
@@ -229,7 +238,9 @@ class Stage:
             for event in game.events:
                 self.play(*event)
             self.best = max(self.best, len(game.body))
-            self.board.show(tally(len(game.body), self.best))
+        if self.effects or self.hint:
+            best = self.best if self.effects else None
+            self.board.show(tally(len(game.body), best, self.hint))
 
     def play(self, what: str, *data: Any) -> None:
         """An event of the game, as particles."""

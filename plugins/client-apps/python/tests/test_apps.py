@@ -823,6 +823,63 @@ def test_snake_game() -> None:
     assert size - 1 <= len(game.body) <= size
 
 
+def test_snake_steer() -> None:
+    """A player: waits for an arrow, goes straight, never back over its
+    neck, stops at a wall, bites itself off."""
+    game = snake.Game(random.Random(3), player=True)
+    box = (0, 0, 10, 5)
+    walls = {(9, 2)}
+    game.step(box, walls)
+    game.body, game.grow, game.apple = deque([(5, 2)]), 0, (0, 0)
+    game.step(box, walls)
+    assert list(game.body) == [(5, 2)]  # no arrow yet
+    game.press("right")
+    game.grow = 3
+    for _ in range(3):
+        game.step(box, walls)
+    assert list(game.body) == [(8, 2), (7, 2), (6, 2), (5, 2)]
+    game.press("left")  # back over the neck: ignored
+    game.step(box, walls)
+    assert game.body[0] == (8, 2)  # against the wall: waits
+    game.grow = 2
+    for key in ("down", "left", "up"):
+        game.press(key)
+        game.step(box, walls)
+    # Into its own body: bitten off there.
+    assert list(game.body) == [(7, 2), (7, 3), (8, 3)]
+    assert ("lost", [(7, 2), (6, 2), (5, 2)]) in game.events
+
+
+def test_snake_grab(session: Pilot) -> None:
+    """`--grab`: the arrows are taken while it runs, given back after."""
+    page(session, "", "", "words in the way", "", "   more words here")
+    settle(session)
+    args = ["-s", session.session, "--seed", "4", "--speed", "30", "--grab"]
+    grabbed = []
+
+    def look(host: str) -> bool:
+        grabbed.append(session.info()["grabbed"])
+        return "←↑↓→  ctrl+t  ◆" in host and "@" in host
+
+    watch(session, lambda: snake.main(args, seconds=1.5), look)
+    assert any(grabbed) and not session.info()["grabbed"]
+
+
+def test_snake_front(session: Pilot) -> None:
+    """`--front`: the snake, the apple, foes and beams over the text."""
+    page(session, "", "", "words in the way", "", "   more words here")
+    settle(session)
+    args = ["-s", session.session, "--seed", "4", "--speed", "30", "-x", "-l"]
+    layers: set[int] = set()
+
+    def look(host: str) -> bool:
+        layers.update(s["layer"] for s in session.sprites())
+        return "@" in host and "●" in host
+
+    watch(session, lambda: snake.main([*args, "--front"], seconds=1.5), look)
+    assert layers and all(n > 0 for n in layers), layers
+
+
 def test_snake_ghost() -> None:
     """Out of sight or under text: through anything, unhurt, to a safe cell."""
     rows = ["", "", "####################", "####################", "", "", ""]
