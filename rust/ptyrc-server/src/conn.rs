@@ -19,6 +19,8 @@ pub(crate) struct Conn {
     pub dead: bool,
     /// Of a paused app: it does not read, events are not queued for it.
     pub paused: bool,
+    /// The pid of the peer, while it is no app of the table yet.
+    pub peer: Option<u32>,
 }
 
 impl Conn {
@@ -31,6 +33,7 @@ impl Conn {
             topics: HashSet::new(),
             dead: false,
             paused: false,
+            peer: None,
         })
     }
 

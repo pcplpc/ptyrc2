@@ -1224,9 +1224,15 @@ impl Driver {
             if let Some(apps) = &mut self.apps {
                 let peer = rustix::net::sockopt::socket_peercred(&conn.stream).ok();
                 let peer = peer.map(|cred| cred.pid.as_raw_nonzero().get() as u32);
-                let app = apps.attach(id, peer, now).and_then(|app| apps.get(app));
-                // One more connection of a paused app: paused as the others.
-                conn.paused = app.is_some_and(|app| app.state == State::Paused);
+                match apps.attach(id, peer, true, now) {
+                    // One more connection of a paused child: paused too.
+                    Some(app) => {
+                        let app = apps.get(app);
+                        conn.paused = app.is_some_and(|app| app.state == State::Paused);
+                    }
+                    // A client is entered at its first request.
+                    None => conn.peer = peer,
+                }
             }
             let paused = conn.paused;
             self.conns.insert(id, conn);
@@ -1291,6 +1297,15 @@ impl Driver {
         engine: &mut dyn Engine,
         in_batch: bool,
     ) -> Option<Result<Value, RpcError>> {
+        // A process that came from elsewhere is an app (a client) from
+        // its first request that is not on the table itself: a verb of
+        // `ptyrc manage` is none.
+        if !method.starts_with("app.")
+            && let Some(apps) = &mut self.apps
+            && let Some(peer) = self.conns.get_mut(&conn).and_then(|c| c.peer.take())
+        {
+            apps.attach(conn, Some(peer), false, self.start.elapsed());
+        }
         Some(match method {
             "session.info" => Ok(self.session_info(engine)),
             "session.resize" => self.session_resize(&params, engine),

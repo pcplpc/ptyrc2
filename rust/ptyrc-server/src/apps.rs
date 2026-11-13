@@ -217,16 +217,23 @@ impl Apps {
         Ok(id)
     }
 
-    /// A connection was accepted from `peer`: the child whose group
-    /// holds it, else the client of that pid, made when new.
-    pub fn attach(&mut self, conn: ConnId, peer: Option<u32>, now: Duration) -> Option<u64> {
+    /// A connection of the process `peer`: the child whose group holds
+    /// it; else, unless `child_only`, the client of that pid, made when
+    /// new.
+    pub fn attach(
+        &mut self,
+        conn: ConnId,
+        peer: Option<u32>,
+        child_only: bool,
+        now: Duration,
+    ) -> Option<u64> {
         let peer = peer?;
         let group = Pid::from_raw(peer as i32)
             .and_then(|pid| getpgid(Some(pid)).ok())
             .map(|g| g.as_raw_nonzero().get() as u32);
         let live = |a: &&mut App| a.state != State::Exited;
         let of_group = |a: &&mut App| a.kind == Kind::Child && Some(a.pid) == group;
-        let of_pid = |a: &&mut App| a.kind == Kind::Client && a.pid == peer;
+        let of_pid = |a: &&mut App| !child_only && a.kind == Kind::Client && a.pid == peer;
         let mut entries = self.entries.values_mut();
         let found = entries.find(|a| live(a) && (of_group(a) || of_pid(a)));
         let id = match found {
@@ -234,6 +241,7 @@ impl Apps {
                 app.conns.insert(conn);
                 app.id
             }
+            None if child_only => return None,
             None => {
                 let id = self.next_id;
                 self.next_id += 1;
@@ -283,6 +291,10 @@ impl Apps {
                 let _ = fs::remove_file(log);
             }
             self.changed.remove(&id);
+            if app.kind == Kind::Client && id + 1 == self.next_id {
+                // A verb that came and went costs no id.
+                self.next_id = id;
+            }
             self.gone.push(app);
         }
     }
@@ -689,13 +701,14 @@ mod tests {
         let id = apps.start(sh("sleep 60"), None, false, T0).unwrap();
         let child = apps.get(id).unwrap().pid;
         // A peer of the child's group: here, the child itself.
-        assert_eq!(apps.attach(ConnId(1), Some(child), T0), Some(id));
+        assert_eq!(apps.attach(ConnId(1), Some(child), true, T0), Some(id));
         // Another process: a client, one entry a pid.
         let me = std::process::id();
-        let client = apps.attach(ConnId(2), Some(me), T0).unwrap();
+        let client = apps.attach(ConnId(2), Some(me), false, T0).unwrap();
         assert_ne!(client, id);
-        assert_eq!(apps.attach(ConnId(3), Some(me), T0), Some(client));
-        assert_eq!(apps.attach(ConnId(4), None, T0), None);
+        assert_eq!(apps.attach(ConnId(3), Some(me), false, T0), Some(client));
+        assert_eq!(apps.attach(ConnId(4), None, false, T0), None);
+        assert_eq!(apps.attach(ConnId(4), Some(me), true, T0), None);
         let info = apps
             .info(client, T0, Some(ConnId(3)), &|c| Owned {
                 sprites: 2,
@@ -719,6 +732,9 @@ mod tests {
         apps.detach(ConnId(3));
         assert!(apps.get(client).is_none());
         assert_eq!(apps.take_gone(T0)[0]["id"], client);
+        // The last id, given back: a verb that comes and goes costs none.
+        assert_eq!(apps.attach(ConnId(5), Some(me), false, T0), Some(client));
+        apps.detach(ConnId(5));
         apps.detach(ConnId(1));
         assert!(apps.get(id).unwrap().conns.is_empty());
         apps.finish();
