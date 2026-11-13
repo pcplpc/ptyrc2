@@ -1,54 +1,65 @@
-> This has been generated using an agent and has not been reviewed.
+> This has been produced with assistance of generative coding agents.
 >
-> Experimental use only.
+> This file was written by a human. Use at your own risk.
 
-# ptyrc
+# `ptyrc2` – the pty remote controller
 
-The pty remote controller: wrap a terminal program, read its screen, draw
-on it, drive it. Selenium for terminals.
+This started as [`ptyrc`](https://github.com/pcplpc/ptyrc) a work done by hand
+with the love of a human, but now with slop and unreviewed code.
+
+The initial goal was to wrap a CLI application like [`vim`](https://vim.org) to
+add confetti to its output.
+
+![confetti](doc/confetti.gif) # TODO make a new one
+
+# Quick setup
+
+This is not yet published on [PyPI](https://pypi.org):
 
 ```sh
-ptyrc run vim notes.md        # wrap; the terminal behaves as before
-ptyrc text                    # from another shell: what is on screen
-ptyrc find flower             # where
-ptyrc keys esc : q enter      # type
-ptyrc frames                  # the panes found on screen
-ptyrc draw text --auto top-right ' 12:00 '
-ptyrc app fishes              # or: sand, snow, snake, bricks, cat...
+# install instructions assuming https://github.com/pcplpc/ptyrc2 as url
 ```
 
-Read: `text`, `find`, `cursor`, `wait`, `frames`, `heat`, `idle`, `snap`,
-`shot` (SVG, HTML, ANSI), `events`. Drive: `send`, `keys`, `click`,
-`grab`, `attach`. Draw: `draw`, behind the app's text by default, fixed
-on the text when it scrolls. Debug: `show`, `debug overlay`,
-`run --record` and `replay` (a recorded session, served as a live one).
+Wrap any application with `ptyrc` as follows:
 
-Presets: tmux, vim, ranger, htop, glances, coding-agent TUIs; pagers and
-the rest need none. `plan/design.md` is the reference.
+```sh
+ptyrc run vim ~/.vimrc
+```
 
-## Repository
+You can then connect to it and send it text to type:
 
-- `rust/ptyrc-vt` terminal model and repair painter;
-- `rust/ptyrc-core` frames, heatmap, placement, scene;
-- `rust/ptyrc-proto` wire protocol;
-- `rust/ptyrc-server` the driver;
-- `rust/ptyrc-cli` the `ptyrc` binary;
-- `plugins/tui-support/` per-app presets (Rust);
-- `plugins/draw-ext/` extra draw functions (Rust);
-- `plugins/client-apps/python/` `ptyrc-app`: confetti, clock, fishes, sand
-  and friends;
-- `python/ptyrc` the Python pilot library;
-- `scripts/` end-to-end tests, demos, bench;
-- `plan/` intent, design, decisions, ideas.
+```sh
+ptyrc send 'iHello world!' && ptyrc keys esc
+```
+
+You can use `ptyrc python` to start an interactive session:
+
+```py
+Connected to "/usr/bin/vim /home/plcp/.vimrc"
+>>> # TODO generate this example
+```
+
+You can also start a user-provided app that draws on screen:
+
+```sh
+ptyrc app bricks
+```
+
+If no pilot is attached `ctrl+t ctrl+t` twice starts one at random.
 
 ## Development
+
+You can use:
 
 ```sh
 cargo test --workspace
 uv sync && uv run pytest
-scripts/e2e-frames.sh; scripts/e2e-tuis.sh; scripts/e2e-render.sh
-scripts/demo-apps.sh; scripts/demo-frames.sh      # to watch
 ```
+
+Honestly, the codebase is still full of slop, and this human haven't pour in
+the time (yet) to make it good to look at.
+
+You can still point your agent at it to write custom apps.
 
 ## License
 
