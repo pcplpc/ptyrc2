@@ -38,7 +38,7 @@ elif [ "${1:-}" = bricks ]; then
     demo_app bricks -a
 else
     demo_app fishes --count 7
-    [ "${1:-}" = --check ] || demo_app confetti --party --sparkle
+    [ "${1:-}" = --check ] || demo_app confetti --sparkle
 fi
 
 if [ "${1:-}" != --check ]; then

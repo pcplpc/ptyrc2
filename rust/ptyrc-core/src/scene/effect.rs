@@ -265,7 +265,47 @@ struct ConfettiParams {
     origin: Option<[f64; 2]>,
     /// Speed scale.
     spread: f64,
+    shape: Shape,
     seed: u64,
+}
+
+/// How a burst is thrown.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Shape {
+    /// A fan opened upwards, wider than tall.
+    #[default]
+    Fan,
+    /// Every direction, every speed: a disc.
+    Ball,
+    /// Every direction, one speed: a circle.
+    Ring,
+    /// Five points.
+    Star,
+    /// A narrow jet upwards.
+    Fountain,
+}
+
+impl Shape {
+    /// A launch: the angle from the vertical and the speed, in rows per
+    /// second.
+    fn throw(self, rng: &mut Rng) -> (f64, f64) {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        match self {
+            Shape::Fan => {
+                let angle = rng.range(-0.95, 0.95) * FRAC_PI_2;
+                (angle, rng.range(8.0, 30.0))
+            }
+            Shape::Ball => (rng.range(-PI, PI), 22.0 * rng.unit().sqrt()),
+            Shape::Ring => (rng.range(-PI, PI), rng.range(19.0, 21.0)),
+            Shape::Star => {
+                let angle = rng.range(-PI, PI);
+                let point = (2.5 * angle).cos().abs().powi(3);
+                (angle, (8.0 + 18.0 * point) * rng.range(0.9, 1.0))
+            }
+            Shape::Fountain => (rng.range(-0.22, 0.22) * FRAC_PI_2, rng.range(20.0, 40.0)),
+        }
+    }
 }
 
 impl Default for ConfettiParams {
@@ -276,6 +316,7 @@ impl Default for ConfettiParams {
             duration_ms: 3000,
             origin: None,
             spread: 1.0,
+            shape: Shape::Fan,
             seed: 1,
         }
     }
@@ -313,9 +354,8 @@ impl Confetti {
         let mut rng = Rng::new(params.seed);
         let particles = (0..params.count.min(2000))
             .map(|_| {
-                // A fan opened upwards, wider than tall.
-                let angle = rng.range(-0.95, 0.95) * std::f64::consts::FRAC_PI_2;
-                let speed = rng.range(8.0, 30.0) * params.spread;
+                let (angle, speed) = params.shape.throw(&mut rng);
+                let speed = speed * params.spread;
                 Particle {
                     // Cells are about twice as tall as wide.
                     vx: angle.sin() * speed * 2.0,
@@ -398,7 +438,8 @@ fn finite_origin(origin: Option<[f64; 2]>) -> Result<(), String> {
 }
 
 /// Factory of the built-in `confetti`. Params: `count`, `colors`,
-/// `duration_ms`, `origin` (`[x, y]` on the canvas), `spread`, `seed`.
+/// `duration_ms`, `origin` (`[x, y]` on the canvas), `spread`, `shape`
+/// (`fan`, `ball`, `ring`, `star`, `fountain`), `seed`.
 pub fn confetti(params: &serde_json::Value) -> Result<Box<dyn Effect>, String> {
     let params: ConfettiParams = parse("confetti", params)?;
     if params.colors.is_empty() {
@@ -556,6 +597,34 @@ mod tune_tests {
         assert_eq!(drawn(&mut *fx, 300), Some(0));
         fx.tune(&json!({"origin": null})).unwrap();
         assert!(drawn(&mut *fx, 300).unwrap() > 0);
+    }
+
+    #[test]
+    fn confetti_shapes() {
+        // Launch speeds, across (two columns a row) and down.
+        let thrown = |shape: &str| -> Vec<(f64, f64)> {
+            let params = json!({"count": 400, "shape": shape});
+            let fx = Confetti::new(parse("confetti", &params).unwrap());
+            fx.particles.iter().map(|p| (p.vx / 2.0, p.vy)).collect()
+        };
+        let speeds =
+            |shape: &str| -> Vec<f64> { thrown(shape).iter().map(|(x, y)| x.hypot(*y)).collect() };
+        assert!(thrown("fan").iter().all(|p| p.1 < 0.0));
+        assert!(
+            thrown("fountain")
+                .iter()
+                .all(|p| p.1 < -15.0 && p.0.abs() < 15.0)
+        );
+        for round in ["ball", "ring", "star"] {
+            let down = thrown(round).iter().filter(|p| p.1 > 0.0).count();
+            assert!((120..280).contains(&down), "{round}: {down}");
+        }
+        assert!(speeds("ring").iter().all(|v| (19.0..21.0).contains(v)));
+        assert!(speeds("ball").iter().any(|v| *v < 8.0));
+        assert!(speeds("star").iter().all(|v| (7.0..26.1).contains(v)));
+        assert!(confetti(&json!({"shape": "cube"})).is_err());
+        let mut fx = confetti(&json!({"shape": "ring"})).unwrap();
+        assert!(fx.tune(&json!({"shape": "ball"})).is_err());
     }
 
     #[test]

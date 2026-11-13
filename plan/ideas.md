@@ -629,3 +629,16 @@ Left:
   reached in this round.
 - `tune` of `confetti` cannot change `count`, `colors`, `spread`: the
   pieces are thrown at the start.
+
+## Confetti, as in the first ptyrc
+
+- Built: plain confetti is the pop of `temp/ptyrc/example/conffeti.py`,
+  four colours a burst; the native explosion is `--fancy`. `--random`,
+  `--fireworks`, `-a`. The effect `confetti` takes a `shape`.
+- A rocket's stop and its explosion are timed by two clocks (the
+  driver's `motion`, the client's sleep): a `delay_ms` of the effect
+  would leave it all to the driver, and the client could exit at once.
+- A shot near a side shows half of its explosion: `spot` could keep a
+  margin with `--fancy`.
+- Built: confetti keeps going by default; `--party` is gone, `--one-shot`
+  plays one round and exits.

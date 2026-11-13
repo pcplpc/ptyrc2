@@ -13,7 +13,7 @@ APPS = {
     "bricks": "a brick breaker that plays alone around the words",
     "cat": "a cat on the text; it sleeps when nothing moves",
     "clock": "a floating clock in a quiet corner",
-    "confetti": "a burst of confetti; a party with --party",
+    "confetti": "pops of confetti; --fancy, --fireworks, --one-shot",
     "fishes": "fishes behind the text, afraid of the cursor",
     "flower": "a flower next to a word",
     "marks": "a highlighter: the matches of patterns, in colours",
