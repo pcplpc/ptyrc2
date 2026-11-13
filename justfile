@@ -49,8 +49,3 @@ lint:
 fmt:
     cargo fmt
     uv run ruff format
-
-# The client apps on a scrolling vim buffer.
-demo *ARGS: check
-    uv sync
-    scripts/demo-apps.sh {{ ARGS }}
