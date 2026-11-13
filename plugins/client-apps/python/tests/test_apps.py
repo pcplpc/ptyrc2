@@ -29,6 +29,7 @@ from ptyrc_apps import (
     fishes,
     flower,
     marks,
+    monitor,
     rain,
     sand,
     snake,
@@ -1463,6 +1464,44 @@ def clock_seen(
 
     run = ["-s", pilot.session, *argv]
     watch(pilot, lambda: clock.main(run, seconds=2.5), seen)
+
+
+def monitor_seen(pilot: Pilot, argv: list[str], titles: set[str]) -> None:
+    """Run `monitor` with `argv`: its widgets are placed and titled."""
+
+    def seen(_: str) -> bool:
+        widgets = pilot.widgets()
+        lines = pilot.shown()
+        return (
+            bool(widgets)
+            and all(w["state"] == "placed" for w in widgets)
+            and {w["title"] for w in widgets} == titles
+            and all(
+                f" {w['title']} " in lines[w["rect"][1]]
+                for w in widgets
+                if w["size"][0] >= 20
+            )
+        )
+
+    run = ["-s", pilot.session, "--every", "0.3", *argv]
+    watch(pilot, lambda: monitor.main(run, seconds=2.5), seen)
+
+
+def test_monitor(session: Pilot) -> None:
+    monitor_seen(session, [], {"glance", "connected", "listening", "disks"})
+
+
+def test_monitor_merged(session: Pilot) -> None:
+    argv = ["--merged", "--monitor", "disk-space,glance", "--cycle", "0.6"]
+    turns = set()
+
+    def seen(_: str) -> bool:
+        turns.update(w["title"] for w in session.widgets())
+        return turns == {"disks", "glance"}
+
+    run = ["-s", session.session, "--every", "0.3", *argv]
+    watch(session, lambda: monitor.main(run, seconds=3), seen)
+    assert [w["tag"] for w in session.widgets()] == []
 
 
 def test_clock(session: Pilot) -> None:

@@ -34,7 +34,7 @@ from typing import Any
 
 from ptyrc import Pilot
 
-from . import _cli
+from . import _cli, _widgets
 from . import _probe as probe
 
 __all__ = [
@@ -691,8 +691,48 @@ def show(args: argparse.Namespace) -> int:
 def live(pilot: Pilot, args: argparse.Namespace, seconds: float | None) -> None:
     """The widgets on the session: declared, shown, set every
     `args.every` seconds; with `args.merged`, one turn every
-    `args.cycle`. Not wired yet: `main` does not call it."""
-    raise NotImplementedError("widgets")
+    `args.cycle`."""
+    names: list[str] = args.monitor
+    data = {name: MONITORS[name].read() for name in names}
+    deck = _widgets.Deck(pilot, args)
+    if args.merged:
+        turn, since = 0, time.monotonic()
+        one = deck.add(
+            MERGED,
+            merged_sizes(names),
+            lambda w, h: merged(data, names, turn, w, h)[1],
+            title=MONITORS[names[0]].title,
+        )
+
+        def tick() -> None:
+            nonlocal turn, since
+            if time.monotonic() - since >= args.cycle:
+                turn, since = turn + 1, time.monotonic()
+                one.set(title=MONITORS[names[turn % len(names)]].title)
+            name = names[turn % len(names)]
+            data[name] = MONITORS[name].read()
+
+        deck.run(min(args.every, args.cycle), seconds, tick)
+        return
+
+    def draw(name: str) -> _widgets.Render:
+        return lambda w, h: MONITORS[name].render(data[name], w, h)
+
+    sizes = {name: trimmed(MONITORS[name], data[name]) for name in names}
+    shown = {
+        name: deck.add(name, sizes[name], draw(name), title=MONITORS[name].title)
+        for name in names
+    }
+
+    def refresh() -> None:
+        for name in names:
+            data[name] = MONITORS[name].read()
+            # A row more or less of data: other heights.
+            if (new := trimmed(MONITORS[name], data[name])) != sizes[name]:
+                sizes[name] = new
+                deck.resize(shown[name], new)
+
+    deck.run(args.every, seconds, refresh)
 
 
 def _names(text: str) -> list[str]:
@@ -748,12 +788,7 @@ def options(argv: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="SECONDS",
         help="turn of --merged [default: 8]",
     )
-    out.add_argument(
-        "--border",
-        default="plain",
-        metavar="NAME",
-        help="border preset [default: plain]",
-    )
+    _widgets.options(out)
     out.add_argument(
         "--print",
         nargs="?",
@@ -771,8 +806,7 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
     args = options(argv)
     if args.print is not None:
         return show(args)
-    print("ptyrc-app monitor: needs the widgets wiring; try --print", file=sys.stderr)
-    return 2
+    return _cli.run(lambda pilot, args: live(pilot, args, seconds), args)
 
 
 if __name__ == "__main__":

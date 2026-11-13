@@ -524,8 +524,6 @@ def test_options(capsys: pytest.CaptureFixture[str]) -> None:
 def test_main(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert monitor.main([]) == 2
-    assert "widgets" in capsys.readouterr().err
     monkeypatch.setattr(
         monitor,
         "MONITORS",
