@@ -203,6 +203,7 @@ dependencies = [
  "clap",
  "ptyrc-core",
  "ptyrc-draw-bigtext",
+ "ptyrc-draw-borders",
  "ptyrc-draw-rain",
  "ptyrc-draw-sand",
  "ptyrc-draw-shapes",
@@ -235,6 +236,15 @@ name = "ptyrc-draw-bigtext"
 version = "2.0.0"
 dependencies = [
  "ptyrc-core",
+ "serde_json",
+]
+
+[[package]]
+name = "ptyrc-draw-borders"
+version = "2.0.0"
+dependencies = [
+ "ptyrc-core",
+ "ptyrc-vt",
  "serde_json",
 ]
 
