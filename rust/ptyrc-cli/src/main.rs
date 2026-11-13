@@ -2,6 +2,7 @@
 //! `ptyrc <verb>`.
 
 mod apps;
+mod manage;
 mod plugins;
 mod replay;
 mod tmux;
@@ -109,6 +110,8 @@ enum Verb {
     },
     /// Run a client app: `ptyrc app bricks`; `ptyrc app` lists them
     App(apps::App),
+    /// The apps of a session: start, stop, pause, restart; a menu
+    Manage(manage::Manage),
     /// An interactive Python session with `pilot` connected
     Python(apps::Python),
     /// A running tmux session under ptyrc: `ptyrc tmux attach`, `detach`
@@ -341,6 +344,7 @@ fn run(cli: Cli) -> Result<ExitCode, Fail> {
         Verb::Tape { verb } => replay::tape(&common, verb),
         Verb::App(args) => apps::app(&common, args),
         Verb::Python(args) => apps::python(&common, args),
+        Verb::Manage(args) => manage::manage(&common, args),
         Verb::Tmux(verb) => tmux::tmux(&common, verb),
         Verb::Debug(verb) => verbs::debug(&common, verb),
         Verb::Events { topics, snapshot } => verb_events(&common, topics, snapshot),
