@@ -74,10 +74,11 @@ To try without installing anything outside the clone:
 just run vim        # cargo build --release && uv sync, then ptyrc run vim
 ```
 
-Use double `ctrl+t ctrl+t` to start a random user app in an idle driver:
+Use double `ctrl+t ctrl+t` in an idle driver to open an app manager:
 
-![ctrl-t](doc/ctrl-t.gif)
+![screenshot-monitor](doc/screenshot-monitor.jpg)
 
+Use `ptyrc tmux attach` inside a `tmux` session to wrap it inside a driver.
 
 ## Development
 
