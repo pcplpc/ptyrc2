@@ -10,6 +10,7 @@ with Pilot() as pilot:
 
 from __future__ import annotations
 
+from . import clock
 from ._wire import PtyrcError, live_sessions, runtime_dir, socket_path
 from .pilot import Cursor, Frame, Match, Pilot, Sprite, find_binary, sprite_spec
 from .tools import Locator, Tape
@@ -25,6 +26,7 @@ __all__ = [
     "Sprite",
     "Tape",
     "Widget",
+    "clock",
     "find_binary",
     "live_sessions",
     "runtime_dir",
