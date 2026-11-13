@@ -979,27 +979,32 @@ The driver keeps a table of apps (`ptyrc-server/src/apps.rs`):
   environment: `PTYRC_SESSION`, `PTYRC_SOCKET`, `PTYRC_APP=<id>`.
   SIGTERM to its group at the end of the session.
 - **client**: a process connected to the socket that is no child's: one
-  entry a pid (`SO_PEERCRED`), made at its first connection, gone with
-  its last.
+  entry a pid (`SO_PEERCRED`), made at its first request that is not
+  `app.*`, gone with its last connection. A process that only asks of
+  the table (a verb of `ptyrc manage`) is no app.
 
 A connection belongs to the child whose process group holds its peer
 (`getpgid` of the peer pid, at accept), else to the client of its pid.
 
 App info: `{"id","kind":"child"|"client","name","argv":[...],"pid",
 "state":"running"|"paused"|"exited","status":code|null,"runs":n,
-"since":seconds,"conns":[id,...],"sprites":n,"widgets":n,"log":path|null,
-"me":bool}`. `id`: from 1, never used twice in a session. `name`: given
-at `app.start`; else the file name of `argv[0]`. `argv`: as started; of
+"since":seconds,"conns":[id,...],"sprites":n,"widgets":n,"frames":[id,
+...],"moves":bool,"log":path|null,"me":bool}`. `id`: from 1; that of a
+child is never used twice in a session, that of a client is free again
+when it leaves and no entry came after it (a verb that comes and goes
+costs none). `name`: given at `app.start`; else the file name of
+`argv[0]`. `argv`: as started; of
 a client, `/proc/<pid>/cmdline` (empty when unreadable). `status`: of an
 exited child, 128 + signal when killed. `runs`: starts so far. `since`:
 seconds in the present state. `sprites`, `widgets`: those its
 connections own. `frames`: the ids of the frames those are on, in
-order. `moves`: a connection of it is subscribed to `move`. `me`: the
-entry of the connection that asks.
+order, as they are when the info is made (a change of them alone is
+no event). `moves`: a connection of it is subscribed to `move`. `me`:
+the entry of the connection that asks; false for one that is no app.
 
 An exited child stays in the table (`exited`) until restarted or
 forgotten; 16 at most, the oldest forgotten first. A client that left is
-not kept.
+not kept, nor the child of the hotkey once it has ended.
 
 ### Methods
 
@@ -1010,17 +1015,19 @@ not kept.
 | `app.stop` | `app`: id | `{"app":info}`; SIGTERM, SIGCONT when paused, SIGKILL after 2 s. A child: its group; a client: its pid. An exited child: nothing |
 | `app.pause` | `app` | `{"app":info}`; see Pause |
 | `app.resume` | `app` | `{"app":info}` |
-| `app.restart` | `app`, `argv`, `name` (both optional: as before) | `{"app":info}`, at once; stopped as by `app.stop`, started again when it has ended, under the same id. A client: `not-usable` |
+| `app.restart` | `app`, `argv`, `name` (both optional: as before) | `{"app":info}`, at once; stopped as by `app.stop`, started again when it has ended, under the same id; an exited one at once (`bad-params` when it does not start: it stays exited, status 127, the reason in its log). A client: `not-usable` |
 | `app.forget` | `app` | `{}`; an exited child leaves the table; another state: `not-usable` |
 | `app.move` | `app`, `frame`: an id or a name, resolved at the call | `{"app":info,"frame":id}`; see Move |
 
 An unknown id: `no-sprite`, `no such app: N`, the hint naming the apps.
 An app may not stop, pause or restart itself (`me`): `not-usable`.
-Not on a replay (`bad-request`), nor on `--transparent`.
+An unknown member: `bad-params`. Not on a replay (`bad-request`), nor
+on `--transparent` (`Config::transparent`): no table.
 
-Topic `apps`: the info of an app, when its state, pid, connections or
-argv change; `"state":"gone"` once for an entry that leaves the table.
-`subscribe {snapshot}`: one per app. `me` is absent from events.
+Topic `apps`: the info of an app, when its state, pid, connections,
+argv or `moves` change; `"state":"gone"` once for an entry that leaves
+the table. `subscribe {snapshot}`: one per app. `me` is absent from
+events. Sent once per turn of the driver's loop.
 
 ### Pause
 
@@ -1029,15 +1036,16 @@ its connections own is hidden: sprites, widgets (their place is kept,
 not an obstacle to other widgets while hidden), effects. Their clocks
 stand still: animations, effects, `ttl_ms` and motions go on at
 `app.resume` from where they were. A sprite or a widget added while
-paused is hidden too.
+paused is hidden too. A key grab it held is released.
 
 Events are not queued for a paused connection (it does not read);
 answers are. `app.resume`: SIGCONT, all is shown again, and each of its
 connections is sent the snapshot of its topics (as `subscribe
 {snapshot}`); one subscribed to `text` gets a `text` event per frame on
 screen naming every row in view: an app that keeps the text reads it
-again. `Scene::hide_owner(owner, hidden, now)`,
-`Widgets::hide_owner(owner, hidden)` (Widgets, Hidden owners).
+again (`Engine::resume_events`). `Scene::hide_owner(owner, hidden,
+now)`, `Widgets::hide_owner(owner, hidden)` (Widgets, Hidden owners),
+through `Engine::hide_owner(conn, hidden)`.
 
 ### Move
 
@@ -1046,7 +1054,9 @@ An app that can change frame while it runs subscribes to the topic
 connection the event `move`: `{"frame": id}`; the app moves what it
 drew: the driver moves nothing. Not `moves`, paused or exited:
 `not-usable`, the hint naming `ptyrc manage move --restart`. The topic
-is sent to the app moved only, never broadcast.
+is sent to the app moved only, never broadcast; it has no snapshot,
+and `ptyrc events` does not ask for it unless named. The frame is
+resolved as by `frame.get` (`no-frame`, the same hint).
 
 Python: `_cli.follow` takes it (the sprite is updated to the frame, then
 followed there): `sand`, `rain`, `snow`; `_widgets.Deck` shows its tags
@@ -1057,7 +1067,8 @@ again on the frame: `clock`, `monitor`. The others are restarted.
 Replaces the demo. `Config::hotkey` (`hotkey.rs`): ctrl+t typed twice in
 a row on the host keyboard, while no key is grabbed, runs that command
 as a child (name `manage`); typed again while it runs, the pair ends
-it. Whoever is connected. Held 350 ms, CSI u forms: as before. A
+it (`app.stop`). Whoever is connected. That child leaves the table
+when it ends. Held 350 ms, CSI u forms: as before. A
 command that does not start rings the bell. `ptyrc run` and `ptyrc tmux
 wrap` give `ptyrc manage --overlay` (the driver's own binary), or the
 words of `$PTYRC_HOTKEY`. `--no-hotkey` (`--no-demo` is read as it),
@@ -1072,7 +1083,7 @@ words of `$PTYRC_HOTKEY`. `--no-hotkey` (`--no-demo` is read as it),
 
 ```
 ptyrc manage                       on a terminal: the menu; else `ls`
-ptyrc manage ls                    the apps: ID STATE SINCE PID NAME ARGS
+ptyrc manage ls                    the apps: ID KIND STATE SINCE PID NAME ARGS
 ptyrc manage start APP [OPTION...]     `ptyrc-app APP OPTION...`
 ptyrc manage start --cmd PROGRAM [ARG...]   any program
 ptyrc manage stop    APP... | --all
@@ -1087,14 +1098,32 @@ ptyrc manage log APP               what it wrote on stderr
 ptyrc manage --overlay             the menu in a modal widget (the hotkey)
 ```
 
-- `APP`: an id, or a name: every app of that name not exited (`restart`
-  with options, `log`: exactly one; several: status 2, the ids named).
-  The name of an app run by `ptyrc-app` is its first word (`bricks`),
-  told from `argv` for a client. `--all`: all but `me` and the manager.
+- `APP`: an id, or a name: every app of that name not exited
+  (`forget`: exited; `restart` with options, `move`, `log`: exactly
+  one, a live one before an exited one; several: status 2, the ids
+  named). None: status 4, the apps named. The name of an app run by
+  `ptyrc-app` is its first word (`bricks`), told from `argv` for any
+  kind (`manage::label`, `options`); else the `name` of its info.
+  `--all`: all but `me` and the managers (`manage::is_manager`).
 - `start` finds `ptyrc-app` as `ptyrc app` does (127 when absent) and
   sends its path in `argv`. It waits 400 ms: an app that ended by then
   with an error is status 1, the last line of its log shown.
-- `stop`, `restart` wait for the end or the new start, 5 s at most.
+- `start --cmd`: the name is the file name of the program.
+- `restart` with options: the `argv` up to the app's name, then the
+  options (`manage::with_options`); of a `--cmd` app, all that follows
+  the program. A new start is watched 400 ms, as `start`.
+- `stop`, `restart` wait for the end or the new start, 5 s at most
+  (status 1 past it). A client stopped is `gone`.
+- `move`: `app.move` when the app `moves`, unless `--restart`; else
+  `frame.get` (the frame is there), then `app.restart` with `-f FRAME`
+  in place of the `-f`, `-fX`, `--frame` or `--frame=` among its
+  options, at their end when none (`manage::with_frame`).
+- `frames`: `ID KIND SIZE KEY IDLE APPS`, the frames on screen
+  (`frame.list`, not inactive); `KEY`: the key, else the preset;
+  `APPS`: the names of the apps whose `frames` hold it.
+- A verb prints a line an app: `ID NAME: STATE` (`exited N`, `gone`;
+  `frame N` for a live move). `ls` leaves `me` out.
+- `log`: the file of the info; a client has none (status 4).
 - `--json`: the infos.
 - No session chosen and several live, on a terminal: the menu asks.
 
@@ -1318,23 +1347,14 @@ that moves a snapshot is read in the diff of the `.snap`.
   One grab at a time (`not-usable` for another client).
   `scripts/grab-sprite.py`: the arrows move a sprite in vim's pane; vim
   does not see them.
-- `Config::apps` (`demo.rs`): commands run on the session after the
-  program, as the demo's without `SEED NTH`; terminated with the driver.
-- The demo (`demo.rs`): ctrl+t typed twice in a row on the host
-  keyboard, while no client is connected and no key is grabbed, runs a
-  client app on the session; the pair reaches nobody. While that app
-  runs, the pair terminates it (SIGTERM to its process group; its
-  sprites go with its connection) and runs the next, whoever is
-  connected. A first ctrl+t is held 350 ms, or until the next key: alone
-  it goes to the app, late. CSI u and modifyOtherKeys forms count; a
-  release event between the two does not break the pair. The driver
-  runs `$PTYRC_DEMO` (words split on spaces), else `ptyrc-app demo`
-  (found as by `ptyrc app`), with two more arguments, `SEED NTH`: a
-  number drawn once for the session and the count of runs before;
-  `PTYRC_SESSION` and `PTYRC_SOCKET` are set, stdio is null. A command
-  that does not start rings the bell. `ptyrc_apps.demo` picks the app
-  from them: rounds of all the apps shuffled, none twice in a row, the
-  `-a` version one time in two. `--no-demo`, `--transparent`: no demo.
+- `Config::apps`: commands started as child apps once the program has
+  started (Apps and the manager, The table).
+- The hotkey (`hotkey.rs`): ctrl+t typed twice in a row on the host
+  keyboard, while no key is grabbed, runs `Config::hotkey` as a child
+  app; the pair reaches nobody (Apps and the manager, Hotkey). A first
+  ctrl+t is held 350 ms, or until the next key: alone it goes to the
+  app, late. CSI u and modifyOtherKeys forms count; a release event
+  between the two does not break the pair.
 - `input.click`: a click at a screen cell, written as the app asked:
   SGR (1006) or X10 bytes, press and release, press alone under mode 9
   or for the wheel. `mods`: `shift`, `alt`, `ctrl` held. `count`: 2 is
@@ -1434,8 +1454,9 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `widget.hide` | `id` | `{}` |
 | `widget.list` | | `{"widgets":[info,...]}`, every connection's |
 | `widget.borders` | | `{"borders":[name,...]}` |
+| `app.list`, `app.start`, `app.stop`, `app.pause`, `app.resume`, `app.restart`, `app.forget`, `app.move` | | see Apps and the manager, Methods |
 | `batch` | `calls`: `[{"method","params"}]` | `{"results":[{"result"} or {"error"},...]}`, applied in one repaint |
-| `subscribe` | `topics`: `screen`, `cursor`, `frames`, `text`, `idle`, `draw`, `input`, `mouse`, `size`, `colors`, `widgets`, `exit`; `snapshot` | `{}`; with `snapshot`, then the state now as events, to this client: `idle` per frame on screen, `cursor`, `frames`, `size`, `widgets` per widget |
+| `subscribe` | `topics`: `screen`, `cursor`, `frames`, `text`, `idle`, `draw`, `input`, `mouse`, `size`, `colors`, `widgets`, `apps`, `move`, `exit`; `snapshot` | `{}`; with `snapshot`, then the state now as events, to this client: `idle` per frame on screen, `cursor`, `frames`, `size`, `widgets` per widget, `apps` per app |
 | `debug.overlay` | `what`: `frames`, `heat`, `off` | `{}` |
 | `debug.dump` | | app grid, host grid, sprites, frames |
 
@@ -1488,7 +1509,7 @@ form exists.
 ptyrc run [--name N] [--headless --size CxR] [--host-log F]
           [--transparent] [--no-presets] [--coalesce-ms N]
           [--host-fg COLOR] [--host-bg COLOR]
-          [--record FILE [--record-input]] [--no-demo] [--app APP]...
+          [--record FILE [--record-input]] [--no-hotkey] [--app APP]...
           [--] CMD...
 ptyrc replay FILE [--name N] [--speed X] [--until T] [--step] [--hold]
           [--no-presets | --presets] [--snap | --check SNAPS] [--at T,...]
@@ -1524,6 +1545,9 @@ ptyrc call METHOD [JSON]          raw request
 ptyrc app [NAME [OPTION...]]      a client app: `ptyrc-app NAME...`
 ptyrc python [FILE [ARG...]]      Python with `pilot` connected:
       a console, or FILE run as `__main__`
+ptyrc manage [ls | start | stop | pause | resume | restart | forget |
+      move | frames | log]        the apps of the session; alone: a
+      menu (Apps and the manager)
 ptyrc tmux attach [-t SESSION] [-L NAME | -S PATH] [--app APP]...
 ptyrc tmux detach [-t SESSION] [-L NAME | -S PATH]
 ```
@@ -1535,9 +1559,8 @@ or `venv/bin` in the current directory or one above it; else from the same
 above the `ptyrc` binary. None: status 127.
 
 `ptyrc run --app APP`: `ptyrc-app` (found as above) with the words of APP
-runs on the session once the program has started; `PTYRC_SESSION` and
-`PTYRC_SOCKET` are set, stdio is null; SIGTERM to its process group at the
-end. Repeatable. Not with `--transparent` (status 2); no `ptyrc-app`:
+is a child app of the session once the program has started (Apps and
+the manager). Repeatable. Not with `--transparent` (status 2); no `ptyrc-app`:
 status 127, nothing runs. The options of `run` come before the program: a
 first word that starts with `-` is one (unknown: status 2); `--` before a
 program that does.
@@ -1564,10 +1587,10 @@ are those of before; the screen is redrawn once.
   without a terminal: status 3.
 - Attached already: nothing is replaced, status 0. One driver per tmux
   session.
-- `--app APP`: `ptyrc-app` with the words of APP on the session, once
-  the driver answers, and on a session attached already; left behind,
-  it ends with the driver. One that ends within 400 ms with an error:
-  status 1, the session stays attached. No `ptyrc-app`: status 127,
+- `--app APP`: `ptyrc-app` with the words of APP, a child app of the
+  driver (`app.start`), once the driver answers, and on a session
+  attached already. One that ends within 400 ms with an error: status
+  1, the last line of its log shown, the session stays attached. No `ptyrc-app`: status 127,
   nothing is replaced.
 - `detach`: `session.handoff`, then the client leaves through tmux,
   without a word on the terminal (hung up when tmux does not know it);
@@ -1609,7 +1632,7 @@ Exit status:
 | 1 | a negative answer: `find` without a match (silent), `wait` timed out (says what was waited for), `click --text` without a match, `replay --check` with a difference (names each) |
 | 2 | usage, or a request that is wrong: a bad key, colour, anchor, position, JSON, method, topic, session name for `run` |
 | 3 | no session to talk to: none, not found, several and none chosen, dead (stale socket, removed), bad name; `run`: the name is taken, no socket directory |
-| 4 | the request names what is not there or not usable: frame, sprite, widget |
+| 4 | the request names what is not there or not usable: frame, sprite, widget, app |
 | 5 | the connection or the system: closed by the driver, I/O |
 | 126 | `run`: the command is there and cannot run: a directory, not executable, no interpreter |
 | 127 | `run`: the command is not there |
@@ -1654,7 +1677,10 @@ first), `.above(n)`, `.below(n)`, then `.wait()`, `.read(width)`,
 `Pilot.click`, `Pilot.clicks(*sprites, timeout=, presses=)` (the
 `mouse` events on those sprites, presses only by default),
 `Pilot.on_click(sprite, handler)` (a thread that reads them),
-`Pilot.grab`, `Pilot.release`, `Pilot.shown` (text with
+`Pilot.grab`, `Pilot.release`, `Pilot.apps`, `Pilot.app_start(argv,
+name=)`, `app_stop`, `app_pause`, `app_resume`, `app_restart(app,
+argv=, name=)`, `app_forget`, `app_move(app, frame)` (`app.*`, one to
+one; the info, the frame id for a move), `Pilot.shown` (text with
 the sprites), `Pilot.snapshot`; `Pilot.spawn(record=FILE)`,
 `Pilot.replay(FILE)` (paused at the start) and `pilot.tape` (`step`,
 `seek`, `play`, `pause`, `status`, `end`).
@@ -1811,7 +1837,9 @@ windows under the driver, one drawing per pane, sand in the idle one.
 - `ptyrc-cli/tests/errors.rs`: every error case of the CLI, message, hint
   and exit status.
 - `ptyrc-cli/tests/tapes.rs`: tapes of real programs replayed against
-  their snapshots; `tests/tools.rs`: grab, click, host mouse, shot, attach on a pty.
+  their snapshots; `tests/tools.rs`: grab, click, host mouse, shot, attach on a pty;
+  `tests/hotkey.rs`: the pair on a pty; `tests/manage.rs`: the verbs of
+  `ptyrc manage` on a headless session, a stand-in app in Python.
 - Python: `uv run pytest`, against a headless driver.
 - `scripts/e2e-tmux.sh`: the driver inside a detached tmux, `tmux
   capture-pane` is the host's verdict.

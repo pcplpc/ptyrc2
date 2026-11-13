@@ -784,7 +784,9 @@ class Pilot(Tools, Widgets):
         scroll), `cursor`, `frames`, `idle` (a frame became idle, or
         busy), `draw` (sprites removed with the rows or the frame they
         were on), `widgets` (a widget placed, moved, resized, hidden),
-        `input`, `size`, `exit`.
+        `input`, `size`, `apps` (the info of an app when it changes),
+        `move` (`{"frame": id}`: this app is asked to go to that frame;
+        subscribing says it can), `exit`.
 
         `snapshot`: the state now comes first, as events: `idle` of each
         frame on screen, `cursor`, `frames`, `size`. No poll at start."""
