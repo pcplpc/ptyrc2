@@ -19,6 +19,7 @@ APPS = {
     "sand": "sand falling in an idle pane",
     "snake": "snake game that plays alone",
     "bricks": "brick breaker game that plays alone",
+    "life": "game of life in braille behind the text",
     "flower": 'add flowers next to the word "flower"',
     "marks": "highlights a selected pattern",
     "monitor": "load, logins, open ports and disks in widgets",
