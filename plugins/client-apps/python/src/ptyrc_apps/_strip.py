@@ -742,8 +742,17 @@ def fog(half: Half, sky: Sky, hz: int) -> None:
             half.set(x, y, grey, max(0.25, thick))
 
 
-def rain(half: Half, sky: Sky, seed: int, t: float, lean: float = 0.0) -> None:
-    """Drops over the scene; `lean`: dots aside a dot fallen."""
+def rain(
+    half: Half,
+    sky: Sky,
+    seed: int,
+    t: float,
+    lean: float = 0.0,
+    rough: float = 0.0,
+) -> None:
+    """Drops over the scene; `lean`: dots aside a dot fallen; `rough`:
+    how much a drop tints a pixel where a cell has two colours
+    (`Half.ink`), 0: no drop there."""
     dots = Braille(half.w, half.h)
     tall = 4 * half.h
     for col in range(2 * half.w):
@@ -751,13 +760,14 @@ def rain(half: Half, sky: Sky, seed: int, t: float, lean: float = 0.0) -> None:
             continue
         fall = 9 + 6 * noise(seed + 22, col)
         y = int(t * fall + noise(seed + 23, col) * 97) % (tall + 5)
-        for k in range(2):
+        for k in range(4 if lean else 2):  # a streak, leaning
             aside = int((y - k) * lean) if lean else (y - k) // 5 % 2
             dots.set((col - aside) % (2 * half.w), y - k)
-    half.ink(dots, sky.shade(DROP), 0.75)
+    half.ink(dots, sky.shade(DROP), 0.75, rough)
 
 
-def snow(half: Half, sky: Sky, seed: int, t: float) -> None:
+def snow(half: Half, sky: Sky, seed: int, t: float, rough: float = 0.0) -> None:
+    """Flakes over the scene; `rough`: as for `rain`."""
     dots = Braille(half.w, half.h)
     wide, tall = 2 * half.w, 4 * half.h
     for i in range(max(3, half.w * half.h // 7)):
@@ -765,7 +775,7 @@ def snow(half: Half, sky: Sky, seed: int, t: float) -> None:
         y = int(t * fall + noise(seed + 32, i) * tall) % tall
         sway = math.sin(t * 0.7 + i) * 1.6
         dots.set(int(noise(seed + 33, i) * wide + sway + t * 0.4) % wide, y)
-    half.ink(dots, mix(WHITE, sky.shade(WHITE), 0.5))
+    half.ink(dots, mix(WHITE, sky.shade(WHITE), 0.5), rough=rough)
 
 
 def lights(

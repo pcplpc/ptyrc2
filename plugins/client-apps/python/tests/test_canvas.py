@@ -118,6 +118,18 @@ def test_ink() -> None:
     low.set(0, 3)
     near.ink(low, RED)
     assert near.over[0, 0] == ("⡀", RED, (14, 14, 14))
+    # Over an edge, `rough`: the pixel under the dots takes the ink.
+    edge = Half(1, 1, BLUE)
+    edge.set(0, 1, RED)
+    edge.ink(low, (255, 255, 255), rough=0.5)
+    assert not edge.over and edge.px[0][0] == BLUE
+    assert edge.px[1][0] == (255, 128, 128)
+    # Alike, but two colours of the 256: no glyph is shown there.
+    near.fill((100, 100, 100))
+    near.set(0, 1, (112, 112, 112))
+    near.ink(low, RED)
+    assert near.rows() == [[{"t": "▀", "fg": 241, "bg": 242}]]
+    assert near.rows(deep=True)[0][0]["t"] == "⡀"
 
 
 def test_ansi() -> None:

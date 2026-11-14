@@ -718,15 +718,17 @@ def scene(
 
     stars(half, clear, sky, seed + 3, None, hz)  # not hidden by a wire
     _string(half, sky, wires, trip.deep)
-    glass = set(half.over)
+    glass, was = set(half.over), [list(row) for row in half.px]
     if kind == "rain":
-        rain(half, sky, seed, t, 1.5)
+        rain(half, sky, seed, t, 1.5, 0.35)
     elif kind == "snow":
-        snow(half, sky, seed, t)
+        snow(half, sky, seed, t, 0.45)
     if dry is not None:  # no rain in a tunnel
         for cell in set(half.over) - glass:
             if dry[0] <= cell[0] < dry[1]:
                 del half.over[cell]
+        for y, row in enumerate(was):
+            half.px[y][dry[0] : dry[1]] = row[dry[0] : dry[1]]
     breath(half, pointer, t)
     return half.rows(trip.deep)
 

@@ -16,7 +16,9 @@ Pure: no driver, no clock.
   go over the pixels: `put(cx, cy, text, fg)` writes cells, the
   background the mean of the two pixels under each unless `bg` is
   given; `ink(braille, fg)` puts the cells of a `Braille` that have a
-  dot, where no glyph is yet and the two pixels are alike. `rows()`: rows of runs `{"t", "fg", "bg"}`, colours of the 256;
+  dot, where no glyph is yet and the two pixels are alike. `rows()`:
+  rows of runs `{"t", "fg", "bg"}`, colours of the 256, where ink on
+  two pixels of two colours is left out: a glyph has one background;
   `rows(deep=True)`: `#rrggbb`.
 - `ansi(rows)`: the rows with SGR escapes, for a terminal.
 
@@ -180,18 +182,31 @@ class Half:
             if 0 <= cx + i < self.w and 0 <= cy < self.h:
                 self.over[cx + i, cy] = (char, fg, bg)
 
-    def ink(self, dots: Braille, fg: RGB | None = None, tint: float = 1.0) -> None:
+    def ink(
+        self,
+        dots: Braille,
+        fg: RGB | None = None,
+        tint: float = 1.0,
+        rough: float = 0.0,
+    ) -> None:
         """Put the cells of `dots` that have a dot on, where no glyph
         is yet and the two pixels are alike or nearly: the background
         is the pixel under most of the dots, and an edge is never
-        blurred. The ink: `fg` mixed over it by `tint`."""
+        blurred. The ink: `fg` mixed over it by `tint`. Where the two
+        pixels differ, `fg` is mixed by `rough` into each that has a
+        dot over it."""
         for cx, cy in dots.cells():
             if cx >= self.w or cy >= self.h or (cx, cy) in self.over:
                 continue
             top, low = self.px[2 * cy][cx], self.px[2 * cy + 1][cx]
-            if sum(abs(a - b) for a, b in zip(top, low, strict=True)) > NEAR:
-                continue
             bits = dots.bits[cy][cx]
+            if sum(abs(a - b) for a, b in zip(top, low, strict=True)) > NEAR:
+                if rough and fg is not None:
+                    if bits & 0x1B:
+                        self.px[2 * cy][cx] = mix(top, fg, rough)
+                    if bits & 0xE4:
+                        self.px[2 * cy + 1][cx] = mix(low, fg, rough)
+                continue
             bg = top if (bits & 0x1B).bit_count() > (bits & 0xE4).bit_count() else low
             ink = fg if fg is None or tint >= 1.0 else mix(bg, fg, tint)
             self.over[cx, cy] = (dots.glyph(cx, cy), ink, bg)
@@ -205,6 +220,17 @@ class Half:
             row: list[Run] = []
             for cx in range(self.w):
                 glyph = self.over.get((cx, cy))
+                # Ink on two pixels alike that the 256 tell apart: the
+                # glyph would take them for one, and what is behind
+                # would move with it.
+                if (
+                    glyph is not None
+                    and not deep
+                    and glyph[2] is not None
+                    and "\u2800" < glyph[0] < "\u2900"
+                    and xterm(top[cx]) != xterm(low[cx])
+                ):
+                    glyph = None
                 if glyph is not None:
                     text, fg, bg = glyph
                     run = {"t": text, "bg": name(bg or mix(top[cx], low[cx], 0.5))}
