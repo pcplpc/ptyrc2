@@ -29,7 +29,8 @@ What it shows:
   out from the view behind them and from each other, lit by a lamp at
   night; the cat between the mullions;
 - the pointer over the window (`_strip.Pointer`): the curtains move
-  aside, the cat turns its head, a house near it lights up;
+  aside, the cat hunts it along its pane and leaps at it, a house near
+  it lights up;
 - `-r`: what is not given is drawn at random, another at each run:
   the place, the season and its day, the time (`MOMENTS`: more often
   a low sun or an evening than a noon), the weather; `--seed`: the
@@ -569,6 +570,59 @@ def _perch(w: int, h: int, seed: int) -> tuple[int, int] | None:
     return left, way
 
 
+#: The cat on the hunt: cells a second after the pointer and back
+#: home; seconds it waits before it goes; a leap, its length, its
+#: period, its height in pixels at most.
+RUN, HOME = 8.0, 3.0
+WAIT, BACK = 0.3, 1.0
+LEAP, BOUNCE, HIGH = 0.75, 1.6, 4
+
+
+def _run(w: int, h: int, perch: tuple[int, int]) -> tuple[int, int]:
+    """The left columns the cat can take from its perch: its pane, the
+    body clear of the mullions and of the drawn curtains."""
+    cols, _ = _bars(w, h)
+    side = curtain(w, 0.0)
+    left = perch[0]
+
+    def clear(x: int) -> bool:
+        return side <= x <= w - side - 5 and not any(x <= c <= x + 4 for c in cols)
+
+    lo = hi = left
+    while clear(lo - 1):
+        lo -= 1
+    while clear(hi + 1):
+        hi += 1
+    return lo, hi
+
+
+def chase(
+    pointer: Pointer | None, t: float, home: int, lo: int, hi: int
+) -> tuple[float, int, float]:
+    """Where the cat is at `t`: its left column, the way it last went,
+    and since when it is where it goes. It goes to the column of the
+    pointer `WAIT` seconds late, at `RUN` cells a second; home, at
+    `HOME`, `BACK` seconds after the pointer left."""
+    if pointer is None or not pointer.trail:
+        return float(home), 0, -math.inf
+    goals = [(at + WAIT, min(hi, max(lo, x - 2))) for x, _, at in pointer.trail]
+    if pointer.at is None:
+        goals.append((pointer.since + BACK, home))
+    goals = [g for g in goals if g[0] <= t] or goals[:1]
+    clipped = pointer.trail[0][2] > pointer.since
+    x, way = float(goals[0][1] if clipped else home), 0
+    settled = goals[0][0] if x == goals[0][1] else math.inf
+    for i, (at, goal) in enumerate(goals):
+        end = goals[i + 1][0] if i + 1 < len(goals) else t
+        speed = HOME if pointer.at is None and i == len(goals) - 1 else RUN
+        if x != goal:
+            step = min(abs(goal - x), speed * max(0.0, end - at))
+            way = 1 if goal > x else -1
+            x += way * step
+            settled = at + step / speed if x == goal else math.inf
+    return x, way, min(settled, t)
+
+
 def _cat(
     half: Half,
     sky: _sky.Sky,
@@ -576,43 +630,60 @@ def _cat(
     pointer: Pointer | None,
     room: Room,
 ) -> None:
-    """A cat on the sill, seen from behind; it looks at the pointer.
-    Indoors: a cell it covers loses the glyph from outside."""
+    """A cat on the sill, seen from behind; it hunts the pointer along
+    its pane and leaps at it. Indoors: a cell it covers loses the
+    glyph from outside."""
     w, rows = half.w, 2 * half.h
     if room.perch is None:
         return
+    cols, _ = _bars(w, half.h)
 
     def dot(x: int, y: int, colour: RGB) -> None:
         if 0 <= x < w and 0 <= y < rows:
             half.set(x, y, colour)
             half.over.pop((x, y // 2), None)
 
-    left, way = room.perch
-    top = rows - len(CAT)
+    home, way = room.perch
+    lo, hi = _run(w, half.h, room.perch)
+    x, went, settled = chase(pointer, t, home, lo, hi)
+    left = round(x)
+    if went and left != home:  # the tail behind it, where it fits
+        for turn in (-went, went):
+            if all(0 <= c < w and c not in cols for c in _tail(left, turn)):
+                way = turn
+                break
+    rise, paw = 0, 0
+    here = pointer.at if pointer is not None else None
+    if here is not None and left <= here[0] <= left + 4 and settled < t:
+        phase = (t - settled) % BOUNCE
+        top = rows - len(CAT)
+        high = max(1, min(HIGH, top - 2 * here[1]))
+        if phase < LEAP:
+            rise = round(high * math.sin(math.pi * phase / LEAP))
+            paw = 1 if here[0] > left + 2 else -1
+    top = rows - len(CAT) - rise
     fur = [
         (left + dx, top + dy)
         for dy, line in enumerate(CAT)
         for dx, char in enumerate(line)
         if char == "#"
     ]
-    flick = int(t) % 23 < 2 and int(t * 3) % 2
+    hunting = here is not None and not rise
+    flick = (int(t) % 23 < 2 or hunting) and int(t * 3) % 2
     tail = _tail(left, way)
-    fur += [(tail[0], rows - 1), (tail[1], rows - (2 if flick else 1))]
+    bottom = rows - 1 - rise
+    fur += [(tail[0], bottom), (tail[1], bottom - (1 if flick else 0))]
     if not flick:
-        fur.append((tail[2], rows - 2))
+        fur.append((tail[2], bottom - 1))
+    if paw:  # a foreleg up by the head, on the side of the pointer
+        reach = left + 2 + 2 * paw
+        fur += [(reach, top), (reach, top - 1)]
+    fur = [(c, y) for c, y in fur if c not in cols]
     # The top of each column: the rim the lamp lights at night.
-    edge = {x: min(y for i, y in fur if i == x) for x, _ in fur}
+    edge = {c: min(y for i, y in fur if i == c) for c, _ in fur}
     coat, rim = _lit(room.coat, sky.light), _rim(room.coat, sky.light)
-    for x, y in fur:
-        dot(x, y, rim if edge[x] == y else coat)
-    if pointer is not None and pointer.at is not None:
-        eyes = (200, 230, 90)
-        turn = (pointer.at[0] > left + 2) - (pointer.at[0] < left + 2)
-        if turn:
-            dot(left + 2 + turn, top + 1, eyes)
-        else:
-            dot(left + 1, top + 1, eyes)
-            dot(left + 3, top + 1, eyes)
+    for c, y in fur:
+        dot(c, y, rim if edge[c] == y else coat)
 
 
 def sized(w: int, h: int) -> Size:

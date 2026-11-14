@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import threading
 import unicodedata
 from dataclasses import replace
@@ -145,18 +146,57 @@ def test_hover() -> None:
     here = window.scene(40, 12, NOON, 5.0, look, pointer)
     assert here != away
     assert pixels(here)[4] != pixels(away)[4]  # the curtain went aside
-    # The cat looks at the pointer: an eye on its side.
-    eye = "#c8e65a"
-    assert eye not in {fg for _, fg, _ in pixels(away)} | {
-        bg for *_, bg in pixels(away)
-    }
-    seen = {fg for _, fg, _ in pixels(here)} | {bg for *_, bg in pixels(here)}
-    assert eye in seen
     pointer.leave()
     assert window.scene(40, 12, NOON, 5.0, look, pointer) != away  # it closes
     assert window.scene(40, 12, NOON, 9.0, look, pointer) == window.scene(
         40, 12, NOON, 9.0, look
     )
+
+
+def _fur(look: Look, t: float, pointer: Pointer | None) -> set[tuple[int, int]]:
+    half = window.Half(40, 12)
+    room = window._room(look, 40, 12, "summer", None)
+    window._cat(half, _sky.at(NOON), t, pointer, room)
+    return {
+        (x, y)
+        for y, row in enumerate(half.px)
+        for x, c in enumerate(row)
+        if c != (0, 0, 0)
+    }
+
+
+def test_cat_hunts() -> None:
+    """The cat runs along its pane to the pointer, leaps at it, and
+    goes home when it leaves; never on a mullion."""
+    look = Look(seed=5, cosy=True)
+    room = window._room(look, 40, 12, "summer", None)
+    home, _ = room.perch
+    lo, hi = window._run(40, 12, room.perch)
+    assert lo < home < hi
+    cols = set(window._bars(40, 12)[0])
+    now = [0.0]
+    pointer = Pointer(lambda: now[0])
+    rest = _fur(look, 0.0, pointer)
+    pointer.move(lo + 2, 5)
+    xs, tops = [], []
+    for n in range(40):
+        now[0] = t = n / 4
+        x, _, _ = window.chase(pointer, t, home, lo, hi)
+        xs.append(x)
+        fur = _fur(look, t, pointer)
+        assert not {x for x, _ in fur} & cols, t
+        tops.append(min(y for _, y in fur))
+    assert xs[0] == home and xs[-1] == lo
+    assert all(a >= b for a, b in itertools.pairwise(xs))  # no step back
+    assert min(tops) < min(tops[:4]) - 2  # it leaps
+    pointer.move(hi + 30, 5)  # out of its pane: it waits at the edge
+    now[0] = 20.0
+    assert window.chase(pointer, 20.0, home, lo, hi)[0] == hi
+    pointer.leave()
+    now[0] = 40.0
+    assert window.chase(pointer, 40.0, home, lo, hi)[0] == home
+    body = {(x, y) for x, y in rest if y < 23}
+    assert body <= _fur(look, 40.0, pointer)  # at rest again
 
 
 @pytest.mark.parametrize("kind", ["rain", "snow"])
