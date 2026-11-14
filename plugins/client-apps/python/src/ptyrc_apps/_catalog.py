@@ -32,6 +32,7 @@ RANDOM: dict[str, tuple[tuple[str, ...], ...]] = {
     "marks": (),  # it wants patterns
     "note": (),  # it wants a file: TODO.md of the working directory
     "pace": ((), ("-a",)),
+    "pond": ((), ("-a",)),
     "sand": (("--now",),),
     "snake": ((), ("-a",)),
     "stars": ((), ("-a",)),
