@@ -159,6 +159,38 @@ def test_hover() -> None:
     )
 
 
+@pytest.mark.parametrize("kind", ["rain", "snow"])
+def test_cat_is_indoors(monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
+    """What falls outside never shows on the cat: its cells are the
+    same as with nothing outside but the land."""
+    cat, cells, under = window._cat, set[tuple[int, int]](), [0]
+
+    def spy(half: window.Half, *args: object) -> None:
+        before, over = [list(row) for row in half.px], set(half.over)
+        cat(half, *args)
+        cells.clear()
+        for y, row in enumerate(half.px):
+            cells.update((x, y // 2) for x, c in enumerate(row) if c != before[y][x])
+        under[0] += len(cells & over)
+
+    monkeypatch.setattr(window, "_cat", spy)
+    look = Look(seed=5, land=True, passing=True, cosy=True, weather=kind)
+    pointer = Pointer(lambda: 0.0)
+    pointer.move(20, 11)  # the eyes
+    frames = []
+    for t in (n / 4 for n in range(240)):
+        rows = window.scene(40, 12, NOON, t, look, pointer)
+        frames.append((t, pixels(rows), sorted(cells)))
+    assert under[0] > 20  # it falls on the cat
+    for name in ("rain", "snow", "stars", "_birds", "_meteor"):
+        monkeypatch.setattr(window, name, lambda *args, **kwargs: None)
+    for t, seen, painted in frames:
+        assert painted
+        plain = pixels(window.scene(40, 12, NOON, t, look, pointer))
+        for x, y in painted:
+            assert seen[40 * y + x] == plain[40 * y + x], (t, x, y)
+
+
 def test_house_lit_under_the_pointer() -> None:
     hexa = "#{:02x}{:02x}{:02x}".format(*LAMP)
     evening = NOON.replace(hour=22, minute=0)

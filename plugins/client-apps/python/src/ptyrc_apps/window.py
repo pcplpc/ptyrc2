@@ -390,10 +390,17 @@ def _cat(
     pointer: Pointer | None,
     side: int,
 ) -> None:
-    """A cat on the sill, seen from behind; it looks at the pointer."""
+    """A cat on the sill, seen from behind; it looks at the pointer.
+    Indoors: a cell it covers loses the glyph from outside."""
     w, rows = half.w, 2 * half.h
     if w < 18 or half.h < 6:
         return
+
+    def dot(x: int, y: int, colour: RGB) -> None:
+        if 0 <= x < w and 0 <= y < rows:
+            half.set(x, y, colour)
+            half.over.pop((x, y // 2), None)
+
     coat = COATS[int(noise(seed + 111) * len(COATS))]
     coat = mix(coat, (0, 0, 0), 0.5 * (1 - sky.light))
     left = side + 1 + int(noise(seed + 112) * (w - 2 * side - 9))
@@ -401,20 +408,20 @@ def _cat(
     for dy, line in enumerate(CAT):
         for dx, char in enumerate(line):
             if char == "#":
-                half.set(left + dx, top + dy, coat)
+                dot(left + dx, top + dy, coat)
     flick = int(t) % 23 < 2 and int(t * 3) % 2
-    half.set(left + 5, rows - 1, coat)
-    half.set(left + 6, rows - (2 if flick else 1), coat)
+    dot(left + 5, rows - 1, coat)
+    dot(left + 6, rows - (2 if flick else 1), coat)
     if not flick:
-        half.set(left + 7, rows - 2, coat)
+        dot(left + 7, rows - 2, coat)
     if pointer is not None and pointer.at is not None:
         eyes = (200, 230, 90)
         turn = (pointer.at[0] > left + 2) - (pointer.at[0] < left + 2)
         if turn:
-            half.set(left + 2 + turn, top + 1, eyes)
+            dot(left + 2 + turn, top + 1, eyes)
         else:
-            half.set(left + 1, top + 1, eyes)
-            half.set(left + 3, top + 1, eyes)
+            dot(left + 1, top + 1, eyes)
+            dot(left + 3, top + 1, eyes)
 
 
 def sized(w: int, h: int) -> Size:
