@@ -23,6 +23,7 @@ APPS = {
     "stars": "night sky, a moon and grass in a breeze",
     "pond": "still water, rings that break against the words",
     "shore": "a beach from above: waves, their lace, a tide",
+    "flock": "starlings dance before a sunset",
     "window": "house window on a landscape, day and night",
     "train": "the land going by a train window",
     "fire": "a fire, from a candle to a hearth",

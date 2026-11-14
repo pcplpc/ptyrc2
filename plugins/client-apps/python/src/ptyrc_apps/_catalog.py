@@ -24,6 +24,7 @@ RANDOM: dict[str, tuple[tuple[str, ...], ...]] = {
     "confetti": ((), ("-a",)),
     "fire": ((), ("-a",)),
     "fishes": ((), ("-a",), ("--tank",), ("--tank", "-a")),
+    "flock": ((), ("-a",)),
     "flower": (("-a",),),  # bare, it wants its word on the screen
     "gallery": ((), ("-a",)),
     "git": ((), ("-a",)),
