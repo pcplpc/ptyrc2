@@ -4,7 +4,7 @@ the sand and leave their lace, a tide that comes and goes.
 
     ptyrc-app shore                 # sand, swell, swash, the tide
     ptyrc-app shore -d -r           # shells and wrack, ripples in the sand
-    ptyrc-app shore -c -b           # crabs, sandpipers at the water's edge
+    ptyrc-app shore -c -b           # crabs, sandpipers: they flee the pointer
     ptyrc-app shore -w -g           # someone's footprints, gulls overhead
     ptyrc-app shore -n              # dusk, then the moon on the water
     ptyrc-app shore --all
@@ -16,9 +16,12 @@ The sand is at the top, the sea at the bottom. All of it is braille,
 What it shows:
 
 - A scene that is a function of the time: `Shore.picture` keeps no
-  state. A wave is a number: where its crest is, how far it ran, what
-  it left, all follow from it (`Wave`). One sprite in view cells,
-  behind the text, 8 times a second, sent when it changed.
+  state but what the pointer did to the animals. A wave is a number:
+  where its crest is, how far it ran, what it left, all follow from
+  it (`Wave`). One sprite in view cells, behind the text, 8 times a
+  second, sent when it changed.
+- Few marks: a crest is a line of long strokes, a front one dot
+  thick; the sand and the water between are left almost bare.
 - A wave: a crest that comes in from the open sea, breaks at the
   still-water line, runs up the sand in lobes, slower on one side,
   and slides back. The foam is a net (`lace`), carried by the front.
@@ -33,6 +36,10 @@ What it shows:
 - `-b`, `-w`: footprints, of sandpipers that follow the water down
   and flee it, of someone walking by. A print lasts until a wave
   that peaked after it was made reaches it.
+- The pointer over the pane (`scare`, from the `hover` events), with
+  `-b`, `-c`: sandpipers run from it, and fly, all those about, when
+  it is on one; crabs run for their lives. One that rests is
+  forgotten; they walk back.
 - `-g`: the shadow of a gull, one request: a looped animation with a
   `motion` and a `ttl`.
 - `-n`: the light, in `--day` seconds: the palette goes from day to
@@ -47,11 +54,13 @@ import math
 import random
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 
-from ptyrc import Pilot, Sprite, clock
+from ptyrc import Pilot, PtyrcError, Sprite, clock
 
 from . import _cli
+from ._strip import Pointer
 from .life import DOTS
 from .snake import walls_of
 from .stars import Grid, clear, noise, runs
@@ -65,6 +74,7 @@ __all__ = [
     "lace",
     "light",
     "main",
+    "scare",
     "show",
     "swash",
     "tide",
@@ -89,6 +99,15 @@ STRIDE = 5  # dots a step
 TRAIL = 0.4  # seconds between two prints of a sandpiper
 ROWS = 11  # windrows of sand down the pane
 DUSK = 0.04  # share of a day a change of light takes
+STILL = 2.0  # seconds a pointer that rests still scares
+FADE = 3.0  # seconds its scare then takes to go
+WARY = 9.0  # cells from the pointer a sandpiper runs from it
+NEAR = 4.5  # cells from the pointer a sandpiper flies
+SHY = 11.0  # cells from the pointer a crab runs from it
+BOLT = 14.0  # cells a second of a crab that flees
+RUN = 9.0  # cells a second of a sandpiper that flees
+FLY = 0.9  # seconds a flight
+FLEE = 13.0  # cells a flight
 
 FOAM: tuple[Ink, ...] = (
     (231, 231, 123),
@@ -97,23 +116,22 @@ FOAM: tuple[Ink, ...] = (
     (153, 217, 44),
 )
 LINE: tuple[Ink, ...] = (
-    (255, 224, 37), (252, 223, 30), (248, 181, 30), (244, 245, 23), (240, 240, 23),
+    (254, 224, 37), (250, 223, 30), (246, 181, 30), (243, 245, 23), (241, 240, 23), (239, 239, 23),
 )  # fmt: skip
 #: A crest, from the shore out.
 SEA: tuple[Ink, ...] = (
     (116, 222, 31), (74, 180, 25), (38, 138, 24), (32, 96, 24), (25, 60, 18), (24, 24, 17),
 )  # fmt: skip
 GLINT: Ink = (195, 222, 67)
-DEEP: tuple[Ink, Ink] = ((31, 95, 23), (25, 59, 17))  # nearer, farther
 SHALLOW: tuple[Ink, ...] = ((37, 137, 23), (80, 180, 30))  # deeper, nearer
 SAND: tuple[Ink, ...] = (
-    (137, 131, 238), (95, 95, 237), (101, 95, 238), (137, 131, 239),
-    (143, 137, 239), (179, 137, 240), (137, 131, 238), (180, 173, 241),
+    (137, 131, 238), (137, 131, 239), (101, 95, 238), (137, 131, 238),
+    (101, 95, 239), (180, 173, 241),
 )  # fmt: skip
-WET: tuple[Ink, ...] = ((67, 96, 238), (103, 95, 237), (66, 132, 239), (109, 138, 59))
+WET: tuple[Ink, ...] = ((66, 96, 237), (67, 96, 238), (103, 95, 238))
 FILM: Ink = (153, 216, 60)  # water thin on the sand a wave leaves
 SUNK: tuple[Ink, ...] = ((66, 96, 23), (67, 60, 24), (73, 66, 23))
-FROTH: tuple[Ink, ...] = ((195, 223, 87), (153, 217, 44))
+FROTH: tuple[Ink, ...] = ((153, 217, 44), (110, 174, 38))
 WRACK: tuple[Ink, ...] = ((58, 58, 236), (64, 58, 237), (94, 94, 236), (100, 94, 238))
 RIPPLE: tuple[Ink, Ink] = ((95, 95, 236), (60, 96, 236))  # dry, wet
 PRINT: tuple[Ink, Ink] = ((180, 173, 243), (109, 138, 240))  # dry, wet
@@ -168,6 +186,40 @@ def light(t: float, day: float) -> tuple[int, float]:
 def _after(palette: int, f: float) -> int:
     """The palette that follows `palette` at `f` of a day."""
     return {0: 1, 1: 2 if f < 0.75 else 0, 2: 1}[palette]
+
+
+def scare(pointer: Pointer | None, t: float) -> tuple[int, int, float] | None:
+    """The cell of the pointer at `t` seconds and how much it scares,
+    0 to 1: all it can while it moves and `STILL` seconds after, less
+    over the next `FADE`, and as it leaves. None: not at all."""
+    if pointer is None or not pointer.trail:
+        return None
+    x, y, moved = pointer.trail[-1]
+    rest = t - moved - STILL if pointer.at is not None else t - pointer.since
+    much = 1.0 - max(0.0, rest) / FADE
+    return (x, y, much) if much > 0.0 else None
+
+
+@dataclass
+class _Bird:
+    """What the pointer did to a sandpiper."""
+
+    off: float = 0.0  # cells from where it would be
+    flight: tuple[float, float, float] | None = None  # from when, from, to
+    face: int = 1
+    down: float = -math.inf  # when it landed
+    since: float = math.inf  # it was not where it would be: from, to
+    until: float = -math.inf
+    tracks: list[tuple[int, int, float]] = field(default_factory=list)
+
+
+@dataclass
+class _Crab:
+    """What the pointer did to a crab."""
+
+    off: float = 0.0  # cells from where it would be
+    x: float | None = None  # where it was
+    way: int = 0  # the side it runs to; 0: it does not
 
 
 _LACE: list[list[float]] = []
@@ -253,7 +305,7 @@ class Shore:
         rng: random.Random,
         period: float = 8.0,
         ebb: float = 300.0,
-        grains: float = 900.0,
+        grains: float = 420.0,
         day: float = 0.0,
         drift: bool = False,
         ripples: bool = False,
@@ -271,6 +323,9 @@ class Shore:
         self.finds: list[tuple[float, float, int, int]] = []
         self._waves: dict[int, Wave] = {}
         self._across = 0
+        self._seen = -math.inf  # the time of the last picture
+        self._flock: list[_Bird] = []
+        self._dug: list[_Crab] = []
 
     # -- the waves ---------------------------------------------------
 
@@ -337,12 +392,23 @@ class Shore:
         h: int,
         t: float = 0.0,
         rocks: Sequence[tuple[int, int]] = (),
+        pointer: Pointer | None = None,
     ) -> Grid:
         """The shore over `w` by `h` cells at `t` seconds. `rocks`:
-        the cells where froth gathers when the water covers them."""
+        the cells where froth gathers when the water covers them.
+        `pointer`: what the animals flee, in cells; what it did to
+        them is kept from a picture to the next, a second apart at
+        most."""
         grid: Grid = [{} for _ in range(max(0, h))]
         if w <= 0 or h <= 0:
             return grid
+        dt = t - self._seen
+        self._seen = t
+        if not 0.0 <= dt <= 1.0:
+            dt = 0.0
+            self._flock.clear()
+            self._dug.clear()
+        fear = scare(pointer, t)
         across, down = 2 * w, 4 * h
         period = self.period
         stay = STAY * period
@@ -430,8 +496,6 @@ class Shore:
                 if keep < age or any(r[x] <= y + 0.5 for r in later):
                     continue
                 dot(x, int(y), ink, 3)
-                if keep > 0.72 and age < 0.4:
-                    dot(x, int(y) + 1, ink, 3)
 
         self._sea(dots, across, down, edge, base, t, k0, far, speed, h)
 
@@ -446,20 +510,20 @@ class Shore:
                 over = base - y  # dots of sand under the wave
                 column = net[(x + shift) % TILE]
                 if p < PEAK:
-                    line, body, scale = 1.0, 0.5, 1.5 + 0.3 * over
+                    line, body, scale = 1.0, 0.3, 1.5 + 0.3 * over
                     pale = 0
                 else:
                     q = (p - PEAK) / (1.0 - PEAK)
                     line = 0.7 * (1.0 - q) ** 1.5
                     pale = 1 + int(2.5 * q)
-                    body = 0.4 * (1.0 - q) ** 3
+                    body = 0.25 * (1.0 - q) ** 3
                     scale = 1.5 + 0.35 * over
                 y0 = math.floor(y)
                 deep = min(int(over) + 3, 30)
                 for d in range(deep):
                     py = y0 + d
                     if d < 2:
-                        want = line if d == 0 or p < PEAK else line * 0.5
+                        want = line if d == 0 else line * 0.4
                     else:
                         want = body * math.exp(-d / scale)
                         if want < 0.04:
@@ -474,9 +538,9 @@ class Shore:
         if self.drift:
             self._drift(glyphs, w, h, edge, wet)
         if self.birds:
-            self._birds(dots, glyphs, w, h, t, wet, washed)
+            self._birds(dots, glyphs, w, h, t, wet, washed, fear, dt)
         if self.crabs:
-            self._crabs(glyphs, w, h, t, edge)
+            self._crabs(glyphs, w, h, t, edge, fear, dt)
         if self.day and light(t, self.day)[0] == 2:
             self._moon(dots, across, down, edge, t)
 
@@ -509,19 +573,19 @@ class Shore:
             y1 = math.floor(edge[x])
             for py in range(max(0, math.ceil(wet[x])), y1):
                 roll = column[py % TILE]
-                if back[x] and y1 - py <= 5 and roll < 0.34 - 0.05 * (y1 - py):
+                if back[x] and y1 - py <= 4 and roll < 0.2 - 0.04 * (y1 - py):
                     dots.dot(x, py, FILM, 1)
-                elif roll < 0.11:
+                elif roll < 0.035:
                     dots.dot(x, py, WET[int(roll * 997) % len(WET)], 0)
         n = int(self.grains * w * h / AREA)
         rng = self._sand
         while len(self.sand) < n:
             u, v = rng.random(), rng.random()
-            if rng.random() < 0.6:
+            if rng.random() < 0.85:
                 # Windrows: most grains lie along lines the wind drew.
                 row = int(v * ROWS)
                 v = (row + 0.5 + 0.3 * math.sin(math.tau * (3 * u + 0.37 * row))) / ROWS
-                v += rng.gauss(0.0, 0.008)
+                v += rng.gauss(0.0, 0.004)
             self.sand.append((u, v % 1.0, rng.getrandbits(16)))
         for u, v, key in self.sand[:n]:
             px, py = int(u * across), int(v * down)
@@ -531,7 +595,7 @@ class Shore:
                     dots.dot(px, py, WET[key % len(WET)], 1)
                 else:
                     dots.dot(px, py, SAND[key % len(SAND)], 1)
-            elif depth < 14 and key % 3:
+            elif depth < 10 and key % 2:
                 dots.dot(px, py, SUNK[key % len(SUNK)], 0)
 
     def _sea(
@@ -548,7 +612,6 @@ class Shore:
         h: int,
     ) -> None:
         """The crests on their way in, the water's stipple, glints."""
-        gap = self.spacing(h)
         period = self.period
         net = lace()
         dot = dots.dot
@@ -587,31 +650,26 @@ class Shore:
                         dot(x, int(y), ink, 4)
                         if row[(x + drift) % TILE] < 0.6 * rise:
                             dot(x, int(y) - 1, ink, 4)
-                        for d in range(1, 1 + int(4 * rise)):
-                            if net[(x + k) % TILE][(d + drift) % TILE] < 0.4 * rise:
+                        for d in range(1, 1 + int(3 * rise)):
+                            if net[(x + k) % TILE][(d + drift) % TILE] < 0.25 * rise:
                                 dot(x, int(y) + d, FOAM[3], 4)
                         continue
-                # A dashed line, longer strokes nearer the shore.
-                stroke = row[((x >> 2) + (drift >> 3)) % TILE]
-                if stroke > 0.85 - 0.35 * min(1.0, near / 3.0):
+                # Long strokes, shorter and fewer farther out.
+                stroke = row[((x + drift) >> 4) % TILE]
+                if stroke > 0.92 - 0.3 * min(1.0, near / 3.0):
                     continue
                 ink = SEA[min(len(SEA) - 1, int(out / (0.55 * speed * period)))]
                 dot(x, int(y), ink, 2)
-                if near < 1.0 and row[(x + drift) % TILE] < 0.4:
-                    dot(x, int(y) + 1, ink, 2)
         # Shallow water over the sand, thinner as it deepens.
         slide = int(0.7 * t)
         for x in range(across):
             y0 = math.floor(edge[x]) + 1
             column = rough[(x * 5 + 11) % TILE]
-            for d in range(1, min(17, down - y0)):
-                if column[(y0 + d + slide) % TILE] < 0.16 - 0.008 * d:
-                    dot(x, y0 + d, SHALLOW[d < 6], 1)
-            for py in range(y0 + 17, down):
-                if column[(py + slide) % TILE] < 0.03:
-                    dot(x, py, DEEP[(py - y0) > 3 * gap], 0)
+            for d in range(1, min(13, down - y0)):
+                if column[(y0 + d + slide) % TILE] < 0.06 - 0.005 * d:
+                    dot(x, y0 + d, SHALLOW[d < 5], 1)
         # Short ripples between the crests.
-        for j in range(int(max(0.0, down - base) * across / 220)):
+        for j in range(int(max(0.0, down - base) * across / 600)):
             px = int(noise(j, 11) * across + 3.0 * math.sin(0.3 * t + j))
             py = int(base + 8 + noise(j, 12) * (down - base - 8))
             ink = SEA[min(len(SEA) - 1, 1 + int((py - base) / (0.55 * speed * period)))]
@@ -620,7 +678,7 @@ class Shore:
                     dot(px + dx, py, ink, 1)
         # Glints of the light, each on a beat of its own.
         cells = max(0.0, down - base) * across / 8
-        for j in range(int(cells / 40)):
+        for j in range(int(cells / 110)):
             beat = int(t / 0.6 + 8 * noise(j, 1))
             px = int(noise(j, beat) * across)
             py = int(edge[px] + 6 + noise(beat, j) * (down - edge[px] - 6))
@@ -646,7 +704,7 @@ class Shore:
             if depth < 0:
                 continue
             swell = 0.6 + 0.4 * math.sin(1.9 * t + 0.7 * x + 2.3 * y)
-            want = (0.08 + 0.3 * math.exp(-max(0.0, py - base) / size)) * swell
+            want = (0.03 + 0.14 * math.exp(-max(0.0, py - base) / size)) * swell
             sway = int(2.5 * math.sin(0.8 * t + y))
             for dy in range(4):
                 for dx in range(2):
@@ -754,33 +812,119 @@ class Shore:
         t: float,
         wet: list[float],
         washed: Any,
+        fear: tuple[int, int, float] | None,
+        dt: float,
     ) -> None:
-        """Sandpipers: they follow the water down and run from it."""
+        """Sandpipers: they follow the water down and run from it;
+        from the pointer too, and fly when it is on them."""
         across = 2 * w
         n = max(3, min(9, w // 16))
 
-        def place(i: int, at: float) -> tuple[int, int]:
+        def home(i: int, at: float) -> float:
             mid = w * (0.5 + 0.36 * math.sin(at * math.tau / 97 + self.key))
-            x = mid + (i - (n - 1) / 2) * 3.4 + 1.8 * math.sin(0.7 * at + 2.1 * i)
+            return mid + (i - (n - 1) / 2) * 3.4 + 1.8 * math.sin(0.7 * at + 2.1 * i)
+
+        def stand(i: int, x: float, at: float) -> tuple[int, int]:
             x = max(0, min(w - 1, round(x)))
             lag = 0.25 + 0.12 * (i % 3)
             y = int(self.edge(2 * x, at - lag, across, h)) >> 2
             return x, max(0, min(h - 1, y - 1 - (i & 1)))
 
-        for i in range(n):
-            x, y = place(i, t)
+        def place(i: int, at: float) -> tuple[int, int]:
+            return stand(i, home(i, at), at)
+
+        if len(self._flock) != n:
+            self._flock = [_Bird() for _ in range(n)]
+        flock = self._flock
+        # Where each is, how far from the pointer, the side it flees to.
+        spots: list[tuple[float, float, int]] = []
+        for i, bird in enumerate(flock):
+            x = home(i, t) + bird.off
+            if fear is None:
+                spots.append((x, math.inf, 1))
+                continue
+            d = math.hypot(x - fear[0], 2.0 * (stand(i, x, t)[1] - fear[1]))
+            spots.append((x, d, 1 if (x - fear[0] or (i & 1) - 0.5) > 0 else -1))
+        at, much = (fear[0], fear[2]) if fear else (0, 0.0)
+        # One flies: those about it do.
+        up = any(
+            d < NEAR * much and bird.flight is None
+            for bird, (_, d, _) in zip(flock, spots, strict=True)
+        )
+        for i, bird in enumerate(flock):
+            x, d, way = spots[i]
+            d -= 1.7 * (i % 4)  # each its own nerve
+            hx = x - bird.off
+            lift = 0.0
+            if bird.flight is not None:
+                since, a, b = bird.flight
+                u = (t - since) / FLY
+                if u >= 1.0:
+                    bird.flight, bird.down, x = None, t, b
+                elif u > 0.0:
+                    x = a + (b - a) * u * u * (3 - 2 * u)
+                    lift = math.sin(math.pi * u)
+                    bird.face = 1 if b > a else -1
+            elif d < NEAR * much or (
+                up and d < (WARY + 3.0) * much and t - bird.down > 2 * FLY
+            ):
+                to = x + way * (FLEE + 6.0 * noise(i, int(8 * t)))
+                wall = 1.0 if way < 0 else w - 2.0
+                if abs(wall - x) < FLEE / 2:  # no room: over the pointer
+                    to = x - way * (FLEE + 2 * abs(x - at))
+                to = max(1.0, min(w - 2.0, to))
+                wait = 0.3 * noise(i, int(t)) * max(0.0, d) / WARY
+                bird.flight = (t + wait, x, to)
+            elif d < WARY * much:
+                x = max(0.0, min(w - 1.0, x + way * RUN * dt))
+                bird.face = way
+            elif bird.off and (
+                fear is None
+                or (
+                    (hx - fear[0]) * (x - fear[0]) > 0
+                    and abs(hx - fear[0]) > WARY * much + 2
+                )
+            ):
+                step = min(abs(bird.off), 0.3 * RUN * dt)
+                x -= math.copysign(step, bird.off)
+                bird.face = -1 if bird.off > 0 else 1
+            bird.off = x - hx
+            cx, cy = stand(i, x, t)
+            away = bird.off != 0.0 or bird.flight is not None
+            if away:
+                if t - bird.until > 25 * TRAIL:
+                    bird.since = t
+                bird.until = t
+            # Its prints: where it would have been, and where it fled.
             for j in range(1, 26):
                 made = t - j * TRAIL
+                if bird.since <= made <= bird.until:
+                    continue
                 fx, fy = place(i, made)
                 px, py = 2 * fx + (j & 1), 4 * fy + 2 + (j & 1)
-                if (fx, fy) != (x, y) and not washed(px, py, made):
+                if (fx, fy) != (cx, cy) and not washed(px, py, made):
                     dots.dot(px, py, PRINT[py >= wet[px]], 2)
-            before = place(i, t - 0.3)
-            if before == (x, y):
-                glyph = "," if noise(i, int(2 * t)) < 0.4 else "›‹"[i & 1]
+            tracks = bird.tracks
+            while tracks and t - tracks[0][2] > 25 * TRAIL:
+                tracks.pop(0)
+            for px, py, made in tracks:
+                if (px >> 1, py >> 2) != (cx, cy) and not washed(px, py, made):
+                    dots.dot(px, py, PRINT[py >= wet[px]], 2)
+            if away and not lift and (not tracks or t - tracks[-1][2] >= TRAIL / 2):
+                odd = len(tracks) & 1
+                tracks.append((2 * cx + odd, 4 * cy + 2 + odd, t))
+            if lift:
+                cy = max(0, cy - round(2.4 * lift))
+                glyph = "v^"[int(8 * t + i) & 1]
+            elif away:
+                glyph = "›" if bird.face > 0 else "‹"
             else:
-                glyph = "›" if before[0] <= x else "‹"
-            glyphs[x, y] = (glyph, BIRD)
+                before = place(i, t - 0.3)
+                if before == (cx, cy):
+                    glyph = "," if noise(i, int(2 * t)) < 0.4 else "›‹"[i & 1]
+                else:
+                    glyph = "›" if before[0] <= cx else "‹"
+            glyphs[cx, cy] = (glyph, BIRD)
 
     def _crabs(
         self,
@@ -789,21 +933,51 @@ class Shore:
         h: int,
         t: float,
         edge: list[float],
+        fear: tuple[int, int, float] | None,
+        dt: float,
     ) -> None:
         """Crabs: sideways, in bursts; under the sand when the water
-        comes over them."""
-        n = max(1, w // 30)
+        comes over them. They run from the pointer, to the side they
+        took, past it when the side of the pane is near."""
+        n = max(1, w // 12)
         size = self.reach(h)
         base = tide(t, self.ebb, h)
-        for i in range(n):
+        if len(self._dug) != n:
+            self._dug = [_Crab() for _ in range(n)]
+        for i, crab in enumerate(self._dug):
             key = self.key + 977 * i
             beat, part = divmod(t / 2.6 + 5 * noise(key), 1.0)
             a, b = noise(key, int(beat)), noise(key, int(beat) + 1)
             ease = min(1.0, part / 0.35)
             ease = ease * ease * (3 - 2 * ease)
-            x = round(w * ((i + 0.1 + 0.8 * (a + (b - a) * ease)) / n))
-            x = max(0, min(w - 1, x))
+            hx = w * ((i + 0.3 + 0.4 * (a + (b - a) * ease)) / n)
             y = int(base - size * (0.7 + 0.5 * noise(key, 3))) >> 2
+            fx = hx + crab.off
+            was = fx if crab.x is None else crab.x
+            d = math.inf
+            if fear is not None:
+                d = math.hypot(was - fear[0], 2.0 * (y - fear[1])) / fear[2]
+                d -= 5.0 * noise(key, 7)  # each its own nerve
+            if d < SHY:
+                if not crab.way:
+                    crab.way = 1 if was >= fear[0] else -1  # type: ignore[index]
+                    if abs((0 if crab.way < 0 else w - 1) - was) < 3:
+                        crab.way = -crab.way
+                elif was in (0.0, w - 1.0):
+                    crab.way = 1 if was == 0.0 else -1
+                fx = was + crab.way * BOLT * (0.7 + 0.6 * noise(key, int(4 * t))) * dt
+            elif d >= SHY + 2.0:
+                crab.way = 0
+                if fear is not None and abs(hx - fear[0]) < (SHY + 2.0) * fear[2]:
+                    fx = was  # the pointer is where it would go
+                else:
+                    step = min(abs(crab.off), 0.3 * RUN * dt)
+                    fx -= math.copysign(step, crab.off)
+            else:
+                fx = was
+            fx = max(0.0, min(w - 1.0, fx))
+            crab.off, crab.x = fx - hx, fx
+            x = round(fx)
             if 0 <= y < h and 4 * y + 3 < edge[2 * x]:
                 glyphs[x, y] = ("ж", CRAB)
 
@@ -893,16 +1067,32 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     shore = scene(args, rng)
     fx = random.Random(rng.getrandbits(32))
     frame = _cli.pick(pilot, args.frame)
-    sight = _cli.Sight(pilot, frame)
     size = (0, 0)
     shown: list[int] = []
     rocks: list[tuple[int, int]] = []
     beach: Sprite | None = None
     sent: Any = None  # the cells of the beach, as sent
     start = clock.monotonic() - args.at
+    pointer = Pointer(lambda: clock.monotonic() - start)
+    sight = _cli.Sight(pilot, frame)
+    if shore.birds or shore.crabs:
+        try:
+            pilot.subscribe("hover")
+        except PtyrcError as err:  # a driver without the topic
+            if err.code != "bad-params":
+                raise
     flight = fx.uniform(*GULL) / 4  # when the next gull goes
     for _ in _cli.ticks(PERIOD, seconds):
-        if not sight.look():
+        seen = sight.look()
+        for topic, data in sight.others:
+            # Over the beach, or off every sprite; over a gull: no news.
+            if topic != "hover":
+                continue
+            if data.get("sprite") is None:
+                pointer.leave()
+            elif beach is not None and data["sprite"] == beach.id:
+                pointer.move(*data["at"])
+        if not seen:
             continue
         w, h = frame.size
         t = clock.monotonic() - start
@@ -911,7 +1101,10 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
             shown = clear(sight.rows, w, h)
             rocks = rocks_of(sight.rows, w, h)
         with sight.drawing(), pilot.batch():
-            cells = runs(shore.picture(w, h, t, rocks), w, shown)
+            cells = runs(shore.picture(w, h, t, rocks, pointer), w, shown)
+            # The whole view is its box: a hover is told anywhere on it.
+            if (pad := w - sum(len(run["t"]) for run in cells[0])) > 0:
+                cells[0].append({"t": " " * pad})
             if beach is None:
                 beach = pilot.draw(
                     cells=cells, frame=frame.id, at=(0, 0), space="view", z=0
@@ -966,9 +1159,9 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
     out.add_argument(
         "--sand",
         type=float,
-        default=900.0,
+        default=420.0,
         metavar="N",
-        help="grains of sand over 80 by 24 cells [default: 900]",
+        help="grains of sand over 80 by 24 cells [default: 420]",
     )
     out.add_argument(
         "--at",

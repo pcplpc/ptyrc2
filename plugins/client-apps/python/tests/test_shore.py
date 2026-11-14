@@ -4,15 +4,21 @@ driver."""
 
 from __future__ import annotations
 
+import math
 import random
 import threading
 import time
+from typing import TYPE_CHECKING
 
 import pytest
 from ptyrc import Pilot
 from ptyrc import clock as session_clock
 from ptyrc_apps import shore
+from ptyrc_apps._strip import Pointer
 from ptyrc_apps.shore import Shore
+
+if TYPE_CHECKING:
+    from conftest import Host
 
 
 def inks(grid: shore.Grid) -> set[int]:
@@ -68,7 +74,7 @@ def test_picture_is_a_function_of_the_time() -> None:
 def test_sand_over_sea() -> None:
     grid = Shore(random.Random(1)).picture(80, 24, 3.0)
     dry = {ink[0] for ink in shore.SAND}
-    sea = {ink[0] for ink in shore.SEA + shore.DEEP}
+    sea = {ink[0] for ink in shore.SEA + shore.SHALLOW}
     assert inks(grid[:6]) <= dry
     assert inks(grid[-2:]) & sea and not inks(grid[-2:]) & dry
 
@@ -126,6 +132,76 @@ def test_extras() -> None:
     for kind in ("drift", "ripples", "walker"):
         one = Shore(random.Random(1), **{kind: True})
         assert one.picture(80, 24, 30.0) != plain
+
+
+def found(grid: shore.Grid, wanted: str) -> list[tuple[int, int]]:
+    return [
+        (x, y) for y, row in enumerate(grid) for x, (g, _) in row.items() if g in wanted
+    ]
+
+
+def test_scare() -> None:
+    now = [10.0]
+    pointer = Pointer(lambda: now[0])
+    assert shore.scare(None, 10.0) is None and shore.scare(pointer, 10.0) is None
+    pointer.move(7, 3)
+    assert shore.scare(pointer, 10.0) == (7, 3, 1.0)
+    assert shore.scare(pointer, 10.0 + shore.STILL) == (7, 3, 1.0)
+    x, y, much = shore.scare(pointer, 10.0 + shore.STILL + shore.FADE / 2)
+    assert (x, y) == (7, 3) and much == pytest.approx(0.5)
+    assert shore.scare(pointer, 10.0 + shore.STILL + shore.FADE) is None
+    now[0] = 11.0
+    pointer.leave()
+    assert shore.scare(pointer, 11.0 + shore.FADE / 2)[2] == pytest.approx(0.5)
+
+
+def test_the_animals_flee_the_pointer() -> None:
+    now = [14.0]
+    pointer = Pointer(lambda: now[0])
+    one = Shore(random.Random(3), birds=True, crabs=True)
+    alone = Shore(random.Random(3), birds=True, crabs=True)
+
+    def step(to: float) -> shore.Grid:
+        grid = one.picture(80, 24, now[0], (), pointer)
+        while now[0] < to:
+            now[0] += shore.PERIOD
+            grid = one.picture(80, 24, now[0], (), pointer)
+        return grid
+
+    # No pointer, or one that never came: the scene of the time.
+    grid = step(14.0)
+    assert grid == alone.picture(80, 24, 14.0)
+    birds, crabs = found(grid, "›‹,"), found(grid, "ж")
+    assert len(birds) >= 3 and crabs
+    # On a bird: those about it fly, and land away from it.
+    bx, by = birds[0]
+    pointer.move(bx, by)
+    seen: set[str] = set()
+    for _ in range(12):
+        seen |= glyphs(step(now[0] + shore.PERIOD))
+    assert seen & set("v^")
+    grid = step(now[0] + 1.0)
+    assert not found(grid, "v^")
+    for x, y in found(grid, "›‹,"):
+        assert math.hypot(x - bx, 2 * (y - by)) >= shore.NEAR
+    # On a crab: it runs, and stays away.
+    cx, cy = found(grid, "ж")[0]
+    pointer.move(cx, cy)
+    for _ in range(8):
+        grid = step(now[0] + shore.PERIOD)
+        pointer.move(cx, cy)
+        assert (cx, cy) not in found(grid, "ж")
+    assert set(found(grid, "ж")) and not glyphs(grid) & set(".¨")
+    for x, y in found(grid, "ж"):
+        assert math.hypot(x - cx, 2 * (y - cy)) >= shore.SHY - 1
+    # It left: they come back, and the scene is that of the time again.
+    pointer.leave()
+    step(now[0] + 60.0)
+    assert step(now[0]) == alone.picture(80, 24, now[0])
+    # A jump of the time: what it did to them is forgotten.
+    pointer.move(*found(step(now[0]), "›‹,")[0])
+    step(now[0] + 1.0)
+    assert one.picture(80, 24, 500.0) == alone.picture(80, 24, 500.0)
 
 
 def test_night() -> None:
@@ -209,3 +285,31 @@ def test_shore_all(session: Pilot, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(shore, "GULL", (0.4, 0.8))
     pictures, sprites = played(session, "-a")
     assert pictures > 3 and sprites >= 2
+
+
+def test_the_host_mouse_over_the_beach(hosted: tuple[Host, Pilot]) -> None:
+    host, pilot = hosted
+    args = ["-s", pilot.session, "--seed", "3", "--at", "14", "-b", "-c"]
+    status: list[int] = []
+    thread = threading.Thread(
+        target=lambda: status.append(shore.main(args, seconds=4.0))
+    )
+    thread.start()
+
+    def birds() -> list[tuple[int, int]]:
+        rows = pilot.dump()["host"]
+        return [(x, y) for y, row in enumerate(rows) for x, c in enumerate(row) if c in "›‹,"]  # fmt: skip
+
+    deadline = time.monotonic() + 5
+    while len(found := birds()) < 3:
+        assert time.monotonic() < deadline, "no sandpiper"
+        time.sleep(0.02)
+    host.wait_seen(b"\x1b[?1003h")
+    x, y = found[0]
+    host.move(x, y)
+    flown = False
+    while thread.is_alive():
+        flown |= any(c in row for row in pilot.dump()["host"] for c in "v^")
+        time.sleep(0.02)
+    thread.join()
+    assert status == [0] and flown

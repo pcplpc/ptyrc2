@@ -3,81 +3,14 @@
 
 from __future__ import annotations
 
-import fcntl
-import os
-import pty
-import struct
-import subprocess
-import termios
-import threading
 import time
-from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
-import pytest
-from ptyrc import Pilot, PtyrcError, clock
+from ptyrc import Pilot, clock
 from ptyrc_apps import _widgets
 
-
-class Host:
-    """A terminal that is not there: `ptyrc run` on a pty, what it
-    writes kept, what a mouse would send typed in."""
-
-    def __init__(self, name: str) -> None:
-        self.master, slave = pty.openpty()
-        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
-        argv = [os.environ["PTYRC_BIN"], "run", "--name", name, "--"]
-        argv += ["env", "PS1=$ ", "sh"]
-        self.driver = subprocess.Popen(
-            argv, stdin=slave, stdout=slave, stderr=slave, start_new_session=True
-        )
-        os.close(slave)
-        self.seen = b""
-        threading.Thread(target=self._read, daemon=True).start()
-
-    def _read(self) -> None:
-        try:
-            while data := os.read(self.master, 65536):
-                self.seen += data
-        except OSError:
-            pass
-
-    def move(self, x: int, y: int) -> None:
-        """A move with no button down on a screen cell, SGR form."""
-        os.write(self.master, f"\x1b[<35;{x + 1};{y + 1}M".encode())
-
-    def wait_seen(self, needle: bytes, start: int = 0) -> None:
-        deadline = time.monotonic() + 5
-        while needle not in self.seen[start:]:
-            assert time.monotonic() < deadline, (needle, self.seen[-200:])
-            time.sleep(0.01)
-
-    def close(self) -> None:
-        self.driver.kill()
-        self.driver.wait()
-        os.close(self.master)
-
-
-@pytest.fixture
-def hosted() -> Iterator[tuple[Host, Pilot]]:
-    name = f"hover-{os.getpid()}-{time.monotonic_ns() % 10**9}"
-    host = Host(name)
-    try:
-        deadline = time.monotonic() + 5
-        while True:
-            try:
-                pilot = Pilot(name)
-                break
-            except (PtyrcError, OSError):
-                assert time.monotonic() < deadline, "no session"
-                time.sleep(0.02)
-        with pilot:
-            pilot.wait_for("$ ")
-            while not pilot.frame("raw").usable:
-                assert time.monotonic() < deadline, "no usable frame"
-                time.sleep(0.02)
-            yield host, pilot
-    finally:
-        host.close()
+if TYPE_CHECKING:
+    from conftest import Host
 
 
 class Seen:
