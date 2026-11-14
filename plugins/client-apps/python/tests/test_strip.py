@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import itertools
+from dataclasses import replace
 from datetime import datetime
 
 import pytest
@@ -287,3 +288,75 @@ def test_pointer() -> None:
     now[0] = 16.0
     pointer.move(0, 0)  # the old places are forgotten
     assert pointer.trail == [(0, 0, 16.0)] and pointer.since == 16.0
+
+
+def test_ground() -> None:
+    """`fields`, `strata`, `streak`: a ground of more than one colour,
+    that scrolls with its layer."""
+    crops = {s: ((200, 180, 90), (90, 160, 40), (140, 100, 70)) for s in _sky.SEASONS}
+
+    def tones(layer: Layer, shift: float = 0.0, sky: _sky.Sky = NOON) -> list[list]:
+        half = Half(60, 10)
+        _strip.paint(half, layer, sky, shift, "summer")
+        return [row[:] for row in half.px[8:]]
+
+    flat = Layer(Strip(2, "flat"), 0.0, 4.0, 0.0)
+    assert len({c for row in tones(flat) for c in row}) == 1
+    for knob in (
+        {"fields": _strip.Fields(crops, 9.0, 2, 1.0, 0.5)},
+        {"strata": ((200, 110, 70), (150, 80, 60), (230, 150, 100))},
+        {"streak": 0.5},
+    ):
+        layer = Layer(Strip(2, "flat"), 0.0, 4.0, 0.0, **knob)
+        rows = tones(layer)
+        assert len({c for row in rows for c in row}) >= 2, knob
+        moved = tones(layer, 7.0)
+        assert [row[7:] for row in rows] == [row[:-7] for row in moved]
+    # A field: bands under the ground line, borders that lean.
+    fields = _strip.Fields(crops, 10.0, 2, 1.0)
+    assert [fields.at(0, 3.0, d)[0] for d in range(9)] == [0, 0, 1, 1, 1, 2, 2, 2, 2]
+    assert fields.at(0, 3.0, 0)[1] == fields.at(0, 2.0, 1)[1] + 0
+    assert sum(fields.at(0, x, 0)[2] for x in range(100)) == 10
+    # In the dark the crops are nearly one.
+    layer = Layer(Strip(2, "flat"), 0.0, 4.0, 0.0, fields=fields)
+    by_day = {c for row in tones(layer) for c in row}
+    by_night = {c for row in tones(layer, 0.0, NIGHT) for c in row}
+    spread = [max(c[1] for c in s) - min(c[1] for c in s) for s in (by_day, by_night)]
+    assert spread[0] > 4 * max(1, spread[1])
+
+
+@pytest.mark.parametrize(
+    "kind",
+    ["tree", "pine", "poplar", "house", "barn", "chalet", "church", "lighthouse"]
+    + ["sheep", "cow", "bush", "rock", "hay", "cactus", "palm", "pylon", "hut"],
+)
+def test_things(kind: str) -> None:
+    for size in (2.0, 5.0, 20.0):
+        layer = Layer(Strip(2, "flat"), 0.0, 40.0, 0.0, things=(kind,), gap=24)
+        layer.density, layer.size = 1.0, size
+        empty, half = Half(80, 22), Half(80, 22)
+        _strip.paint(empty, replace(layer, things=()), NOON, 0.0, "summer")
+        marks = _strip.paint(half, layer, NOON, 0.0, "summer")
+        assert half.px != empty.px and not half.over
+        lit = {m.kind for m in marks}
+        assert ("window" in lit) == (
+            kind in ("house", "chalet", "church", "lighthouse")
+        )
+        assert ("chimney" in lit) == (kind in ("house", "chalet") and size > 2)
+        for m in marks:
+            if m.kind == "window" and 0 <= m.x < 80:
+                assert half.get(m.x, m.y) == m.pane
+
+
+def test_pale_at_night() -> None:
+    """Snow shows at night; what is dark stays dark."""
+    snow = Layer(Strip(2, "flat"), 0.0, 4.0, 0.0, colour=_strip.SNOW)
+    soil = Layer(Strip(2, "flat"), 0.0, 4.0, 0.0, colour=(90, 160, 40))
+    out = []
+    for layer in (snow, soil):
+        half = Half(4, 4)
+        _strip.paint(half, layer, NIGHT, 0.0, "summer")
+        out.append(half.px[7][0])
+    assert sum(out[0]) > 2.5 * sum(out[1]) and out[0][2] > out[0][0]
+    dark = NIGHT.shade((90, 160, 40))
+    assert all(abs(a - b) <= 4 for a, b in zip(out[1], dark, strict=True))

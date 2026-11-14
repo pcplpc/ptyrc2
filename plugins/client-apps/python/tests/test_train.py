@@ -180,21 +180,37 @@ def colours(rows: train.Rows) -> list[str]:
     return [run["bg"] for row in rows for run in row for _ in run["t"]]
 
 
+def grid(rows: train.Rows) -> list[list[str]]:
+    flat = colours(rows)
+    return [flat[i : i + 48] for i in range(0, len(flat), 48)]
+
+
 def test_tunnel() -> None:
     trip = replace(ALL, weather=None, deep=True)
     start = cycle(trip, "tunnel") * CYCLE + train.WHEN
-    dark = hexa(train.DARK)
-    inside = colours(train.scene(48, 11, NOON, start + 4.0, trip))
-    assert inside.count(dark) > 0.5 * 48 * 11
-    assert len(set(inside)) > 3  # the car in the glass, a lamp
+    mouth = start + train.approach(22) / PACE  # when it comes in sight
+    wall = {hexa(train.MORTAR), hexa(train.DARK)}
+    inside = train.scene(48, 11, NOON, mouth + 4.0, trip)
+    assert wall <= set(colours(inside)) and len(set(colours(inside))) > 8
+    # No sky in it: the same by day and by night, and no rain.
+    assert inside == train.scene(48, 11, NIGHT, mouth + 4.0, trip)
+    wet = train.scene(48, 11, NOON, mouth + 4.0, replace(trip, weather="rain"))
+    assert wet == inside
+    # The wall goes by, two pixels a frame.
+    a = grid(inside)
+    b = grid(train.scene(48, 11, NOON, mouth + 4.0 + 1 / train.FPS, trip))
+    assert all(a[y][2:] == b[y][:-2] for y in range(11)) and a != b
     before = colours(train.scene(48, 11, NOON, start - 1.0, trip))
-    after = train.scene(48, 11, NOON, start + train.SPAN["tunnel"] + 3, trip)
-    assert dark not in before and dark not in colours(after)
-    # It comes from the right.
-    mouth = colours(train.scene(48, 11, NOON, start + 0.9, trip))
-    rows = [mouth[i * 48 : (i + 1) * 48] for i in range(11)]
-    assert all(row[47] == dark for row in rows[2:6])
-    assert all(row[0] != dark for row in rows)
+    after = train.scene(48, 11, NOON, mouth + train.SPAN["tunnel"] + 5, trip)
+    assert not wall & set(before) and not wall & set(colours(after))
+    # A cutting rises first, from the right; then the mouth.
+    rising = grid(train.scene(48, 11, NOON, mouth - 0.3, trip))
+    sky = grid(train.scene(48, 11, NOON, start - 1.0, trip))[0][47]
+    assert rising[0][0] == sky and rising[0][47] != sky
+    assert not wall & {c for row in rising for c in row}
+    entering = grid(train.scene(48, 11, NOON, mouth + 0.9, trip))
+    assert wall & {row[47] for row in entering}
+    assert not wall & {row[0] for row in entering}
 
 
 def test_station() -> None:
@@ -213,21 +229,56 @@ def test_station() -> None:
     assert dots == 0
 
 
-def test_other_events() -> None:
+def test_other_train() -> None:
     trip = replace(ALL, weather=None, deep=True)
     k = cycle(trip, "train")
     start = k * CYCLE + train.WHEN
     coat = hexa(train.LIVERY[k % len(train.LIVERY)])
-    passing = colours(train.scene(48, 11, NOON, start + train.SPAN["train"] / 2, trip))
-    assert passing[-48:].count(coat) > 40  # its side fills the glass
-    assert coat not in colours(train.scene(48, 11, NOON, start - 1, trip))
-    assert coat not in colours(train.scene(48, 11, NOON, start + 5, trip))
+    passing = grid(train.scene(48, 11, NOON, start + 1.5, trip))
+    assert passing[8].count(coat) > 24  # its side fills the glass
+    assert coat not in passing[0]  # the land over its roof
+    # It goes by `RUSH` pixels a frame, all of a piece.
+    then = grid(train.scene(48, 11, NOON, start + 1.5 + 1 / train.FPS, trip))
+    assert all(passing[y][6:] == then[y][:-6] for y in range(3, 11))
+    lamp = hexa((255, 246, 206))  # its head, first
+    first = colours(train.scene(48, 11, NOON, start + 2 / train.FPS, trip))
+    assert lamp in first and first.count(coat) < 48
+    long = (48 + train.CAR * train.CARS) / (train.RUSH * train.FPS)
+    for t in (start - 1, start + long + 0.1):
+        assert coat not in colours(train.scene(48, 11, NOON, t, trip))
+    assert coat in colours(train.scene(48, 11, NOON, start + long - 0.2, trip))
+
+
+def test_bridge() -> None:
+    trip = replace(ALL, weather=None, deep=True)
     start = cycle(trip, "bridge") * CYCLE + train.WHEN
     iron = hexa(train.IRON)
-    on = colours(train.scene(48, 11, NOON, start + train.SPAN["bridge"] / 2 + 1, trip))
-    assert on.count(iron) > 48
-    assert iron not in colours(train.scene(48, 11, NOON, start - 1, trip))
-    assert iron not in colours(train.scene(48, 11, NOON, start + 9, trip))
+    mid = start + train.SPAN["bridge"] / 2 + 1
+    on = train.scene(48, 11, NOON, mid, trip)
+    assert grid(on)[0].count(iron) == 48  # the chord over it
+    assert colours(on).count(iron) > 80
+    # A river under it: what is under the far land is not the land's.
+    land = train.scene(48, 11, NOON, start - 1, trip)
+    assert not set(grid(on)[8]) & set(grid(land)[8])
+    # No pole on it, no wire.
+    assert not any(0x2800 < ord(c) < 0x2900 for c, _, _ in pixels(on))
+    assert iron not in colours(land)
+    gone = start + train.SPAN["bridge"] + 3
+    assert iron not in colours(train.scene(48, 11, NOON, gone, trip))
+    # The truss goes by with the banks, a pixel a frame.
+    a, b = grid(on), grid(train.scene(48, 11, NOON, mid + 1 / train.FPS, trip))
+    assert all(a[y][1:] == b[y][:-1] for y in (0, 10))
+
+
+@pytest.mark.parametrize("what", train.EVENTS)
+def test_events_fit(what: str) -> None:
+    """Each event, as it comes, stays and goes, at every size."""
+    trip = replace(ALL, weather="snow")
+    start = cycle(trip, what) * CYCLE + train.WHEN
+    for w, h in (*train.SIZES, (1, 1), (5, 2), (70, 16)):
+        for step in range(34):
+            for when in (NOON, NIGHT):
+                check(train.scene(w, h, when, start - 1 + step * 0.9, trip), w, h)
 
 
 def test_breath() -> None:

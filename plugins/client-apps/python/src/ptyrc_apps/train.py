@@ -24,11 +24,13 @@ What it shows:
   brushes the glass, what the trip meets;
 - bare: the sky, two ranges of hills, the verge. `-l`: the land: far
   ridges, trees, houses lit at night, what brushes the glass; `-p`:
-  poles and their wires, sagging; `-e`: what a trip is made of: a
-  tunnel and the car in the glass, a bridge, a train the other way, a
-  station where it stops; `-y`: the season of the date; `-w`: the
-  weather of the day, rain along the glass; `-a`: all, and the line
-  of the day (`--line`: plain, coast, alps, desert, city);
+  poles and their wires, sagging; `-e`: what a trip meets, one a
+  `CYCLE`: a tunnel, a cutting up to its mouth, then a wall of
+  bricks and its lamps; a truss over a river; a train the other way;
+  a level crossing, its boom down; a station where it stops; `-y`:
+  the season of the date; `-w`: the weather of the day, rain along
+  the glass; `-a`: all, and the line of the day (`--line`: plain,
+  coast, alps, desert, city);
 - the pointer on the glass (`_strip.Pointer`): a breath of fog where
   it goes, gone in a few seconds;
 - `-r`: what is not given is drawn at random, another at each run
@@ -56,6 +58,7 @@ from ._canvas import NEAR, RGB, Braille, Half, Rows, ansi, mix
 from ._line import LINES, land
 from ._strip import (
     LAMP,
+    SEA,
     WHITE,
     Layer,
     Mark,
@@ -70,6 +73,7 @@ from ._strip import (
     snow,
     stars,
     water,
+    wave,
 )
 from .window import Era, drawn, times
 
@@ -92,7 +96,7 @@ Size = tuple[int, int]
 
 #: The inner sizes of the variants.
 SIZES: tuple[Size, ...] = ((10, 3), (16, 4), (24, 6), (34, 8), (48, 11))
-EVENTS = ("tunnel", "station", "train", "bridge")
+EVENTS = ("tunnel", "station", "train", "bridge", "crossing")
 #: The frame of the glass: rounded above, a rail under.
 BORDER: dict[str, Any] = {
     "corners": "╭╮╘╛",
@@ -108,15 +112,24 @@ PACE = 24.0  # pixels a second, the nearest plane: one a frame
 CYCLE = 70.0  # seconds from an event to the next
 WHEN = 24.0  # seconds into a cycle, its event
 BRAKE, STAND = 9.0, 10.0  # seconds: to stop and to leave; standing
-SPAN = {"tunnel": 8.0, "train": 3.2, "bridge": 5.0}  # seconds an event lasts
+SPAN = {"tunnel": 8.0, "bridge": 6.0, "crossing": 1.5}  # seconds along each
+CAR, CARS = 48, 9  # pixels a car of a train the other way; its cars
+RUSH = 6  # pixels a frame it goes by
+LAMPS = 48  # pixels of wall from a lamp of a tunnel to the next
+PORTAL = 3  # pixels of stone at a mouth
 POLES = 30  # pixels from a pole to the next
 KEEP = 6.0  # seconds a breath stays on the glass
 ROUGH = 0.45  # how much a wire darkens a pixel
 
-DARK: RGB = (10, 10, 14)
-IRON: RGB = (120, 56, 44)
+DARK: RGB = (22, 20, 24)
+BRICK: RGB = (62, 50, 48)
+BAKED: RGB = (88, 58, 50)
+MORTAR: RGB = (40, 36, 38)
+ROCK: RGB = (118, 110, 108)
+GLOW: RGB = (255, 184, 24)  # of a lamp on a wall: amber in the 256 too
+IRON: RGB = (160, 40, 36)
 STONE: RGB = (150, 150, 158)
-LIVERY: tuple[RGB, ...] = ((196, 52, 48), (40, 96, 170), (236, 190, 60), (60, 140, 90))
+LIVERY: tuple[RGB, ...] = ((204, 44, 44), (40, 96, 170), (236, 190, 60), (60, 140, 90))
 
 
 @dataclass(frozen=True)
@@ -251,98 +264,266 @@ def _string(half: Half, wires: Strung) -> None:
             half.over.setdefault((cx, cy), (glyph, ink, bg))
 
 
-def _tunnel(half: Half, sky: _sky.Sky, x0: float, x1: float, shift: float) -> None:
-    """Dark from the pixel `x0` to `x1`: lamps go by, and the car
-    shows in the glass."""
-    w, rows = half.w, 2 * half.h
-    a, b = max(0, math.ceil(x0)), min(w, math.ceil(x1))
-    for x in range(a, b):
-        for y in range(rows):
-            half.px[y][x] = DARK
-        for cy in range(half.h):
-            half.over.pop((x, cy), None)
-    for edge in (
-        math.ceil(x0) - 1,
-        math.ceil(x0) - 2,
-        math.ceil(x1),
-        math.ceil(x1) + 1,
-    ):
-        for y in range(rows):  # the stone of the mouth
-            half.set(edge, y, sky.shade(STONE))
-    glass = mix(DARK, (255, 220, 160), 0.16)
-    for x in range(a, b):
-        half.set(x, 0, glass)  # the lamps of the car
-        seat = (x + 2) % 11
-        if seat < 6:
-            for y in range(round(rows * 0.62) + (seat in (0, 5)), rows):
-                half.set(x, y, mix(DARK, (70, 80, 130), 0.3))
-        if seat in (2, 3) and x // 11 % 3 == 1:  # someone
-            half.set(x, round(rows * 0.62) - 1, mix(DARK, (200, 170, 150), 0.25))
-            half.set(x, round(rows * 0.62) - 2, mix(DARK, (200, 170, 150), 0.25))
-    lamp = round(rows * 0.3)
-    step = 46
-    x = math.floor(shift * 1.3 / step) * step - shift * 1.3
-    while x < w:
-        for tail in range(4):
-            if a <= round(x) + tail < b:
-                half.set(round(x) + tail, lamp, (255, 196, 110), 1 - tail * 0.27)
-        x += step
+def _whole(x: float) -> int:
+    return math.floor(x + 1e-6)
 
 
-def _bridge(half: Half, sky: _sky.Sky, x0: float, x1: float, shift: float) -> None:
-    """A truss from the pixel `x0` to `x1`."""
-    w, rows = half.w, 2 * half.h
-    iron = sky.shade(IRON)
-    top, low = max(1, round(rows * 0.12)), round(rows * 0.82)
-    bay = max(6, low - top)
-    for x in range(max(0, math.ceil(x0)), min(w, math.ceil(x1))):
-        along = math.floor(x + shift) % (2 * bay)
-        half.set(x, top, iron)
-        half.set(x, top - 1, iron)
-        for y in range(low, rows):
-            half.set(x, y, iron if y == low else sky.shade((66, 46, 42)))
-        if along % bay == 0:
-            for y in range(top, low):
-                half.set(x, y, iron)
-        slope = along if along < bay else 2 * bay - along
-        half.set(x, top + round(slope * (low - top) / bay), iron)
-        for cy in range(half.h):
-            if cy * 2 >= low or cy * 2 <= top or along % bay == 0:
-                half.over.pop((x, cy), None)
+def _ease(x: float) -> float:
+    x = min(1.0, max(0.0, x))
+    return x * x * (3 - 2 * x)
 
 
-def _other(
-    half: Half, sky: _sky.Sky, x0: float, x1: float, slide: float, n: int
+def approach(rows: int) -> int:
+    """Pixels of cutting before the mouth of a tunnel, and after."""
+    return 2 * rows + 6
+
+
+def _cutting(
+    half: Half, sky: _sky.Sky, x: int, near: int, at: int, seed: int, ground: RGB
 ) -> None:
-    """A train the other way, from the pixel `x0` to `x1`."""
+    """The column `x` of the hillside a tunnel goes into, `near`
+    pixels from its mouth; `at`: its pixel along the way. Of the
+    colour `ground`, it turns to rock as it rises."""
+    rows = 2 * half.h
+    f = _ease(1 - near / approach(rows))
+    bump = (wave(seed + 710, at / 5) - 0.5) * 3 * (1 - f)
+    top = round(rows - 1 - (rows + 2) * f + bump)
+    body = mix(mix(ground, sky.shade(ROCK), 0.75 * f), (0, 0, 0), 0.1)
+    for y in range(max(0, top), rows):
+        c = body
+        if y == top:
+            c = mix(body, WHITE, 0.14)
+        elif noise(seed + 711, at, y) < 0.1:
+            c = mix(body, (0, 0, 0), 0.16)
+        half.px[y][x] = c
+
+
+def _tunnel(
+    half: Half,
+    sky: _sky.Sky,
+    x0: float,
+    x1: float,
+    shift: float,
+    seed: int,
+    ground: RGB,
+) -> tuple[int, int]:
+    """A tunnel, its mouths at the pixels `x0` and `x1`: a cutting
+    rises to a portal of stone; inside, a wall of bricks goes by at
+    twice the pace, lamps on it, a cable, a dashed line. The columns
+    under the vault."""
+    w, rows = half.w, 2 * half.h
+    a, b, s = _whole(x0), _whole(x1), _whole(shift)
+    reach = approach(rows)
+    stone, joint = sky.shade(STONE), sky.shade(mix(STONE, (40, 40, 48), 0.45))
+    for x in range(max(0, a - reach), min(w, b + reach)):
+        if a - PORTAL <= x < b + PORTAL:
+            continue
+        _cutting(
+            half,
+            sky,
+            x,
+            a - PORTAL - x if x < a else x - b - PORTAL,
+            x + s,
+            seed,
+            ground,
+        )
+    for x in (*range(a - PORTAL, a), *range(b, b + PORTAL)):
+        if not 0 <= x < w:
+            continue
+        inner = x in (a - 1, b)
+        for y in range(rows):
+            dark = inner or y % 3 == 2 or (x + s + y // 3) % 2 == 0 and y % 3 == 0
+            half.px[y][x] = joint if dark else stone
+    lamp_y = max(1, round(rows * 0.22))
+    cable, line = round(rows * 0.44), round(rows * 0.78)
+    ledge = max(line + 1, round(rows * 0.88))
+    glow = max(3.0, rows * 0.38)
+    day = sky.shade((176, 178, 184))
+    lo, hi = max(0, a), min(w, b)
+    bricks: dict[tuple[int, int], RGB] = {}
+    for x in range(lo, hi):
+        at = x + 2 * s  # along the wall
+        aside = (at + LAMPS // 2) % LAMPS - LAMPS // 2  # from the nearest lamp
+        mouth = max(0.0, 1 - min(x - a, b - 1 - x) / 10) * sky.light
+        for y in range(rows):
+            course = y // 3
+            run = at + 4 * (course % 2)
+            if y >= ledge:
+                c = (40, 38, 40) if y == ledge else DARK
+            elif y == cable:
+                c = (108, 108, 112) if at % 16 == 0 else (18, 18, 22)
+            elif y == line and at // 6 % 2 == 0:
+                c = (176, 170, 140)
+            elif y == 0:
+                c = (26, 24, 26)
+            elif y % 3 == 2 or run % 8 == 0:
+                c = MORTAR
+            else:
+                brick = (run // 8, course)
+                if brick not in bricks:
+                    bricks[brick] = mix(BRICK, BAKED, noise(seed + 700, *brick))
+                c = bricks[brick]
+            if -glow < aside < glow and y < ledge:
+                near = math.hypot(aside, y - lamp_y)
+                if near < glow:
+                    c = mix(c, GLOW, 0.74 * (1 - near / glow) ** 1.5)
+            if mouth:  # the day comes in, grey
+                grey = sum(c) // 3
+                c = mix(mix(c, (grey, grey, grey), mouth), day, 0.4 * mouth)
+            half.px[y][x] = c
+        if aside in (0, 1):
+            half.set(x, lamp_y, (255, 238, 186))
+            half.set(x, lamp_y - 1, (70, 66, 62))
+    return lo, hi
+
+
+def _bridge(
+    half: Half,
+    sky: _sky.Sky,
+    x0: float,
+    x1: float,
+    shift: float,
+    hz: int,
+    seed: int,
+    t: float,
+) -> None:
+    """A truss over a river, from the pixel `x0` to `x1`: the near
+    ground gives way to water between two banks, the far land beyond;
+    the iron in front."""
+    w, rows = half.w, 2 * half.h
+    a, b, s = _whole(x0), _whole(x1), _whole(shift)
+    iron, dark = sky.shade(IRON), sky.shade(mix(IRON, (26, 18, 22), 0.55))
+    top, low = max(1, round(rows * 0.1)), max(3, round(rows * 0.87))
+    bay = max(6, low - top)
+    line = min(low - 1, max(hz + 1, round(rows * 0.62)))  # of the water
+    bank = max(4, rows // 2)
+    deep, reeds = sky.shade(SEA), sky.shade((40, 110, 50))
+    earth, pier = sky.shade((132, 112, 84)), sky.shade(STONE)
+    beat = int(t * 2)
+    for x in range(max(0, a), min(w, b)):
+        along, back = x - a, b - 1 - x
+        edge = line + max(0, round((rows - line) * (1 - min(along, back) / bank)))
+        for y in range(line, rows):
+            if y < edge:
+                continue
+            if y == edge:
+                c = reeds if edge == line else earth
+            else:
+                v = (y - line) / max(1, rows - line)
+                murk = (0.3 + 0.15 * v) * (0.35 + 0.65 * sky.light)
+                c = mix(sky.colour((x + 0.5) / w, 1 - 0.85 * v), deep, murk)
+                ripple = noise(seed + 9, (x + s) // 3 + beat * 7, y) < 0.09
+                if ripple and sky.light > 0.3:  # dim, the 256 turn it purple
+                    c = mix(c, WHITE, 0.1 + 0.25 * sky.light)
+            half.px[y][x] = c
+        post = along % bay == 0 or along < 2 or back < 2
+        slope = along % (2 * bay)
+        slope = slope if slope < bay else 2 * bay - slope
+        brace = top + round(slope * (low - top) / bay)
+        for y in range(top - 1, rows):
+            if y <= top or y == low:
+                c = iron
+            elif y > low:
+                c = pier if min(along, back) < 3 else dark
+                if c is dark and along % 4 == 0:
+                    c = mix(dark, iron, 0.4)
+            elif post:
+                c = iron
+            elif y == brace:
+                c = dark
+            else:
+                continue
+            half.px[y][x] = c
+
+
+def _other(half: Half, sky: _sky.Sky, head: int, n: int) -> None:
+    """A train the other way, its head at the pixel `head`: `CARS`
+    cars of `CAR` pixels, a nose, a lamp at each end."""
     w, rows = half.w, 2 * half.h
     coat = LIVERY[n % len(LIVERY)]
     body, roof = sky.shade(coat), sky.shade(mix(coat, (40, 40, 48), 0.6))
-    line = sky.shade(mix(coat, WHITE, 0.7))
-    top = round(rows * 0.22)
-    sill, head = round(rows * 0.62), round(rows * 0.36)
+    line, door = sky.shade(mix(coat, WHITE, 0.7)), sky.shade(mix(coat, (0, 0, 0), 0.25))
+    under = sky.shade((44, 42, 48))
     pane = mix(LAMP, sky.shade((150, 196, 226)), sky.light)
-    for x in range(max(0, math.ceil(x0)), min(w, math.ceil(x1))):
-        along = math.floor(x + slide) % 34
-        for y in range(top, rows):
-            c = roof if y == top else body
-            if y == sill + 1:
+    top = round(rows * 0.2)
+    lintel, sill = round(rows * 0.34), round(rows * 0.6)
+    skirt = max(sill + 2, round(rows * 0.88))
+    long = CAR * CARS
+    for x in range(max(0, head), min(w, head + long)):
+        along = x - head
+        i = along % CAR
+        nose = max(0, 5 - along) + max(0, along - long + 6)  # the ends slope
+        for y in range(top + nose, rows):
+            if i >= CAR - 2 and along < long - 2:  # between two cars
+                if y < top + 2:
+                    continue
+                c = under
+            elif y >= skirt:
+                c = under
+            elif y == top + nose:
+                c = roof
+            elif y == sill + 1:
                 c = line
-            if head <= y < sill and 2 <= along % 8 < 7 and along < 32:
+            elif lintel <= y < sill and 9 <= i < CAR - 11 and (i - 9) % 14 < 12:
                 c = pane
-            if along >= 32:  # between two cars
-                c = roof if y > top + 1 else half.px[y][x]
+            elif lintel <= y < sill and (3 <= i < 6 or CAR - 8 <= i < CAR - 5):
+                c = pane if y < lintel + 2 else door
+            elif y > lintel and (2 <= i < 7 or CAR - 9 <= i < CAR - 4):
+                c = door
+            else:
+                c = body
             half.px[y][x] = c
-        for cy in range(top // 2, half.h):
-            half.over.pop((x, cy), None)
+    for at, lamp in ((head, (255, 246, 206)), (head + long - 1, (236, 44, 40))):
+        half.set(at, sill + 2, lamp)
+        half.set(at, sill + 3, lamp)
+
+
+def _crossing(
+    half: Half, sky: _sky.Sky, x0: float, x1: float, n: int, t: float
+) -> None:
+    """A road over the track, from the pixel `x0` to `x1`: a boom
+    down, two red lamps that blink in turn, a car that waits."""
+    rows = 2 * half.h
+    if rows < 12:
+        return
+    a, b = _whole(x0), _whole(x1)
+    mid = (a + b) // 2
+    reach = (b - a) // 2 - 4  # half the road, by the glass
+    far, boom = round(rows * 0.66), round(rows * 0.8)
+    tar, paint = sky.shade((84, 84, 92)), sky.shade((226, 226, 214))
+    for y in range(far, rows):
+        wide = 3 + round((reach - 3) * (y - far) / max(1, rows - 1 - far))
+        for x in range(mid - wide, mid + wide + 1):
+            half.set(x, y, paint if x == mid and y % 2 else tar)
+    night = sky.light < 0.4
+    coat = sky.shade(LIVERY[(n + 1) % 3])  # not the green of a field
+    half.rect(mid - 3, far - 1, 5, 2, coat)  # the car, its nose to us
+    half.rect(mid - 2, far - 2, 3, 1, sky.shade((50, 70, 96)))
+    for x in (mid - 3, mid + 1):
+        half.set(x, far, LAMP if night else paint)
+    post, red = sky.shade((120, 120, 128)), (226, 44, 40)
+    for y in range(boom - 2, boom + 2):
+        half.set(mid - reach, y, post)
+    for x in range(mid - reach + 1, mid + reach):
+        half.set(x, boom - 1, red if (x - mid) // 2 % 2 else (244, 244, 240))
+    mast = mid + reach + 1
+    for y in range(far - 4, boom + 2):
+        half.set(mast, y, post)
+    beat = int(t * 3) % 2
+    half.set(mast - 1, far - 4, red if beat else (70, 24, 24))
+    half.set(mast + 1, far - 4, (70, 24, 24) if beat else red)
+    half.set(mast, far - 5, paint)
 
 
 def _station(half: Half, sky: _sky.Sky, at: float, trip: Trip, k: int) -> None:
-    """The platform of a stop; `at`: the pixel of its start."""
+    """The platform of a stop; `at`: the pixel of its start. A canopy
+    on posts, a lamp a bay, benches, people, the name on its board;
+    at night the lamps light the stone under them."""
     w, rows = half.w, 2 * half.h
     long = w + 150
     floor, roof = round(rows * 0.76), max(1, round(rows * 0.26))
     dark = sky.light < 0.4
+    start = math.ceil(at)
 
     def lit(c: RGB) -> RGB:  # its lamps light it at night
         return (
@@ -352,32 +533,38 @@ def _station(half: Half, sky: _sky.Sky, at: float, trip: Trip, k: int) -> None:
         )
 
     stone, edge = lit(STONE), lit((232, 208, 96))
-    beam, post = lit((128, 62, 52)), lit((96, 96, 104))
-    for x in range(max(0, math.ceil(at)), min(w, math.ceil(at + long))):
-        i = x - math.ceil(at)
+    beam, tiles = lit((128, 62, 52)), lit((160, 84, 66))
+    post, wood = lit((96, 96, 104)), lit((66, 110, 84))
+    for x in range(max(0, start), min(w, start + long)):
+        i = x - start
+        under = 24 <= i < long - 24  # the canopy
+        bay = (i - 24) % 22
+        pool = dark and under and abs(bay - 11) <= 4  # of a lamp
         for y in range(floor, rows):
-            half.px[y][x] = edge if y == floor else stone
-        for cy in range(half.h):
-            half.over.pop((x, cy), None)
-        if not 24 <= i < long - 24:
+            c = edge if y == floor else stone
+            half.px[y][x] = mix(c, (214, 170, 100), 0.5) if pool else c
+        if not under:
             continue
         half.set(x, roof, beam)
-        half.set(x, roof - 1, lit((160, 84, 66)))
-        bay = (i - 24) % 22
+        half.set(x, roof - 1, tiles)
         if bay == 0:
             for y in range(roof + 1, floor):
                 half.set(x, y, post)
-        elif bay == 11 and dark:
-            half.set(x, roof + 1, LAMP)
         elif bay == 11:
-            half.set(x, roof + 1, post)
+            half.set(x, roof + 1, LAMP if dark else post)
+        elif bay in (10, 12) and dark:
+            half.set(x, roof + 1, LAMP, 0.35)
+        if 15 <= bay < 19 and rows >= 16:  # a bench
+            half.set(x, floor - 1, wood)
+            half.set(x, floor - 2, wood, 0.7)
+            continue
         who = noise(trip.seed + 600 + k, (i - 24) // 5)
         if (i - 24) % 5 == 2 and who < 0.3 and bay not in (0, 1, 21):
             coat = LIVERY[int(who * 40) % len(LIVERY)]
             half.set(x, floor - 1, lit(mix(coat, (30, 30, 40), 0.4)))
             half.set(x, floor - 2, lit(coat))
             half.set(x, floor - 3, lit((226, 190, 160)))
-    sign = math.ceil(at) + long // 2 - 4  # the name, on its board
+    sign = start + long // 2 - 4  # the name, on its board
     half.rect(sign, roof + 2, 8, 3, lit((40, 60, 130)))
     for dx in (1, 2, 3, 5, 6):
         half.set(sign + dx, roof + 3, lit((244, 244, 236)))
@@ -447,6 +634,7 @@ def scene(
     hz, back, front, sea = land(trip.line, seed, rows, trip.land)
     for layer in (*back, *front):
         layer.speed = _even(layer.rate())
+    verge = back[-1]
     shift = dist(trip, t)
     clear = [list(row) for row in _sky_of(w, h, hz, sky)]
     half.px = [list(row) for row in clear]
@@ -466,19 +654,29 @@ def scene(
             x0 = dist(trip, start + BRAKE) - 75
             met.append((what, n, x0, x0 + w + 150))
         elif what == "train":  # as long as it takes to go by
-            met.append((what, n, dist(trip, start) + w, dist(trip, start + SPAN[what])))
+            end = start + (w + CAR * CARS) / (RUSH * FPS)
+            met.append((what, n, dist(trip, start) + w, dist(trip, end)))
+        elif what == "tunnel":  # and the cuttings it goes into, and out of
+            x0 = dist(trip, start) + w
+            met.append((what, n, x0, x0 + PACE * SPAN[what] + 2 * approach(rows)))
         elif what is not None:
             x0 = dist(trip, start) + w
             met.append((what, n, x0, x0 + PACE * SPAN[what]))
     # No pole at a station or on a bridge; nothing by the glass where
     # something is met.
-    poles = [(x0, x1) for what, _, x0, x1 in met if what in ("station", "bridge")]
+    poles = [(x0, x1) for what, _, x0, x1 in met if what not in ("train", "tunnel")]
     for layer in front:
         reach, rate = layer.size + 3, layer.rate()
         layer.bare = [
             (rate * (x0 - w) - reach, rate * x1 + w + reach) for _, _, x0, x1 in met
         ]
 
+    pad = approach(rows)
+    if any(
+        what == "tunnel" and x0 + pad <= shift and x1 - pad >= shift + w
+        for what, _, x0, x1 in met
+    ):
+        back, front = [], []  # under a vault: no land to paint
     marks: list[Mark] = []
     for i, layer in enumerate(back):
         if sea and i == 1:
@@ -487,7 +685,7 @@ def scene(
     if trip.land:
         lights(half, sky, marks, seed, None)
     wires: Strung = []
-    if trip.poles and rows >= 8:
+    if trip.poles and rows >= 8 and back:
         wires = _wires(half, sky, shift, back[-1], poles)
     if kind == "fog":
         fog(half, sky, hz)
@@ -497,22 +695,21 @@ def scene(
     dry = None  # the columns under a vault
     for what, n, x0, x1 in met:
         a, b = x0 - shift, x1 - shift
-        if a >= w or b <= 0:
+        if what == "train":  # it goes by at its own pace, `RUSH` a frame
+            head = w - RUSH * _whole((t - n * CYCLE - WHEN) * FPS)
+            if -CAR * CARS < head < w:
+                _other(half, sky, head, n)
+        elif a >= w or b <= 0:
             continue
-        if what == "station":
+        elif what == "station":
             _station(half, sky, a, trip, n)
-        elif what == "train":
-            start = n * CYCLE + WHEN
-            p, q = (t - start) / 0.3, (t - start - SPAN[what]) / 0.3
-            if p > 0 and q < 1:
-                _other(
-                    half, sky, w * (1 - p), w * (1 - q) if q > 0 else w, shift * 4, n
-                )
         elif what == "bridge":
-            _bridge(half, sky, a, b, shift)
+            _bridge(half, sky, a, b, shift, hz, seed, t)
+        elif what == "crossing":
+            _crossing(half, sky, a, b, n, t)
         elif what == "tunnel":
-            _tunnel(half, sky, a, b, shift)
-            dry = (math.ceil(a), math.ceil(b))
+            grass = sky.shade(verge.ground(season))
+            dry = _tunnel(half, sky, a + pad, b - pad, shift, seed, grass)
 
     _string(half, wires)
     stars(half, clear, sky, seed + 3, None, hz)
@@ -621,7 +818,7 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
         "-e",
         "--events",
         action="store_true",
-        help="a tunnel, a bridge, a train the other way, a station",
+        help="a tunnel, a bridge, a train the other way, a crossing, a station",
     )
     out.add_argument(
         "-y", "--seasons", action="store_true", help="the season of the date"

@@ -13,6 +13,13 @@ Pure: a seed, a place along the strip and a `_sky.Sky` give the pixels.
   the spans of `bare`, in pixels of the layer). A layer scrolls
   at `speed`, `(1 - depth)²` by default: `shift` pixels of the nearest
   plane are `shift * speed` of this one.
+  The ground is one colour, or more: `fields`, a patchwork of crops
+  in bands that follow the relief; `strata`, level beds of rock;
+  `streak`, the share of it in short dashes, darker, lighter: what
+  shows that a near plane runs.
+  Things: `tree`, `pine`, `poplar`, `bush`, `palm`, `cactus`, `rock`,
+  `hay`, `sheep`, `cow`, `pylon`, `hut`; with a window to light:
+  `house`, `chalet`, `church`, `lighthouse`; `barn`.
 - `heavens(half, sky, horizon)`: the sky down to the pixel row
   `horizon`, the sun and the moon; it returns the pixels as painted.
   `clouds(...)` next, then `paint(half, layer, sky, shift)` far to
@@ -29,7 +36,8 @@ Pure: a seed, a place along the strip and a `_sky.Sky` give the pixels.
   `move(x, y)` and `leave()` are the handlers; `at`, `since`, `trail`.
 
 Colours of the land are given for full daylight; `Sky.shade` lights
-and hazes them.
+and hazes them. At night what is pale keeps a glow (`NIGHT`): snow,
+sand, a wall.
 """
 
 from __future__ import annotations
@@ -44,6 +52,7 @@ from ._sky import Sky
 
 __all__ = [
     "KINDS",
+    "Fields",
     "Layer",
     "Mark",
     "Pointer",
@@ -72,6 +81,7 @@ LAMP: RGB = (255, 214, 120)
 SEA: RGB = (0, 92, 140)
 DROP: RGB = (150, 172, 208)
 MIST: RGB = (206, 210, 214)
+NIGHT: RGB = (98, 104, 146)  # what is pale, at night
 #: The ground of a season, in daylight.
 GROUND: dict[str, RGB] = {
     "spring": (135, 190, 70),
@@ -168,6 +178,31 @@ class Mark(NamedTuple):
     pane: RGB | None = None  # `window`: its colour as painted
 
 
+@dataclass(frozen=True)
+class Fields:
+    """A patchwork over the ground of a layer: `crops`, the colours a
+    season; a field is `wide` pixels; the bands are `deep` pixel rows
+    under the ground line, then a row more each; a border leans
+    `lean` pixels a row; `hedge`: the share of fields with one."""
+
+    crops: dict[str, Sequence[RGB]]
+    wide: float = 16.0
+    deep: int = 2
+    lean: float = 0.8
+    hedge: float = 0.0
+
+    def at(self, seed: int, x: float, d: int) -> tuple[int, int, bool]:
+        """The field `d` rows under the ground line at `x`: its band,
+        its number, and whether this pixel is its border."""
+        band, tall, low = 0, self.deep, self.deep
+        while d >= low:
+            band, tall = band + 1, tall + 1
+            low += tall
+        u = (x + self.lean * d) / self.wide + noise(seed + 41, band) * 9
+        n = math.floor(u)
+        return band, n, (u - n) * self.wide < 1.0
+
+
 @dataclass
 class Layer:
     strip: Strip
@@ -182,6 +217,9 @@ class Layer:
     snow: float | None = None  # heights over it are snowed
     speed: float | None = None
     bare: Sequence[tuple[float, float]] = ()  # spans without a thing
+    fields: Fields | None = None
+    strata: Sequence[RGB] = ()  # beds of rock, two pixel rows each
+    streak: float = 0.0
 
     def rate(self) -> float:
         return (1 - self.depth) ** 2 if self.speed is None else self.speed
@@ -405,28 +443,59 @@ def _tree(half: Half, x: int, y: int, s: int, thing: Thing, lit: _Lit) -> None:
 
 
 def _pine(half: Half, x: int, y: int, s: int, thing: Thing, lit: _Lit) -> None:
-    green = lit(mix((0, 84, 30), (0, 112, 40), thing.tint))
+    base = mix((0, 84, 30), (0, 112, 40), thing.tint)
+    green, dark = lit(base), lit(mix(base, (0, 24, 20), 0.35))
     snow = lit(SNOW)
     half.set(x, y - 1, lit(TRUNK))
+    if s >= 9:
+        half.set(x, y - 2, lit(TRUNK))
+    tier = s if s < 9 else max(3, s // 4)  # boughs in tiers, when tall
     for j in range(s - 1):  # from the top
-        wide = (j + 1) // 2
+        wide = (j + 1) // 2 if s < 9 else round(j * 0.3 + j % tier * 0.5)
         white = lit.season == "winter" and (j < 1 or (j % 2 == 1 and thing.tint < 0.6))
         for dx in range(-wide, wide + 1):
             edge = white and (j < 1 or abs(dx) == wide)
-            half.set(x + dx, y - s + j, snow if edge else green)
+            c = dark if dx > 0 else green
+            half.set(x + dx, y - s + j, snow if edge else c)
+
+
+def _poplar(half: Half, x: int, y: int, s: int, thing: Thing, lit: _Lit) -> None:
+    half.set(x, y - 1, lit(TRUNK))
+    leaves = _crown(lit.season, 0.4 + 0.5 * thing.tint)
+    if leaves is None:
+        for j in range(2, s + 1):
+            half.set(x, y - j, lit(TRUNK))
+        return
+    for j in range(2, s + 2):
+        half.set(x, y - j, lit(leaves))
+        if 2 < j < s + 1 and s >= 4:
+            half.set(x + 1, y - j, lit(mix(leaves, (0, 30, 20), 0.3)))
 
 
 def _house(half: Half, x: int, y: int, s: int, thing: Thing, lit: _Lit) -> list[Mark]:
     wide = max(3, s)
     tall = max(2, round(s * 0.5))
-    wall = lit(WALLS[int(thing.tint * 3) % 3])
-    roof = lit(SNOW if lit.season == "winter" else ROOFS[int(thing.tint * 7) % 3])
+    wall = WALLS[int(thing.tint * 3) % 3]
+    roof = ROOFS[int(thing.tint * 7) % 3]
+    if thing.kind == "barn":
+        wide, wall, roof = wide + 1, (158, 60, 48), (84, 70, 70)
+    elif thing.kind == "chalet":
+        wall, roof = (132, 92, 60), (92, 70, 60)
+    wall, roof = lit(wall), lit(SNOW if lit.season == "winter" else roof)
+    if thing.kind == "church":  # a tower at one end, a spire
+        tx = x - 2 if thing.tint < 0.5 else x + wide
+        half.rect(tx, y - tall - 3, 2, tall + 3, wall)
+        half.rect(tx, y - tall - 4, 2, 1, roof)
+        half.set(tx + (thing.tint < 0.5), y - tall - 5, roof)
     half.rect(x, y - tall, wide, tall, wall)
     rows = max(1, round(s * 0.34))
     for j in range(rows):  # the eaves first
         inset = j if rows > 1 else 0
         half.rect(x - 1 + inset, y - tall - 1 - j, wide + 2 - 2 * inset, 1, roof)
-    marks = []
+    marks: list[Mark] = []
+    if thing.kind == "barn":  # a wide door, no window
+        half.rect(x + wide // 2 - 1, y - min(2, tall), 2, min(2, tall), roof)
+        return marks
     wx, wy = x + (1 if thing.tint < 0.5 else wide - 2), y - max(1, tall - 1)
     pane = lit(mix((70, 90, 120), wall, 0.2))
     half.set(wx, wy, pane)
@@ -434,9 +503,10 @@ def _house(half: Half, x: int, y: int, s: int, thing: Thing, lit: _Lit) -> list[
     if wide >= 4:
         px = x + (wide - 2 if thing.tint < 0.5 else 1)
         half.set(px, y - 1, lit(mix(TRUNK, (40, 30, 30), 0.4)))  # the door
-        top = y - tall - rows - 1
-        half.set(px, top, lit(mix(ROOFS[1], (40, 40, 40), 0.3)))
-        marks.append(Mark("chimney", px, top, thing.n))
+        if thing.kind in ("house", "chalet"):
+            top = y - tall - rows - 1
+            half.set(px, top, lit(mix(ROOFS[1], (40, 40, 40), 0.3)))
+            marks.append(Mark("chimney", px, top, thing.n))
     return marks
 
 
@@ -469,12 +539,46 @@ def _small(half: Half, x: int, y: int, s: int, thing: Thing, lit: _Lit) -> None:
     elif kind == "palm":
         for j in range(1, s):
             half.set(x + (1 if j > s // 2 else 0), y - j, lit((140, 110, 76)))
-        green = lit((0, 135, 60))
+        green, dark = lit((0, 135, 60)), lit((0, 104, 56))
         cx = x + 1
         half.rect(cx - 2, y - s, 5, 1, green)
         half.rect(cx - 1, y - s - 1, 3, 1, green)
-        half.set(cx - 2, y - s + 1, green)
-        half.set(cx + 2, y - s + 1, green)
+        half.set(cx - 2, y - s + 1, dark)
+        half.set(cx + 2, y - s + 1, dark)
+        half.set(cx + 1, y - s, dark)
+    elif kind == "cow":
+        if lit.season != "winter":
+            coat = lit((250, 246, 240) if thing.tint < 0.5 else (124, 78, 50))
+            half.rect(x, y - 2, 3, 1, coat)
+            half.set(x, y - 1, coat)
+            half.set(x + 2, y - 1, coat)
+            half.set(x + (3 if thing.size < 0.5 else -1), y - 2, lit((60, 50, 46)))
+    elif kind == "pylon":
+        steel = lit((150, 154, 164))
+        for j in range(1, s + 2):
+            half.set(x, y - j, steel)
+        half.rect(x - 1, y - s, 3, 1, steel)
+        if s >= 4:
+            half.rect(x - 1, y - s + 2, 3, 1, steel)
+    elif kind == "hut":  # of a beach, striped
+        coat = ((70, 130, 190), (220, 90, 80), (240, 200, 90))[int(thing.tint * 3) % 3]
+        half.rect(x, y - 2, 2, 2, lit(coat))
+        half.rect(x, y - 3, 2, 1, lit((244, 240, 230)))
+
+
+def _lighthouse(
+    half: Half, x: int, y: int, s: int, thing: Thing, lit: _Lit
+) -> list[Mark]:
+    tall = s + 2
+    for j in range(1, tall + 1):
+        band = lit((206, 62, 54) if j // 2 % 2 else (244, 240, 232))
+        half.set(x, y - j, band)
+        if j <= tall - 2:
+            half.set(x + 1, y - j, band)
+    pane = lit((60, 70, 90))
+    half.set(x, y - tall, pane)
+    half.set(x, y - tall - 1, lit((70, 64, 70)))
+    return [Mark("window", x, y - tall, thing.n, pane)]
 
 
 class _Lit:
@@ -486,7 +590,10 @@ class _Lit:
 
     def __call__(self, c: RGB) -> RGB:
         if c not in self.memo:
-            self.memo[c] = self.sky.shade(c, self.depth)
+            lit = self.sky.shade(c, self.depth)
+            # What is pale still shows at night: snow, sand, a wall.
+            pale = (min(c) / 255) ** 2 * (1 - self.sky.light)
+            self.memo[c] = mix(lit, NIGHT, 0.75 * pale) if pale else lit
         return self.memo[c]
 
 
@@ -511,6 +618,32 @@ def _city(half: Half, layer: Layer, sky: Sky, shift: float, lit: _Lit) -> None:
                 half.set(x, y, lit(mix((120, 150, 180), (60, 70, 90), draw)))
 
 
+def _soil(
+    layer: Layer, lit: _Lit, season: str, x: int, y: int, d: int, ground: RGB
+) -> RGB:
+    """The ground of `layer` at the pixel `x` of it, on the row `y`,
+    `d` rows under its line."""
+    seed = layer.strip.seed
+    c = ground
+    if layer.strata:
+        bed = (round(layer.base) - y) // 2
+        c = lit(layer.strata[int(noise(seed + 43, bed) * len(layer.strata))])
+    if layer.fields is not None:
+        band, n, border = layer.fields.at(seed, x, d)
+        crops = layer.fields.crops[season]
+        raw = crops[int(noise(seed + 42, n, band) * len(crops))]
+        if border and noise(seed + 44, n, band) < layer.fields.hedge:
+            raw = mix(raw, (30, 60, 30), 0.45) if season != "winter" else TRUNK
+        # In a low light the crops are one: the palette has few darks.
+        c = lit(mix(raw, layer.ground(season), 0.8 * (1 - lit.sky.light)))
+    if layer.streak:
+        run = math.floor(x / 4 + noise(seed + 45, y) * 16)
+        draw = noise(seed + 46, run, y)
+        if draw < layer.streak:
+            c = mix(c, (0, 0, 0) if draw < layer.streak / 2 else WHITE, 0.14)
+    return c
+
+
 def paint(
     half: Half,
     layer: Layer,
@@ -528,6 +661,7 @@ def paint(
     rim = lit(mix(layer.ground(season), WHITE, 0.16))
     snow = lit(SNOW)
     blocky = layer.strip.kind == "city"
+    plain = not (layer.fields or layer.strata or layer.streak)
     for x in range(w):
         high = layer.strip.height(x + shift)
         top = round(layer.base - layer.amp * high)
@@ -540,8 +674,10 @@ def paint(
                 c = snow
             elif y == top and not blocky and high > 0:
                 c = rim
-            else:
+            elif plain:
                 c = ground
+            else:
+                c = _soil(layer, lit, season, x + shift, y, y - top, ground)
             half.px[y][x] = c
     if blocky:
         _city(half, layer, sky, shift, lit)
@@ -555,9 +691,13 @@ def paint(
             _tree(half, x, y, s, thing, lit)
         elif thing.kind == "pine":
             _pine(half, x, y, s + 1, thing, lit)
-        elif thing.kind == "house":
+        elif thing.kind == "poplar":
+            _poplar(half, x, y, s + 1, thing, lit)
+        elif thing.kind in ("house", "barn", "chalet", "church"):
             y = round(max(layer.top(thing.x), layer.top(thing.x + s)))
             marks += _house(half, x, y, s, thing, lit)
+        elif thing.kind == "lighthouse":
+            marks += _lighthouse(half, x, y, s, thing, lit)
         else:
             _small(half, x, y, s, thing, lit)
     return marks
