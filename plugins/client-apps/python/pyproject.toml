@@ -1,7 +1,7 @@
 [project]
 name = "ptyrc-apps"
 version = "2.0.0"
-description = "ptyrc client apps: confetti, flower, clock, fishes, snake, sand, cat, marks, rain, bricks, snow, life, stars, pond, window, train, fire, globe, gallery, git, note, timer, pace."
+description = "ptyrc client apps: confetti, flower, clock, fishes, snake, sand, cat, marks, rain, bricks, snow, life, stars, pond, shore, window, train, fire, globe, gallery, git, note, timer, pace."
 readme = "README.md"
 requires-python = ">=3.13"
 license = "GPL-3.0-or-later"

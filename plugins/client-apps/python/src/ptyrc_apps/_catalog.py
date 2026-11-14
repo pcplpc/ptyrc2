@@ -34,6 +34,7 @@ RANDOM: dict[str, tuple[tuple[str, ...], ...]] = {
     "pace": ((), ("-a",)),
     "pond": ((), ("-a",)),
     "sand": (("--now",),),
+    "shore": ((), ("-a",)),
     "snake": ((), ("-a",)),
     "stars": ((), ("-a",)),
     "timer": (("5m",), ("5m", "-a")),
