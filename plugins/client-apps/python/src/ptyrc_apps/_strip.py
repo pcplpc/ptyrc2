@@ -9,7 +9,8 @@ Pure: a seed, a place along the strip and a `_sky.Sky` give the pixels.
 - `Layer`: a strip at a `depth`, 0 the nearest to 1 the farthest: its
   ground line (`base`, the pixel row of height 0), its relief (`amp`,
   pixels), its colour a season, and the things that stand on it
-  (`things`: kinds drawn one a `gap`, with `density`). A layer scrolls
+  (`things`: kinds drawn one a `gap`, with `density`; none within
+  the spans of `bare`, in pixels of the layer). A layer scrolls
   at `speed`, `(1 - depth)²` by default: `shift` pixels of the nearest
   plane are `shift * speed` of this one.
 - `heavens(half, sky, horizon)`: the sky down to the pixel row
@@ -18,7 +19,9 @@ Pure: a seed, a place along the strip and a `_sky.Sky` give the pixels.
   near, then `stars(half, clear, sky, seed, t)`: stars only in the
   cells still as `heavens` left them.
 - `paint` returns `Mark`s, in pixels: the `window` and the `chimney`
-  of each house, for the scene to light (`lights`) and to smoke.
+  of each house, for the scene to light (`lights`) and to smoke. A
+  window keeps its `pane`: painted over since, it is hidden, and
+  stays dark.
 - `water(half, sky, horizon, seed, t)`: a sea under the horizon, the
   sky mirrored. `fog`, `rain`, `snow`: the weather over what is
   painted; rain and snow are braille, and move with `t`.
@@ -162,6 +165,7 @@ class Mark(NamedTuple):
     x: int  # on the canvas, in pixels
     y: int
     n: int  # the number of its thing
+    pane: RGB | None = None  # `window`: its colour as painted
 
 
 @dataclass
@@ -177,6 +181,7 @@ class Layer:
     size: float = 5.0  # pixels: the height of a tall thing
     snow: float | None = None  # heights over it are snowed
     speed: float | None = None
+    bare: Sequence[tuple[float, float]] = ()  # spans without a thing
 
     def rate(self) -> float:
         return (1 - self.depth) ** 2 if self.speed is None else self.speed
@@ -202,6 +207,8 @@ class Layer:
                 continue
             kind = self.things[int(noise(seed, n, 1) * len(self.things))]
             x = i * self.gap + noise(seed, n, 2) * max(1, self.gap - 2)
+            if any(a <= x < b for a, b in self.bare):
+                continue
             out.append(Thing(x, kind, noise(seed, n, 3), noise(seed, n, 4), n))
         return out
 
@@ -421,8 +428,9 @@ def _house(half: Half, x: int, y: int, s: int, thing: Thing, lit: _Lit) -> list[
         half.rect(x - 1 + inset, y - tall - 1 - j, wide + 2 - 2 * inset, 1, roof)
     marks = []
     wx, wy = x + (1 if thing.tint < 0.5 else wide - 2), y - max(1, tall - 1)
-    half.set(wx, wy, lit(mix((70, 90, 120), wall, 0.2)))
-    marks.append(Mark("window", wx, wy, thing.n))
+    pane = lit(mix((70, 90, 120), wall, 0.2))
+    half.set(wx, wy, pane)
+    marks.append(Mark("window", wx, wy, thing.n, pane))
     if wide >= 4:
         px = x + (wide - 2 if thing.tint < 0.5 else 1)
         half.set(px, y - 1, lit(mix(TRUNK, (40, 30, 30), 0.4)))  # the door
@@ -514,7 +522,7 @@ def paint(
     pixels the nearest plane has scrolled, to the left."""
     season = season or sky.season
     lit = _Lit(sky, layer.depth, season)
-    shift = math.floor(shift * layer.rate())
+    shift = math.floor(shift * layer.rate() + 1e-6)
     w, rows = half.w, 2 * half.h
     ground = lit(layer.ground(season))
     rim = lit(mix(layer.ground(season), WHITE, 0.16))
@@ -628,10 +636,12 @@ def lights(
     pointer: Pointer | None,
 ) -> None:
     """The windows of the houses: lit at night, fewer late; lit under
-    the pointer at any time."""
+    the pointer at any time. Not those painted over since."""
     late = sky.hour >= 23.25 or sky.hour < 5.5
     for mark in marks:
         if mark.kind != "window":
+            continue
+        if mark.pane is not None and half.get(mark.x, mark.y) != mark.pane:
             continue
         home = noise(seed + 95, mark.n)
         lit = sky.light < 0.4 and home < (0.25 if late else 0.85)

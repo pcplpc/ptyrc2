@@ -5,6 +5,7 @@
     ptyrc-app train -a --prefer top
     ptyrc-app train -lp --line alps --at 08:00 --season winter
     ptyrc-app train -a --print 48x11 --at 21:40
+    ptyrc-app train -a -r
 
 What it shows:
 
@@ -14,8 +15,13 @@ What it shows:
   near ones run; `scene(w, h, when, t)` is pure: `when` the local time
   (the light of `_sky`), `t` the seconds of the trip, of which
   `dist(trip, t)` makes pixels of the nearest plane;
-- a frame every `PERIOD`, the whole content: what a parallax costs
-  from a client;
+- `FPS` frames a second, the whole content: what a parallax costs
+  from a client. The trip goes a frame a draw and the nearest plane
+  a pixel a frame; each layer scrolls evenly (`_even`): a pixel every
+  so many frames;
+- far to near, nothing shows through what is nearer: the sky, the
+  layers of `_line`, the poles on the verge and their wires, what
+  brushes the glass, what the trip meets;
 - bare: the sky, two ranges of hills, the verge. `-l`: the land: far
   ridges, trees, houses lit at night, what brushes the glass; `-p`:
   poles and their wires, sagging; `-e`: what a trip is made of: a
@@ -25,6 +31,9 @@ What it shows:
   of the day (`--line`: plain, coast, alps, desert, city);
 - the pointer on the glass (`_strip.Pointer`): a breath of fog where
   it goes, gone in a few seconds;
+- `-r`: what is not given is drawn at random, another at each run
+  (`window.drawn`): the line, the season, the time, the weather,
+  where along the way; `--seed`: the same draws;
 - `--print [WxH]`: no driver, the variants on stdout.
 """
 
@@ -33,6 +42,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import math
+import random
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -42,15 +52,14 @@ from typing import Any
 from ptyrc import Pilot, clock
 
 from . import _cli, _sky, _widgets
-from ._canvas import RGB, Braille, Half, Rows, ansi, mix
+from ._canvas import NEAR, RGB, Braille, Half, Rows, ansi, mix
+from ._line import LINES, land
 from ._strip import (
-    GROUND,
     LAMP,
     WHITE,
     Layer,
     Mark,
     Pointer,
-    Strip,
     clouds,
     fog,
     heavens,
@@ -62,7 +71,7 @@ from ._strip import (
     stars,
     water,
 )
-from .window import Era, times
+from .window import Era, drawn, times
 
 __all__ = [
     "BORDER",
@@ -83,7 +92,6 @@ Size = tuple[int, int]
 
 #: The inner sizes of the variants.
 SIZES: tuple[Size, ...] = ((10, 3), (16, 4), (24, 6), (34, 8), (48, 11))
-LINES = ("plain", "coast", "alps", "desert", "city")
 EVENTS = ("tunnel", "station", "train", "bridge")
 #: The frame of the glass: rounded above, a rail under.
 BORDER: dict[str, Any] = {
@@ -95,14 +103,15 @@ BORDER: dict[str, Any] = {
     "style": {"fg": 250},
 }
 
-PERIOD = 0.1  # seconds a frame
-PACE = 26.0  # pixels a second, the nearest plane
+FPS = 24  # frames a second
+PACE = 24.0  # pixels a second, the nearest plane: one a frame
 CYCLE = 70.0  # seconds from an event to the next
 WHEN = 24.0  # seconds into a cycle, its event
 BRAKE, STAND = 9.0, 10.0  # seconds: to stop and to leave; standing
 SPAN = {"tunnel": 8.0, "train": 3.2, "bridge": 5.0}  # seconds an event lasts
 POLES = 30  # pixels from a pole to the next
 KEEP = 6.0  # seconds a breath stays on the glass
+ROUGH = 0.45  # how much a wire darkens a pixel
 
 DARK: RGB = (10, 10, 14)
 IRON: RGB = (120, 56, 44)
@@ -172,159 +181,74 @@ def dist(trip: Trip, t: float) -> float:
     )
 
 
-# --- the land of each line -------------------------------------------
-
-
-def _verge(trip: Trip, rows: int, colour: Any = None) -> Layer:
-    verge = Layer(Strip(trip.seed + 9, "plain", 24), 0.0, rows * 0.99, rows * 0.22)
-    if colour is not None:
-        verge.colour = colour
-    return verge
-
-
-def _brush(trip: Trip, rows: int, things: Sequence[str]) -> Layer:
-    """What stands by the track: large, quick, seldom."""
-    near = Layer(Strip(trip.seed + 8, "flat"), 0.0, rows + 1.0, 0.0, speed=1.7)
-    near.things, near.size = things, rows * 0.95
-    near.gap, near.density = round(rows * 1.4), 0.3
-    return near
-
-
-def _plain(trip: Trip, rows: int) -> tuple[int, list[Layer]]:
-    s, hz = trip.seed, round(rows * 0.58)
-    far = Layer(Strip(s + 1, "hills", 26), 0.55, hz + rows * 0.08, rows * 0.32)
-    fields = Layer(Strip(s + 2, "hills", 44), 0.25, rows * 0.84, rows * 0.2)
-    out = [far, fields, _verge(trip, rows)]
-    if trip.land and rows >= 8:
-        ridge = Layer(Strip(s, "mountains", 30), 0.9, hz + 1, rows * 0.3)
-        far.things, far.gap, far.density, far.size = (
-            ("pine", "tree", "bush"),
-            4,
-            0.5,
-            2.0,
-        )
-        fields.things = (
-            "tree",
-            "house",
-            "tree",
-            "pine",
-            "bush",
-            "hay",
-            "tree",
-            "sheep",
-        )
-        fields.size = float(min(6, max(3, round(rows * 0.24))))
-        fields.gap, fields.density = round(fields.size) + 2, 0.7
-        out = [ridge, *out, _brush(trip, rows, ("tree", "tree", "pine"))]
-    return hz, out
-
-
-def _coast(trip: Trip, rows: int) -> tuple[int, list[Layer]]:
-    s, hz = trip.seed, round(rows * 0.52)
-    amp = rows * 0.3
-    isles = Layer(Strip(s + 1, "hills", 30), 0.86, hz + amp * 0.5, amp, (60, 130, 70))
-    sand = {**GROUND, "spring": (214, 196, 140), "summer": (214, 196, 140)}
-    sand["autumn"] = (200, 182, 134)
-    shore = Layer(Strip(s + 2, "dunes", 40), 0.3, rows * 0.98, rows * 0.3, sand)
-    out = [isles, shore, _verge(trip, rows)]
-    if trip.land and rows >= 8:
-        shore.things = ("palm", "rock", "house", "bush", "palm")
-        shore.size = float(min(6, max(3, round(rows * 0.26))))
-        shore.gap, shore.density = round(shore.size) + 3, 0.6
-        out.append(_brush(trip, rows, ("palm", "tree")))
-    return hz, out
-
-
-def _alps(trip: Trip, rows: int) -> tuple[int, list[Layer]]:
-    s, hz = trip.seed, round(rows * 0.66)
-    rock = (112, 112, 126)
-    peaks = Layer(Strip(s, "mountains", 22), 0.86, hz + 1, rows * 0.6, rock, snow=0.42)
-    woods = Layer(Strip(s + 2, "hills", 30), 0.3, rows * 0.88, rows * 0.26)
-    out = [peaks, woods, _verge(trip, rows)]
-    if trip.land and rows >= 8:
-        mid = Layer(Strip(s + 1, "mountains", 34), 0.6, hz + 2, rows * 0.4)
-        mid.colour, mid.snow = {**GROUND, "summer": (70, 120, 80)}, 0.8
-        woods.things, woods.gap, woods.density = (
-            ("pine", "pine", "house", "pine"),
-            3,
-            0.7,
-        )
-        woods.size = float(min(6, max(3, round(rows * 0.24))))
-        out = [peaks, mid, woods, out[-1], _brush(trip, rows, ("pine",))]
-    return hz, out
-
-
-def _desert(trip: Trip, rows: int) -> tuple[int, list[Layer]]:
-    s, hz = trip.seed, round(rows * 0.6)
-    mesas = Layer(Strip(s, "mesas", 13), 0.84, hz + 1, rows * 0.3, (204, 116, 76))
-    dunes = Layer(
-        Strip(s + 1, "dunes", 34), 0.4, rows * 0.86, rows * 0.3, (232, 190, 124)
-    )
-    out = [mesas, dunes, _verge(trip, rows, (214, 170, 110))]
-    if trip.land and rows >= 8:
-        dunes.things, dunes.gap, dunes.density = (
-            ("cactus", "rock", "cactus", "bush"),
-            6,
-            0.5,
-        )
-        dunes.size = float(min(5, max(3, round(rows * 0.2))))
-        out.append(_brush(trip, rows, ("cactus", "rock")))
-    return hz, out
-
-
-def _town(trip: Trip, rows: int) -> tuple[int, list[Layer]]:
-    s, hz = trip.seed, round(rows * 0.72)
-    far = Layer(Strip(s, "city", 5), 0.72, rows, rows * 0.5, (128, 130, 140))
-    near = Layer(Strip(s + 1, "city", 8), 0.34, rows, rows * 0.66, (92, 94, 104))
-    out = [far, near, _verge(trip, rows, (92, 92, 100))]
-    if trip.land and rows >= 8:
-        hills = Layer(Strip(s + 2, "hills", 40), 0.92, hz, rows * 0.24, (96, 110, 128))
-        out = [hills, *out, _brush(trip, rows, ("tree",))]
-    return hz, out
-
-
-_LAND = {
-    "plain": _plain,
-    "coast": _coast,
-    "alps": _alps,
-    "desert": _desert,
-    "city": _town,
-}
-
-
 # --- what goes by ----------------------------------------------------
 
 
+Strung = list[tuple[int, int, str, RGB, RGB, RGB, RGB]]
+
+
 def _wires(
-    half: Half, sky: _sky.Sky, shift: float, clear: tuple[float, float] | None = None
-) -> None:
-    """Poles and two wires that sag from one to the next; no pole
-    from the pixel `clear[0]` to `clear[1]`."""
+    half: Half,
+    sky: _sky.Sky,
+    shift: float,
+    verge: Layer,
+    bare: Sequence[tuple[float, float]] = (),
+) -> Strung:
+    """Poles on the verge, at its pace, and two wires that sag from
+    one to the next. No pole within the spans of `bare`, in pixels of
+    the way, and no wire to a pole that is not.
+
+    Over a cell of one colour a wire is braille: those cells are
+    returned, for `_string` to put once what is nearer is painted.
+    Elsewhere it darkens the pixel it crosses."""
     w, rows = half.w, 2 * half.h
+    shift = math.floor(shift + 1e-6)
     top = max(1, round(rows * 0.1))
-    first = math.floor(shift / POLES) * POLES - shift
-    dots = Braille(w, half.h)
     high, sag = 2 * top, max(2.0, rows * 0.24)  # in dots
+
+    def stands(i: int) -> bool:
+        return not any(a - 2 <= i * POLES < b + 2 for a, b in bare)
+
+    dots = Braille(w, half.h)
     for dx in range(2 * w):
-        u = (dx / 2 - first) % POLES / POLES
+        i, u = divmod((dx / 2 + shift) / POLES, 1)
+        if not (stands(int(i)) and stands(int(i) + 1)):
+            continue
         drop = sag * (1 - (2 * u - 1) ** 2)
         for wire in (0, 3):
             dots.set(dx, round(high + wire + drop))
-    half.ink(dots, mix(sky.shade((60, 50, 44)), (0, 0, 0), 0.3))
-    wood = sky.shade((92, 66, 44))
-    x = first
-    while x < w + POLES:
-        px = round(x)
-        if clear is not None and clear[0] - 2 <= px < clear[1] + 2:
-            x += POLES
+    ink = mix(sky.shade((60, 50, 44)), (0, 0, 0), 0.3)
+    out: Strung = []
+    for cx, cy in dots.cells():
+        up, low = half.px[2 * cy][cx], half.px[2 * cy + 1][cx]
+        bits = dots.bits[cy][cx]
+        above, under = (bits & 0x1B).bit_count(), (bits & 0xE4).bit_count()
+        if sum(abs(a - b) for a, b in zip(up, low, strict=True)) <= NEAR:
+            bg = up if above > under else low
+            out.append((cx, cy, dots.glyph(cx, cy), ink, bg, up, low))
             continue
-        for y in range(top - 1, rows):
-            half.set(px, y, wood)
-        half.set(px - 1, top, wood)
-        half.set(px + 1, top, wood)
-        for cy in range(half.h):
-            half.over.pop((px, cy), None)
-        x += POLES
+        if above:
+            half.set(cx, 2 * cy, ink, ROUGH)
+        if under:
+            half.set(cx, 2 * cy + 1, ink, ROUGH)
+    wood = sky.shade((92, 66, 44))
+    for i in range(shift // POLES, (shift + w) // POLES + 1):
+        if not stands(i):
+            continue
+        x = i * POLES - shift
+        foot = min(rows, round(verge.top(i * POLES)) + 2)
+        for y in range(top - 1, foot):
+            half.set(x, y, wood)
+        half.set(x - 1, top, wood)
+        half.set(x + 1, top, wood)
+    return out
+
+
+def _string(half: Half, wires: Strung) -> None:
+    """Put the wires where the cell is as it was: not behind a thing."""
+    for cx, cy, glyph, ink, bg, up, low in wires:
+        if (half.px[2 * cy][cx], half.px[2 * cy + 1][cx]) == (up, low):
+            half.over.setdefault((cx, cy), (glyph, ink, bg))
 
 
 def _tunnel(half: Half, sky: _sky.Sky, x0: float, x1: float, shift: float) -> None:
@@ -483,6 +407,12 @@ def _sky_of(w: int, h: int, hz: int, sky: _sky.Sky) -> tuple[tuple[RGB, ...], ..
     return tuple(tuple(row) for row in half.px)
 
 
+def _even(rate: float) -> float:
+    """The nearest rate that scrolls evenly: a pixel every so many
+    frames, or so many pixels a frame."""
+    return float(round(rate)) if rate >= 0.75 else 1 / round(1 / max(rate, 0.004))
+
+
 def scene(
     w: int,
     h: int,
@@ -492,7 +422,11 @@ def scene(
     pointer: Pointer | None = None,
 ) -> Rows:
     """The glass of `w` by `h` cells at the local time `when`, `t`
-    seconds into the trip, the pointer at `pointer`."""
+    seconds into the trip, the pointer at `pointer`.
+
+    Far to near: the sky, the layers beyond the track, the poles and
+    their wires, what brushes the glass, what the trip meets; then
+    what is on the glass."""
     trip = trip or Trip()
     seed = trip.seed
     when = when.replace(second=0, microsecond=0)  # the sky, a minute at a time
@@ -510,7 +444,9 @@ def scene(
 
     half = Half(w, h)
     rows = 2 * h
-    hz, layers = _LAND[trip.line](trip, rows)
+    hz, back, front, sea = land(trip.line, seed, rows, trip.land)
+    for layer in (*back, *front):
+        layer.speed = _even(layer.rate())
     shift = dist(trip, t)
     clear = [list(row) for row in _sky_of(w, h, hz, sky)]
     half.px = [list(row) for row in clear]
@@ -519,46 +455,76 @@ def scene(
         clouds(half, sky, seed + 7, hz, amount, -shift * 0.012)
         if cover < 0.5:
             clear = [list(row) for row in half.px]
-    k = int(t // CYCLE)
-    halt = None  # the platform in sight, in pixels
-    for n in (k - 1, k):
-        if n >= 0 and event(trip, n) == "station":
-            at = dist(trip, n * CYCLE + WHEN + BRAKE) - 75 - shift
-            if at < w and at + w + 150 > 0:
-                halt = (at, at + w + 150)
-    marks: list[Mark] = []
-    for i, layer in enumerate(layers):
-        if trip.line == "coast" and i == 1:
-            water(half, sky, hz, seed, t)
-        marks += paint(half, layer, sky, shift, season)
-        if trip.poles and rows >= 8 and layer.depth == 0.0 and layer.speed is None:
-            _wires(half, sky, shift * 0.9, halt)
-    if trip.land:
-        lights(half, sky, marks, seed, None)
-    if kind == "fog":
-        fog(half, sky, hz)
-    stars(half, clear, sky, seed + 3, None, hz)
 
-    if halt is not None:
-        _station(half, sky, halt[0], trip, k)
+    # What the trip meets, in pixels of the way: `(what, cycle, x0, x1)`.
+    k = int(t // CYCLE)
+    met = []
     for n in (k - 1, k):  # an event may end in the next cycle
         what = event(trip, n) if n >= 0 else None
         start = n * CYCLE + WHEN
-        if what == "train":
+        if what == "station":
+            x0 = dist(trip, start + BRAKE) - 75
+            met.append((what, n, x0, x0 + w + 150))
+        elif what == "train":  # as long as it takes to go by
+            met.append((what, n, dist(trip, start) + w, dist(trip, start + SPAN[what])))
+        elif what is not None:
+            x0 = dist(trip, start) + w
+            met.append((what, n, x0, x0 + PACE * SPAN[what]))
+    # No pole at a station or on a bridge; nothing by the glass where
+    # something is met.
+    poles = [(x0, x1) for what, _, x0, x1 in met if what in ("station", "bridge")]
+    for layer in front:
+        reach, rate = layer.size + 3, layer.rate()
+        layer.bare = [
+            (rate * (x0 - w) - reach, rate * x1 + w + reach) for _, _, x0, x1 in met
+        ]
+
+    marks: list[Mark] = []
+    for i, layer in enumerate(back):
+        if sea and i == 1:
+            water(half, sky, hz, seed, t)
+        marks += paint(half, layer, sky, shift, season)
+    if trip.land:
+        lights(half, sky, marks, seed, None)
+    wires: Strung = []
+    if trip.poles and rows >= 8:
+        wires = _wires(half, sky, shift, back[-1], poles)
+    if kind == "fog":
+        fog(half, sky, hz)
+    for layer in front:
+        paint(half, layer, sky, shift, season)
+
+    dry = None  # the columns under a vault
+    for what, n, x0, x1 in met:
+        a, b = x0 - shift, x1 - shift
+        if a >= w or b <= 0:
+            continue
+        if what == "station":
+            _station(half, sky, a, trip, n)
+        elif what == "train":
+            start = n * CYCLE + WHEN
             p, q = (t - start) / 0.3, (t - start - SPAN[what]) / 0.3
             if p > 0 and q < 1:
                 _other(
                     half, sky, w * (1 - p), w * (1 - q) if q > 0 else w, shift * 4, n
                 )
-        elif what in ("tunnel", "bridge"):
-            x0 = dist(trip, start) + w - shift
-            x1 = x0 + PACE * SPAN[what]
-            if x0 < w and x1 > 0:
-                (_tunnel if what == "tunnel" else _bridge)(half, sky, x0, x1, shift)
+        elif what == "bridge":
+            _bridge(half, sky, a, b, shift)
+        elif what == "tunnel":
+            _tunnel(half, sky, a, b, shift)
+            dry = (math.ceil(a), math.ceil(b))
+
+    _string(half, wires)
+    stars(half, clear, sky, seed + 3, None, hz)
+    glass = set(half.over)
     if kind == "rain":
         rain(half, sky, seed, t, 1.5)
     elif kind == "snow":
         snow(half, sky, seed, t)
+    if dry is not None:  # no rain in a tunnel
+        for cell in set(half.over) - glass:
+            if dry[0] <= cell[0] < dry[1]:
+                del half.over[cell]
     breath(half, pointer, t)
     return half.rows(trip.deep)
 
@@ -598,7 +564,7 @@ def _trip(args: argparse.Namespace, start: datetime.datetime) -> Trip:
 
 
 def _era(args: argparse.Namespace) -> Era:
-    return Era(datetime.datetime.now(), args.speed, args.at, args.season)
+    return Era(datetime.datetime.now(), args.speed, args.at, args.season, args.days)
 
 
 def show(args: argparse.Namespace) -> int:
@@ -617,9 +583,17 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     trip = _trip(args, era.start)
     start = clock.monotonic() - args.after
     pointer = Pointer(lambda: clock.monotonic() - start, KEEP)
+    frame = math.floor(args.after * FPS)
+
+    def tick() -> None:
+        # The trip goes a frame a draw, so that the land scrolls
+        # evenly; more than a frame off the clock, it catches up.
+        nonlocal frame
+        due = (clock.monotonic() - start) * FPS
+        frame = frame + 1 if abs(due - frame - 1) < 1.5 else math.floor(due)
 
     def render(w: int, h: int) -> Rows:
-        t = clock.monotonic() - start
+        t = frame / FPS
         return scene(w, h, era.when(t), t, trip, pointer)
 
     deck = _widgets.Deck(pilot, args)
@@ -627,7 +601,7 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     widget = deck.add("train", list(SIZES), render, border=border, title="")
     # The next frame shows the breath: no draw of its own.
     deck.on_hover(widget, lambda x, y: pointer.move(x, y) or False, pointer.leave)
-    deck.run(PERIOD, seconds)
+    deck.run(1 / FPS, seconds, tick, align=True)
 
 
 def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> int:
@@ -678,6 +652,10 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
     args = _cli.parse(out, argv)
     if args.speed <= 0:
         out.error("--speed: more than 0")
+    drawn(args, "line", LINES)
+    if args.random and not args.after:  # somewhere along the way, an event soon
+        rng = random.Random(args.seed)
+        args.after = rng.randrange(40) * CYCLE + rng.uniform(0.0, WHEN - 6.0)
     if args.print is not None:
         return show(args)
     return _cli.run(lambda pilot, a: app(pilot, a, seconds), args)

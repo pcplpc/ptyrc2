@@ -106,6 +106,75 @@ def test_options_add() -> None:
     assert sum(0x2800 < ord(c) < 0x2900 for c, _, _ in wires) > 30
 
 
+def test_wires() -> None:
+    trip = replace(ALL, weather="clouds", events=False, deep=True)
+    wood = hexa(train._sky.at(NOON, 47.0, 0.25).shade((92, 66, 44)))
+    for step in range(0, 240, 7):
+        cells = pixels(train.scene(48, 11, NOON, step / train.FPS, trip))
+        rows = [cells[i * 48 : (i + 1) * 48] for i in range(11)]
+        for x in range(48):
+            column = [rows[y][x] for y in range(11)]
+            if any(bg == wood for _, _, bg in column[1:5]):
+                continue  # a pole
+            # A wire is seen in every column: braille on a cell of one
+            # colour, a darker pixel elsewhere.
+            dots = sum(0x2800 < ord(c) < 0x2900 for c, _, _ in column[:5])
+            assert dots or any(c == "▀" for c, _, _ in column[:5]), (step, x)
+    # A thing by the glass hides them.
+    half = Half(4, 2)
+    sky, leaf = (90, 120, 230), (0, 90, 0)
+    half.fill(sky)
+    strung = [(x, 0, "⠒", (0, 0, 0), sky, sky, sky) for x in range(4)]
+    half.set(1, 0, leaf)
+    half.set(2, 1, leaf)
+    train._string(half, strung)
+    assert sorted(half.over) == [(0, 0), (3, 0)]
+    # The poles stand on the verge: they go by at its pace, a pixel a frame.
+    bare = replace(trip, land=False)
+
+    def poles(t: float) -> list[int]:
+        row = pixels(train.scene(48, 11, NOON, t, bare))[3 * 48 : 4 * 48]
+        return [x for x, (_, _, bg) in enumerate(row) if bg == wood]
+
+    first = poles(2.0)
+    assert first and poles(2.0 + 5 / train.FPS) == [x - 5 for x in first if x >= 5]
+
+
+def test_planes() -> None:
+    """A lit window is not seen through what is nearer."""
+    trip = replace(ALL, weather=None, events=False, poles=False, deep=True)
+    lamp = hexa(train.LAMP)
+    lit = hidden = 0
+    for step in range(0, 1500, 3):
+        t = step / train.FPS
+        cells = colours(train.scene(48, 11, NIGHT.replace(hour=21), t, trip))
+        rows = [cells[i * 48 : (i + 1) * 48] for i in range(11)]
+        for y in range(1, 10):
+            for x in range(1, 47):
+                if rows[y][x] != lamp:
+                    continue
+                lit += 1
+                # A lamp alone in the dark crown of a tree by the glass.
+                around = {rows[y + j][x + i] for j in (-1, 1) for i in (-1, 0, 1)}
+                hidden += len(around) == 1
+    assert lit > 50 and hidden == 0
+
+
+def test_random(capsys: pytest.CaptureFixture[str]) -> None:
+    args = ["--print", "34x8", "-a", "-r", "--seed", "11"]
+    assert train.main(args) == 0
+    first = capsys.readouterr().out
+    assert train.main(args) == 0
+    assert capsys.readouterr().out == first
+    seen = {first}
+    for seed in range(12, 20):
+        assert train.main([*args[:-1], str(seed)]) == 0
+        seen.add(capsys.readouterr().out)
+    assert len(seen) == 9
+    assert train.main(["--print", "34x8", "-r", "--line", "alps", "--after", "5"]) == 0
+    capsys.readouterr()
+
+
 def colours(rows: train.Rows) -> list[str]:
     """The background of each cell, `deep`, row by row."""
     return [run["bg"] for row in rows for run in row for _ in run["t"]]

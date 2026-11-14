@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import threading
 import unicodedata
 from dataclasses import replace
@@ -189,6 +190,59 @@ def test_era() -> None:
     assert era.start == datetime(2026, 1, 20, 21, 30)
     for season, (month, day) in window.MIDDLE.items():
         assert _sky.season_of(datetime(2026, month, day).timetuple().tm_yday) == season
+
+
+def test_random(capsys: pytest.CaptureFixture[str]) -> None:
+    def draw(*more: str) -> argparse.Namespace:
+        out = argparse.ArgumentParser()
+        out.add_argument("--place")
+        out.add_argument("--weather")
+        out.add_argument("-y", "--seasons", action="store_true")
+        window.times(out)
+        args = out.parse_args(more)
+        window.drawn(args, "place", window.PLACES)
+        return args
+
+    plain = draw("--seed", "3")
+    assert (plain.place, plain.season, plain.at, plain.weather) == (None,) * 4
+    assert plain.days == 0 and not plain.seasons
+    seen = [draw("-r", "--seed", str(n)) for n in range(120)]
+    assert seen[7] == draw("-r", "--seed", "7")  # a seed: the same draws
+    assert {a.place for a in seen} == set(window.PLACES)
+    assert {a.season for a in seen} == set(_sky.SEASONS)
+    assert {a.weather for a in seen} == set(_sky.WEATHERS)
+    assert all(a.season == "winter" for a in seen if a.weather == "snow")
+    assert all(a.seasons and -28 <= a.days <= 28 for a in seen)
+    assert len({a.at for a in seen}) > 60
+    assert sum(not 7 <= a.at[0] < 18 for a in seen) > 30  # low suns, evenings
+    # What is given stays.
+    kept = draw("-r", "--place", "sea", "--at", "07:10", "--season", "spring")
+    assert (kept.place, kept.at, kept.season, kept.days) == (
+        "sea",
+        (7, 10),
+        "spring",
+        0,
+    )
+    assert draw("-r", "--weather", "fog").weather == "fog"
+    assert draw("-r").seed != draw("-r").seed  # no seed: another at each run
+    # The moments, by the sun.
+    assert 4.5 < window.moment("dawn", 5.0, 21.0, 0.5) < 5.5
+    assert (
+        19.9
+        < window.moment("golden", 5.0, 21.0, 0.0)
+        < window.moment("golden", 5.0, 21.0, 1.0)
+        < 21.0
+    )
+    assert window.moment("night", 8.0, 16.5, 0.9) < 8.0
+    start = window.Era(NOON, 1.0, (6, 0), "winter", days=-3).start
+    assert (start.month, start.day, start.hour) == (1, 17, 6)
+    args = ["--print", "26x8", "-a", "-r", "--seed", "9"]
+    assert window.main(args) == 0
+    first = capsys.readouterr().out
+    assert window.main(args) == 0
+    assert capsys.readouterr().out == first
+    assert window.main([*args[:-1], "10"]) == 0
+    assert capsys.readouterr().out != first
 
 
 def test_print(capsys: pytest.CaptureFixture[str]) -> None:

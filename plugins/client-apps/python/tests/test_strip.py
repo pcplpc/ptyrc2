@@ -145,6 +145,15 @@ def test_houses() -> None:
     _strip.lights(day, NOON, marks, 4, pointer)
     assert day.get(here.x, here.y) == _strip.LAMP
     assert sum(day.get(m.x, m.y) == _strip.LAMP for m in marks) == 1
+    # A window painted over since is hidden: no lamp shows through.
+    night = Half(60, 10)
+    marks = _strip.paint(night, layer, NIGHT, 0.0, "summer")
+    windows = [m for m in marks if m.kind == "window" and 0 <= m.x < 60]
+    night.set(windows[0].x, windows[0].y, (0, 90, 0))
+    _strip.lights(night, NIGHT, marks, 4, None)
+    pointer.move(windows[0].x, windows[0].y // 2)
+    _strip.lights(night, NIGHT, marks, 4, pointer)
+    assert night.get(windows[0].x, windows[0].y) == (0, 90, 0)
 
 
 def test_city() -> None:

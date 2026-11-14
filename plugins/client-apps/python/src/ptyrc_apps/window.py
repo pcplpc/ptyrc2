@@ -5,6 +5,7 @@
     ptyrc-app window -a --prefer top-right
     ptyrc-app window -ly --place mountain --at 21:30 --season winter
     ptyrc-app window -a --print 40x12 --at 07:10
+    ptyrc-app window -a -r
 
 What it shows:
 
@@ -26,6 +27,10 @@ What it shows:
   curtains and a cat on the sill; `-a`: all, and the place of the day;
 - the pointer over the window (`_strip.Pointer`): the curtains move
   aside, the cat turns its head, a house near it lights up;
+- `-r`: what is not given is drawn at random, another at each run:
+  the place, the season and its day, the time (`MOMENTS`: more often
+  a low sun or an evening than a noon), the weather; `--seed`: the
+  same draws;
 - `--print [WxH]`: no driver, the variants on stdout.
 """
 
@@ -34,6 +39,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import math
+import random
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -70,6 +76,7 @@ __all__ = [
     "Era",
     "Look",
     "boxed",
+    "drawn",
     "main",
     "scene",
     "sized",
@@ -121,7 +128,9 @@ class Look:
 
 class Era:
     """The time of the scene: `when(t)`, the local time after `t`
-    seconds of the app, `speed` seconds of the scene a second."""
+    seconds of the app, `speed` seconds of the scene a second. It
+    starts at `start`: at the time `at`, in the middle of `season`,
+    `days` later."""
 
     def __init__(
         self,
@@ -129,12 +138,14 @@ class Era:
         speed: float = 1.0,
         at: tuple[int, int] | None = None,
         season: str | None = None,
+        days: int = 0,
     ) -> None:
         if at is not None:
             start = start.replace(hour=at[0], minute=at[1], second=0)
         if season is not None:
             month, day = MIDDLE[season]
             start = start.replace(month=month, day=day)
+        start += datetime.timedelta(days=days)  # of the season: its middle is the 20th
         self.start, self.speed = start.replace(tzinfo=None, microsecond=0), speed
 
     def when(self, t: float) -> datetime.datetime:
@@ -513,7 +524,7 @@ def _look(args: argparse.Namespace, start: datetime.datetime) -> Look:
 
 
 def _era(args: argparse.Namespace) -> Era:
-    return Era(datetime.datetime.now(), args.speed, args.at, args.season)
+    return Era(datetime.datetime.now(), args.speed, args.at, args.season, args.days)
 
 
 def show(args: argparse.Namespace) -> int:
@@ -563,9 +574,87 @@ def _clock(text: str) -> tuple[int, int]:
     return hour, minute
 
 
+#: `-r`: the moments of a day, and how often each is drawn.
+MOMENTS = {
+    "dawn": 2,
+    "morning": 2,
+    "noon": 2,
+    "afternoon": 2,
+    "golden": 3,
+    "dusk": 3,
+    "evening": 3,
+    "night": 1,
+}
+#: `-r`: how often a weather is drawn; no snow but in winter.
+SKIES = {"clear": 34, "clouds": 28, "rain": 14, "fog": 10, "snow": 14}
+
+
+def _sun(day: datetime.datetime, lat: float) -> tuple[float, float]:
+    """The hours the sun rises and sets at, to a few minutes."""
+    up = [m / 12 for m in range(288) if _sky.at(_hour(day, m / 12), lat).sun > 0]
+    return (up[0], up[-1]) if up else (12.0, 12.0)
+
+
+def _hour(day: datetime.datetime, hour: float) -> datetime.datetime:
+    minutes = round(hour % 24 * 60) % 1440
+    return day.replace(hour=minutes // 60, minute=minutes % 60, second=0)
+
+
+def moment(name: str, rise: float, fall: float, draw: float) -> float:
+    """The hour of the moment `name` of `MOMENTS` of a day whose sun
+    rises at `rise` and sets at `fall`; `draw`, `0..1`: where in it."""
+    noon = (rise + fall) / 2
+    a, b = {
+        "dawn": (rise - 0.4, rise + 0.3),
+        "morning": (rise + 0.8, noon - 1.5),
+        "noon": (noon - 1.5, noon + 1.5),
+        "afternoon": (noon + 1.5, fall - 1.2),
+        "golden": (fall - 1.0, fall - 0.2),
+        "dusk": (fall - 0.1, fall + 0.6),
+        "evening": (fall + 0.8, max(fall + 1.0, 23.0)),
+        "night": (fall + 4.0, rise + 23.0),
+    }[name]
+    return (a + max(0.0, b - a) * draw) % 24
+
+
+def drawn(args: argparse.Namespace, key: str, among: Sequence[str]) -> None:
+    """`-r`: draw what `args` leave open: the seed, `key` among
+    `among`, the season and a day of it, the time, the weather. The
+    season shows. A seed given: the same draws."""
+    args.days = 0
+    if not args.random:
+        return
+    rng = random.Random(args.seed)
+    if args.seed is None:
+        args.seed = rng.randrange(1 << 30)
+    if getattr(args, key) in (None, "random"):
+        setattr(args, key, rng.choice(among))
+    if args.season is None:
+        args.season = rng.choice(_sky.SEASONS)
+        args.days = rng.randrange(-28, 29)  # another moon
+    args.seasons = True
+    if args.weather is None:
+        skies = {
+            k: n for k, n in SKIES.items() if k != "snow" or args.season == "winter"
+        }
+        args.weather = rng.choices(list(skies), list(skies.values()))[0]
+    if args.at is None:
+        day = Era(datetime.datetime.now(), 1.0, None, args.season, args.days).start
+        name = rng.choices(list(MOMENTS), list(MOMENTS.values()))[0]
+        hour = moment(name, *_sun(day, args.lat), rng.random())
+        args.at = (int(hour), int(hour % 1 * 60))
+
+
 def times(out: argparse.ArgumentParser) -> None:
-    """The options of the time of a scene, and `--seed`, `--rgb`,
-    `--print`."""
+    """The options of the time of a scene, and `-r`, `--seed`,
+    `--rgb`, `--print`."""
+    out.add_argument(
+        "-r",
+        "--random",
+        action="store_true",
+        help="at random, what is not given: the land, the season, the time, "
+        "the weather; another at each run",
+    )
     out.add_argument(
         "--at",
         type=_clock,
@@ -637,6 +726,7 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
     args = _cli.parse(out, argv)
     if args.speed <= 0:
         out.error("--speed: more than 0")
+    drawn(args, "place", PLACES)
     if args.print is not None:
         return show(args)
     return _cli.run(lambda pilot, a: app(pilot, a, seconds), args)
