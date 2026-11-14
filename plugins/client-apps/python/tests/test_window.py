@@ -191,6 +191,107 @@ def test_cat_is_indoors(monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
             assert seen[40 * y + x] == plain[40 * y + x], (t, x, y)
 
 
+CATS = [s for s in window.SIZES if s[0] >= 18 and s[1] >= 6]
+ODD = [(18, 6), (19, 7), (25, 9), (33, 8), (34, 6), (35, 11), (61, 17), (200, 60)]
+
+
+@pytest.mark.parametrize("size", [*CATS, *ODD])
+def test_cat_clear_of_the_bars(size: tuple[int, int]) -> None:
+    """The cat, tail and all, on no mullion; its body in the open,
+    its ears under the rail with a row between."""
+    w, h = size
+    cols, rail = window._bars(w, h)
+    side = window.curtain(w, 0.0)
+    seen = set()
+    for seed in range(201):
+        perch = window._perch(w, h, seed)
+        assert perch is not None
+        left, way = perch
+        body = range(left, left + 5)
+        assert side <= left and left + 4 < w - side
+        assert not set(cols) & {*body, *window._tail(left, way)}
+        assert all(0 <= x < w for x in window._tail(left, way))
+        assert rail is None or rail < 2 * h - len(window.CAT) - 1
+        seen.add(perch)
+    assert len(seen) >= 2 or w < 19  # drawn from the seed; one place at 18
+
+
+def test_cat_clear_of_the_bars_drawn() -> None:
+    """In the picture: no pixel of the cat on a mullion column."""
+    look = Look(seed=0, cosy=True, deep=True)
+    for w, h in [*CATS, (19, 7), (35, 11)]:
+        cols, _ = window._bars(w, h)
+        for seed in range(0, 200, 7):
+            half = window.Half(w, h)
+            room = window._room(replace(look, seed=seed), w, h, "summer", None)
+            window._cat(half, _sky.at(NOON), 0.0, None, room)
+            fur = {x for row in half.px for x, c in enumerate(row) if c != (0, 0, 0)}
+            assert fur and not fur & set(cols), (w, h, seed)
+
+
+SEASONS = {"spring": 4, "summer": 7, "autumn": 10, "winter": 1}
+
+
+@pytest.mark.parametrize("place", window.PLACES)
+def test_cat_stands_out(place: str) -> None:
+    """The cat against what is behind it and against the mullions, by
+    day and by night, as the 256 show them."""
+    low = []
+    for season, month in SEASONS.items():
+        for kind in (None, "clouds", "rain", "fog"):
+            for seed in range(8):
+                for w, h in ((40, 12), (26, 8), (18, 6)):
+                    look = Look(seed, place, land=True, seasons=True, cosy=True)
+                    look = replace(look, weather=kind)
+                    room = window._room(look, w, h, season, kind)
+                    left, _ = room.perch
+                    for hour in (12, 0):
+                        when = datetime(2026, month, 20, hour, 30)
+                        sky = _sky.at(when, look.lat, window.COVER.get(kind or "", 0))
+                        out = window._outside(w, h, look, sky, season, kind, 0, None)
+                        rows = 2 * h
+                        cells = [
+                            (x, y)
+                            for x in range(left - 1, left + 6)
+                            for y in range(rows - 6, rows)
+                        ]
+                        behind = ((sky.light, tuple(out.px[y][x] for x, y in cells)),)
+                        fit = window._against(room.coat, behind, rim=True)
+                        coat = window._lit(room.coat, sky.light)
+                        frame = window._lit(room.frame, sky.light)
+                        apart = window._apart(coat, frame)
+                        low.append(min(fit, apart))
+    assert min(low) >= 18
+    assert sum(v < 25 for v in low) <= len(low) // 50
+
+
+@pytest.mark.parametrize("place", window.PLACES)
+def test_indoors_vary(place: str) -> None:
+    """The seed still chooses: several coats and cloths a place."""
+    coats, cloths = set(), set()
+    for seed in range(40):
+        look = Look(seed, place, land=True, seasons=True, cosy=True)
+        room = window._room(look, 40, 12, "summer", None)
+        coats.add(room.coat)
+        cloths.add(room.cloth)
+    assert len(coats) >= 4 and len(cloths) >= 4
+
+
+def test_indoors_still() -> None:
+    """The things indoors keep their colours as the time runs and the
+    clouds pass."""
+    for seed in range(8):
+        look = replace(ALL, seed=seed, weather="clouds", deep=True)
+        left, _ = window._room(look, 40, 12, "summer", "clouds").perch
+        bar = window._bars(40, 12)[0][0]
+        # A cell of the curtain, of a mullion, of the back of the cat.
+        cells = [0, bar, 40 * 10 + left + 2, 40 * 11 + left + 2]
+        frames = [pixels(window.scene(40, 12, NOON, t, look)) for t in (10, 13, 40)]
+        assert frames[0] != frames[2]  # the clouds move
+        for seen in frames:
+            assert [seen[i] for i in cells] == [frames[0][i] for i in cells]
+
+
 def test_house_lit_under_the_pointer() -> None:
     hexa = "#{:02x}{:02x}{:02x}".format(*LAMP)
     evening = NOON.replace(hour=22, minute=0)

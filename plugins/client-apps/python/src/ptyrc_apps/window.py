@@ -25,6 +25,9 @@ What it shows:
   the weather of the day: clouds, rain, fog, snow; `-p`: what passes:
   birds, smoke, a balloon, a meteor, a plane, the stars twinkle; `-c`:
   curtains and a cat on the sill; `-a`: all, and the place of the day;
+- indoors, the mullions, the curtains and the cat: colours that stand
+  out from the view behind them and from each other, lit by a lamp at
+  night; the cat between the mullions;
 - the pointer over the window (`_strip.Pointer`): the curtains move
   aside, the cat turns its head, a house near it lights up;
 - `-r`: what is not given is drawn at random, another at each run:
@@ -41,14 +44,15 @@ import datetime
 import math
 import random
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from functools import cache, lru_cache
 from typing import Any
 
 from ptyrc import Pilot, clock
 
 from . import _cli, _sky, _widgets
-from ._canvas import RGB, Braille, Half, Rows, ansi, mix
+from ._canvas import RGB, Braille, Half, Rows, ansi, mix, rgb, xterm
 from ._strip import (
     GROUND,
     LAMP,
@@ -99,8 +103,43 @@ BORDER: dict[str, Any] = {
 MIDDLE = {"spring": (4, 20), "summer": (7, 20), "autumn": (10, 20), "winter": (1, 20)}
 
 FRAME: RGB = (196, 156, 116)
-FABRICS: tuple[RGB, ...] = ((178, 62, 66), (222, 208, 180), (70, 110, 140))
-COATS: tuple[RGB, ...] = ((26, 24, 28), (206, 126, 56), (120, 118, 122))
+#: The paints of the mullions: `FRAME` unless it melts into the view.
+FRAMES: tuple[RGB, ...] = (
+    FRAME,
+    (238, 236, 228),
+    (84, 54, 38),
+    (46, 88, 62),
+    (54, 76, 116),
+    (132, 50, 44),
+)
+FABRICS: tuple[RGB, ...] = (
+    (178, 62, 66),
+    (222, 208, 180),
+    (70, 110, 140),
+    (214, 162, 48),
+    (58, 116, 78),
+    (118, 58, 108),
+    (190, 94, 58),
+    (40, 50, 96),
+    (36, 126, 128),
+    (240, 236, 228),
+)
+COATS: tuple[RGB, ...] = (
+    (26, 24, 28),
+    (206, 126, 56),
+    (120, 118, 122),
+    (238, 234, 226),
+    (218, 196, 160),
+    (104, 72, 48),
+    (76, 78, 92),
+)
+#: The lamp of the room: what lights the inside at night; the edge of
+#: the cat towards it.
+ROOM: RGB = (255, 228, 192)
+RIM: RGB = (250, 230, 200)
+#: The least contrast of a thing indoors with what is behind it, and
+#: with the other things indoors (`_apart`).
+FLOOR = 36.0
 SLATE: RGB = (128, 130, 140)
 
 PERIOD = 0.25  # seconds a frame, when something moves
@@ -341,14 +380,129 @@ def _boat(half: Half, sky: _sky.Sky, seed: int, t: float, hz: int) -> None:
         half.set(x, y - 3, LAMP)
 
 
-def _mullions(half: Half, sky: _sky.Sky) -> None:
-    w, h = half.w, half.h
+# --- indoors ---------------------------------------------------------
+
+
+def _lit(c: RGB, light: float) -> RGB:
+    """`c` indoors: as it is by day, under the lamp of the room at night."""
+    lamp = (c[0] * ROOM[0] // 400, c[1] * ROOM[1] // 400, c[2] * ROOM[2] // 400)
+    return mix(lamp, c, light)
+
+
+@cache
+def _lab(n: int) -> tuple[float, float, float]:
+    """CIE L*a*b* of the colour `n` of the 256."""
+
+    def lin(v: int) -> float:
+        u = v / 255
+        return u / 12.92 if u <= 0.04045 else ((u + 0.055) / 1.055) ** 2.4
+
+    def f(u: float) -> float:
+        return u ** (1 / 3) if u > 0.008856 else 7.787 * u + 16 / 116
+
+    r, g, b = (lin(v) for v in rgb(n))
+    x = f((0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047)
+    y = f(0.2126 * r + 0.7152 * g + 0.0722 * b)
+    z = f((0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883)
+    return 116 * y - 16, 500 * (x - y), 200 * (y - z)
+
+
+def _apart(a: RGB, b: RGB) -> float:
+    """Contrast of two colours as the 256 show them: CIE76 with the
+    lightness weighed 1.5."""
+    return _gap(xterm(a), xterm(b))
+
+
+@cache
+def _gap(m: int, n: int) -> float:
+    (l0, a0, b0), (l1, a1, b1) = _lab(m), _lab(n)
+    return math.sqrt((1.5 * (l0 - l1)) ** 2 + (a0 - a1) ** 2 + (b0 - b1) ** 2)
+
+
+#: What is behind a thing indoors: the light and the pixels, by day and
+#: by night.
+Behind = tuple[tuple[float, tuple[RGB, ...]], ...]
+
+
+def _rim(c: RGB, light: float) -> RGB:
+    """The edge of the cat in `c`: lit by the lamp at night, the more so
+    as the coat is dark."""
+    return mix(_lit(c, light), RIM, 0.5 * (1 - light) * (1 - max(c) / 255))
+
+
+def _against(c: RGB, behind: Behind, rim: bool = False) -> float:
+    """Contrast of `c` indoors with the pixels behind it: the mean of the
+    lowest third of the contrasts per pixel, the worse of day and night.
+    `rim`: the better of `c` and its rim."""
+    worst = math.inf
+    for light, pixels in behind:
+        best = 0.0
+        for ink in (_lit(c, light), _rim(c, light))[: 1 + rim]:
+            seen = sorted(_apart(ink, p) for p in pixels)
+            low = seen[: max(1, len(seen) // 3)]
+            best = max(best, sum(low) / len(low))
+        worst = min(worst, best)
+    return worst
+
+
+def _between(a: RGB, b: RGB) -> float:
+    """Contrast of two things indoors, the worse of day and night."""
+    return min(_apart(_lit(a, light), _lit(b, light)) for light in (0.0, 1.0))
+
+
+def _pick(
+    among: Sequence[RGB],
+    behind: Behind,
+    others: Sequence[tuple[RGB, float]],
+    order: list[int],
+    rim: bool = False,
+) -> tuple[RGB, float]:
+    """The first of `among` in `order` with `FLOOR` of contrast with what
+    is behind it, and with each of `others` its share of `FLOOR`; else
+    the one of most contrast. With its contrast."""
+
+    def fit(c: RGB) -> float:
+        apart = (_between(c, o) / k for o, k in others)
+        return min([_against(c, behind, rim), *apart])
+
+    return _first((among[i], fit(among[i])) for i in order)
+
+
+def _first(fits: Iterable[tuple[Any, float]]) -> Any:
+    """The first of `fits` of `FLOOR` at least; else the best."""
+    best: Any = None
+    for it in fits:
+        if it[1] >= FLOOR:
+            return it
+        if best is None or it[1] > best[1]:
+            best = it
+    return best
+
+
+@dataclass(frozen=True)
+class Room:
+    """The things indoors: the paint of the mullions, the cloth of the
+    curtains, the coat of the cat and where it sits (`_perch`)."""
+
+    frame: RGB
+    cloth: RGB
+    coat: RGB
+    perch: tuple[int, int] | None
+
+
+def _bars(w: int, h: int) -> tuple[list[int], int | None]:
+    """The columns of the mullions, and the pixel row of the rail."""
     if w < 18:
-        return
-    ink = mix((70, 60, 60), FRAME, sky.light)
-    bars = [w // 2] if w < 34 else [w // 3, w - 1 - w // 3]
-    rail = 2 * (h // 3) + 1 if h >= 8 else None
-    for x in bars:
+        return [], None
+    cols = [w // 2] if w < 34 else [w // 3, w - 1 - w // 3]
+    return cols, 2 * (h // 3) + 1 if h >= 8 else None
+
+
+def _mullions(half: Half, sky: _sky.Sky, paint: RGB) -> None:
+    w, h = half.w, half.h
+    cols, rail = _bars(w, h)
+    ink = _lit(paint, sky.light)
+    for x in cols:
         for y in range(2 * h):
             half.px[y][x] = ink
             half.over.pop((x, y // 2), None)
@@ -364,15 +518,14 @@ def curtain(w: int, ease: float) -> int:
     return max(1, round(full - ease * (full - max(1, full // 3))))
 
 
-def _curtains(half: Half, sky: _sky.Sky, seed: int, ease: float) -> None:
+def _curtains(half: Half, sky: _sky.Sky, cloth: RGB, ease: float) -> None:
     w, h = half.w, half.h
-    cloth = FABRICS[int(noise(seed + 101) * len(FABRICS))]
-    room = 0.4 + 0.6 * sky.light
+    cloth = _lit(cloth, sky.light)
     wide = curtain(w, ease) if w >= 12 else 0  # none on a porthole
     for i in range(wide):
         # Folds: a light cell, a dark one; denser when drawn aside.
         fold = (0.0, 0.2, 0.36)[(i * (2 if ease > 0.5 else 1) + (i == wide - 1)) % 3]
-        c = mix(mix(cloth, (20, 14, 24), fold), (0, 0, 0), 1 - room)
+        c = mix(cloth, (20, 14, 24), fold)
         for y in range(h):
             for x in (i, w - 1 - i):
                 half.put(x, y, " ", bg=c)
@@ -382,18 +535,51 @@ def _curtains(half: Half, sky: _sky.Sky, seed: int, ease: float) -> None:
 CAT = (" # # ", " ### ", " ### ", "#####", "#####")
 
 
+def _tail(left: int, way: int) -> list[int]:
+    """The columns of the tail of a cat at `left`, to the right if `way`
+    is 1, to the left if -1."""
+    return [left + 2 + way * k for k in (3, 4, 5)]
+
+
+def _perch(w: int, h: int, seed: int) -> tuple[int, int] | None:
+    """Where the cat sits: its left column and the way of its tail; None
+    if no cat. The body clear of the mullions and of the drawn
+    curtains, the tail clear of the mullions; a gap to a mullion and a
+    tail in the open preferred. Among those, by `seed`."""
+    if w < 18 or h < 6:
+        return None
+    cols, _ = _bars(w, h)
+    side = curtain(w, 0.0)
+    fits: list[tuple[int, int, int, int]] = []
+    for left in range(side, w - side - 4):
+        if any(left <= x <= left + 4 for x in cols):
+            continue
+        for way in (1, -1):
+            tail = _tail(left, way)
+            if any(x in cols or not 0 <= x < w for x in tail):
+                continue
+            hidden = sum(x < side or x >= w - side for x in tail)
+            near = any(left - 1 <= x <= left + 5 for x in cols)
+            fits.append((hidden, near, left, way))
+    if not fits:  # not at the sizes there are
+        return side + 1, 1
+    best = min(fits)[:2]
+    fits = [f for f in fits if f[:2] == best]
+    _, _, left, way = fits[int(noise(seed + 112) * len(fits))]
+    return left, way
+
+
 def _cat(
     half: Half,
     sky: _sky.Sky,
-    seed: int,
     t: float,
     pointer: Pointer | None,
-    side: int,
+    room: Room,
 ) -> None:
     """A cat on the sill, seen from behind; it looks at the pointer.
     Indoors: a cell it covers loses the glyph from outside."""
     w, rows = half.w, 2 * half.h
-    if w < 18 or half.h < 6:
+    if room.perch is None:
         return
 
     def dot(x: int, y: int, colour: RGB) -> None:
@@ -401,19 +587,24 @@ def _cat(
             half.set(x, y, colour)
             half.over.pop((x, y // 2), None)
 
-    coat = COATS[int(noise(seed + 111) * len(COATS))]
-    coat = mix(coat, (0, 0, 0), 0.5 * (1 - sky.light))
-    left = side + 1 + int(noise(seed + 112) * (w - 2 * side - 9))
+    left, way = room.perch
     top = rows - len(CAT)
-    for dy, line in enumerate(CAT):
-        for dx, char in enumerate(line):
-            if char == "#":
-                dot(left + dx, top + dy, coat)
+    fur = [
+        (left + dx, top + dy)
+        for dy, line in enumerate(CAT)
+        for dx, char in enumerate(line)
+        if char == "#"
+    ]
     flick = int(t) % 23 < 2 and int(t * 3) % 2
-    dot(left + 5, rows - 1, coat)
-    dot(left + 6, rows - (2 if flick else 1), coat)
+    tail = _tail(left, way)
+    fur += [(tail[0], rows - 1), (tail[1], rows - (2 if flick else 1))]
     if not flick:
-        dot(left + 7, rows - 2, coat)
+        fur.append((tail[2], rows - 2))
+    # The top of each column: the rim the lamp lights at night.
+    edge = {x: min(y for i, y in fur if i == x) for x, _ in fur}
+    coat, rim = _lit(room.coat, sky.light), _rim(room.coat, sky.light)
+    for x, y in fur:
+        dot(x, y, rim if edge[x] == y else coat)
     if pointer is not None and pointer.at is not None:
         eyes = (200, 230, 90)
         turn = (pointer.at[0] > left + 2) - (pointer.at[0] < left + 2)
@@ -429,6 +620,142 @@ def sized(w: int, h: int) -> Size:
     return w, 2 * h
 
 
+#: The share of the sky the clouds cover, by weather.
+COVER = {"clouds": 0.25, "rain": 0.85, "fog": 0.55, "snow": 0.75}
+
+
+def _outside(
+    w: int,
+    h: int,
+    look: Look,
+    sky: _sky.Sky,
+    season: str,
+    kind: str | None,
+    t: float,
+    pointer: Pointer | None,
+    live: bool = True,
+) -> Half:
+    """The view, no window. Not `live`: the land, the clouds, the fog;
+    nothing that falls, passes or twinkles."""
+    seed = look.seed
+    half = Half(w, h)
+    rows = 2 * h
+    hz, layers = _LAND[look.place](look, w, rows)
+    clear = heavens(half, sky, hz)
+    if kind is not None:
+        amount = {"clear": 0.14, "clouds": 0.6}.get(kind, 0.3)
+        clouds(half, sky, seed + 7, hz, amount, t * 0.25)
+        if sky.cover < 0.5:  # stars and birds show between the clouds
+            clear = [list(row) for row in half.px]
+    marks: list[Mark] = []
+    for layer in layers:
+        if look.place == "sea" and layer.depth == 0.0:
+            water(half, sky, hz, seed, t)
+        marks += paint(half, layer, sky, season=season)
+    if look.place == "sea" and layers[-1].depth != 0.0:
+        water(half, sky, hz, seed, t)
+    if look.land:
+        lights(half, sky, marks, seed, pointer)
+    if live and look.passing:
+        _smoke(half, sky, marks, seed, t)
+        _balloon(half, sky, seed, t, hz)
+        _plane(half, sky, seed, t, hz)
+        if look.place == "sea":
+            _boat(half, sky, seed, t, hz)
+    if kind == "fog":
+        fog(half, sky, hz)
+    if not live:
+        return half
+    stars(half, clear, sky, seed + 3, t if look.passing else None, hz)
+    if look.passing and kind not in ("rain", "fog", "snow"):
+        _birds(half, sky, seed, t, hz)
+        _meteor(half, sky, seed, t, hz)
+    if kind == "rain":
+        rain(half, sky, seed, t)
+    elif kind == "snow":
+        snow(half, sky, seed, t)
+    return half
+
+
+@lru_cache(maxsize=64)
+def _views(
+    look: Look, w: int, h: int, season: str, kind: str | None
+) -> tuple[tuple[float, Half], ...]:
+    """The view at noon and at midnight in the middle of `season`, still:
+    what the things indoors are chosen against."""
+    month = MIDDLE[season][0]
+    if look.lat < 0:
+        month = (month + 5) % 12 + 1
+    out = []
+    for hour in (12, 0):
+        when = datetime.datetime(2001, month, 20, hour, 30)
+        sky = _sky.at(when, look.lat, COVER.get(kind or "", 0.0))
+        out.append(
+            (sky.light, _outside(w, h, look, sky, season, kind, 0.0, None, False))
+        )
+    return tuple(out)
+
+
+def _behind(
+    views: tuple[tuple[float, Half], ...], cells: Sequence[tuple[int, int]]
+) -> Behind:
+    """The pixels `cells` of each of `views`."""
+    return tuple(
+        (light, tuple(half.px[y][x] for x, y in cells)) for light, half in views
+    )
+
+
+@lru_cache(maxsize=256)
+def _room(look: Look, w: int, h: int, season: str, kind: str | None) -> Room:
+    """The things indoors, chosen by contrast with the view behind them
+    and with each other; among those, by the seed. A function of the
+    look, the size, the season and the weather: no colour changes as
+    the time runs."""
+    seed, rows = look.seed, 2 * h
+    views = _views(look, w, h, season, kind)
+
+    def order(among: Sequence[RGB], salt: int) -> list[int]:
+        return sorted(range(len(among)), key=lambda i: noise(seed + salt, i))
+
+    cols, rail = _bars(w, h)
+    cells = [(x, y) for x in cols for y in range(rows)]
+    cells += [(x, rail) for x in range(w)] if rail is not None else []
+    bars = _behind(views, cells)
+
+    def framed(coat: RGB | None) -> tuple[RGB, float]:
+        if not cols:
+            return FRAMES[0], math.inf
+        near = [(coat, 1.0)] if coat is not None else []
+        return _pick(FRAMES, bars, near, list(range(len(FRAMES))))
+
+    # The cat first, with a paint of the mullions that suits it.
+    perch = _perch(w, h, seed) if look.cosy else None
+    coat: RGB | None = None
+    frame, _ = framed(None)
+    if perch is not None:
+        left, way = perch
+        xs = {
+            *range(left - 1, left + 6),
+            *(x + d for x in _tail(left, way) for d in (-1, 0, 1)),
+        }
+        cells = [(x, y) for x in xs if 0 <= x < w for y in range(rows - 6, rows)]
+        behind = _behind(views, cells)
+
+        def both(i: int) -> tuple[tuple[RGB, RGB], float]:
+            fit = _against(COATS[i], behind, rim=True)
+            paint, apart = framed(COATS[i])
+            return (COATS[i], paint), min(fit, apart)
+
+        (coat, frame), _ = _first(both(i) for i in order(COATS, 111))
+    near = [(frame, 1.0)] if cols else []
+    near += [(coat, 0.6)] if coat is not None else []
+    side = curtain(w, 0.0)
+    cells = [(x, y) for x in range(min(side + 1, w)) for y in range(rows)]
+    cells += [(w - 1 - x, y) for x, y in cells]
+    cloth, _ = _pick(FABRICS, _behind(views, cells), near, order(FABRICS, 101))
+    return Room(frame, cloth, coat or COATS[0], perch)
+
+
 def scene(
     w: int,
     h: int,
@@ -440,58 +767,21 @@ def scene(
     """The window of `w` by `h` cells at the local time `when`, `t`
     seconds after the start, the pointer at `pointer`."""
     look = look or Look()
-    seed = look.seed
     sky = _sky.at(when, look.lat)
     season = sky.season if look.seasons else "summer"
     kind = look.weather
     if kind == "day":
-        kind = _sky.weather(when.toordinal(), seed, season)
+        kind = _sky.weather(when.toordinal(), look.seed, season)
     if kind == "snow":
         season = "winter"
-    cover = {"clouds": 0.25, "rain": 0.85, "fog": 0.55, "snow": 0.75}.get(
-        kind or "", 0.0
-    )
-    sky = _sky.at(when, look.lat, cover)
-
-    half = Half(w, h)
-    rows = 2 * h
-    hz, layers = _LAND[look.place](look, w, rows)
-    clear = heavens(half, sky, hz)
-    if kind is not None:
-        amount = {"clear": 0.14, "clouds": 0.6}.get(kind, 0.3)
-        clouds(half, sky, seed + 7, hz, amount, t * 0.25)
-        if cover < 0.5:  # stars and birds show between the clouds
-            clear = [list(row) for row in half.px]
-    marks: list[Mark] = []
-    for layer in layers:
-        if look.place == "sea" and layer.depth == 0.0:
-            water(half, sky, hz, seed, t)
-        marks += paint(half, layer, sky, season=season)
-    if look.place == "sea" and layers[-1].depth != 0.0:
-        water(half, sky, hz, seed, t)
-    if look.land:
-        lights(half, sky, marks, seed, pointer)
-    if look.passing:
-        _smoke(half, sky, marks, seed, t)
-        _balloon(half, sky, seed, t, hz)
-        _plane(half, sky, seed, t, hz)
-        if look.place == "sea":
-            _boat(half, sky, seed, t, hz)
-    if kind == "fog":
-        fog(half, sky, hz)
-    stars(half, clear, sky, seed + 3, t if look.passing else None, hz)
-    if look.passing and kind not in ("rain", "fog", "snow"):
-        _birds(half, sky, seed, t, hz)
-        _meteor(half, sky, seed, t, hz)
-    if kind == "rain":
-        rain(half, sky, seed, t)
-    elif kind == "snow":
-        snow(half, sky, seed, t)
-    _mullions(half, sky)
+    sky = _sky.at(when, look.lat, COVER.get(kind or "", 0.0))
+    half = _outside(w, h, look, sky, season, kind, t, pointer)
+    room = _room(look, w, h, season, kind)
+    _mullions(half, sky, room.frame)
     if look.cosy:
         ease = pointer.ease(t) if pointer is not None else 0.0
-        _cat(half, sky, seed, t, pointer, curtain(w, 0.0))
-        _curtains(half, sky, seed, ease)
+        _cat(half, sky, t, pointer, room)
+        _curtains(half, sky, room.cloth, ease)
     return half.rows(look.deep)
 
 
