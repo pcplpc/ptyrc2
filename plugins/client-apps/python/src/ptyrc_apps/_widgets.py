@@ -189,15 +189,17 @@ class Deck:
 
     def run(
         self,
-        period: float = 1.0,
+        period: float | Callable[[], float] = 1.0,
         seconds: float | None = None,
         tick: Callable[[], None] | None = None,
         align: bool = False,
     ) -> None:
         """Keep the deck fresh until the session ends, or for `seconds`.
         `tick`: the app's work before each periodic draw (read its
-        data). `align`: draw on the multiples of `period` of the wall
-        clock, as a clock does."""
+        data). `period`: seconds, or what gives them after each draw.
+        `align`: draw on the multiples of `period` of the wall clock,
+        as a clock does."""
+        every = period if callable(period) else lambda: period
         end = None if seconds is None else clock.monotonic() + seconds
         due = clock.monotonic()
         while True:
@@ -208,7 +210,7 @@ class Deck:
                 if tick is not None:
                     tick()
                 self.draw()
-                now = clock.monotonic()
+                now, period = clock.monotonic(), every()
                 # The wall clock is real time: one of its seconds is `rate()` here.
                 wall = (period - time.time() % period) * clock.rate()
                 due = now + (wall if align else period)

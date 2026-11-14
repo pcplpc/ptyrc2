@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import itertools
 import threading
 import unicodedata
 from dataclasses import replace
@@ -13,7 +12,7 @@ from datetime import datetime
 import pytest
 from ptyrc import Pilot
 from ptyrc import clock as session_clock
-from ptyrc_apps import _sky, window
+from ptyrc_apps import _mouser, _sky, window
 from ptyrc_apps._strip import LAMP, Pointer
 from ptyrc_apps.window import Look
 
@@ -148,15 +147,17 @@ def test_hover() -> None:
     assert pixels(here)[4] != pixels(away)[4]  # the curtain went aside
     pointer.leave()
     assert window.scene(40, 12, NOON, 5.0, look, pointer) != away  # it closes
-    assert window.scene(40, 12, NOON, 9.0, look, pointer) == window.scene(
-        40, 12, NOON, 9.0, look
-    )
+    assert window.scene(40, 12, NOON, 30.0, look, pointer) == window.scene(
+        40, 12, NOON, 30.0, look
+    )  # the curtains drawn, the cat home
 
 
-def _fur(look: Look, t: float, pointer: Pointer | None) -> set[tuple[int, int]]:
+def _fur(
+    look: Look, t: float, pointer: Pointer | None, cat: _mouser.Cat | None = None
+) -> set[tuple[int, int]]:
     half = window.Half(40, 12)
     room = window._room(look, 40, 12, "summer", None)
-    window._cat(half, _sky.at(NOON), t, pointer, room)
+    window._cat(half, _sky.at(NOON), t, pointer, room, cat, look.seed)
     return {
         (x, y)
         for y, row in enumerate(half.px)
@@ -166,37 +167,60 @@ def _fur(look: Look, t: float, pointer: Pointer | None) -> set[tuple[int, int]]:
 
 
 def test_cat_hunts() -> None:
-    """The cat runs along its pane to the pointer, leaps at it, and
-    goes home when it leaves; never on a mullion."""
+    """The cat goes to the pointer across the mullions, leaps at it,
+    and goes home when it leaves; the same stepped or from the trail."""
     look = Look(seed=5, cosy=True)
     room = window._room(look, 40, 12, "summer", None)
-    home, _ = room.perch
-    lo, hi = window._run(40, 12, room.perch)
-    assert lo < home < hi
-    cols = set(window._bars(40, 12)[0])
+    home = room.perch[0] + 2
+    sill = window._sill(40, 12, look.seed, room.perch)
+    assert sill.home == home and sill.lo < home < sill.hi
+    assert sill.lo <= sill.left and sill.right <= sill.hi
+    far = sill.lo if home > 20 else sill.hi
+    assert any(min(home, far) < c < max(home, far) for c in sill.cols)
     now = [0.0]
     pointer = Pointer(lambda: now[0])
-    rest = _fur(look, 0.0, pointer)
-    pointer.move(lo + 2, 5)
-    xs, tops = [], []
-    for n in range(40):
-        now[0] = t = n / 4
-        x, _, _ = window.chase(pointer, t, home, lo, hi)
-        xs.append(x)
-        fur = _fur(look, t, pointer)
-        assert not {x for x, _ in fur} & cols, t
+    cat = _mouser.Cat()
+    rest = _fur(look, 0.0, pointer, cat)
+    assert rest == _fur(look, 0.0, None)
+    mids, tops = [], []
+    for n in range(72):
+        now[0] = t = n / 12
+        if n % 6 == 0:
+            pointer.move(far + n // 6 % 2, 7)
+        fur = _fur(look, t, pointer, cat)
+        assert fur == _fur(look, t, pointer), t
+        mids.append(sum(x for x, _ in fur) / len(fur))
         tops.append(min(y for _, y in fur))
-    assert xs[0] == home and xs[-1] == lo
-    assert all(a >= b for a, b in itertools.pairwise(xs))  # no step back
-    assert min(tops) < min(tops[:4]) - 2  # it leaps
-    pointer.move(hi + 30, 5)  # out of its pane: it waits at the edge
-    now[0] = 20.0
-    assert window.chase(pointer, 20.0, home, lo, hi)[0] == hi
+    assert abs(mids[0] - home) < 2 and abs(mids[-1] - far) < 5
+    assert min(tops) < tops[0] - 2  # it leaps
+    assert cat.busy
     pointer.leave()
     now[0] = 40.0
-    assert window.chase(pointer, 40.0, home, lo, hi)[0] == home
-    body = {(x, y) for x, y in rest if y < 23}
-    assert body <= _fur(look, 40.0, pointer)  # at rest again
+    assert _fur(look, 40.0, pointer, cat) == _fur(look, 40.0, None)
+    assert not cat.busy
+
+
+def test_cat_alone() -> None:
+    """No pointer: the cat is a function of the time; it watches the
+    birds that pass."""
+    look = Look(seed=5, land=True, passing=True, cosy=True)
+    shots = [pixels(window.scene(40, 12, NOON, t / 2, look)) for t in range(240)]
+    assert shots == [
+        pixels(window.scene(40, 12, NOON, t / 2, look)) for t in range(240)
+    ]
+    seen: list[float | None] = []
+    cat = window._cat
+
+    def spy(*args: object) -> None:
+        seen.append(args[-1])
+        cat(*args)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(window, "_cat", spy)
+        for t in range(240):
+            window.scene(40, 12, NOON, t / 2, look)
+    preys = [x for x in seen if x is not None]
+    assert preys and len(preys) < len(seen) and all(0 <= x < 40 for x in preys)
 
 
 @pytest.mark.parametrize("kind", ["rain", "snow"])
@@ -324,8 +348,8 @@ def test_indoors_still() -> None:
         look = replace(ALL, seed=seed, weather="clouds", deep=True)
         left, _ = window._room(look, 40, 12, "summer", "clouds").perch
         bar = window._bars(40, 12)[0][0]
-        # A cell of the curtain, of a mullion, of the back of the cat.
-        cells = [0, bar, 40 * 10 + left + 2, 40 * 11 + left + 2]
+        # A cell of the curtain, of a mullion, of the cat: it sits, or lies.
+        cells = [0, bar, 40 * 11 + left + 2]
         frames = [pixels(window.scene(40, 12, NOON, t, look)) for t in (10, 13, 40)]
         assert frames[0] != frames[2]  # the clouds move
         for seen in frames:
