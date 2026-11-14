@@ -54,7 +54,7 @@ from typing import Any
 from ptyrc import Pilot, clock
 
 from . import _cli, _sky, _widgets
-from ._canvas import NEAR, RGB, Braille, Half, Rows, ansi, mix
+from ._canvas import NEAR, RGB, Braille, Half, Rows, ansi, mix, xterm
 from ._line import LINES, land
 from ._strip import (
     LAMP,
@@ -119,7 +119,7 @@ LAMPS = 48  # pixels of wall from a lamp of a tunnel to the next
 PORTAL = 3  # pixels of stone at a mouth
 POLES = 30  # pixels from a pole to the next
 KEEP = 6.0  # seconds a breath stays on the glass
-ROUGH = 0.45  # how much a wire darkens a pixel
+WIRE = 0.3  # how much a wire dims a pixel
 
 DARK: RGB = (22, 20, 24)
 BRICK: RGB = (62, 50, 48)
@@ -197,7 +197,7 @@ def dist(trip: Trip, t: float) -> float:
 # --- what goes by ----------------------------------------------------
 
 
-Strung = list[tuple[int, int, str, RGB, RGB, RGB, RGB]]
+Strung = list[tuple[int, int, int, RGB, RGB]]
 
 
 def _wires(
@@ -211,9 +211,9 @@ def _wires(
     one to the next. No pole within the spans of `bare`, in pixels of
     the way, and no wire to a pole that is not.
 
-    Over a cell of one colour a wire is braille: those cells are
-    returned, for `_string` to put once what is nearer is painted.
-    Elsewhere it darkens the pixel it crosses."""
+    The poles are painted. The wires are returned, for `_string` to
+    draw once what is nearer is painted: the cells they cross, each
+    with its braille bits and its two pixels as they are now."""
     w, rows = half.w, 2 * half.h
     shift = math.floor(shift + 1e-6)
     top = max(1, round(rows * 0.1))
@@ -230,20 +230,10 @@ def _wires(
         drop = sag * (1 - (2 * u - 1) ** 2)
         for wire in (0, 3):
             dots.set(dx, round(high + wire + drop))
-    ink = mix(sky.shade((60, 50, 44)), (0, 0, 0), 0.3)
-    out: Strung = []
-    for cx, cy in dots.cells():
-        up, low = half.px[2 * cy][cx], half.px[2 * cy + 1][cx]
-        bits = dots.bits[cy][cx]
-        above, under = (bits & 0x1B).bit_count(), (bits & 0xE4).bit_count()
-        if sum(abs(a - b) for a, b in zip(up, low, strict=True)) <= NEAR:
-            bg = up if above > under else low
-            out.append((cx, cy, dots.glyph(cx, cy), ink, bg, up, low))
-            continue
-        if above:
-            half.set(cx, 2 * cy, ink, ROUGH)
-        if under:
-            half.set(cx, 2 * cy + 1, ink, ROUGH)
+    out: Strung = [
+        (cx, cy, dots.bits[cy][cx], half.px[2 * cy][cx], half.px[2 * cy + 1][cx])
+        for cx, cy in dots.cells()
+    ]
     wood = sky.shade((92, 66, 44))
     for i in range(shift // POLES, (shift + w) // POLES + 1):
         if not stands(i):
@@ -257,11 +247,26 @@ def _wires(
     return out
 
 
-def _string(half: Half, wires: Strung) -> None:
-    """Put the wires where the cell is as it was: not behind a thing."""
-    for cx, cy, glyph, ink, bg, up, low in wires:
-        if (half.px[2 * cy][cx], half.px[2 * cy + 1][cx]) == (up, low):
-            half.over.setdefault((cx, cy), (glyph, ink, bg))
+def _string(half: Half, sky: _sky.Sky, wires: Strung, deep: bool = False) -> None:
+    """Draw the wires where the cell is as it was: not behind a thing.
+
+    What is behind a wire must not move with it. A glyph takes the
+    two pixels of its cell for one: braille only where they are shown
+    as one colour (`deep`: as good as one); elsewhere the wire dims
+    the pixel it crosses."""
+    ink = mix(sky.shade((60, 50, 44)), (0, 0, 0), 0.3)
+    for cx, cy, bits, up, low in wires:
+        if (half.px[2 * cy][cx], half.px[2 * cy + 1][cx]) != (up, low):
+            continue
+        near = sum(abs(a - b) for a, b in zip(up, low, strict=True))
+        if near <= 2 * NEAR if deep else xterm(up) == xterm(low):
+            under = up if (bits & 0x1B).bit_count() > (bits & 0xE4).bit_count() else low
+            half.over.setdefault((cx, cy), (chr(0x2800 + bits), ink, under))
+            continue
+        if bits & 0x1B:
+            half.px[2 * cy][cx] = mix(up, ink, WIRE)
+        if bits & 0xE4:
+            half.px[2 * cy + 1][cx] = mix(low, ink, WIRE)
 
 
 def _whole(x: float) -> int:
@@ -684,11 +689,11 @@ def scene(
         marks += paint(half, layer, sky, shift, season)
     if trip.land:
         lights(half, sky, marks, seed, None)
+    if kind == "fog":
+        fog(half, sky, hz)
     wires: Strung = []
     if trip.poles and rows >= 8 and back:
         wires = _wires(half, sky, shift, back[-1], poles)
-    if kind == "fog":
-        fog(half, sky, hz)
     for layer in front:
         paint(half, layer, sky, shift, season)
 
@@ -711,8 +716,8 @@ def scene(
             grass = sky.shade(verge.ground(season))
             dry = _tunnel(half, sky, a + pad, b - pad, shift, seed, grass)
 
-    _string(half, wires)
-    stars(half, clear, sky, seed + 3, None, hz)
+    stars(half, clear, sky, seed + 3, None, hz)  # not hidden by a wire
+    _string(half, sky, wires, trip.deep)
     glass = set(half.over)
     if kind == "rain":
         rain(half, sky, seed, t, 1.5)

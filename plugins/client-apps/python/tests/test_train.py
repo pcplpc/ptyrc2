@@ -10,7 +10,7 @@ from datetime import datetime
 import pytest
 from ptyrc import Pilot
 from ptyrc_apps import train
-from ptyrc_apps._canvas import Half, hexa
+from ptyrc_apps._canvas import Half, hexa, xterm
 from ptyrc_apps._strip import Pointer
 from ptyrc_apps.train import CYCLE, PACE, Trip
 
@@ -102,35 +102,43 @@ def test_options_add() -> None:
         48, 11, winter, 0.0, replace(bare, seasons=True)
     )
     check(train.scene(48, 11, NOON, 0.0, replace(ALL, deep=True)), 48, 11, deep=True)
-    wires = pixels(train.scene(48, 11, NOON, 5.0, replace(bare, poles=True)))
-    assert sum(0x2800 < ord(c) < 0x2900 for c, _, _ in wires) > 30
 
 
 def test_wires() -> None:
-    trip = replace(ALL, weather="clouds", events=False, deep=True)
-    wood = hexa(train._sky.at(NOON, 47.0, 0.25).shade((92, 66, 44)))
+    trip = replace(ALL, weather="clouds", events=False)
+    off = replace(trip, poles=False)
+    wood = xterm(train._sky.at(NOON, 47.0, 0.25).shade((92, 66, 44)))
+    glyphs = dimmed = 0
     for step in range(0, 240, 7):
-        cells = pixels(train.scene(48, 11, NOON, step / train.FPS, trip))
-        rows = [cells[i * 48 : (i + 1) * 48] for i in range(11)]
-        for x in range(48):
-            column = [rows[y][x] for y in range(11)]
-            if any(bg == wood for _, _, bg in column[1:5]):
-                continue  # a pole
-            # A wire is seen in every column: braille on a cell of one
-            # colour, a darker pixel elsewhere.
-            dots = sum(0x2800 < ord(c) < 0x2900 for c, _, _ in column[:5])
-            assert dots or any(c == "▀" for c, _, _ in column[:5]), (step, x)
-    # A thing by the glass hides them.
+        t = step / train.FPS
+        a = pixels(train.scene(48, 11, NOON, t, trip))
+        b = pixels(train.scene(48, 11, NOON, t, off))
+        for i, (new, old) in enumerate(zip(a, b, strict=True)):
+            if new == old or wood in new[1:]:
+                continue
+            assert i < 6 * 48  # in the sky
+            if 0x2800 < ord(new[0]) < 0x2900:
+                # Braille on a cell of one colour: what is behind stays.
+                assert old[0] == " " and new[2] == old[2], (step, i)
+                glyphs += 1
+            else:  # two colours: its pixels dimmed, no glyph
+                assert new[0] in "▀ " and old[0] == "▀"
+                dimmed += 1
+    assert glyphs > 1000 and dimmed < glyphs
+    # A thing by the glass hides them; a cell of two colours keeps both.
     half = Half(4, 2)
-    sky, leaf = (90, 120, 230), (0, 90, 0)
+    sky, leaf, cloud = (90, 120, 230), (0, 90, 0), (240, 240, 240)
     half.fill(sky)
-    strung = [(x, 0, "⠒", (0, 0, 0), sky, sky, sky) for x in range(4)]
+    half.set(3, 1, cloud)
+    strung = [(x, 0, 0x09, sky, cloud if x == 3 else sky) for x in range(4)]
     half.set(1, 0, leaf)
-    half.set(2, 1, leaf)
-    train._string(half, strung)
-    assert sorted(half.over) == [(0, 0), (3, 0)]
+    train._string(half, train._sky.at(NOON), strung)
+    assert sorted(half.over) == [(0, 0), (2, 0)]
+    assert half.over[0, 0][2] == sky and half.px[0][1] == leaf
+    assert half.px[1][3] == cloud and half.px[0][3] != sky
     # The poles stand on the verge: they go by at its pace, a pixel a frame.
-    bare = replace(trip, land=False)
+    bare = replace(trip, land=False, deep=True)
+    wood = hexa(train._sky.at(NOON, 47.0, 0.25).shade((92, 66, 44)))
 
     def poles(t: float) -> list[int]:
         row = pixels(train.scene(48, 11, NOON, t, bare))[3 * 48 : 4 * 48]
