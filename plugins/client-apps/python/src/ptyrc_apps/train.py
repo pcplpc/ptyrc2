@@ -54,7 +54,7 @@ from typing import Any
 from ptyrc import Pilot, clock
 
 from . import _cli, _sky, _widgets
-from ._canvas import NEAR, RGB, Braille, Half, Rows, ansi, mix, xterm
+from ._canvas import RGB, Braille, Half, Rows, ansi, mix
 from ._line import LINES, land
 from ._strip import (
     LAMP,
@@ -119,7 +119,6 @@ LAMPS = 48  # pixels of wall from a lamp of a tunnel to the next
 PORTAL = 3  # pixels of stone at a mouth
 POLES = 30  # pixels from a pole to the next
 KEEP = 6.0  # seconds a breath stays on the glass
-WIRE = 0.3  # how much a wire dims a pixel
 
 DARK: RGB = (22, 20, 24)
 BRICK: RGB = (62, 50, 48)
@@ -247,26 +246,19 @@ def _wires(
     return out
 
 
-def _string(half: Half, sky: _sky.Sky, wires: Strung, deep: bool = False) -> None:
+def _string(half: Half, sky: _sky.Sky, wires: Strung) -> None:
     """Draw the wires where the cell is as it was: not behind a thing.
 
-    What is behind a wire must not move with it. A glyph takes the
-    two pixels of its cell for one: braille only where they are shown
-    as one colour (`deep`: as good as one); elsewhere the wire dims
-    the pixel it crosses."""
+    A glyph has one background: both pixels of the cell take their
+    mean, so the wire is whole and what is drawn is what is shown, in
+    any palette."""
     ink = mix(sky.shade((60, 50, 44)), (0, 0, 0), 0.3)
     for cx, cy, bits, up, low in wires:
         if (half.px[2 * cy][cx], half.px[2 * cy + 1][cx]) != (up, low):
             continue
-        near = sum(abs(a - b) for a, b in zip(up, low, strict=True))
-        if near <= 2 * NEAR if deep else xterm(up) == xterm(low):
-            under = up if (bits & 0x1B).bit_count() > (bits & 0xE4).bit_count() else low
-            half.over.setdefault((cx, cy), (chr(0x2800 + bits), ink, under))
-            continue
-        if bits & 0x1B:
-            half.px[2 * cy][cx] = mix(up, ink, WIRE)
-        if bits & 0xE4:
-            half.px[2 * cy + 1][cx] = mix(low, ink, WIRE)
+        under = mix(up, low, 0.5)
+        half.px[2 * cy][cx] = half.px[2 * cy + 1][cx] = under
+        half.over.setdefault((cx, cy), (chr(0x2800 + bits), ink, under))
 
 
 def _whole(x: float) -> int:
@@ -717,7 +709,7 @@ def scene(
             dry = _tunnel(half, sky, a + pad, b - pad, shift, seed, grass)
 
     stars(half, clear, sky, seed + 3, None, hz)  # not hidden by a wire
-    _string(half, sky, wires, trip.deep)
+    _string(half, sky, wires)
     glass, was = set(half.over), [list(row) for row in half.px]
     if kind == "rain":
         rain(half, sky, seed, t, 1.5, 0.35)

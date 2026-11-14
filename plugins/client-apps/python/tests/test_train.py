@@ -10,7 +10,7 @@ from datetime import datetime
 import pytest
 from ptyrc import Pilot
 from ptyrc_apps import train
-from ptyrc_apps._canvas import Half, hexa, xterm
+from ptyrc_apps._canvas import Half, hexa, mix, xterm
 from ptyrc_apps._strip import Pointer
 from ptyrc_apps.train import CYCLE, PACE, Trip
 
@@ -108,7 +108,7 @@ def test_wires() -> None:
     trip = replace(ALL, weather="clouds", events=False)
     off = replace(trip, poles=False)
     wood = xterm(train._sky.at(NOON, 47.0, 0.25).shade((92, 66, 44)))
-    glyphs = dimmed = 0
+    glyphs = 0
     for step in range(0, 240, 7):
         t = step / train.FPS
         a = pixels(train.scene(48, 11, NOON, t, trip))
@@ -117,15 +117,13 @@ def test_wires() -> None:
             if new == old or wood in new[1:]:
                 continue
             assert i < 6 * 48  # in the sky
-            if 0x2800 < ord(new[0]) < 0x2900:
-                # Braille on a cell of one colour: what is behind stays.
-                assert old[0] == " " and new[2] == old[2], (step, i)
-                glyphs += 1
-            else:  # two colours: its pixels dimmed, no glyph
-                assert new[0] in "▀ " and old[0] == "▀"
-                dimmed += 1
-    assert glyphs > 1000 and dimmed < glyphs
-    # A thing by the glass hides them; a cell of two colours keeps both.
+            # Always braille, unbroken; on a cell of one colour, that
+            # colour behind it.
+            assert 0x2800 < ord(new[0]) < 0x2900, (step, i)
+            assert old[0] != " " or new[2] == old[2], (step, i)
+            glyphs += 1
+    assert glyphs > 1000
+    # A thing by the glass hides them; a cell of two colours takes their mean.
     half = Half(4, 2)
     sky, leaf, cloud = (90, 120, 230), (0, 90, 0), (240, 240, 240)
     half.fill(sky)
@@ -133,9 +131,10 @@ def test_wires() -> None:
     strung = [(x, 0, 0x09, sky, cloud if x == 3 else sky) for x in range(4)]
     half.set(1, 0, leaf)
     train._string(half, train._sky.at(NOON), strung)
-    assert sorted(half.over) == [(0, 0), (2, 0)]
+    assert sorted(half.over) == [(0, 0), (2, 0), (3, 0)]
     assert half.over[0, 0][2] == sky and half.px[0][1] == leaf
-    assert half.px[1][3] == cloud and half.px[0][3] != sky
+    grey = mix(sky, cloud, 0.5)
+    assert half.over[3, 0][2] == grey and half.px[0][3] == half.px[1][3] == grey
     # The poles stand on the verge: they go by at its pace, a pixel a frame.
     bare = replace(trip, land=False, deep=True)
     wood = hexa(train._sky.at(NOON, 47.0, 0.25).shade((92, 66, 44)))
