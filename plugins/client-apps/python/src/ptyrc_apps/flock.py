@@ -8,19 +8,23 @@
     ptyrc-app flock --all
     ptyrc-app flock --print 80x24   # no driver: the scene on stdout
 
-A bird is a braille dot. The flock is a sheet of birds in space, seen
-from the side: it stretches with its speed, rolls, twists and bends.
-Where the sheet is seen on edge the birds crowd, and a cell is the
+A bird is a braille dot, on its own wings (`Flock`): it flies with
+its neighbours, after a lead that wanders. A few stray; now and then
+a part of the flock goes its own way and comes back. A cell is the
 brighter the more birds it holds.
 
 What it shows:
 
-- A scene that is a function of the time: `Flock.dance`, `Dusk.picture`,
-  `Land.picture` keep no state; the app asks what the scene is now and
-  sends what changed.
+- A sky and a land that are functions of the time: `Dusk.picture`,
+  `Land.picture` keep no state. The birds are a state, stepped to
+  the time asked; the app sends what changed.
 - A dusk, `--dusk` seconds: the sun comes down from over the view,
-  sets at `SET` of it; the birds then pour down to roost; a night of
-  `REST` of it, and the dusk comes again, the birds lift off.
+  sets at `SET` of it; the birds then glide down, part after part, to
+  roosts all along the land; a night of `REST` of it, and the dusk
+  comes again, the birds take off from there.
+- The host pointer over the pane (topic `hover`): the birds flee it.
+- `-k`: a hawk stoops at the thick of the flock, which bursts apart
+  and gathers again.
 - Three sprites in view cells, behind the text: the sky (the glow of
   the sun, strokes of light the thicker the lower; clouds, stars),
   looked at once a second; the sun and the birds, 10 times a second; the
@@ -36,10 +40,10 @@ import argparse
 import math
 import random
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, NamedTuple
 
-from ptyrc import Pilot, Sprite, clock
+from ptyrc import Pilot, PtyrcError, Sprite, clock
 
 from . import _cli
 from .life import DOTS
@@ -49,13 +53,13 @@ from .stars import AREA, Grid, Sky, breeze, clear, noise, runs
 __all__ = [
     "REST",
     "SET",
+    "Air",
     "Bird",
     "Dusk",
     "Flock",
     "Land",
     "Scene",
     "glow",
-    "hawk",
     "height",
     "main",
     "perches",
@@ -65,8 +69,13 @@ __all__ = [
 ]
 
 Dot = tuple[float, float]
+Vec = tuple[float, float, float]
+Scare = tuple[float, float, float]  # a dot, and how much: 0 to 1
 
 PERIOD = 1 / 10  # seconds a tick: the birds
+DT = PERIOD  # seconds a step of the birds
+WARM = 10  # steps a flock just made has flown
+LEAP = 50  # steps at most from a call to the next
 SKY = 10  # ticks between two looks at the sky
 LAND = 2  # and at the land
 
@@ -74,11 +83,37 @@ SET = 0.8  # share of a dusk at which the sun is down
 REST = 0.1  # the night, in dusks
 START = 0.3  # share of a dusk gone at the start
 ROOST = (0.86, 0.08, 0.04)  # the first bird goes down, the last, a flight
-RISE = (0.0, 0.02, 0.03)  # the same, up
+RISE = (0.0, 0.045)  # the first bird goes up, the last
+SITES = 9  # places along the land they roost at
 JOIN = (0.08, 0.62, 0.035)  # the first group comes in, the last, a flight
 CORE = 0.3  # share of the birds that roost here, with `-j`
-SECOND = (0.35, 0.62)  # the second flock: its birds, its size
-HAWK = (28.0, 3.5)  # seconds between two stoops, and one
+SECOND = 0.35  # the second flock: its birds, over the first
+HAWK = (90.0, 14.0)  # seconds between two hunts, and one at most
+SPLIT = (50.0, 0.6)  # seconds between two splits; how often there is one
+STRAY = (8.0, 0.05)  # seconds a bird strays; the share that does
+LEADS = (1.0, 1.13, 0.89)  # the leads of the tribes: how fast each goes
+LAGS = (6, 0.6)  # ranks in a tribe; seconds a rank is behind the one before
+STILL = 0.35  # how much a pointer that rests scares, of 1
+CALM = 4.0  # seconds it takes to
+#: The flight. Lengths in `Flock.reach`, speeds in `PACE`.
+PACE = 0.55  # reaches a second
+HOOD = 0.24  # the side of a cell of neighbours
+PACK = 0.08  # share of the birds in 27 cells at which they are at ease
+ALIGN = 1.2  # a second: how fast a bird takes its neighbours' heading
+COHERE = 1.0  # speeds a second, a cell from the middle of its neighbours
+PART = 2.0  # the most it flees them, over that
+LEAD = 0.9  # speeds a second, towards its lead
+SLACK = 0.45  # from its lead, free
+ROAM = 2.0  # the same, for a stray
+WANDER = 0.35  # speeds a second, its own mind
+WALL = 3.0  # speeds a second, a reach out of the view
+LEVEL = 0.5  # a second: how fast it comes level
+FEAR = 4.5  # speeds a second, on what scares it
+DASH = 0.9  # speeds more, there
+SHY = 0.9  # how far the pointer scares
+WARY = 0.85  # and the hawk
+STEEP = 0.5  # the slope under which a bird comes down
+DOWN, UP, IN = 0, 1, 2  # a bird: on its roost, in the air, coming in
 
 #: The sun, from high to the horizon.
 SUN = (229, 228, 221, 220, 214, 208, 202, 196)
@@ -289,31 +324,89 @@ class Dusk:
 
 
 class Bird(NamedTuple):
-    """A bird of a flock: its place in the sheet, `rho` from the middle
-    at the angle `phi`, turning by `spin` a second; `q` across the
-    sheet. `beat`: of its own flutter. `order`: 0 the first to go to
-    roost, 1 the last. `group`: the one it comes in with, 0 the core."""
+    """A bird: `beat`, the phase of its wander; `pace`, its speed over
+    the flock's; `order`: 0 the first of its lot up, 1 the last;
+    `group`: the one it comes in with, 0 the core; `clan`: the one it
+    roosts with; `tribe`: the lead it follows, 1 the second flock;
+    `rank`: how far behind its lead, 0 the first."""
 
-    rho: float
-    phi: float
-    spin: float
-    q: float
     beat: float
+    pace: float
     order: float
     group: int
+    clan: int
+    tribe: int
+    rank: int
+
+
+class Air(NamedTuple):
+    """Where the birds fly: a view `w` cells wide, `over` rows of sky.
+    `stage(t)`: the stage at `t` seconds; `dusk`: seconds a dusk;
+    `ground(px)`: the dot row of the skyline; `roosts`: dots to perch
+    on, the bird `i` on the `i`th."""
+
+    w: int
+    over: int
+    stage: Callable[[float], float]
+    dusk: float
+    ground: Callable[[int], int]
+    roosts: Sequence[tuple[int, int]] = ()
 
 
 class Flock:
-    """Birds that fly as one. `birds`: over 80 by 24 cells; `size`:
-    of the flock, 1 a third of the view long at rest."""
+    """Birds, each on its own wings, stepped `DT` by `DT`.
 
-    def __init__(self, rng: random.Random, birds: float = 260.0, size: float = 1.0):
+    A bird flies at about one speed and turns: with its neighbours
+    (their mean heading), towards them when few, away when many,
+    after the lead of its tribe (`lead`) when far from it, away from
+    what scares it. Neighbours are those of the 27 cells around its
+    own, `HOOD` wide: a step is linear in the birds.
+
+    `birds`: over 80 by 24 cells; `second`: birds of a second flock,
+    over the first; `join`: groups come in from the sides; `hawk`: one
+    hunts now and then.
+
+    `fly(air, t)` steps to `t`. A time before the last one, or more
+    than `LEAP` steps after: the flock starts again `WARM` steps
+    before, about its leads; so a flock just made is a function of `t`.
+    """
+
+    def __init__(
+        self,
+        rng: random.Random,
+        birds: float = 130.0,
+        second: float = 0.0,
+        join: bool = False,
+        hawk: bool = False,
+    ) -> None:
         self.rng = random.Random(rng.getrandbits(32))
-        self.density = birds
-        self.size = size
-        self.phases = [rng.uniform(0.0, math.tau) for _ in range(12)]
-        self.way = rng.choice((-1.0, 1.0))
+        self.seed = rng.getrandbits(20)
+        self.density = birds * (1.0 + second)
+        self.second = second / (1.0 + second)
+        self.join, self.hunted = join, hawk
+        self.phases = [[rng.uniform(0.0, math.tau) for _ in range(5)] for _ in LEADS]
         self.birds: list[Bird] = []
+        self.k: int | None = None  # the step it is at
+        self.f = 0.0  # the stage there
+        self.size = (0, 0)
+        #: Per bird: where it is, its speed, in dots and dots a second.
+        self.x: list[float] = []
+        self.y: list[float] = []
+        self.z: list[float] = []
+        self.vx: list[float] = []
+        self.vy: list[float] = []
+        self.vz: list[float] = []
+        self.state: list[int] = []  # DOWN, UP, IN
+        self.tribe: list[int] = []  # the lead it follows now
+        self.up: list[float] = []  # the stage it takes off at
+        self.down: list[float] = []  # and heads for its roost at
+        self.site: list[float] = []  # the dot column it roosts by
+        self.stray: list[bool] = []
+        self.rift: int | None = None  # the split there is
+        self.bed = False  # the roosts are dealt
+        #: The hawk: x, y, heading, its aim, 0 in a stoop, born, passes
+        #: left, since when.
+        self.hawk: list[float] | None = None
 
     def count(self, w: int, h: int) -> int:
         return int(self.density * w * h / AREA)
@@ -321,97 +414,465 @@ class Flock:
     def _bird(self) -> Bird:
         rng = self.rng
         return Bird(
-            rng.random() ** 0.62,
             rng.uniform(0.0, math.tau),
-            self.way * rng.uniform(0.25, 0.7),
-            rng.gauss(0.0, 0.5),
-            rng.uniform(0.0, math.tau),
+            rng.uniform(0.9, 1.12),
             rng.random(),
             rng.randrange(1, 9) if rng.random() >= CORE else 0,
+            rng.randrange(SITES),
+            int(rng.random() < self.second),
+            rng.randrange(LAGS[0]),
         )
 
-    def middle(self, across: float, down: float, t: float) -> Dot:
-        """The middle of the flock at `t` seconds, in dots."""
-        p = self.phases
+    def reach(self, across: float, down: float) -> float:
+        """The unit of the flight, in dots: a flock at ease is about
+        three long."""
+        return max(1.0, min(0.18 * across, 0.36 * down))
+
+    def lead(self, tribe: int, across: float, down: float, t: float) -> Vec:
+        """Where the birds of `tribe` are drawn to at `t` seconds, in
+        dots; the third, into the depth."""
+        p = self.phases[tribe]
+        t *= LEADS[tribe]
         return (
-            across * (0.5 + 0.3 * math.sin(0.21 * t + p[0]) + 0.07 * math.sin(0.53 * t + p[1])),
-            down * (0.4 + 0.17 * math.sin(0.17 * t + p[2]) + 0.06 * math.sin(0.61 * t + p[3])),
+            across * (0.5 + 0.3 * math.sin(0.27 * t + p[0]) + 0.08 * math.sin(0.61 * t + p[1])),
+            down * (0.4 + 0.17 * math.sin(0.19 * t + p[2]) + 0.06 * math.sin(0.67 * t + p[3])),
+            0.5 * self.reach(across, down) * math.sin(0.23 * t + p[4]),
         )  # fmt: skip
 
-    def reach(self, across: float, down: float) -> float:
-        """Half the length of the flock at rest, in dots."""
-        return self.size * min(0.18 * across, 0.36 * down)
+    def home(self, site: int, across: float) -> float:
+        """The dot column of the roost `site`."""
+        return across * (site + 0.2 + 0.6 * noise(site, self.seed)) / SITES
 
-    def dance(self, w: int, h: int, t: float) -> list[Dot]:
-        """Where each bird is at `t` seconds over a sky of `w` by `h`
-        cells, in dots: `count(w, h)` of them, the first of one list
-        at every size."""
-        n = self.count(w, h)
+    def _up(self, bird: Bird) -> float:
+        if self.join and bird.group:
+            came = JOIN[0] + (JOIN[1] - JOIN[0]) * noise(bird.group, 3)
+            return came + 0.25 * JOIN[2] * bird.order
+        # A clan after the other.
+        turn = (4 * bird.clan + self.seed) % SITES
+        return RISE[0] + RISE[1] * (turn + 3.0 * bird.order) / (SITES + 2)
+
+    def _fit(self, air: Air) -> None:
+        """The birds of this view: the first of one list."""
+        n = self.count(air.w, air.over)
+        size = (air.w, air.over)
+        if size != self.size and self.x:
+            kx = air.w / self.size[0] if self.size[0] else 1.0
+            ky = air.over / self.size[1] if self.size[1] else 1.0
+            self.x = [x * kx for x in self.x]
+            self.y = [y * ky for y in self.y]
+            self.z = [z * kx for z in self.z]
+            self.site = [x * kx for x in self.site]
+        self.size = size
         while len(self.birds) < n:
             self.birds.append(self._bird())
-        across, down = 2.0 * w, 4.0 * h
-        p = self.phases
-        cx, cy = self.middle(across, down, t)
-        ax, ay = self.middle(across, down, t + 0.5)
-        vx, vy = (ax - cx) / 0.5, (ay - cy) / 0.5
-        # Along its way; level, and the other way round, in a turn.
-        slow = 0.02 * across
-        way = math.tanh(vx / slow)
-        turn = math.atan2(vy * way, abs(vx) + slow)
-        # Long and thin when fast, a ball in a turn.
-        fast = min(1.0, math.hypot(vx, vy) / (0.06 * across))
-        pull = 0.6 + 0.5 * fast + 0.12 * math.sin(0.37 * t + p[4])
-        reach = self.reach(across, down)
-        long, wide, thick = reach * pull, 0.58 * reach / math.sqrt(pull), 0.07 * reach
-        roll = 0.33 * t + 1.2 * math.sin(0.13 * t + p[5])
-        twist = 2.3 * math.sin(0.19 * t + p[6])
-        bend = 0.3 * reach * math.sin(0.23 * t + p[7])
-        sway = 0.7 * t + p[8]
-        ca, sa = math.cos(turn), math.sin(turn)
-        sin, cos = math.sin, math.cos
-        out = []
-        for rho, phi, spin, q, beat, _, _ in self.birds[:n]:
-            a = phi + spin * t
-            s = rho * cos(a)
-            b = rho * sin(a)
-            # A wave of crowding runs down the flock.
-            s += 0.09 * sin(5.0 * s - 2.3 * t)
-            angle = roll + twist * s
-            x = long * s
-            y = (
-                wide * (0.75 + 0.25 * way * s) * b * cos(angle)
-                - thick * q * sin(angle)
-                + bend * sin(2.0 * s + sway)
+        for row in (self.x, self.y, self.z, self.vx, self.vy, self.vz):
+            row[n:] = []
+            row += [0.0] * (n - len(row))
+        for i in range(len(self.state), n):
+            # On the ground: up at the next step, if it is its time.
+            bird = self.birds[i]
+            self.state.append(DOWN)
+            self.tribe.append(bird.tribe)
+            self.up.append(self._up(bird))
+            self.down.append(ROOST[0] + ROOST[1] * bird.order)
+            self.site.append(
+                self.home(bird.clan, 2.0 * air.w) + (noise(i, 5) - 0.5) * 0.3 * air.w
             )
-            out.append(
+            self.stray.append(False)
+        for row in (self.state, self.tribe, self.up, self.down, self.site, self.stray):
+            row[n:] = []
+
+    def _start(self, k: int, air: Air) -> None:
+        """All anew at the step `k`: in the air about their leads, or
+        down."""
+        for row in (self.x, self.state, self.tribe, self.up, self.down, self.site):
+            row.clear()
+        self.stray.clear()
+        self._fit(air)
+        self.k, self.rift, self.bed, self.hawk = k, None, False, None
+        t = k * DT
+        self.f = f = air.stage(t)
+        across, down = 2.0 * air.w, 4.0 * air.over
+        u = self.reach(across, down)
+        rng = random.Random(self.seed + 7919 * k)
+        for i, bird in enumerate(self.birds[: len(self.x)]):
+            if not self.up[i] <= f < self.down[i] + 0.5 * ROOST[2]:
+                continue
+            lx, ly, lz = self.lead(bird.tribe, across, down, t)
+            ax, ay, az = self.lead(bird.tribe, across, down, t + 0.5)
+            dx, dy, dz = ax - lx, ay - ly, az - lz
+            d = math.sqrt(dx * dx + dy * dy + dz * dz)
+            if d < 1e-6:
+                dx, d = 1.0, 1.0
+            v = PACE * u / d
+            self.state[i] = UP
+            self.x[i] = lx + rng.gauss(0.0, 0.55 * u)
+            self.y[i] = ly + rng.gauss(0.0, 0.28 * u)
+            self.z[i] = lz + rng.gauss(0.0, 0.35 * u)
+            self.vx[i], self.vy[i], self.vz[i] = v * dx, v * dy, v * dz
+
+    def spot(self, i: int, air: Air) -> Dot:
+        """Where the bird `i` roosts: its perch, or on the land."""
+        if i < len(air.roosts):
+            x, y = air.roosts[i]
+            return float(x), float(y)
+        px = min(max(0, 2 * air.w - 1), max(0, int(self.site[i])))
+        return float(px), float(air.ground(px))
+
+    def _launch(self, i: int, air: Air, lead: Sequence[Vec], u: float) -> None:
+        """Up from its roost, low and along; or in from a side."""
+        bird = self.birds[i]
+        across, down = 2.0 * air.w, 4.0 * air.over
+        v = PACE * u
+        if self.join and bird.group:
+            left = bird.group % 2
+            x = across * (-0.08 if left else 1.08) + (noise(i, 11) - 0.5) * 0.8 * u
+            y = (
+                down * (0.15 + 0.4 * noise(bird.group, 4))
+                + (noise(i, 12) - 0.5) * 0.5 * u
+            )
+            vx, vy = (v if left else -v), 0.0
+        else:  # fmt: skip
+            x, y = self.spot(i, air)
+            way = 1.0 if lead[bird.tribe][0] > x else -1.0
+            climb = math.radians(6.0 + 22.0 * noise(i, 13))
+            vx, vy = way * v * math.cos(climb), -v * math.sin(climb)
+        self.state[i] = UP
+        self.tribe[i] = bird.tribe
+        self.x[i], self.y[i], self.z[i] = x, y, (noise(i, 14) - 0.5) * 0.8 * u
+        self.vx[i], self.vy[i], self.vz[i] = vx, vy, 0.0
+
+    def _deal(self, air: Air) -> None:
+        """The roosts: the birds in the air, from left to right, go to
+        the sites from left to right, a site after the other."""
+        across = 2.0 * air.w
+        up = sorted(
+            (i for i, s in enumerate(self.state) if s == UP), key=self.x.__getitem__
+        )
+        for rank, i in enumerate(up):
+            site = rank * SITES // len(up)
+            turn = (4 * site + self.seed) % SITES
+            self.down[i] = ROOST[0] + ROOST[1] * (turn + 1.2 * noise(i, 7)) / (SITES + 0.2)  # fmt: skip
+            self.site[i] = self.home(site, across) + (noise(i, 5) - 0.5) * 0.14 * across  # fmt: skip
+        self.bed = True
+
+    def _split(self, t: float) -> None:
+        """Now and then a side of the main flock goes its own way, for
+        a while."""
+        slot = math.floor(t / SPLIT[0])
+        seed = self.seed
+        on = noise(slot, seed + 1) < SPLIT[1] and 0.2 <= t / SPLIT[0] - slot < 0.75
+        if not on:
+            if self.rift is not None:
+                self.rift = None
+                self.tribe = [bird.tribe for bird in self.birds[: len(self.x)]]
+            return
+        if self.rift == slot:
+            return
+        self.rift = slot
+        main = [i for i, s in enumerate(self.state) if s == UP and self.tribe[i] == 0]
+        if len(main) < 8:
+            return
+        # Cut across a bearing: those the furthest along it.
+        lean = math.tau * noise(slot, seed + 2)
+        ca, sa = math.cos(lean), math.sin(lean)
+        main.sort(key=lambda i: self.x[i] * ca + self.y[i] * sa)
+        share = 0.2 + 0.3 * noise(slot, seed + 3)
+        to = 1 if noise(slot, seed + 4) < 0.5 else 2
+        for i in main[int(len(main) * (1.0 - share)) :]:
+            self.tribe[i] = to
+
+    def _hunt(self, t: float, air: Air, thick: Dot | None, u: float) -> None:
+        """The hawk: it comes from over the view, stoops at the thick
+        of the flock, pulls up and goes; at times it comes round again."""
+        across, down = 2.0 * air.w, 4.0 * air.over
+        every, long = HAWK
+        v = PACE * u
+        hawk = self.hawk
+        if hawk is None:
+            slot = math.floor(t / every)
+            seed = self.seed
+            begin = slot * every + (every - long) * (0.2 + 0.6 * noise(slot, seed + 5))
+            calm = JOIN[0] + 0.02 < self.f < ROOST[0] - 0.03
+            if not self.hunted or thick is None or not calm or not t - DT < begin <= t:
+                return
+            side = 1.0 if noise(slot, seed + 6) < 0.5 else -1.0
+            x = thick[0] + side * (0.5 + 0.8 * noise(slot, seed + 7)) * u
+            y = -0.06 * down
+            again = 2.0 if noise(slot, seed + 8) < 0.35 else 1.0
+            way = math.atan2(thick[1] - y, thick[0] - x)
+            self.hawk = [x, y, way, thick[0], thick[1], 0.0, t, again, t]
+            return
+        x, y, way, ax, ay, away, born, passes, since = hawk
+        if thick is not None:
+            ax += 0.2 * (thick[0] - ax)
+            ay += 0.2 * (thick[1] - ay)
+        if not away:
+            want, rate, speed = math.atan2(ay - y, ax - x), 1.6, 2.2 * v
+            if math.hypot(ax - x, ay - y) < 0.3 * u or t - since > 5.0:
+                away, since, passes = 1.0, t, passes - 1.0
+        else:
+            want = math.atan2(-0.45, 1.0 if math.cos(way) >= 0 else -1.0)
+            rate, speed = (3.0 if y > 0.8 * down else 1.1), 1.7 * v
+            if passes > 0 and t - since > 1.6:
+                away, since = 0.0, t
+        turn = (want - way + math.pi) % math.tau - math.pi
+        way += max(-rate * DT, min(rate * DT, turn))
+        x += speed * math.cos(way) * DT
+        y += speed * math.sin(way) * DT
+        out = x < -0.1 * across or x > 1.1 * across or y < -0.1 * down
+        if (away and out) or t - born > long:
+            self.hawk = None
+        else:
+            self.hawk = [x, y, way, ax, ay, away, born, passes, since]
+
+    def _step(self, air: Air, scare: Scare | None) -> None:
+        assert self.k is not None
+        self.k += 1
+        t = self.k * DT
+        self.f = f = air.stage(t)
+        n = len(self.x)
+        across, down = 2.0 * air.w, 4.0 * air.over
+        if not n or across <= 0:
+            return
+        u = self.reach(across, down)
+        v0 = PACE * u
+        # A rank follows where the lead was: a tribe trails along its way.
+        leads = [
+            [self.lead(j, across, down, t - LAGS[1] * rank) for rank in range(LAGS[0])]
+            for j in range(len(LEADS))
+        ]
+        X, Y, Z, VX, VY, VZ = self.x, self.y, self.z, self.vx, self.vy, self.vz
+        state, tribe, ups, downs = self.state, self.tribe, self.up, self.down
+        birds = self.birds
+
+        # Who takes off, who heads for its roost.
+        if f < ROOST[0]:
+            self.bed = False
+        elif not self.bed:
+            self._deal(air)
+        for i in range(n):
+            s = state[i]
+            if s == DOWN:
+                if ups[i] <= f < downs[i]:
+                    self._launch(i, air, [rank[0] for rank in leads], u)
+            elif s == UP and f >= downs[i]:
+                state[i] = IN
+        self._split(t)
+        tribe = self.tribe
+        if self.k % 10 == 0 or len(self.stray) != n:
+            seed = self.seed
+            self.stray = [
+                noise(i, seed + int((t + bird.beat) / STRAY[0])) < STRAY[1]
+                for i, bird in enumerate(birds[:n])
+            ]
+        strays = self.stray
+
+        # The neighbours, of its tribe: the birds by cell, then by 27 cells.
+        inv = 1.0 / max(3.0, HOOD * u)
+        cells: dict[tuple[int, int, int, int], list[float]] = {}
+        keys: list[Any] = [None] * n
+        for i in range(n):
+            if state[i] != UP:
+                continue
+            x, y, z = X[i], Y[i], Z[i]
+            key = (
+                int(x * inv + 64.0),
+                int(y * inv + 64.0),
+                int(z * inv + 64.0),
+                tribe[i],
+            )
+            cell = cells.get(key)
+            if cell is None:
+                cells[key] = [1.0, x, y, z, VX[i], VY[i], VZ[i]]
+            else:
+                cell[0] += 1.0
+                cell[1] += x
+                cell[2] += y
+                cell[3] += z
+                cell[4] += VX[i]
+                cell[5] += VY[i]
+                cell[6] += VZ[i]
+            keys[i] = key
+        hood: dict[tuple[int, int, int, int], tuple[float, ...]] = {}
+        get = cells.get
+        span = (-1, 0, 1)
+        most, thick = 0.0, None
+        for key in cells:
+            a, b, c, own = key
+            m = sx = sy = sz = su = sv = sw = 0.0
+            for da in span:
+                for db in span:
+                    for dc in span:
+                        cell = get((a + da, b + db, c + dc, own))
+                        if cell is not None:
+                            m += cell[0]
+                            sx += cell[1]
+                            sy += cell[2]
+                            sz += cell[3]
+                            su += cell[4]
+                            sv += cell[5]
+                            sw += cell[6]
+            hood[key] = (m, sx / m, sy / m, sz / m, su / m, sv / m, sw / m)
+            if m > most:
+                most, thick = m, (sx / m, sy / m)
+
+        self._hunt(t, air, thick, u)
+        # What scares: where, how far, how much.
+        threats: list[tuple[float, float, float, float]] = []
+        if scare is not None:
+            gain = 0.5 + 0.5 * scare[2]
+            threats.append((scare[0], scare[1], SHY * u * gain, gain))
+        if (hawk := self.hawk) is not None:
+            ahead = 0.45 * 2.0 * v0
+            threats.append((hawk[0], hawk[1], WARY * u, 1.0))
+            threats.append(
                 (
-                    cx + x * ca - y * sa + 0.6 * sin(3.1 * t + beat),
-                    cy + x * sa + y * ca + 0.6 * cos(2.3 * t + beat),
+                    hawk[0] + ahead * math.cos(hawk[2]),
+                    hawk[1] + ahead * math.sin(hawk[2]),
+                    0.75 * WARY * u,
+                    0.8,
                 )
             )
+
+        dt = DT
+        full = PACK * n
+        coh = COHERE * v0 * inv
+        apart = -PART * coh
+        few = max(3.0, 2.5 * full / 27)  # birds in a cell, at most
+        wall = WALL * v0 / u
+        pull_ = LEAD * v0
+        x0, x1 = 0.04 * across, 0.96 * across
+        y0, y1 = 0.08 * down, 0.78 * down
+        zm = 0.8 * u
+        lo, hi = 0.7 * v0, 1.45 * v0
+        glide = 0.9 * v0
+        seconds = air.dusk
+        sqrt, sin, cos = math.sqrt, math.sin, math.cos
+        for i in range(n):
+            s = state[i]
+            if s == DOWN:
+                continue
+            x, y, z, vx, vy, vz = X[i], Y[i], Z[i], VX[i], VY[i], VZ[i]
+            if s == IN:
+                # To its roost: straight when the way is not steep,
+                # else on along and down, and back.
+                tx, ty = self.spot(i, air)
+                left = (downs[i] + ROOST[2] - f) * seconds
+                dx, dy = tx - x, ty - y
+                far = sqrt(dx * dx + dy * dy)
+                speed = max(glide, far / max(left, dt))
+                if left <= dt or far <= speed * dt + 0.5:
+                    state[i], X[i], Y[i] = DOWN, tx, ty
+                    continue
+                if dy > STEEP * abs(dx) and left > 4.0 * dy / v0 + 1.0:
+                    wx, wy = (0.94 if vx >= 0 else -0.94), 0.34
+                else:
+                    wx, wy = dx / far, dy / far
+                rate = min(1.0, max(3.0 * dt, 2.0 * dt / left))
+                vx += (wx * speed - vx) * rate
+                vy += (wy * speed - vy) * rate
+                vz *= 0.8
+            else:
+                bird = birds[i]
+                m, cx, cy, cz, ux, uy, uz = hood[keys[i]]
+                stray = strays[i]
+                # With its neighbours.
+                g = ALIGN * 0.3 if stray else ALIGN
+                ax, ay, az = g * (ux - vx), g * (uy - vy), g * (uz - vz)
+                # Towards them when few, away when many.
+                g = coh * (1.0 - m / full)
+                if g < apart:
+                    g = apart
+                elif stray and g > 0:
+                    g = 0.0
+                ax += g * (cx - x)
+                ay += g * (cy - y)
+                az += g * (cz - z)
+                # Never wing to wing.
+                own = cells[keys[i]]
+                if own[0] > few:
+                    g = apart * (own[0] - few) / own[0]
+                    ax += g * (own[1] / own[0] - x)
+                    ay += g * (own[2] / own[0] - y)
+                    az += g * (own[3] / own[0] - z)
+                # After its lead, when far from it.
+                lx, ly, lz = leads[tribe[i]][bird.rank]
+                dx, dy, dz = lx - x, ly - y, lz - z
+                d = sqrt(dx * dx + dy * dy + dz * dz)
+                slack = (ROAM if stray else SLACK) * u
+                if d > slack:
+                    g = pull_ * min(1.0, (d - slack) / u) / d
+                    ax += g * dx
+                    ay += g * dy
+                    az += g * dz
+                # Its own mind.
+                a = bird.beat + 0.8 * t * bird.pace
+                g = (WANDER * 2.5 if stray else WANDER) * v0
+                ax += g * cos(a)
+                ay += 0.6 * g * sin(1.31 * a)
+                az += g * sin(a)
+                # Back into the view, and level.
+                if x < x0:
+                    ax += wall * (x0 - x)
+                elif x > x1:
+                    ax -= wall * (x - x1)
+                if y < y0:
+                    ay += wall * (y0 - y)
+                elif y > y1:
+                    ay -= 0.4 * wall * (y - y1)
+                if z < -zm:
+                    az -= wall * (z + zm)
+                elif z > zm:
+                    az -= wall * (z - zm)
+                ay -= LEVEL * vy
+                top = hi
+                for hx, hy, r, gain in threats:
+                    ex, ey = x - hx, y - hy
+                    d2 = ex * ex + ey * ey
+                    if d2 < r * r:
+                        d = sqrt(d2) or 1.0
+                        near = gain * (1.0 - d / r)
+                        g = FEAR * v0 * near / d
+                        ax += g * ex
+                        ay += g * ey
+                        top = max(top, hi + DASH * v0 * near)
+                vx += ax * dt
+                vy += ay * dt
+                vz += az * dt
+                # At about its speed: a bird does not stop.
+                speed = sqrt(vx * vx + vy * vy + vz * vz) or 1.0
+                want = speed + (bird.pace * v0 - speed) * 0.8 * dt
+                want = max(lo, min(want, top))
+                g = want / speed
+                vx *= g
+                vy *= g
+                vz *= g
+            X[i] = x + vx * dt
+            Y[i] = y + vy * dt
+            Z[i] = z + vz * dt
+            VX[i], VY[i], VZ[i] = vx, vy, vz
+
+    def fly(self, air: Air, t: float, scare: Scare | None = None) -> list[Dot]:
+        """Step to `t` seconds; the birds to draw, in dots: in the
+        air, or on their perch. `scare`: what they flee, a dot and how
+        much, 0 to 1."""
+        k = math.floor(t / DT + 1e-6)
+        if self.k is None or not 0 <= k - self.k <= LEAP:
+            self._start(k - WARM, air)
+        else:
+            self._fit(air)
+        while self.k is not None and self.k < k:
+            self._step(air, scare)
+        out = []
+        perched = len(air.roosts)
+        night = self.f >= ROOST[0]
+        for i, s in enumerate(self.state):
+            if s != DOWN:
+                out.append((self.x[i], self.y[i]))
+            elif i < perched and (night or not (self.join and self.birds[i].group)):
+                out.append(self.spot(i, air))
         return out
-
-
-def hawk(flock: Flock, across: float, down: float, t: float) -> list[Dot]:
-    """The hawk's dots at `t` seconds, the last where it is, the
-    others where it was, 0.2 s apart; none between two stoops. It
-    stoops through the middle of `flock`, every `HAWK[0]` seconds."""
-    every, long = HAWK
-    slot = math.floor(t / every)
-    key = slot + 7 * int(flock.phases[9] * 1000)
-    begin = slot * every + (every - long) * (0.2 + 0.6 * noise(key))
-    if not begin <= t < begin + long + 1.0:
-        return []
-    mx, my = flock.middle(across, down, begin + long / 2)
-    lean = (noise(key, 1) - 0.5) * 1.8
-    dx, dy = math.sin(lean), math.cos(lean)
-    span = 2.6 * flock.reach(across, down)
-    out = []
-    for back in (1.0, 0.8, 0.6, 0.4, 0.2, 0.0):
-        f = (t - back - begin) / long
-        if 0.0 <= f <= 1.0:
-            out.append((mx + dx * span * (f - 0.5), my + dy * span * (f - 0.5)))
-    return out
 
 
 def perches(rows: Sequence[str], w: int, h: int) -> list[tuple[int, int]]:
@@ -571,11 +1032,9 @@ class Scene:
         self.args = args
         self.dusk = Dusk(rng, args.clouds)
         self.land = Land(rng, args.water, args.reeds)
-        self.flocks = [Flock(rng, args.birds)]
-        if args.double:
-            self.flocks.append(Flock(rng, args.birds * SECOND[0], SECOND[1]))
+        second = SECOND if args.double else 0.0
+        self.flock = Flock(rng, args.birds, second, args.join, args.hawk)
         self.sky = Sky(rng, 0.0) if args.night else None
-        self.home = rng.uniform(0.62, 0.9)  # where they roost, across
 
     def stage(self, t: float) -> float:
         return stage(t, self.args.dusk, self.args.at)
@@ -612,73 +1071,30 @@ class Scene:
         return grid + [{} for _ in range(h - over)]
 
     def birds(
-        self, w: int, h: int, t: float, roosts: Sequence[tuple[int, int]] = ()
+        self,
+        w: int,
+        h: int,
+        t: float,
+        roosts: Sequence[tuple[int, int]] = (),
+        scare: Scare | None = None,
     ) -> tuple[list[Dot], list[Dot]]:
-        """The birds in the air, then the hawk, in dots. `roosts`:
-        dots to perch on at night; a bird without one goes into the
-        land, and is not seen there."""
-        args = self.args
-        f = self.stage(t)
+        """The birds, then the hawk, in dots, the flock stepped to `t`
+        seconds. `roosts`: dots to perch on at night; a bird without
+        one goes into the land, and is not seen there. `scare`: the
+        pointer, a dot and how much."""
         over = max(1, h - self.rows(h))
-        across, down = 2.0 * w, 4.0 * over
-        out: list[Dot] = []
-        stoop = hawk(self.flocks[0], across, down, t) if args.hawk else []
-        if stoop and not JOIN[0] < f < ROOST[0]:
-            stoop = []
-        fear = 0.55 * self.flocks[0].reach(across, down)
-        at = 0
-        for flock in self.flocks:
-            for bird, (x, y) in zip(flock.birds, flock.dance(w, over, t), strict=False):
-                i, at = at, at + 1
-                # Down: to roost; then up again.
-                if f >= ROOST[0]:
-                    sunk = (f - ROOST[0] - ROOST[1] * bird.order) / ROOST[2]
-                elif args.join and bird.group:
-                    sunk = 0.0
-                else:
-                    sunk = 1.0 - (f - RISE[0] - RISE[1] * bird.order) / RISE[2]
-                if sunk > 0:
-                    if i < len(roosts):
-                        px, py = roosts[i]
-                    elif sunk >= 1:
-                        continue
-                    else:
-                        spread = (noise(i, 5) - 0.5) * 0.12 * across
-                        px = int(self.home * across + spread) % max(1, 2 * w)
-                        py = self.land.top(px, h)
-                    u = min(1.0, sunk)
-                    # A funnel: over the roost first, then down.
-                    x += (px - x) * _ease(2.0 * u)
-                    y += (py - y) * _ease(u) ** 1.6
-                elif args.join and bird.group:
-                    # In with its group, from a side.
-                    came = JOIN[0] + (JOIN[1] - JOIN[0]) * noise(bird.group, 3)
-                    u = (f - came) / JOIN[2] + 1.0 - 0.25 * bird.order
-                    if u <= 0:
-                        continue
-                    if u < 1:
-                        side = -0.1 if bird.group % 2 else 1.1
-                        ex = side * across + 12 * math.cos(bird.phi) * bird.rho
-                        ey = down * (0.15 + 0.4 * noise(bird.group, 4))
-                        ey += 6 * math.sin(bird.phi) * bird.rho
-                        x = ex + (x - ex) * _ease(u)
-                        y = ey + (y - ey) * _ease(u)
-                for k, (hx, hy) in enumerate(stoop):
-                    # Away from the hawk, and from where it just was.
-                    dx, dy = x - hx, y - hy
-                    d = math.hypot(dx, dy) or 1.0
-                    reach = fear * (0.4 + 0.12 * k) if k < len(stoop) - 1 else fear
-                    if d < reach:
-                        # Some flee further than others.
-                        push = reach * (1.0 - d / reach) ** 1.5
-                        push *= 0.45 + 0.9 * noise(i, 9)
-                        x += dx / d * push
-                        y += dy / d * push
-                out.append((x, y))
-        return out, stoop[-1:]
+        air = Air(w, over, self.stage, self.args.dusk, lambda px: self.land.top(px, h), roosts)  # fmt: skip
+        flown = self.flock.fly(air, t, scare)
+        hawk = self.flock.hawk
+        return flown, [(hawk[0], hawk[1])] if hawk is not None else []
 
     def fore(
-        self, w: int, h: int, t: float, roosts: Sequence[tuple[int, int]] = ()
+        self,
+        w: int,
+        h: int,
+        t: float,
+        roosts: Sequence[tuple[int, int]] = (),
+        scare: Scare | None = None,
     ) -> Grid:
         """The sun and the birds before it, `h` rows."""
         grid: Grid = [{} for _ in range(h)]
@@ -688,7 +1104,7 @@ class Scene:
         cx, cy, colour = self.sun(w, h, t)
         r = self.radius(w, h)
         disc = _disc(cx, cy, r, self.land, h) if r > 0 else {}
-        flown, stoop = self.birds(w, h, t, roosts)
+        flown, stoop = self.birds(w, h, t, roosts, scare)
         cells: dict[tuple[int, int], list[int]] = {}
         for x, y in flown:
             px, py = math.floor(x), math.floor(y)
@@ -708,10 +1124,12 @@ class Scene:
             grid[y][x] = (chr(0x2800 + bits), ink)
         for (x, y), bits in disc.items():
             grid[y][x] = (chr(0x2800 + bits) if bits else " ", colour)
+        hawk = self.flock.hawk
         for x, y in stoop:
-            # Wings swept back.
+            # Wings swept back: up in a stoop, down in a climb.
+            flip = -1 if hawk is not None and math.sin(hawk[2]) < 0 else 1
             for ox, oy in HAWK_DOTS:
-                px, py = math.floor(x) + ox, math.floor(y) + oy
+                px, py = math.floor(x) + ox, math.floor(y) + flip * oy
                 if 0 <= px < 2 * w and 0 <= py < 4 * h:
                     glyph, ink = grid[py >> 2].get(px >> 1, ("⠀", PREY))
                     bits = ord(glyph) - 0x2800 if ink == PREY else 0
@@ -755,6 +1173,12 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     sprites: list[Sprite | None] = [None, None, None]  # sky, birds, land
     sent: list[Any] = [None, None, None]
     start = clock.monotonic()
+    pointer: list[float] | None = None  # the host mouse: a dot, when it moved
+    try:
+        pilot.subscribe("hover")
+    except PtyrcError as err:  # a driver without the topic
+        if err.code != "bad-params":
+            raise
 
     def put(i: int, cells: Any, y: int, moved: bool) -> None:
         sprite = sprites[i]
@@ -776,6 +1200,21 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
         w, h = frame.size
         t = clock.monotonic() - start
         rows = scene.rows(h)
+        for topic, data in sight.others:
+            if topic != "hover":
+                continue
+            ids = [sprite.id if sprite is not None else None for sprite in sprites]
+            if data.get("at") is None or data["sprite"] not in ids:
+                pointer = None  # off the scene
+                continue
+            # The land's sprite is the last rows of the view.
+            x, y = data["at"]
+            y += h - rows if data["sprite"] == ids[2] else 0
+            pointer = [2.0 * x + 1.0, 4.0 * y + 2.0, t]
+        scare = None
+        if pointer is not None:
+            fright = max(STILL, 1.0 - (t - pointer[2]) / CALM)
+            scare = (pointer[0], pointer[1], fright)
         sized = (w, h) != size
         if sized or sight.changed:
             size = (w, h)
@@ -786,7 +1225,10 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
         with sight.drawing(), pilot.batch():
             if sized or sight.changed or tick % SKY == 0:
                 put(0, runs(scene.above(w, h, t), w, shown), 0, False)
-            put(1, runs(scene.fore(w, h, t, roosts), w, shown), 0, False)
+            cells = runs(scene.fore(w, h, t, roosts, scare), w, shown)
+            # The whole view is its box: a hover is told anywhere on it.
+            cells[0].append({"t": " " * (w - sum(len(run["t"]) for run in cells[0]))})
+            put(1, cells, 0, False)
             if sized or sight.changed or tick % LAND == 0:
                 low = scene.below(w, h, t)[-rows:]
                 put(2, runs(low, w, shown[h - rows :]), h - rows, sized)
@@ -812,9 +1254,9 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
     out.add_argument(
         "--birds",
         type=float,
-        default=260.0,
+        default=130.0,
         metavar="N",
-        help="birds over 80 by 24 cells [default: 260]",
+        help="birds over 80 by 24 cells [default: 130]",
     )
     out.add_argument(
         "--dusk",
@@ -858,10 +1300,16 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
         "-j", "--join", action="store_true", help="groups come in and join the flock"
     )
     out.add_argument(
-        "-d", "--double", action="store_true", help="a second, smaller flock"
+        "-d",
+        "--double",
+        action="store_true",
+        help="a second, smaller flock, on its own way",
     )
     out.add_argument(
-        "-k", "--hawk", action="store_true", help="a hawk stoops, the flock parts"
+        "-k",
+        "--hawk",
+        action="store_true",
+        help="a hawk hunts now and then, the flock bursts",
     )
     out.add_argument(
         "-n", "--night", action="store_true", help="the stars come out as it sets"

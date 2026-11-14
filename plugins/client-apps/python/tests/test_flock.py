@@ -13,7 +13,7 @@ import pytest
 from ptyrc import Pilot
 from ptyrc import clock as session_clock
 from ptyrc_apps import _cli, flock
-from ptyrc_apps.flock import REST, SET, Dusk, Flock, Land, Scene
+from ptyrc_apps.flock import REST, SET, Air, Dusk, Flock, Land, Scene
 
 
 def braille(glyph: str) -> int:
@@ -81,30 +81,101 @@ def test_dusk() -> None:
     assert dusk.picture(80, 23, 0.7, sun, 60.0) == low
 
 
-def test_dance() -> None:
+def sky(
+    w: int = 80, over: int = 23, at: float = 0.4, dusk: float = 3000.0
+) -> flock.Air:
+    """A sky over flat land, at the stage `at`, a long dusk."""
+    return Air(w, over, lambda t: flock.stage(t, dusk, at), dusk, lambda px: 4 * over)
+
+
+def test_flight() -> None:
     one = Flock(random.Random(3))
-    small = one.dance(40, 12, 5.0)
-    assert len(small) == one.count(40, 12) == 65 and one.count(80, 24) == 260
-    assert one.dance(40, 12, 5.0) == small
-    assert Flock(random.Random(3)).dance(40, 12, 5.0) == small
-    assert Flock(random.Random(4)).dance(40, 12, 5.0) != small
-    assert one.dance(80, 24, 5.0) != one.dance(80, 24, 5.1)
-    assert Flock(random.Random(3), birds=0).dance(80, 24, 5.0) == []
+    small = one.fly(sky(40, 12), 5.0)
+    assert len(small) == one.count(40, 12) == 32 and one.count(80, 24) == 130
+    assert one.fly(sky(40, 12), 5.0) == small
+    # A flock just made is a function of the time.
+    assert Flock(random.Random(3)).fly(sky(40, 12), 5.0) == small
+    assert Flock(random.Random(4)).fly(sky(40, 12), 5.0) != small
+    assert one.fly(sky(40, 12), 5.1) != small
+    assert Flock(random.Random(3), birds=0).fly(sky(), 5.0) == []
     # The first birds of one list at every size.
-    assert len(one.birds) == 260 and one.dance(40, 12, 5.0) == small
-    # They hold together, most in view, and fly without a jump.
-    for w, h in ((80, 23), (200, 58)):
-        reach = one.reach(2 * w, 4 * h)
-        inside = 0
-        for k in range(600):
-            now = one.dance(w, h, k / 10)
-            after = one.dance(w, h, (k + 1) / 10)
-            mx, my = one.middle(2 * w, 4 * h, k / 10)
-            assert all(math.hypot(x - mx, y - my) < 2.2 * reach for x, y in now)
-            step = sum(math.hypot(a - x, b - y) for (x, y), (a, b) in zip(now, after, strict=True))  # fmt: skip
-            assert step / len(now) < 0.05 * 2 * w
-            inside += sum(0 <= x < 2 * w and 0 <= y < 4 * h for x, y in now)
-        assert inside > 0.8 * 600 * len(now)
+    # More, in a larger view: up from the land at the next step.
+    assert len(one.fly(sky(), 5.1)) == 32 and len(one.fly(sky(), 5.2)) == 124
+    assert len(one.fly(sky(40, 12), 5.2)) == 32 and len(one.birds) == 124
+    for w, over in ((80, 23), (200, 58)):
+        air = sky(w, over)
+        one = Flock(random.Random(3))
+        u = one.reach(2 * w, 4 * over)
+        now = one.fly(air, 0.0)
+        inside = cells = far = 0
+        for k in range(1, 400):
+            after = one.fly(air, k / 10)
+            steps = [math.hypot(a - x, b - y) for (x, y), (a, b) in zip(now, after, strict=True)]  # fmt: skip
+            # A bird flies on, without a jump; none stops.
+            assert max(steps) < 2.5 * flock.PACE * u * flock.DT
+            assert sum(steps) / len(steps) > 0.3 * flock.PACE * u * flock.DT
+            now = after
+            inside += sum(0 <= x < 2 * w and 0 <= y < 4 * over for x, y in now)
+            cells += len({(int(x) >> 1, int(y) >> 2) for x, y in now})
+            mx = sorted(x for x, _ in now)[len(now) // 2]
+            my = sorted(y for _, y in now)[len(now) // 2]
+            far += sum(math.hypot(x - mx, y - my) > 1.5 * u for x, y in now)
+        total = 399 * len(now)
+        # Most in view; loose: few share a cell; together, less a few.
+        assert inside > 0.85 * total
+        assert cells > 0.5 * total
+        assert 0.002 * total < far < 0.15 * total
+    # They fly as one: the same way.
+    up = range(len(one.x))
+    vx, vy = sum(one.vx) / len(up), sum(one.vy) / len(up)
+    speed = sum(math.hypot(one.vx[i], one.vy[i]) for i in up) / len(up)
+    assert math.hypot(vx, vy) > 0.4 * speed
+    # A view of another size: the same birds, where they were in it.
+    wide = one.fly(sky(100, 58), 39.9)
+    assert len(wide) == one.count(100, 58)
+    assert [x for x, _ in wide] == pytest.approx([x / 2 for x, _ in now][: len(wide)])
+
+
+def test_split_and_scare() -> None:
+    one = Flock(random.Random(3))
+    air = sky()
+    u = one.reach(160, 92)
+    apart = 0.0
+    seen = set()
+    for k in range(2000):
+        one.fly(air, k / 10)
+        seen.add(one.rift)
+        tribes = set(one.tribe)
+        assert (len(tribes) > 1) == (one.rift is not None)
+        if one.rift is not None:
+            mine = [i for i, tribe in enumerate(one.tribe) if tribe]
+            rest = [i for i, tribe in enumerate(one.tribe) if not tribe]
+            assert 0.15 * 124 < len(mine) < 0.55 * 124
+            mid = [
+                (sum(one.x[i] for i in part) / len(part), sum(one.y[i] for i in part) / len(part))
+                for part in (mine, rest)
+            ]  # fmt: skip
+            apart = max(apart, math.dist(*mid))
+    # Now and then a part goes its own way, and comes back.
+    assert None in seen and 2 <= len(seen) <= 5 and apart > 1.5 * u
+    # What scares them: they leave the place.
+    calm, wary = Flock(random.Random(3)), Flock(random.Random(3))
+    at = calm.fly(air, 20.0)
+    assert wary.fly(air, 20.0) == at
+    x = sorted(x for x, _ in at)[len(at) // 2]
+    y = sorted(y for _, y in at)[len(at) // 2]
+
+    def near(birds: list[tuple[float, float]]) -> int:
+        return sum(math.hypot(a - x, b - y) < 0.4 * u for a, b in birds)
+
+    assert near(at) > 30
+    for k in range(201, 211):
+        here, there = calm.fly(air, k / 10), wary.fly(air, k / 10, (x, y, 1.0))
+    assert near(there) <= 2 < near(here)
+    # A pointer that rests scares less far.
+    for k in range(211, 300):
+        there = wary.fly(air, k / 10, (x, y, flock.STILL))
+        assert sum(math.hypot(a - x, b - y) < 0.2 * u for a, b in there) <= 6
 
 
 def test_land() -> None:
@@ -153,7 +224,7 @@ def test_scene(monkeypatch: pytest.MonkeyPatch) -> None:
     cx, cy, colour = scene.sun(80, 24, 0.0)
     assert 130 < dots(fore, (colour,)) <= 160  # pi * 7 * 7
     birds = dots(fore, flock.BIRDS)
-    assert 150 < birds <= 260
+    assert 80 < birds <= 130
     assert scene.fore(80, 24, 0.0) == fore and scene.fore(80, 24, 0.1) != fore
     assert scene.fore(0, 24, 0.0) == [{}] * 24
     # A bird before the sun: dots off in the disc.
@@ -177,10 +248,42 @@ def test_roost_and_join(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Down at the start, all up after, down again for the night.
     counts = [len(flying(f)) for f in (0.0, 0.005, 0.06, 0.5, 0.9, 0.99, 1.05)]
-    assert counts[0] == 0 and 0 < counts[1] < 249 and counts[2] == counts[3] == 249
-    assert 0 < counts[4] <= 249 and counts[5] == counts[6] == 0
-    # Late, they are low: they pour down.
-    assert sum(y for _, y in flying(0.95)) / len(flying(0.95)) > 60
+    assert counts[0] == 0 and 0 < counts[1] < 124 and counts[2] == counts[3] == 124
+    assert 0 < counts[4] <= 124 and counts[5] == counts[6] == 0
+    # They take off from all along the land, low, and gather.
+    early = flying(0.02)
+    xs = sorted(x for x, _ in early)
+    assert xs[-1] - xs[0] > 80 and len(early) > 30
+
+    def spread(f: float) -> float:
+        """Of the middle four birds in five, across."""
+        xs = sorted(x for x, _ in flying(f))
+        return xs[9 * len(xs) // 10] - xs[len(xs) // 10]
+
+    assert spread(0.03) > 1.5 * min(spread(f) for f in (0.3, 0.5, 0.7))
+    # At dusk they go down apart: over the whole land, not in a column.
+    landed: dict[int, float] = {}
+    state = scene.flock.state
+    for k in range(850, 990):
+        flying(k / 1000)
+        for i, s in enumerate(state):
+            if s == flock.DOWN and i not in landed:
+                landed[i] = scene.flock.x[i]
+    assert len(landed) == 124
+    sites = {int(x * flock.SITES / 160) for x in landed.values()}
+    assert len(sites) >= flock.SITES - 2
+    assert max(landed.values()) - min(landed.values()) > 120
+    # A bird glides down, when the dusk gives it the time.
+    one = Flock(random.Random(3))
+    sink = []
+    for k in range(300):
+        one.fly(sky(at=0.855, dusk=300.0), k / 10)
+        sink += [
+            one.vy[i] / math.hypot(one.vx[i], one.vy[i])
+            for i, s in enumerate(one.state)
+            if s == flock.IN
+        ]
+    assert len(sink) > 1500 and 0.3 < sum(sink) / len(sink) < 0.55
     # Perches: over the text, where the cell is free.
     rows = ["", "", "  roost here", "x"]
     spots = flock.perches(rows, 80, 24)
@@ -195,34 +298,56 @@ def test_roost_and_join(monkeypatch: pytest.MonkeyPatch) -> None:
     args = options("--seed", "2", "--at", "0", "--dusk", "100", "-j", monkeypatch=monkeypatch)  # fmt: skip
     scene = Scene(args, random.Random(2))
     counts = [len(flying(f)) for f in (0.07, 0.2, 0.4, 0.7)]
-    assert 40 < counts[0] < 120 and counts == sorted(set(counts)) and counts[3] == 249
-    # Two flocks.
+    assert 20 < counts[0] < 60 and counts == sorted(set(counts)) and counts[3] == 124
+    # Those not in yet have no perch; all have one at night.
+    assert len(flying(0.07, spots)) == counts[0]
+    assert len(flying(1.0, spots)) == len(spots)
+    # Two flocks: each after its own lead.
     args = options("--seed", "2", "-d", monkeypatch=monkeypatch)
-    assert len(Scene(args, random.Random(2)).birds(80, 24, 0.0)[0]) == 249 + 87
+    scene = Scene(args, random.Random(2))
+    assert len(scene.birds(80, 24, 0.0)[0]) == 124 + 44
+    second = sum(scene.flock.tribe)
+    assert 25 < second < 65
 
 
 def test_hawk(monkeypatch: pytest.MonkeyPatch) -> None:
-    one = Flock(random.Random(3))
-    times = [t / 10 for t in range(600) if flock.hawk(one, 160, 92, t / 10)]
-    _, long = flock.HAWK
-    assert long * 10 <= len(times) <= 2 * (long + 1) * 10 + 4
-    begin = times[0]
-    assert len(flock.hawk(one, 160, 92, begin + 2.0)) == 6
-    # Through the middle of the flock, downwards.
-    ys = [flock.hawk(one, 160, 92, begin + k * long / 4)[-1][1] for k in range(5)]
-    assert ys == sorted(ys)
-    mid = flock.hawk(one, 160, 92, begin + long / 2)[-1]
-    assert mid == pytest.approx(one.middle(160, 92, begin + long / 2), abs=4)
-    # The birds keep away from it.
-    args = options("--seed", "3", "-k", "--dusk", "3000", "--at", "0.5", monkeypatch=monkeypatch)  # fmt: skip
+    args = options("--seed", "3", "-k", "--dusk", "3000", "--at", "0.4", monkeypatch=monkeypatch)  # fmt: skip
     scene = Scene(args, random.Random(3))
-    stoops = [t / 10 for t in range(600) if scene.birds(80, 24, t / 10)[1]]
-    assert stoops
-    for t in stoops:
-        birds, [(hx, hy)] = scene.birds(80, 24, t)
-        assert sum(math.hypot(x - hx, y - hy) < 4 for x, y in birds) <= 2
-    grid = scene.fore(80, 24, stoops[len(stoops) // 2])
-    assert flock.PREY in {ink for row in grid for _, ink in row.values()}
+    u = scene.flock.reach(160, 92)
+    hunts: list[list[tuple[float, float]]] = []
+    was: list[tuple[float, float]] = []
+    close = 0
+    for k in range(3000):
+        birds, hawk = scene.birds(80, 24, k / 10)
+        if hawk and not was:
+            hunts.append([])
+            still = birds
+        if hawk:
+            hunts[-1] += hawk
+            (hx, hy) = hawk[0]
+            close = max(close, sum(math.hypot(x - hx, y - hy) < 4 for x, y in birds))
+            if was:
+                # It flies on, faster than they do.
+                step = math.dist(hawk[0], was[0])
+                assert 1.5 * flock.PACE * u * flock.DT < step < 2.3 * flock.PACE * u * flock.DT  # fmt: skip
+            if len(hunts[-1]) == 12:
+                grid = scene.fore(80, 24, k / 10)
+                assert flock.PREY in {ink for row in grid for _, ink in row.values()}
+        was = hawk
+    # Now and then, not for long; it comes from over the view.
+    every, long = flock.HAWK
+    assert 2 <= len(hunts) <= 300 / every + 1
+    assert all(10 < len(hunt) <= 10 * long + 1 for hunt in hunts)
+    assert all(hunt[0][1] < 0 for hunt in hunts)
+    # It goes for the thick of the flock, and they keep away from it.
+    mx = sum(x for x, _ in still) / len(still)
+    my = sum(y for _, y in still) / len(still)
+    assert min(math.hypot(x - mx, y - my) for x, y in hunts[-1]) < u
+    assert close <= 5
+    # No hawk without the option, nor as they go to roost.
+    args = options("--seed", "3", "-k", "--dusk", "3000", "--at", "0.9", monkeypatch=monkeypatch)  # fmt: skip
+    scene = Scene(args, random.Random(3))
+    assert not any(scene.birds(80, 24, k / 10)[1] for k in range(0, 2000, 2))
 
 
 def test_print(capsys: pytest.CaptureFixture[str]) -> None:
