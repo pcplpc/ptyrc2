@@ -213,16 +213,6 @@ def test_night() -> None:
     assert not {ink[0] for ink in shore.SAND} - {ink[2] for ink in shore.SAND} & night
 
 
-def test_gull() -> None:
-    rng = random.Random(3)
-    for _ in range(20):
-        one = shore.gull(rng, 80, 24)
-        x, y = one["at"]
-        assert x in (0, 76) and 0 <= y < 24 and one["loop"]
-        assert (one["motion"]["vx"] > 0) == (x == 0)
-        assert one["ttl"] <= 80 / 14
-
-
 def test_print(capsys: pytest.CaptureFixture[str]) -> None:
     assert shore.main(["--print", "40x12", "--seed", "1"]) == 0
     out = capsys.readouterr().out
@@ -281,10 +271,9 @@ def test_shore(session: Pilot) -> None:
     assert pictures > 3 and sprites == 1
 
 
-def test_shore_all(session: Pilot, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(shore, "GULL", (0.4, 0.8))
+def test_shore_all(session: Pilot) -> None:
     pictures, sprites = played(session, "-a")
-    assert pictures > 3 and sprites >= 2
+    assert pictures > 3 and sprites == 1
 
 
 def test_the_host_mouse_over_the_beach(hosted: tuple[Host, Pilot]) -> None:
