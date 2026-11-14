@@ -5,7 +5,7 @@ use super::*;
 use crate::frames::HeatView;
 use crate::scene::{Run, StyleSpec};
 use crate::types::{CursorSample, FrameKind, FramePos, FrameState, TextMatch, TextQuery};
-use ptyrc_vt::{Cell, Style};
+use ptyrc_vt::{Cell, Color, Style};
 use std::collections::HashMap;
 
 const PANE: FrameId = 3;
@@ -1246,6 +1246,38 @@ fn modal_over_blanks_the_gap_and_hides_the_text() {
     // Shown again: laid out again, in the room.
     rig.show(1, modal("m", Prefer::Any));
     assert!(!rig.info(id).over);
+}
+
+#[test]
+fn modal_takes_no_colour_from_a_sprite_behind() {
+    let mut rig = Rig::new(40, 12);
+    // A back sprite, red, on every cell.
+    let spec = SpriteSpec {
+        frame: FrameSel::Id(RAW),
+        content: Some(Content {
+            style: Some(StyleSpec::fg(Color::Indexed(1))),
+            ..Content::rows(&vec!["#".repeat(40); 12])
+        }),
+        ..SpriteSpec::default()
+    };
+    rig.scene.add(9, spec, rig.now).unwrap();
+    rig.declare(1, "m", &[[16, 4]]);
+    let id = rig.show(1, modal("m", Prefer::Any));
+    let set = Set {
+        id,
+        content: Some(Content::rows(&["hi"])),
+        ..Set::default()
+    };
+    rig.w.set(1, set).unwrap();
+    rig.tick();
+    let [x, y, w, h] = rig.rect(id).unwrap();
+    let out = rig.scene.compose(&rig.grid, &rig.mock);
+    assert_eq!(out.cell(x - 1, y).style.fg, Color::Indexed(1));
+    assert_eq!(out.cell(x + 1, y + 1).text.as_str(), "h");
+    for (cx, cy) in (y + 1..y + h - 1).flat_map(|cy| (x + 1..x + w - 1).map(move |cx| (cx, cy))) {
+        let style = out.cell(cx, cy).style;
+        assert_eq!((style.fg, style.bg), (Color::Default, Color::Default));
+    }
 }
 
 #[test]

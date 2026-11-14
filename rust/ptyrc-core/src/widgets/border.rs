@@ -568,9 +568,9 @@ pub fn compose_at(
             let mut runs: Vec<Run> = Vec::new();
             for slot in row.into_iter().flatten() {
                 let mut style = slot.style;
-                if style.bg.is_none() {
-                    style.bg = Some(ColorSpec(Color::Default));
-                }
+                // Opaque: no colour of the cell below is inherited.
+                style.fg.get_or_insert(ColorSpec(Color::Default));
+                style.bg.get_or_insert(ColorSpec(Color::Default));
                 match runs.last_mut() {
                     Some(run) if run.style == style => run.t.push_str(&slot.text),
                     _ => runs.push(Run {

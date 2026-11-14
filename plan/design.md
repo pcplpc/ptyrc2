@@ -821,7 +821,7 @@ repaint.
 
 Content is clipped to the inner size and padded with blanks; a wide
 glyph cut by the right edge is a blank. The inside is opaque: a cell
-without `bg` gets the default background, nothing of the layers behind
+without `fg` or `bg` gets the default one, nothing of the layers behind
 shows through. The app's text does: the default layer is `back`, a
 widget never hides what the app writes.
 
