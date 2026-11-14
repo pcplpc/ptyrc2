@@ -24,7 +24,7 @@ What it shows:
   brushes the glass, what the trip meets;
 - bare: the sky, two ranges of hills, the verge. `-l`: the land: far
   ridges, trees, houses lit at night, what brushes the glass; `-p`:
-  poles and their wires, sagging; `-e`: what a trip meets, one a
+  poles and the wire between them, sagging; `-e`: what a trip meets, one a
   `CYCLE`: a tunnel, a cutting up to its mouth, then a wall of
   bricks and its lamps; a truss over a river; a train the other way;
   a level crossing, its boom down; a station where it stops; `-y`:
@@ -54,7 +54,7 @@ from typing import Any
 from ptyrc import Pilot, clock
 
 from . import _cli, _sky, _widgets
-from ._canvas import RGB, Braille, Half, Rows, ansi, mix
+from ._canvas import NEAR, RGB, Braille, Half, Rows, ansi, mix
 from ._line import LINES, land
 from ._strip import (
     LAMP,
@@ -199,6 +199,24 @@ def dist(trip: Trip, t: float) -> float:
 Strung = list[tuple[int, int, int, RGB, RGB]]
 
 
+def _hung(rows: int) -> tuple[int, int, float]:
+    """The pixel row of the cross arms; the dot row of the wire at a
+    pole, how far it sags, in dots."""
+    top = max(1, round(rows * 0.1))
+    return top, 2 * top, max(2.0, rows * 0.24)
+
+
+def _cells(px: list[list[RGB]], h: int) -> None:
+    """The cells a wire may cross, as one colour where their two
+    pixels are near one: a glyph shows its cell as one."""
+    _, high, sag = _hung(2 * h)
+    for cy in range(high // 4, min(h, int((high + sag) // 4) + 1)):
+        up, low = px[2 * cy], px[2 * cy + 1]
+        for cx, (a, b) in enumerate(zip(up, low, strict=True)):
+            if sum(abs(i - j) for i, j in zip(a, b, strict=True)) <= NEAR:
+                up[cx] = low[cx] = mix(a, b, 0.5)
+
+
 def _wires(
     half: Half,
     sky: _sky.Sky,
@@ -206,17 +224,16 @@ def _wires(
     verge: Layer,
     bare: Sequence[tuple[float, float]] = (),
 ) -> Strung:
-    """Poles on the verge, at its pace, and two wires that sag from
+    """Poles on the verge, at its pace, and a wire that sags from
     one to the next. No pole within the spans of `bare`, in pixels of
     the way, and no wire to a pole that is not.
 
-    The poles are painted. The wires are returned, for `_string` to
-    draw once what is nearer is painted: the cells they cross, each
+    The poles are painted. The wire is returned, for `_string` to
+    draw once what is nearer is painted: the cells it crosses, each
     with its braille bits and its two pixels as they are now."""
     w, rows = half.w, 2 * half.h
     shift = math.floor(shift + 1e-6)
-    top = max(1, round(rows * 0.1))
-    high, sag = 2 * top, max(2.0, rows * 0.24)  # in dots
+    top, high, sag = _hung(rows)
 
     def stands(i: int) -> bool:
         return not any(a - 2 <= i * POLES < b + 2 for a, b in bare)
@@ -226,9 +243,7 @@ def _wires(
         i, u = divmod((dx / 2 + shift) / POLES, 1)
         if not (stands(int(i)) and stands(int(i) + 1)):
             continue
-        drop = sag * (1 - (2 * u - 1) ** 2)
-        for wire in (0, 3):
-            dots.set(dx, round(high + wire + drop))
+        dots.set(dx, round(high + sag * (1 - (2 * u - 1) ** 2)))
     out: Strung = [
         (cx, cy, dots.bits[cy][cx], half.px[2 * cy][cx], half.px[2 * cy + 1][cx])
         for cx, cy in dots.cells()
@@ -637,7 +652,7 @@ def scene(
     half.px = [list(row) for row in clear]
     if kind is not None:
         amount = {"clear": 0.14, "clouds": 0.6}.get(kind, 0.3)
-        clouds(half, sky, seed + 7, hz, amount, -shift * 0.012)
+        clouds(half, sky, seed + 7, hz, amount, -shift * 0.012, 2)
         if cover < 0.5:
             clear = [list(row) for row in half.px]
 
@@ -685,6 +700,8 @@ def scene(
         fog(half, sky, hz)
     wires: Strung = []
     if trip.poles and rows >= 8 and back:
+        _cells(half.px, h)
+        _cells(clear, h)
         wires = _wires(half, sky, shift, back[-1], poles)
     for layer in front:
         paint(half, layer, sky, shift, season)
@@ -811,7 +828,10 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
         help="far ridges, trees, houses, what brushes the glass",
     )
     out.add_argument(
-        "-p", "--poles", action="store_true", help="poles and their sagging wires"
+        "-p",
+        "--poles",
+        action="store_true",
+        help="poles and the sagging wire between them",
     )
     out.add_argument(
         "-e",

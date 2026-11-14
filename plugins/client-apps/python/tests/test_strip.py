@@ -234,6 +234,11 @@ def test_weather() -> None:
     _strip.heavens(moved, NOON, 10)
     _strip.clouds(moved, NOON, 3, 10, 0.6, 9.0)
     assert moved.px != half.px
+    # Clouds of whole cells: the two pixels of a cell are one cloud or none.
+    cells = Half(30, 8, (40, 60, 90))
+    _strip.clouds(cells, NOON, 3, 10, 0.6, 0.0, 2)
+    assert any(c != (40, 60, 90) for row in cells.px for c in row)
+    assert all(cells.px[2 * y] == cells.px[2 * y + 1] for y in range(8))
     for fall in (_strip.rain, _strip.snow):
         looks = []
         for t in (0.0, 0.3):

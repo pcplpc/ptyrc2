@@ -135,6 +135,20 @@ def test_wires() -> None:
     assert half.over[0, 0][2] == sky and half.px[0][1] == leaf
     grey = mix(sky, cloud, 0.5)
     assert half.over[3, 0][2] == grey and half.px[0][3] == half.px[1][3] == grey
+    # One wire: a dot a column of dots.
+    half = Half(48, 11)
+    sky = train._sky.at(NOON)
+    verge = train.land("plain", 0, 22, False)[1][-1]
+    strung = train._wires(half, sky, 0.0, verge)
+    assert sum(bits.bit_count() for _, _, bits, _, _ in strung) == 96
+    # The cells it may cross: one colour where their pixels are near.
+    half = Half(2, 11)
+    half.fill(sky.colour(0.5, 0.5))
+    near, far = (100, 100, 200), (240, 240, 240)
+    for y, c in ((2, near), (3, mix(near, (0, 0, 0), 0.05)), (4, far)):
+        half.set(0, y, c)
+    train._cells(half.px, 11)
+    assert half.px[2][0] == half.px[3][0] and half.px[4][0] != half.px[5][0]
     # The poles stand on the verge: they go by at its pace, a pixel a frame.
     bare = replace(trip, land=False, deep=True)
     wood = hexa(train._sky.at(NOON, 47.0, 0.25).shade((92, 66, 44)))

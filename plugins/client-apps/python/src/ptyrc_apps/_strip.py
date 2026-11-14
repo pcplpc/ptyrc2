@@ -341,9 +341,11 @@ def clouds(
     horizon: int,
     amount: float = 0.4,
     drift: float = 0.0,
+    tall: int = 1,
 ) -> None:
     """Clouds over the sky, `amount` in `0..1`; `drift`: pixels gone
-    by, to the right."""
+    by, to the right; `tall`: pixels a row of a cloud, its rows on
+    multiples of it (2: whole cells)."""
     w = half.w
     count = max(1, round(amount * (2 + w / 7)))
     lap = w + 24
@@ -352,15 +354,16 @@ def clouds(
         far = noise(seed, i, 2)  # 0 high and near to 1 low and far
         long = max(4, round(w / 5 * (0.6 + 0.8 * noise(seed, i, 1)) * (1 - 0.4 * far)))
         left = int((noise(seed, i, 0) * lap + drift * (1.2 - 0.7 * far)) % lap) - 12
-        base = round(horizon * (0.14 + 0.5 * far))
+        base = round(horizon * (0.14 + 0.5 * far)) // tall * tall
         body = mix(tone, sky.colour(0.5, 0.9), 0.3 * far)
         under = mix(body, (70, 76, 96), 0.2 + 0.3 * sky.cover)
         tiers = 1 if long < 6 else 2 if long < 11 else 3
+        tiers = max(1, round(tiers / tall + 0.4))  # as tall, taller rows
         for tier in range(tiers):  # a flat base, shorter rows over it
             a = round(tier * long * (0.1 + 0.2 * noise(seed, i, 5 + tier)))
             b = round(tier * long * (0.1 + 0.2 * noise(seed, i, 8 + tier)))
             tint = under if tier == 0 and tiers > 1 else body
-            half.rect(left + a, base - tier, long - a - b, 1, tint, 0.94)
+            half.rect(left + a, base - tier * tall, long - a - b, tall, tint, 0.94)
 
 
 def stars(
