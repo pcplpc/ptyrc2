@@ -17,19 +17,26 @@ What it shows:
 
 - A scene that is a function of the time: a drop is drawn from the
   second it falls in (`drops`), so `Pond.picture` keeps no state but
-  the koi. One sprite in view cells, behind the text, 8 times a
-  second, sent when it changed.
+  the koi and the pointer. One sprite in view cells, behind the text,
+  20 times a second, sent when it changed. Few things, dull colours.
+- A slow current (`--current`): the light on the swell, what floats
+  and the striders at rest go with it.
+- The pointer over the pane (`Pond.touch`, from the `hover` events):
+  feared while it moves and `CALM` seconds after. The koi turn their
+  tail to it and dart, a ring where they took fright; the striders
+  slide off; a dragonfly leaves for another place.
 - The screen read as a map (`_cli.Sight`): the words are stones. A
   drop on one makes no ring; a ring stops against them, and closes
   again behind a small one (`shadow`). Nothing is drawn in the cell
   on each side of a glyph. The koi steer clear of them.
-- Rings: a drop sends a few. As one fades it loses arcs, each on its
-  own bearing, then thins to one dot in two, one in three.
+- Rings: a drop sends one or two, that leave fast and slow down
+  (`Ripple.ring`). Whole as it leaves, a ring then loses arcs, each on
+  its own bearing, and thins to one dot in two, one in three.
 - `-m`: the moon in the water, tonight's phase (`stars.phase_of`),
   its rows shaken by the swell, a glitter over and under it; it
   crosses the pond in `--night` seconds.
 - `-p`: the season of the day (`_sky.season_of`): petals in spring,
-  leaves in autumn, adrift on a slow current.
+  leaves in autumn, adrift on the current.
 - `-i`: water striders, a ring at each push; dragonflies, sprites
   the driver plays, moved by the client.
 """
@@ -46,7 +53,7 @@ from collections import deque
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any, NamedTuple
 
-from ptyrc import Pilot, Sprite, clock
+from ptyrc import Pilot, PtyrcError, Sprite, clock
 
 from . import _cli
 from ._sky import SEASONS, season_of
@@ -72,45 +79,53 @@ __all__ = [
 Walls = Mapping[int, Sequence[int]]
 """The glyphs of the view: per row, the columns that hold one."""
 
-PERIOD = 1 / 8  # seconds a tick
+PERIOD = 1 / 20  # seconds a tick
 AREA = 80 * 24  # cells the densities count over
 
-RING = (153, 117, 111, 75, 68, 61, 60, 23)  # a ring, as it fades
-SHEEN = (18, 24, 31)  # light on the swell, by level
-GREENS = (22, 28, 29, 34, 35, 64, 70)  # pads
+# Colours of the 256: greys and the dull steps of the cube.
+RING = (152, 109, 103, 67, 66, 60, 59, 238)  # a ring, as it fades
+SHEEN = (237, 239, 242)  # light on the swell, by level
+GREENS = (65, 65, 71, 101, 108)  # pads
 BLOOMS = "✿❀✾"
-LOTUS = (218, 212, 225, 231)
-MOON = (230, 186, 144, 101)  # a row in place, one shaken; the glitter, as it fades
-STRIDER = 180
-FLIES = ((51, 45), (203, 197), (120, 84))  # a dragonfly: wings out, wings in
+LOTUS = (224, 181, 182, 230)
+MOON = (230, 187, 144, 101)  # a row in place, one shaken; the glitter, as it fades
+STRIDER = 144
+FLIES = ((116, 73), (174, 131), (151, 108))  # a dragonfly: wings out, wings in
 #: What floats by, a season: colours, dots a piece, pieces over `AREA`.
 ADRIFT: dict[str, tuple[tuple[int, ...], int, float]] = {
-    "spring": ((218, 225, 212, 231), 2, 16.0),
-    "summer": ((231, 229, 151), 2, 7.0),
-    "autumn": ((208, 172, 178, 166, 130), 3, 12.0),
-    "winter": ((137, 144, 180), 3, 5.0),
+    "spring": ((224, 225, 182, 231), 2, 8.0),
+    "summer": ((230, 187, 151), 2, 4.0),
+    "autumn": ((173, 137, 179, 180, 131), 3, 7.0),
+    "winter": ((138, 144, 102), 3, 3.0),
 }
 #: Coats of a koi, head to tail.
 COATS: tuple[tuple[int, ...], ...] = (
-    (208,),
-    (214, 214, 208, 208),
-    (255, 255, 202, 202, 202, 255, 255, 202, 202, 255),
-    (255, 202, 202, 255, 255, 255, 202, 255),
-    (220, 220, 214),
-    (255, 255, 240, 255, 240, 240, 255),
-    (255,),
+    (173,),
+    (216, 216, 173, 173),
+    (254, 254, 167, 167, 167, 254, 254, 167, 167, 254),
+    (254, 167, 167, 254, 254, 254, 167, 254),
+    (222, 222, 179),
+    (254, 254, 245, 254, 245, 245, 254),
+    (253,),
 )
 #: Half the width of a koi along its length, in dots; the last two the tail.
 BODY = (1.0, 1.5, 1.8, 1.9, 1.8, 1.6, 1.3, 1.0, 0.8, 0.6, 0.5, 0.9, 1.4)
 
-SPEED = 5.0  # of a ring, dots per second
-GAP = 3.5  # dots from a ring to the next of its drop
+REACH = 12.0  # dots a ring is wide by when it dies
+LAG = 0.22  # share of the life of a drop from a ring to the next
 ARCS = 40  # bearings a ring breaks along
+FLOW = 0.6  # the current, dots per second
+CALM = 3.0  # seconds a pointer that rests is feared
+SHY = 26.0  # dots a koi keeps from the pointer
+SKIT = 16.0  # dots a strider keeps from it
+WARY = 7.0  # cells a dragonfly keeps from it
 BINS = 96  # bearings of a shadow
-RAIN = 260.0  # drops a minute over `AREA`, at the height of a shower
+RAIN = 110.0  # drops a minute over `AREA`, at the height of a shower
 SHOWER = 50.0  # seconds from a shower to the next
 RISEN = 0.2  # share of its way the moon has made at the start
 DOWN = 0.2  # share of a night the moon stays out
+#: Of a drop of rain: its life, its reach, its rings, as `drops` takes them.
+SHOWERS = ((0.7, 1.3), (2.5, 6.0), 1)
 DISC = 6.0  # radius of the moon, dots
 KISS = (6.0, 20.0)  # seconds between two rings of a koi
 
@@ -120,8 +135,8 @@ _UNIT = tuple(
 
 
 class Ripple(NamedTuple):
-    """A drop: where, in dots, and when; its rings go for `life`
-    seconds, `rings` of them, at `speed` dots per second."""
+    """A drop: where, in dots, and when; `rings` rings that go for
+    `life` seconds, the first `reach` dots wide by then."""
 
     key: int
     x: float
@@ -129,7 +144,17 @@ class Ripple(NamedTuple):
     t0: float
     life: float
     rings: int
-    speed: float = SPEED
+    reach: float = REACH
+
+    def ring(self, age: float, k: int = 0) -> tuple[float, float] | None:
+        """Ring `k` at `age` seconds: its radius in dots, its strength
+        from 1 to 0. It leaves fast and slows down: the cube of what is
+        left of its time. None: not out yet, or gone."""
+        late = LAG * k
+        a = (age / self.life - late) / (1 - late)
+        if not 0 <= a < 1:
+            return None
+        return self.reach * (1 - 0.3 * k) * (1 - (1 - a) ** 3), (1 - a) * 0.75**k
 
 
 def drops(
@@ -138,11 +163,14 @@ def drops(
     w: int,
     h: int,
     rate: float | Callable[[int], float],
-    life: tuple[float, float] = (4.0, 9.0),
+    life: tuple[float, float] = (1.4, 3.2),
+    reach: tuple[float, float] = (6.0, 20.0),
+    rings: int = 2,
 ) -> Iterator[Ripple]:
     """The drops whose rings still go at `t` over `w` by `h` cells:
     `rate` a minute over `AREA`, or a function of the second. A drop
-    is drawn from the second it falls in: the same at every call."""
+    is drawn from the second it falls in: the same at every call.
+    `life`, `reach`: of the smallest, of the largest; `rings`: at most."""
     low, high = life
     share = w * h / AREA / 60.0
     for second in range(math.floor(t - high), math.floor(t) + 1):
@@ -162,8 +190,8 @@ def drops(
                     noise(key, 4) * 4 * h,
                     t0,
                     lasts,
-                    1 + round(2 * size + (high > 4.0) * 0.6),
-                    SPEED if high > 4.0 else 4.0,
+                    1 + (rings > 1 and size > 0.25) + (rings > 2 and size > 0.6),
+                    reach[0] + (reach[1] - reach[0]) * size,
                 )
 
 
@@ -305,15 +333,22 @@ class Koi:
         self.coat = rng.choice(COATS)
         self.beat = rng.uniform(0, math.tau)
         self.kiss = rng.uniform(2.0, KISS[1])  # seconds to its next ring
+        self.dash = 0.0  # its fright, 1 to 0: it swims faster
         #: Where its head was, a dot apart, the last first.
         self.trail: deque[tuple[float, float]] = deque(maxlen=24)
         self.trail.append((self.x, self.y))
 
     def step(
-        self, dt: float, w: int, h: int, stone: Callable[[float, float], bool]
+        self,
+        dt: float,
+        w: int,
+        h: int,
+        stone: Callable[[float, float], bool],
+        scare: tuple[float, float, float] | None = None,
     ) -> None:
         """Swim for `dt` seconds over `w` by `h` cells; `stone(x, y)`:
-        the dot is under a word."""
+        the dot is under a word. `scare`: the pointer, as `Pond.fear`;
+        within `SHY` dots of it the koi turns its tail to it and darts."""
         rng = self.rng
         across, down = 2 * w, 4 * h
 
@@ -323,6 +358,16 @@ class Koi:
             return not (-4 <= x < across + 4 and -4 <= y < down + 4) or stone(x, y)
 
         self.turn += (rng.gauss(0.0, 2.2) - 1.4 * self.turn) * dt
+        self.dash *= math.exp(-dt / 0.8)
+        limit = 1.6
+        if scare is not None:
+            sx, sy, fright = scare
+            if math.hypot(self.x - sx, self.y - sy) < SHY:
+                away = math.atan2(self.y - sy, self.x - sx)
+                off = (away - self.heading + math.pi) % math.tau - math.pi
+                limit = 1.6 + 4.4 * fright
+                self.turn = max(-limit, min(limit, 6 * off))
+                self.dash = max(self.dash, fright)
         if not (0 <= self.x < across and 0 <= self.y < down):
             # Out, after a resize: back to the middle.
             home = math.atan2(down / 2 - self.y, across / 2 - self.x)
@@ -336,10 +381,11 @@ class Koi:
                 self.turn -= 5 * dt
             elif ahead:
                 self.turn += (5 if self.turn >= 0 else -5) * dt
-        self.turn = max(-1.6, min(1.6, self.turn))
+        self.turn = max(-limit, min(limit, self.turn))
         self.heading += self.turn * dt
-        self.x += self.speed * dt * math.cos(self.heading)
-        self.y += self.speed * dt * math.sin(self.heading)
+        pace = self.speed * (1 + 2.5 * self.dash) * dt
+        self.x += pace * math.cos(self.heading)
+        self.y += pace * math.sin(self.heading)
         px, py = self.trail[0]
         gone = math.hypot(self.x - px, self.y - py)
         if gone > 8:  # a jump: the tail does not stretch over it
@@ -379,15 +425,19 @@ class Pond:
     `pads`: lily pads over `AREA`; `drops`: drops a minute over it.
     `koi`, `lotus`, `rain`, `moon`, `adrift`, `striders`: what `-k -l -r
     -m -p -i` add. `phase`: of the moon; `night`: seconds it takes to
-    cross; `season`: one of `SEASONS`. The same seed gives the same
-    pond, at every size."""
+    cross; `season`: one of `SEASONS`; `current`: dots a second the
+    water goes by. The same seed gives the same pond, at every size.
+
+    `touch`: the pointer came on a dot. What lives here fears it for
+    `CALM` seconds after its last move (`fear`): the koi dart away, the
+    striders slide off."""
 
     def __init__(
         self,
         rng: random.Random,
         *,
-        pads: float = 9.0,
-        drops: float = 24.0,
+        pads: float = 6.0,
+        drops: float = 10.0,
         koi: bool = False,
         lotus: bool = False,
         rain: bool = False,
@@ -397,6 +447,7 @@ class Pond:
         phase: float = 0.5,
         night: float = 300.0,
         season: str = "summer",
+        current: float = FLOW,
     ) -> None:
         self.density = pads
         self.rate = drops
@@ -407,6 +458,9 @@ class Pond:
         self._pads = random.Random(rng.getrandbits(32))
         self._fish = random.Random(rng.getrandbits(32))
         self.current = rng.uniform(0, math.tau)  # where the water goes
+        #: The current, dots per second across and down.
+        self.flow = (current * math.cos(self.current), current * math.sin(self.current))
+        self.pointer: tuple[float, float, float] | None = None
         self.pads: list[Pad] = []
         self._cluster: list[Pad] = []
         self._left = 0
@@ -414,6 +468,23 @@ class Pond:
         self.kisses: list[Ripple] = []
         self._walls: Walls | None = None
         self._shadows: dict[int, tuple[list[float], list[float]] | None] = {}
+
+    # The pointer.
+
+    def touch(self, x: float, y: float, t: float) -> None:
+        """The pointer came on the dot `(x, y)` at `t`."""
+        self.pointer = (x, y, t)
+
+    def fear(self, t: float) -> tuple[float, float, float] | None:
+        """The pointer as felt at `t`: its dot, and the fright from 1,
+        as it moves, to 0, `CALM` seconds after. None: none is felt."""
+        if self.pointer is None:
+            return None
+        x, y, t0 = self.pointer
+        f = 1 - (t - t0) / CALM
+        if not 0 < f <= 1:
+            return None
+        return x, y, f * f * (3 - 2 * f)
 
     # The map.
 
@@ -424,7 +495,7 @@ class Pond:
             self._left = rng.choice((1, 2, 2, 3, 3, 4, 5))
             self._at = rng.random(), rng.random()
         self._left -= 1
-        r = 2.4 + 4.2 * rng.random() ** 1.6
+        r = 2.4 + 3.2 * rng.random() ** 1.6
         ox = oy = 0.0
         for tries in range(48):
             if all(
@@ -475,8 +546,9 @@ class Pond:
         self, w: int, h: int, t: float, dry: Callable[[float, float], bool]
     ) -> Iterator[tuple[float, float, Ripple]]:
         """The water striders at `t`: where each is, in dots, and the
-        ring of its last push. One rests, then darts to a place near
-        its home that `dry` does not hold."""
+        ring of its last push. One rests, adrift on the current, then
+        darts to a place near its home that `dry` does not hold."""
+        fx, fy = self.flow
         for i in range(max(1, int(3 * w * h / AREA))):
             key = int(noise(self.seed, 7000 + i) * 2**32)
             rest = 1.6 + 2.2 * noise(key, 1)
@@ -493,13 +565,14 @@ class Pond:
                 return x, y
 
             (x0, y0), (x1, y1) = place(hop - 1), place(hop)
+            x0, y0 = x0 + fx * rest, y0 + fy * rest  # where the rest left it
             since = (beat - hop) * rest
-            f = min(1.0, since / 0.3)
+            f = min(1.0, since / 0.25)
             f = f * (2 - f)
             yield (
-                x0 + (x1 - x0) * f,
-                y0 + (y1 - y0) * f,
-                Ripple(key + hop, x0, y0, t - since, 1.5, 1, 3.0),
+                x0 + (x1 - x0) * f + fx * since,
+                y0 + (y1 - y0) * f + fy * since,
+                Ripple(key + hop, x0, y0, t - since, 0.9, 1, 4.0),
             )
 
     def step(
@@ -517,12 +590,15 @@ class Pond:
         def stone(x: float, y: float) -> bool:
             return walls is not None and int(x) >> 1 in walls.get(int(y) >> 2, ())
 
+        scare = self.fear(t)
         for fish in self.koi:
-            fish.step(dt, w, h, stone)
-            if fish.kiss <= 0:
+            calm = fish.dash < 0.15
+            fish.step(dt, w, h, stone, scare)
+            # A ring where it is, now and then; one where it took fright.
+            if fish.kiss <= 0 or (calm and fish.dash > 0.5):
                 fish.kiss = self._fish.uniform(*KISS)
                 key = self._fish.getrandbits(30)
-                self.kisses.append(Ripple(key, fish.x, fish.y, t, 4.5, 2, 4.0))
+                self.kisses.append(Ripple(key, fish.x, fish.y, t, 2.0, 2, 9.0))
 
     # The picture.
 
@@ -539,8 +615,7 @@ class Pond:
                 if one.key in self._shadows:
                     shade = self._shadows[one.key]
                 else:
-                    reach = one.speed * one.life
-                    shade = shadow(one.x, one.y, reach, walls)
+                    shade = shadow(one.x, one.y, one.reach, walls)
                 shadows[one.key] = shade
                 if shade is None:
                     continue
@@ -548,22 +623,21 @@ class Pond:
             if not 0 <= age < one.life:
                 continue
             for k in range(one.rings):
-                r = one.speed * age - GAP * k
-                if r >= 0:
-                    strength = (1 - age / one.life) * 0.8**k
-                    rings.append((strength, r, k, one))
+                ring = one.ring(age, k)
+                if ring is not None:
+                    rings.append((ring[1], ring[0], k, one))
         self._shadows = shadows
         # The strongest last: it has the cells it shares.
         rings.sort(key=lambda ring: ring[0])
         for strength, r, k, one in rings:
-            colour = RING[int((1 - strength) ** 1.5 * (len(RING) - 0.01))]
+            colour = RING[int((1 - strength) ** 1.3 * (len(RING) - 0.01))]
             if r < 1.0:
                 water.dot(math.floor(one.x), math.floor(one.y), colour)
                 continue
             shade = shadows.get(one.key)
-            whole = min(1.0, 0.6 + strength)
-            # Fainter: every other dot, then one in three.
-            step = 1 if strength > 0.45 else 2 if strength > 0.2 else 3
+            whole = min(1.0, 0.5 + strength)
+            # Whole as it leaves; then every other dot, then one in three.
+            step = 1 if strength > 0.8 or r < 3 else 2 if strength > 0.35 else 3
             arcs = [noise(one.key, 64 * k + a) < whole for a in range(ARCS)]
             n = max(8, int(math.tau * r))
             for i in range(0, n, step):
@@ -579,17 +653,19 @@ class Pond:
                 )
 
     def _sheen(self, water: _Water, w: int, h: int, t: float) -> None:
-        """Light on the swell: dashes that show where two waves meet."""
-        for i in range(int(170 * w * h / AREA)):
-            x = int(noise(self.seed, 2 * i + 100000) * 2 * w)
-            y = int(noise(self.seed, 2 * i + 100001) * 4 * h)
+        """Light on the swell: dashes adrift on the current, that show
+        where two waves meet."""
+        fx, fy = self.flow
+        for i in range(int(90 * w * h / AREA)):
+            x = int((noise(self.seed, 2 * i + 100000) * 2 * w + fx * t) % (2 * w))
+            y = int((noise(self.seed, 2 * i + 100001) * 4 * h + fy * t) % (4 * h))
             wave = math.sin(0.07 * x + 0.045 * y - 0.5 * t)
             wave += math.sin(-0.035 * x + 0.09 * y - 0.37 * t + 1.7)
-            level = int((wave - 1.1 - 0.2 * noise(i, 5)) / 0.25)
+            level = int((wave - 1.15 - 0.2 * noise(i, 5)) / 0.25)
             if level < 0:
                 continue
             level = min(level, len(SHEEN) - 1)
-            for dx in range(1 + level + (i & 1)):
+            for dx in range(1 + level):
                 water.dot(x + dx, y, SHEEN[level])
 
     def _moon(self, water: _Water, w: int, h: int, t: float) -> None:
@@ -630,10 +706,10 @@ class Pond:
         across, down = 2 * w, 4 * h
         for i in range(int(density * w * h / AREA)):
             key = int(noise(self.seed, 5000 + i) * 2**32)
-            pace = 0.5 + 0.9 * noise(key, 1)
+            pace = 0.8 + 0.8 * noise(key, 1)
             sway = math.tau * noise(key, 2)
-            x = noise(key, 3) * across + pace * t * math.cos(self.current)
-            y = noise(key, 4) * down + pace * t * math.sin(self.current)
+            x = noise(key, 3) * across + pace * t * self.flow[0]
+            y = noise(key, 4) * down + pace * t * self.flow[1]
             x += 3.0 * math.sin(0.17 * t + sway)
             y += 2.0 * math.cos(0.13 * t + sway)
             px, py = math.floor(x % across), math.floor(y % down)
@@ -665,11 +741,20 @@ class Pond:
         if self.rain:
             ripples += [
                 one
-                for one in drops(self.seed + 1, t, w, h, self.shower, (1.2, 2.4))
+                for one in drops(self.seed + 1, t, w, h, self.shower, *SHOWERS)
                 if not dry(one.x, one.y)
             ]
         ripples += self.kisses
         skaters = list(self.skaters(w, h, t, dry)) if self.striders else []
+        scare = self.fear(t)
+        if scare is not None:
+            # A strider slides off the pointer, and back as it calms.
+            sx, sy, fright = scare
+            for i, (x, y, push) in enumerate(skaters):
+                d = math.hypot(x - sx, y - sy) or 1.0
+                if d < SKIT:
+                    k = fright * (SKIT - d) / d
+                    skaters[i] = (x + k * (x - sx), y + k * (y - sy), push)
         ripples += [push for _, _, push in skaters]
         self._rings(water, ripples, t, walls)
         for fish in self.koi or ():
@@ -713,9 +798,25 @@ class Fly:
             {"cells": [[{"t": "╪", "fg": wings}]], "ms": 90},
         ]
 
-    def step(self, dt: float, w: int, h: int) -> tuple[int, int]:
-        """Fly for `dt` seconds; the cell it is in."""
+    def step(
+        self,
+        dt: float,
+        w: int,
+        h: int,
+        scare: tuple[float, float, float] | None = None,
+    ) -> tuple[int, int]:
+        """Fly for `dt` seconds; the cell it is in. `scare`: the pointer,
+        a cell and a fright: it leaves a place within `WARY` cells of it."""
         rng = self.rng
+        if scare is not None and scare[2] > 0.3:
+            sx, sy, _ = scare
+            dx, dy = self.goal[0] - sx, 2 * (self.goal[1] - sy)
+            if math.hypot(dx, dy) < WARY:
+                way = math.atan2(dy, dx) if dx or dy else rng.uniform(0, math.tau)
+                way += rng.uniform(-0.7, 0.7)
+                far = rng.uniform(1.6, 2.6) * WARY
+                self.goal = (sx + far * math.cos(way), sy + far * math.sin(way) / 2)
+                self.wait = rng.uniform(0.8, 3.0)
         gx, gy = self.goal
         far = math.hypot(gx - self.x, 2 * (gy - self.y))
         if far > 0.5:
@@ -760,6 +861,7 @@ def scene(args: argparse.Namespace, rng: random.Random) -> Pond:
         phase=phase,
         night=args.night,
         season=season,
+        current=args.current,
     )
 
 
@@ -790,12 +892,28 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     water: Sprite | None = None
     sent: Any = None  # the cells of the water, as sent
     flies: list[Fly] = []
+    try:
+        pilot.subscribe("hover")
+    except PtyrcError as err:  # a driver without the topic
+        if err.code != "bad-params":
+            raise
     start = clock.monotonic()
     for dt in _cli.ticks(PERIOD, seconds):
         if not sight.look():
             continue
         w, h = frame.size
         t = clock.monotonic() - start
+        for topic, data in sight.others:
+            if topic != "hover" or data.get("at") is None:
+                continue
+            # On the water, or on a dragonfly over it.
+            x, y = data["at"]
+            if water is None or data["sprite"] != water.id:
+                over = [f for f in flies if f.sprite and f.sprite.id == data["sprite"]]
+                if not over or over[0].cell is None:
+                    continue
+                x, y = x + over[0].cell[0], y + over[0].cell[1]
+            pond.touch(2 * x + 1, 4 * y + 2, t)
         if (w, h) != size or sight.changed:
             size = (w, h)
             shown = clear(sight.rows, w, h)
@@ -803,6 +921,8 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
         pond.step(dt, w, h, t, walls)
         with sight.drawing(), pilot.batch():
             cells = runs(pond.picture(w, h, t, walls), w, shown)
+            # The whole view is its box: a hover is told anywhere on it.
+            cells[0].append({"t": " " * (w - sum(len(run["t"]) for run in cells[0]))})
             if water is None:
                 water = pilot.draw(
                     cells=cells, frame=frame.id, at=(0, 0), space="view", z=0
@@ -818,8 +938,11 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
                     if fly.sprite is not None:
                         fly.sprite.remove()
                 del flies[want:]
+                scare = pond.fear(t)
+                if scare is not None:
+                    scare = ((scare[0] - 1) / 2, (scare[1] - 2) / 4, scare[2])
                 for fly in flies:
-                    cell = fly.step(dt, w, h)
+                    cell = fly.step(dt, w, h, scare)
                     if fly.sprite is None:
                         fly.sprite = pilot.draw(
                             frames=fly.frames(),
@@ -855,16 +978,23 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
     out.add_argument(
         "--pads",
         type=float,
-        default=9.0,
+        default=6.0,
         metavar="N",
-        help="lily pads over 80 by 24 cells [default: 9]",
+        help="lily pads over 80 by 24 cells [default: 6]",
     )
     out.add_argument(
         "--drops",
         type=float,
-        default=24.0,
+        default=10.0,
         metavar="N",
-        help="drops a minute over 80 by 24 cells [default: 24]",
+        help="drops a minute over 80 by 24 cells [default: 10]",
+    )
+    out.add_argument(
+        "--current",
+        type=float,
+        default=FLOW,
+        metavar="SPEED",
+        help=f"the current, dots a second; 0: still water [default: {FLOW}]",
     )
     out.add_argument(
         "--night",
@@ -922,8 +1052,8 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
         args.moon = args.petals = args.insects = True
     if args.night <= 0:
         out.error("--night must be positive")
-    if args.pads < 0 or args.drops < 0:
-        out.error("--pads and --drops must not be negative")
+    if args.pads < 0 or args.drops < 0 or args.current < 0:
+        out.error("--pads, --drops and --current must not be negative")
     if args.phase is not None:
         args.phase %= 1.0
     if args.print is not None:

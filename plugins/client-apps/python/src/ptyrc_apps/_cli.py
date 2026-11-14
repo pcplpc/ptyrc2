@@ -7,6 +7,7 @@ import argparse
 import contextlib
 import sys
 from collections.abc import Callable, Iterator, Sequence
+from typing import Any
 
 from ptyrc import Cursor, Frame, Pilot, PtyrcError, Sprite, clock
 
@@ -254,7 +255,8 @@ class Sight:
     the frame is on screen, and where), `text` (rows of its view
     changed, or the view moved), `cursor` when wanted. A tick starts
     with `look()`, which takes the events that came since the last one;
-    the text is read again only when told.
+    the text is read again only when told. The events of the topics
+    the app subscribed to itself are in `others`, for that look.
 
         sight = Sight(pilot, frame)
         for _ in ticks(period):
@@ -274,6 +276,8 @@ class Sight:
         self.rows: list[str] = []  # the text of the view
         self.changed = False  # `rows` was read by the last `look()`
         self.cursor: tuple[int, int] | None = None  # in frame cells; None: hidden
+        #: The events of other topics the last `look()` took, in order.
+        self.others: list[tuple[str, Any]] = []
         self._at: Cursor | None = None
         self._stale = True
         topics = ("frames", "text", "cursor") if cursor else ("frames", "text")
@@ -284,6 +288,7 @@ class Sight:
         drawn on: out of sight (another tmux window), or a new layout
         still settling; its sprites are kept by the driver."""
         frame = self.frame
+        self.others = []
         while (event := self.pilot.event(timeout=0)) is not None:
             topic, data = event
             if topic == "frames":
@@ -299,6 +304,8 @@ class Sight:
                 self._stale = True
             elif topic == "cursor":
                 self._at = Cursor.from_wire(data)
+            elif topic not in ("frames", "text"):
+                self.others.append(event)
         self.changed = False
         if not frame.usable:
             # Asked meanwhile: a raw frame alone settles with no event.

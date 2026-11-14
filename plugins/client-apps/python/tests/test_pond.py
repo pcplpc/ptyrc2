@@ -4,14 +4,20 @@ headless driver."""
 
 from __future__ import annotations
 
+import fcntl
 import itertools
 import math
+import os
+import pty
 import random
+import struct
+import subprocess
+import termios
 import threading
 import time
 
 import pytest
-from ptyrc import Pilot
+from ptyrc import Pilot, PtyrcError
 from ptyrc import clock as session_clock
 from ptyrc_apps import pond, stars
 from ptyrc_apps.pond import Koi, Pond, Ripple
@@ -28,13 +34,14 @@ def inked(grid: stars.Grid, inks: tuple[int, ...]) -> list[tuple[int, int]]:
 
 
 def test_drops() -> None:
-    at = list(pond.drops(3, 50.0, 80, 24, 24.0))
-    assert at and list(pond.drops(3, 50.0, 80, 24, 24.0)) == at
-    assert list(pond.drops(4, 50.0, 80, 24, 24.0)) != at
+    at = list(pond.drops(3, 50.0, 80, 24, 240.0))
+    assert at and list(pond.drops(3, 50.0, 80, 24, 240.0)) == at
+    assert list(pond.drops(4, 50.0, 80, 24, 240.0)) != at
     assert list(pond.drops(3, 50.0, 80, 24, 0.0)) == []
     for one in at:
-        assert one.t0 <= 50.0 < one.t0 + one.life and 4.0 <= one.life <= 9.0
-        assert 0 <= one.x < 160 and 0 <= one.y < 96 and 1 <= one.rings <= 3
+        assert one.t0 <= 50.0 < one.t0 + one.life and 1.4 <= one.life <= 3.2
+        assert 0 <= one.x < 160 and 0 <= one.y < 96 and 1 <= one.rings <= 2
+        assert 6.0 <= one.reach <= 20.0
     # A drop is the same all its life, and falls once.
     keys: dict[int, Ripple] = {}
     for tick in range(2400):
@@ -44,8 +51,26 @@ def test_drops() -> None:
     wide = {r.key for t in range(2400) for r in pond.drops(3, t / 8, 160, 48, 24.0)}
     assert 3.2 * len(keys) < len(wide) < 4.8 * len(keys)
     # A rate that is a function of the second; short lives.
-    rain = list(pond.drops(3, 9.0, 80, 24, lambda s: 600.0 * (s >= 8), (1.2, 2.4)))
-    assert rain and all(r.t0 >= 8.0 and r.life <= 2.4 for r in rain)
+    rain = list(pond.drops(3, 9.0, 80, 24, lambda s: 600.0 * (s >= 8), *pond.SHOWERS))
+    assert rain and all(r.t0 >= 8.0 and r.life <= 1.3 for r in rain)
+    assert all(r.rings == 1 and r.reach <= 6.0 for r in rain)
+
+
+def test_ring() -> None:
+    one = Ripple(7, 0.0, 0.0, 0.0, 2.0, 2, 12.0)
+    assert one.ring(0.0) == (0.0, 1.0)
+    assert one.ring(-0.1) is None and one.ring(2.0) is None
+    # It leaves fast and slows down: half its way in a fifth of its time.
+    wide = [one.ring(t / 10)[0] for t in range(20)]
+    assert wide == sorted(wide) and wide[4] > 5.8 and wide[-1] > 11.9
+    faint = [one.ring(t / 10)[1] for t in range(20)]
+    assert faint == sorted(faint, reverse=True) and faint[-1] < 0.06
+    # The second: later, smaller, fainter, and over with the first.
+    assert one.ring(0.4, 1) is None
+    for t in (0.5, 1.0, 1.9):
+        (r0, s0), (r1, s1) = one.ring(t), one.ring(t, 1)
+        assert r1 < r0 - 3 and s1 < s0
+    assert one.ring(1.99, 1)[0] == pytest.approx(8.4, abs=0.01)
 
 
 def test_shadow() -> None:
@@ -77,10 +102,10 @@ def test_pond_is_a_map() -> None:
     assert Pond(random.Random(2)).picture(40, 12) != small
     large = water.picture(80, 24)
     assert len(large) == 24 and all(0 <= x < 80 for row in large for x in row)
-    assert len(water.pads) == 9 and len(water.leaves(40, 12)) == 2
+    assert len(water.pads) == 6 and len(water.leaves(40, 12)) == 1
     assert all(braille(glyph) for row in large for glyph, _ in row.values())
     greens = inked(large, pond.GREENS)
-    assert 30 <= len(greens) <= 140
+    assert 15 <= len(greens) <= 90
     assert water.picture(0, 5) == [{}] * 5 and water.picture(5, 0) == []
     bare = Pond(random.Random(1), pads=0, drops=0)
     assert not inked(bare.picture(80, 24, 3.0), (*pond.GREENS, *pond.RING))
@@ -95,40 +120,50 @@ def test_pond_is_a_map() -> None:
         for _, _, b in leaves[:i]:
             if (a.u, a.v) == (b.u, b.v):
                 assert math.hypot(a.ox - b.ox, a.oy - b.oy) >= a.r + b.r
-    assert all(2.4 <= pad.r <= 6.6 for _, _, pad in leaves)
+    assert all(2.4 <= pad.r <= 5.6 for _, _, pad in leaves)
 
 
 def test_rings() -> None:
     water = Pond(random.Random(1), pads=0, drops=0)
-    water.kisses = [Ripple(7, 80.0, 60.0, 0.0, 9.0, 3)]
-    assert inked(water.picture(80, 24, 0.05), pond.RING) == [(40, 15)]
+    one = Ripple(7, 80.0, 60.0, 0.0, 3.0, 2, 30.0)
+    water.kisses = [one]
+    assert inked(water.picture(80, 24, 0.005), pond.RING) == [(40, 15)]
     spans = []
-    for t in (1.0, 3.0, 5.0, 8.0):
+    for t in (0.2, 0.6, 1.2, 2.4):
         cells = inked(water.picture(80, 24, t), pond.RING)
         far = max(math.hypot(2 * x + 1 - 80, 4 * y + 2 - 60) for x, y in cells)
-        assert abs(far - pond.SPEED * t) < 4.5
+        assert abs(far - one.ring(t)[0]) < 4.5
         spans.append(far)
     assert spans == sorted(spans)
+
+    def dots(grid: stars.Grid) -> int:
+        return sum(braille(glyph).bit_count() for row in grid for glyph, _ in row.values())  # fmt: skip
+
     # It fades: fewer dots a length, darker.
-    young, old = water.picture(80, 24, 2.0), water.picture(80, 24, 8.5)
-    assert {ink for _, ink in young[15].values()} & set(pond.RING[:3])
+    young, old = water.picture(80, 24, 0.3), water.picture(80, 24, 2.8)
+    assert {ink for row in young for _, ink in row.values()} & set(pond.RING[:3])
     assert not {ink for row in old for _, ink in row.values()} & set(pond.RING[:4])
-    assert water.picture(80, 24, 9.5) == Pond(random.Random(1), pads=0, drops=0).picture(80, 24, 9.5)  # fmt: skip
+    assert dots(young) / one.ring(0.3)[0] > 2 * dots(old) / one.ring(2.8)[0]
+    assert water.picture(80, 24, 3.1) == Pond(random.Random(1), pads=0, drops=0).picture(80, 24, 3.1)  # fmt: skip
     # A line of words over it: no ring beyond.
     walls = pond.index(["", "", "", "", "", "", "", "", "", "x" * 80], 80, 24)
-    for t in (3.0, 6.0, 8.5):
+    for t in (0.6, 1.2, 2.4):
         cells = inked(water.picture(80, 24, t, walls), pond.RING)
         assert cells and all(y >= 9 for _, y in cells)
     # A drop on a word, on a pad: no ring.
-    water.kisses = [Ripple(8, 80.0, 38.0, 0.0, 9.0, 3)]
-    assert not inked(water.picture(80, 24, 3.0, walls), pond.RING)
+    water.kisses = [Ripple(8, 80.0, 38.0, 0.0, 3.0, 2, 30.0)]
+    assert not inked(water.picture(80, 24, 1.0, walls), pond.RING)
     padded = Pond(random.Random(1), drops=600)
     leaves = padded.leaves(80, 24, 4.0)
-    for one in pond.drops(padded.seed, 4.0, 80, 24, 600.0):
+    fell = list(pond.drops(padded.seed, 4.0, 80, 24, 600.0))
+    drawn: list[Ripple] = []
+    rings = padded._rings
+    padded._rings = lambda water, ripples, t, walls: (drawn.extend(ripples), rings(water, ripples, t, walls))[1]  # fmt: skip
+    padded.picture(80, 24, 4.0)
+    assert drawn and len(drawn) < len(fell)
+    for one in fell:
         hit = any(math.hypot(one.x - x, one.y - y) < p.r for x, y, p in leaves)
-        padded.kisses = [one]
-        padded.rate = 0.0
-        assert not (hit and inked(padded.picture(80, 24, 4.0), pond.RING[:2]))
+        assert not (hit and one in drawn)
 
 
 def test_koi() -> None:
@@ -176,6 +211,72 @@ def test_koi() -> None:
     still = Pond(random.Random(5))
     still.step(1 / 8, 80, 24, 0.0)
     assert still.koi is None
+
+
+def test_fear() -> None:
+    water = Pond(random.Random(5), pads=0, drops=0, koi=True, striders=True)
+    assert water.fear(0.0) is None
+    water.touch(81, 50, 10.0)
+    assert water.fear(10.0) == (81, 50, 1.0) and water.fear(9.0) is None
+    felt = [water.fear(10.0 + t / 4)[2] for t in range(12)]
+    assert felt == sorted(felt, reverse=True) and felt[-1] < 0.03
+    assert water.fear(10.0 + pond.CALM) is None
+    # A koi near the pointer turns its tail to it, darts, and leaves a ring.
+    for i in range(200):
+        water.step(1 / 20, 80, 24, i / 20)
+    fish = water.koi[0]
+    fish.x, fish.y, fish.heading, fish.turn = 70.0, 50.0, 0.0, 0.0
+    far = water.koi[1]
+    far.x, far.y = 150.0, 10.0
+    water.kisses = []
+    fish.kiss = far.kiss = 99.0
+    water.touch(81, 50, 10.0)
+    gone = []
+    for i in range(40):
+        before = (fish.x, fish.y)
+        water.step(1 / 20, 80, 24, 10.0 + i / 20)
+        gone.append(math.dist(before, (fish.x, fish.y)) * 20)
+    assert fish.x < 60 and math.hypot(fish.x - 81, fish.y - 50) > pond.SHY
+    assert max(gone) > 2.5 * fish.speed and far.dash == 0.0
+    assert [(one.x, one.y) for one in water.kisses] == [(pytest.approx(70, abs=1), pytest.approx(50, abs=1))]  # fmt: skip
+    # Calm again: its pace, its turns.
+    for i in range(120):
+        water.step(1 / 20, 80, 24, 14.0 + i / 20)
+    assert fish.dash < 0.01 and abs(fish.turn) <= 1.6
+    # A strider slides off the pointer, and comes back.
+    water = Pond(random.Random(5), pads=0, drops=0, striders=True)
+    (x, y, _), *_ = water.skaters(80, 24, 2.0, lambda x, y: False)
+    home = inked(water.picture(80, 24, 2.0), (pond.STRIDER,))
+    water.touch(x + 3, y, 2.0)
+    away = inked(water.picture(80, 24, 2.0), (pond.STRIDER,))
+    assert away != home and min(a for a, _ in away) < min(a for a, _ in home) - 3
+    assert inked(water.picture(80, 24, 2.0 + pond.CALM), (pond.STRIDER,)) == inked(
+        Pond(random.Random(5), pads=0, drops=0, striders=True).picture(
+            80, 24, 2.0 + pond.CALM
+        ),
+        (pond.STRIDER,),
+    )
+
+
+def test_current() -> None:
+    def lit(water: Pond, t: float) -> list[tuple[int, int]]:
+        return inked(water.picture(80, 24, t), pond.SHEEN)
+
+    still = Pond(random.Random(1), pads=0, drops=0, current=0.0)
+    assert still.flow == (0.0, 0.0)
+    water = Pond(random.Random(1), pads=0, drops=0)
+    assert math.hypot(*water.flow) == pytest.approx(pond.FLOW)
+    assert lit(water, 0.0) == lit(still, 0.0) and lit(water, 0.0)
+    assert lit(water, 30.0) != lit(still, 30.0)
+    # A strider is carried while it rests.
+    carried = Pond(random.Random(1), pads=0, drops=0, striders=True, current=2.0)
+    fx, fy = carried.flow
+    for a, b in itertools.pairwise(range(400)):
+        (x0, y0, p0), *_ = carried.skaters(80, 24, a / 20, lambda x, y: False)
+        (x1, y1, p1), *_ = carried.skaters(80, 24, b / 20, lambda x, y: False)
+        assert math.hypot(x1 - x0, y1 - y0) < 14  # no jump
+        if p0.key == p1.key and a / 20 - p0.t0 > 0.3:
+            assert (x1 - x0, y1 - y0) == pytest.approx((fx / 20, fy / 20), abs=1e-6)
 
 
 def test_moon() -> None:
@@ -253,6 +354,13 @@ def test_fly() -> None:
     moves = [a != b for a, b in itertools.pairwise(cells)]
     assert 0.05 < sum(moves) / len(moves) < 0.5
     assert max(abs(a[0] - b[0]) for a, b in itertools.pairwise(cells)) >= 3
+    # The pointer near: it leaves, and stays away.
+    for _ in range(40):
+        x, y = fly.step(1 / 20, 80, 24)
+    for _ in range(60):
+        cell = fly.step(1 / 20, 80, 24, (x, y, 1.0))
+    assert math.hypot(cell[0] - x, 2 * (cell[1] - y)) >= pond.WARY
+    assert fly.step(1 / 20, 80, 24, (x, y, 0.2)) == cell
     frames = fly.frames()
     assert [f["cells"][0][0]["t"] for f in frames] == ["‡", "╪"]
     assert (frames[0]["cells"][0][0]["fg"], frames[1]["cells"][0][0]["fg"]) in pond.FLIES  # fmt: skip
@@ -267,7 +375,7 @@ def test_print(capsys: pytest.CaptureFixture[str]) -> None:
     assert len(full.splitlines()) == 24 and "\x1b[38;5;230m" in full
     assert pond.main(["--print", "-a", "--seed", "1", "--phase", "0.5"]) == 0
     assert capsys.readouterr().out == full
-    for bad in (["--night", "0"], ["--pads", "-1"], ["--drops", "-1"], ["--print", "0x4"], ["--season", "monsoon"]):  # fmt: skip
+    for bad in (["--night", "0"], ["--pads", "-1"], ["--drops", "-1"], ["--current", "-1"], ["--print", "0x4"], ["--season", "monsoon"]):  # fmt: skip
         with pytest.raises(SystemExit):
             pond.main(bad)
     capsys.readouterr()
@@ -317,3 +425,82 @@ def test_pond(session: Pilot) -> None:
 def test_pond_all(session: Pilot) -> None:
     pictures, sprites = played(session, "-a")
     assert pictures > 3 and sprites >= 2
+
+
+class Host:
+    """A terminal that is not there: `ptyrc run` on a pty, what it
+    writes kept, the moves of a mouse typed in."""
+
+    def __init__(self, name: str) -> None:
+        self.master, slave = pty.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+        argv = [os.environ["PTYRC_BIN"], "run", "--name", name, "--"]
+        argv += ["env", "PS1=$ ", "sh"]
+        self.driver = subprocess.Popen(
+            argv, stdin=slave, stdout=slave, stderr=slave, start_new_session=True
+        )
+        os.close(slave)
+        self.seen = b""
+        threading.Thread(target=self._read, daemon=True).start()
+
+    def _read(self) -> None:
+        try:
+            while data := os.read(self.master, 65536):
+                self.seen += data
+        except OSError:
+            pass
+
+    def move(self, x: int, y: int) -> None:
+        """A move with no button down on a screen cell, SGR form."""
+        os.write(self.master, f"\x1b[<35;{x + 1};{y + 1}M".encode())
+
+    def close(self) -> None:
+        self.driver.kill()
+        self.driver.wait()
+        os.close(self.master)
+
+
+def test_pointer(monkeypatch: pytest.MonkeyPatch) -> None:
+    name = f"pond-{os.getpid()}-{time.monotonic_ns() % 10**9}"
+    host = Host(name)
+    touched: list[tuple[float, float]] = []
+    touch = Pond.touch
+
+    def note(self: Pond, x: float, y: float, t: float) -> None:
+        touched.append((x, y))
+        touch(self, x, y, t)
+
+    monkeypatch.setattr(Pond, "touch", note)
+    try:
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                pilot = Pilot(name)
+                break
+            except (PtyrcError, OSError):
+                assert time.monotonic() < deadline, "no session"
+                time.sleep(0.02)
+        with pilot:
+            pilot.wait_for("$ ")
+            while not pilot.frame("raw").usable:
+                assert time.monotonic() < deadline, "no usable frame"
+                time.sleep(0.02)
+            args = ["-s", name, "--seed", "4", "--pads", "0", "--drops", "0", "-k"]
+            status: list[int] = []
+            thread = threading.Thread(
+                target=lambda: status.append(pond.main(args, seconds=6.0))
+            )
+            thread.start()
+            # The moves are asked of the host; one anywhere on the view is told.
+            while b"\x1b[?1003h" not in host.seen or not pilot.sprites():
+                assert time.monotonic() < deadline, host.seen[-200:]
+                time.sleep(0.02)
+            for cell in ((70, 20), (3, 1), (40, 12)):
+                host.move(*cell)
+                while (2 * cell[0] + 1, 4 * cell[1] + 2) not in touched:
+                    assert thread.is_alive() and time.monotonic() < deadline, touched
+                    time.sleep(0.02)
+            thread.join()
+            assert status == [0]
+    finally:
+        host.close()
