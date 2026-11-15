@@ -8,6 +8,8 @@ import os
 import queue
 import re
 import socket
+import stat
+import struct
 import subprocess
 import threading
 from pathlib import Path
@@ -46,22 +48,61 @@ def runtime_dir() -> Path:
     return Path(f"/tmp/ptyrc-{os.getuid()}")
 
 
-def _alive(path: Path) -> bool:
-    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+def _trusted_dir() -> Path | None:
+    """`runtime_dir()` as a client takes it; none when it is not there.
+    One that is not a directory of this user, or that others can enter,
+    is refused: whoever made it may listen there in a driver's place."""
+    path = runtime_dir()
     try:
-        probe.settimeout(0.5)
-        probe.connect(str(path))
+        st = path.lstat()
+    except OSError:
+        return None
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
+        why = "not a directory of ours"
+    elif st.st_mode & 0o077:
+        why = "open to other users"
+    else:
+        return path
+    raise PtyrcError(
+        "gone",
+        f"socket directory {path}: {why}",
+        "the socket directory must be yours, mode 0700; remove it, or set "
+        "XDG_RUNTIME_DIR",
+    )
+
+
+def _connect(path: Path | str, timeout: float) -> socket.socket:
+    """A socket connected to `path`, whose listener runs as this user;
+    `OSError` otherwise."""
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(timeout)
+        sock.connect(str(path))
+        cred = sock.getsockopt(
+            socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")
+        )
+        if struct.unpack("3i", cred)[1] != os.getuid():
+            raise PermissionError("the listener is another user")
+    except OSError:
+        sock.close()
+        raise
+    return sock
+
+
+def _alive(path: Path) -> bool:
+    try:
+        _connect(path, 0.5).close()
         return True
     except OSError:
         return False
-    finally:
-        probe.close()
 
 
 def live_sessions() -> list[str]:
-    """Names of the sessions that accept a connection."""
+    """Names of the sessions that accept a connection. `PtyrcError` for
+    a socket directory that is not this user's alone."""
+    base = _trusted_dir()
     try:
-        socks = sorted(runtime_dir().glob("*.sock"))
+        socks = sorted(base.glob("*.sock")) if base else []
     except OSError:
         return []
     return [p.stem for p in socks if _alive(p)]
@@ -98,6 +139,7 @@ def socket_path(session: str | None = None) -> Path:
         if direct:
             return Path(direct)
         session = os.environ.get("PTYRC_SESSION")
+    _trusted_dir()
     if session is not None:
         path = runtime_dir() / f"{session}.sock"
         if not _alive(path):
@@ -130,12 +172,9 @@ class Connection:
     replies by id and queues events."""
 
     def __init__(self, path: Path | str, timeout: float = 5.0) -> None:
-        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._sock.settimeout(timeout)
         try:
-            self._sock.connect(str(path))
+            self._sock = _connect(path, timeout)
         except OSError as exc:
-            self._sock.close()
             raise PtyrcError("gone", f"{path}: {exc}") from exc
         self._sock.settimeout(None)
         self._send_lock = threading.Lock()

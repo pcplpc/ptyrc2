@@ -72,3 +72,26 @@ def test_environment_names_the_session() -> None:
                 assert by_env.session == "life-c"
         finally:
             del os.environ["PTYRC_SESSION"]
+
+
+def test_the_socket_is_this_users_alone() -> None:
+    with Pilot.spawn(["cat"], name="life-m"):
+        assert (runtime_dir() / "life-m.sock").stat().st_mode & 0o777 == 0o600
+        assert runtime_dir().stat().st_mode & 0o777 == 0o700
+
+
+def test_an_open_socket_directory_is_refused(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    assert live_sessions() == []  # no directory: no session
+    (tmp_path / "ptyrc").mkdir(mode=0o755)
+    for call in (live_sessions, lambda: socket_path("x"), Pilot):
+        with pytest.raises(PtyrcError) as err:
+            call()
+        assert err.value.code == "gone"
+        assert "open to other users" in err.value.message
+    # A symlink to a good directory is no directory.
+    (tmp_path / "ptyrc").rmdir()
+    (tmp_path / "real").mkdir(mode=0o700)
+    (tmp_path / "ptyrc").symlink_to(tmp_path / "real")
+    with pytest.raises(PtyrcError, match="not a directory of ours"):
+        live_sessions()
