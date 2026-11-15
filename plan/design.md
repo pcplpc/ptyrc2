@@ -1429,6 +1429,25 @@ socket 0600), `/tmp/ptyrc-<uid>/` without `XDG_RUNTIME_DIR`. `<session>` is
 `PTYRC_SESSION`, else the live session its tmux session names (`@ptyrc`,
 see `ptyrc tmux`), else the only live session, else fails with the list.
 
+Trust, as tmux: one boundary, the user. Whoever reaches the socket has
+the whole session.
+
+- The directory is a directory of this user, mode 0700, not a symlink.
+  The driver makes it so, or does not start. A client refuses any other
+  (`SelectError::Unsafe`, status 3; Python: `gone`): whoever made it may
+  listen there in a driver's place. It removes a stale socket only there.
+- The socket is bound under umask 0177: mode 0600 from the start.
+- The driver closes at accept a peer that is neither this user nor root
+  (`SO_PEERCRED`), and one past 256 connections.
+- A client closes a socket whose listener is another user
+  (`session::connect`, `_wire._connect`), wherever the path comes from
+  (`PTYRC_SOCKET`).
+- What holds the screen or the keys is made mode 0600, and closed to
+  others when it was there and open: a tape (`--record`), the host log
+  (`--host-log`), the log of a child app (`start::private_file`).
+
+Per-app permissions: `plan/notes-app-permissions.md`, not done.
+
 Durations on the wire (`timeout_ms`, `ttl_ms`, `ms`, ...) are session
 time: real time times `$PTYRC_CLOCK_RATE` (default 1), read by the driver
 at its start and by `ptyrc.clock` at import. Programs in the pty keep real
