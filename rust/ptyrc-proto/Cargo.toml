@@ -8,4 +8,4 @@ license.workspace = true
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-rustix = { version = "1", features = ["process"] }
+rustix = { version = "1", features = ["process", "net"] }

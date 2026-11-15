@@ -4,7 +4,7 @@
 use std::fmt;
 use std::fs;
 use std::io;
-use std::os::unix::fs::{DirBuilderExt, FileTypeExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -31,27 +31,85 @@ pub fn runtime_dir() -> PathBuf {
     }
 }
 
-/// Create the socket directory, mode 0700. An existing one must be ours
-/// and closed to others.
+/// Create the socket directory, mode 0700. An existing one must be ours;
+/// one open to others is closed.
 pub fn ensure_runtime_dir() -> io::Result<PathBuf> {
-    use std::os::unix::fs::MetadataExt;
     let dir = runtime_dir();
     match fs::DirBuilder::new().mode(0o700).create(&dir) {
         Ok(()) => {}
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
         Err(e) => return Err(e),
     }
-    let meta = fs::symlink_metadata(&dir)?;
-    if !meta.is_dir() || meta.uid() != rustix::process::getuid().as_raw() {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            format!("{}: not a directory of ours", dir.display()),
-        ));
-    }
-    if meta.permissions().mode() & 0o077 != 0 {
-        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
+    match check_dir(&dir)? {
+        Ok(()) => {}
+        Err(Unsafe::Open) => fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?,
+        Err(e) => return Err(e.error(&dir)),
     }
     Ok(dir)
+}
+
+/// Why a socket directory is not used.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Unsafe {
+    /// Not a directory (a symlink is none), or of another user.
+    Foreign,
+    /// Ours, with a mode bit for the group or the others.
+    Open,
+}
+
+impl Unsafe {
+    fn error(self, dir: &Path) -> io::Error {
+        let what = match self {
+            Unsafe::Foreign => "not a directory of ours",
+            Unsafe::Open => "open to other users",
+        };
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("{}: {what}", dir.display()),
+        )
+    }
+}
+
+/// Whether `dir` is a directory of this user, mode 0700 at most. The
+/// symlink is looked at, not its target.
+fn check_dir(dir: &Path) -> io::Result<Result<(), Unsafe>> {
+    let meta = fs::symlink_metadata(dir)?;
+    Ok(
+        if !meta.is_dir() || meta.uid() != rustix::process::getuid().as_raw() {
+            Err(Unsafe::Foreign)
+        } else if meta.permissions().mode() & 0o077 != 0 {
+            Err(Unsafe::Open)
+        } else {
+            Ok(())
+        },
+    )
+}
+
+/// The socket directory as a client takes it: `None` when there is
+/// none. One that is not ours, or open to others, is refused: whoever
+/// made it may listen there in a driver's place.
+pub fn trusted_dir() -> io::Result<Option<PathBuf>> {
+    let dir = runtime_dir();
+    match check_dir(&dir) {
+        Ok(Ok(())) => Ok(Some(dir)),
+        Ok(Err(e)) => Err(e.error(&dir)),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Connect to a driver's socket. The listener must run as this user:
+/// a socket of another is closed at once (`PermissionDenied`).
+pub fn connect(path: &Path) -> io::Result<UnixStream> {
+    let stream = UnixStream::connect(path)?;
+    let peer = rustix::net::sockopt::socket_peercred(&stream)?;
+    if peer.uid.as_raw() != rustix::process::getuid().as_raw() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("{}: the listener is another user", path.display()),
+        ));
+    }
+    Ok(stream)
 }
 
 /// A session name: `[A-Za-z0-9._-]+`, not starting with a dot.
@@ -71,12 +129,15 @@ pub fn socket_path(name: &str) -> PathBuf {
 
 /// Whether a driver answers on the socket.
 pub fn is_live(path: &Path) -> bool {
-    UnixStream::connect(path).is_ok()
+    connect(path).is_ok()
 }
 
 /// Live sessions, sorted by name. Sockets nobody listens on are removed.
+/// None in a directory that is not trusted (`trusted_dir`).
 pub fn list() -> Vec<Session> {
-    let dir = runtime_dir();
+    let Ok(Some(dir)) = trusted_dir() else {
+        return Vec::new();
+    };
     let Ok(entries) = fs::read_dir(&dir) else {
         return Vec::new();
     };
@@ -90,7 +151,7 @@ pub fn list() -> Vec<Session> {
             continue;
         }
         let path = entry.path();
-        match UnixStream::connect(&path) {
+        match connect(&path) {
             Ok(_) => sessions.push(Session {
                 name: name.to_string(),
                 path,
@@ -117,6 +178,8 @@ pub enum SelectError {
     Dead(String),
     /// Several live sessions and none named.
     Ambiguous(Vec<String>),
+    /// The socket directory is not ours, or open to others: why.
+    Unsafe(String),
 }
 
 impl SelectError {
@@ -142,6 +205,10 @@ impl SelectError {
                 "pick one with -s NAME or {ENV_SESSION}: {}",
                 names.join(", ")
             ),
+            SelectError::Unsafe(_) => {
+                "the socket directory must be yours, mode 0700; remove it, or set XDG_RUNTIME_DIR"
+                    .into()
+            }
         }
     }
 }
@@ -157,6 +224,7 @@ impl fmt::Display for SelectError {
                 "session {name} is dead: its driver is gone, the stale socket was removed"
             ),
             SelectError::Ambiguous(names) => write!(f, "{} sessions, none chosen", names.len()),
+            SelectError::Unsafe(why) => write!(f, "socket directory {why}"),
         }
     }
 }
@@ -188,13 +256,16 @@ fn of_tmux() -> Option<String> {
 /// The session to talk to: `explicit`, else `PTYRC_SESSION`, else the one
 /// over the tmux session this process is in, else the only live one.
 pub fn select(explicit: Option<&str>) -> Result<Session, SelectError> {
+    if let Err(e) = trusted_dir() {
+        return Err(SelectError::Unsafe(e.to_string()));
+    }
     let env = std::env::var(ENV_SESSION).ok().filter(|s| !s.is_empty());
     if let Some(name) = explicit.map(str::to_string).or(env) {
         if !valid_name(&name) {
             return Err(SelectError::BadName(name));
         }
         let path = socket_path(&name);
-        return match UnixStream::connect(&path) {
+        return match connect(&path) {
             Ok(_) => Ok(Session { name, path }),
             Err(e) if e.kind() == io::ErrorKind::ConnectionRefused => {
                 let _ = fs::remove_file(&path);
@@ -234,5 +305,23 @@ mod tests {
         assert!(!valid_name(".hidden"));
         assert!(!valid_name("a/b"));
         assert!(!valid_name("a b"));
+    }
+
+    #[test]
+    fn a_directory_is_checked() {
+        let dir = std::env::temp_dir().join(format!("ptyrc-dir-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        assert!(check_dir(&dir).is_err());
+        fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        assert_eq!(check_dir(&dir).unwrap(), Ok(()));
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o750)).unwrap();
+        assert_eq!(check_dir(&dir).unwrap(), Err(Unsafe::Open));
+        // A symlink to a good directory is no directory.
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&dir, &link).unwrap();
+        assert_eq!(check_dir(&link).unwrap(), Err(Unsafe::Foreign));
+        assert_eq!(check_dir(Path::new("/")).unwrap(), Err(Unsafe::Foreign));
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

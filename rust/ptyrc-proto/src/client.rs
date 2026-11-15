@@ -83,9 +83,10 @@ pub struct Client {
 }
 
 impl Client {
-    /// Connect to a socket and read the `hello`.
+    /// Connect to a socket of this user (`session::connect`) and read
+    /// the `hello`.
     pub fn connect(path: &Path) -> Result<Client, ClientError> {
-        let stream = UnixStream::connect(path)?;
+        let stream = session::connect(path)?;
         let mut client = Client {
             stream,
             decoder: LineDecoder::new(),
