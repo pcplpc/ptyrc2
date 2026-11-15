@@ -3,9 +3,32 @@
 
 use ptyrc_proto::suggest;
 use std::fmt;
+use std::fs::{File, OpenOptions, Permissions};
 use std::io;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+
+/// A file for what the session shows or is typed (a tape, a log):
+/// created mode 0600, truncated or appended to. A regular file of ours
+/// that others could read is closed to them.
+pub(crate) fn private_file(path: &Path, append: bool) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.create(true).mode(0o600);
+    if append {
+        options.append(true);
+    } else {
+        options.write(true).truncate(true);
+    }
+    let file = options.open(path)?;
+    let meta = file.metadata()?;
+    if meta.is_file()
+        && meta.uid() == rustix::process::getuid().as_raw()
+        && meta.permissions().mode() & 0o077 != 0
+    {
+        file.set_permissions(Permissions::from_mode(0o600))?;
+    }
+    Ok(file)
+}
 
 /// Kind of failure, and the exit status `ptyrc run` gives it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -188,6 +211,24 @@ pub fn exec_error(program: &str, e: &io::Error) -> RunError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_private_file_is_closed_to_others() {
+        let path = std::env::temp_dir().join(format!("ptyrc-private-{}", std::process::id()));
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        let _ = std::fs::remove_file(&path);
+        drop(private_file(&path, false).unwrap());
+        assert_eq!(mode(&path), 0o600);
+        // One that was open is closed; an append keeps what is there.
+        std::fs::write(&path, "kept").unwrap();
+        std::fs::set_permissions(&path, Permissions::from_mode(0o644)).unwrap();
+        drop(private_file(&path, true).unwrap());
+        assert_eq!(mode(&path), 0o600);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "kept");
+        drop(private_file(&path, false).unwrap());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
+        std::fs::remove_file(&path).unwrap();
+    }
 
     #[test]
     fn commands() {

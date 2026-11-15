@@ -20,12 +20,13 @@ use ptyrc_proto::session::{self, ENV_SESSION, ENV_SOCKET};
 use ptyrc_proto::suggest;
 use ptyrc_proto::{ErrorCode, PROTOCOL, Request, RpcError, SERVER, TOPICS};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
+use rustix::fs::Mode;
 use rustix::io::Errno;
 use rustix::process::{Pid, Signal, kill_process_group};
 use serde_json::{Value, json};
 use signal_hook::consts::{SIGCHLD, SIGHUP, SIGINT, SIGTERM, SIGWINCH};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::{self, Read};
 use std::os::fd::AsFd;
 use std::os::unix::fs::PermissionsExt;
@@ -44,6 +45,8 @@ const BURST_MAX_TIME: Duration = Duration::from_millis(8);
 /// Keyboard input is not read while this much waits for the app.
 const PTY_QUEUE_HIGH: usize = 1 << 20;
 const DEFAULT_SIZE: (u16, u16) = (80, 24);
+/// Connections at once; one more is closed at accept.
+const MAX_CONNS: usize = 256;
 /// How long the host has to tell its colours.
 const HOST_COLORS_WAIT: Duration = Duration::from_millis(1000);
 /// How long the app has to leave after the hang-up of a handoff.
@@ -295,7 +298,11 @@ fn bind_session(cfg: &Config) -> Result<(String, PathBuf, UnixListener), RunErro
             format!("no socket in {}: {}", dir.display(), start::describe(&e)),
         )
     };
-    let listener = UnixListener::bind(&socket).map_err(bind)?;
+    // Mode 0600 from its first instant, as tmux: no window before a chmod.
+    let mask = rustix::process::umask(Mode::from_raw_mode(0o177));
+    let listener = UnixListener::bind(&socket);
+    rustix::process::umask(mask);
+    let listener = listener.map_err(bind)?;
     fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))?;
     listener.set_nonblocking(true)?;
     Ok((name, socket, listener))
@@ -362,7 +369,7 @@ impl Driver {
             let signals = Signals::install()?;
             let host = if cfg.headless {
                 let log = match &cfg.host_log {
-                    Some(path) => Some(OpenOptions::new().create(true).append(true).open(path)?),
+                    Some(path) => Some(start::private_file(path, true)?),
                     None => None,
                 };
                 Host::headless(log)
@@ -1287,7 +1294,14 @@ impl Driver {
     }
 
     fn accept(&mut self, engine: &mut dyn Engine) {
+        let me = rustix::process::getuid().as_raw();
         while let Ok((stream, _)) = self.listener.accept() {
+            // This user or root, whatever the modes on the way say.
+            let cred = rustix::net::sockopt::socket_peercred(&stream).ok();
+            let ours = cred.is_some_and(|c| c.uid.as_raw() == me || c.uid.is_root());
+            if !ours || self.conns.len() >= MAX_CONNS {
+                continue;
+            }
             let Ok(mut conn) = Conn::new(stream) else {
                 continue;
             };
@@ -1296,8 +1310,7 @@ impl Driver {
             self.next_conn += 1;
             let now = self.now();
             if let Some(apps) = &mut self.apps {
-                let peer = rustix::net::sockopt::socket_peercred(&conn.stream).ok();
-                let peer = peer.map(|cred| cred.pid.as_raw_nonzero().get() as u32);
+                let peer = cred.map(|cred| cred.pid.as_raw_nonzero().get() as u32);
                 match apps.attach(id, peer, true, now) {
                     // One more connection of a paused child: paused too.
                     Some(app) => {

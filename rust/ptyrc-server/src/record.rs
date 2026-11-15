@@ -71,11 +71,11 @@ pub struct Recorder {
 }
 
 impl Recorder {
-    /// Create `path` and write the header. `input`: typed bytes are
+    /// Create `path` (mode 0600) and write the header. `input`: typed bytes are
     /// recorded too.
     pub fn create(path: &Path, header: &Header, input: bool) -> io::Result<Recorder> {
         let mut recorder = Recorder {
-            file: Some(File::create(path)?),
+            file: Some(crate::start::private_file(path, false)?),
             input,
         };
         let mut head = json!({

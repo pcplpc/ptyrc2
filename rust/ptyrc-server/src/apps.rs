@@ -8,7 +8,7 @@ use crate::start;
 use rustix::process::{Pid, Signal, getpgid, kill_process, kill_process_group};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, File};
+use std::fs;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -163,7 +163,7 @@ impl Apps {
     /// `log`.
     fn spawn(&self, id: u64, argv: &[String], log: &Path) -> Result<Child, String> {
         let (program, args) = argv.split_first().ok_or("argv: empty")?;
-        let stderr = match File::create(log) {
+        let stderr = match start::private_file(log, false) {
             Ok(file) => Stdio::from(file),
             Err(_) => Stdio::null(),
         };
