@@ -77,11 +77,33 @@ You can cool down your terminal as our planet gets hotter every day:
 
 ![sand](doc/snow.gif)
 
+### window
+
+You want to be outside but you are stuck in the open-space:
+
+![window-1](doc/window-1.gif)
+
+You can get some good company if you wave your cursor to the window:
+
+![window-2](doc/window-2.gif)
+
 ### bricks
 
 If you want to feel productive as you take notes on meetings:
 
 ![bricks](doc/bricks.gif)
+
+### pond
+
+Another mindful way to continue write hand-crafted software with love:
+
+![pond](doc/pond.gif)
+
+### train
+
+The best part is the voyage after all, not the destination:
+
+![train](doc/train.gif)
 
 ### gallery
 
@@ -91,7 +113,7 @@ You can decorate your terminal like some people decorate their toilets:
 
 ### shore
 
-Feel the mindfulness running onto the shores of your indifference:
+Feel all your problems running onto the shores of your indifference:
 
 ![shore](doc/shore.gif)
 
