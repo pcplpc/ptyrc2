@@ -123,9 +123,19 @@ Perfect to celebrate the Christmas season alone in front of a computer:
 
 ![globe](doc/globe.gif)
 
+### game of life
+
+Revisiting the classics:
+
+![life](doc/life.gif)
+
 ## Productivity Tools
 
 Find experimental apps for productivity below.
+
+Monitoring metrics of your local machine:
+
+![monitor](doc/monitor-2.gif)
 
 Pin a post-it note to your terminal:
 
@@ -135,11 +145,15 @@ Display what is happening to locally to git:
 
 ![git-demo](doc/git-demo.gif)
 
-If you like working with a pomodoro timer:
+If you are a gifted kid who can read an analog clock:
 
-![pomodoro](doc/timer-pomodoro.gif)
+![clock](doc/clock-2.gif)
 
-Not really productive, but if you like statistics:
+If you like working with a timer for your productivity:
+
+![pomodoro](doc/timer.gif)
+
+If you like funny statistics or graphs of your typing speed:
 
 ![typing-pace](doc/typing-pace.gif)
 
