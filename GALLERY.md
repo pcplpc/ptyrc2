@@ -123,11 +123,17 @@ Perfect to celebrate the Christmas season alone in front of a computer:
 
 ![globe](doc/globe.gif)
 
-### game of life
+### life
 
 Revisiting the classics:
 
 ![life](doc/life.gif)
+
+### fire
+
+Getting warm and cozy:
+
+![fire](doc/fire.gif)
 
 ## Productivity Tools
 

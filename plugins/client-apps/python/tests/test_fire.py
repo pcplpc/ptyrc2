@@ -97,7 +97,7 @@ def test_fuel() -> None:
 
 
 def test_logs() -> None:
-    look = fire.Look(logs=True)
+    look = fire.Look(logs=True, blocks=True)
     candle, brazier, hearth = (
         plain(fire.scene(1.0, w, h, look)) for w, h in ((5, 4), (9, 5), (33, 11))
     )
@@ -105,6 +105,23 @@ def test_logs() -> None:
     assert brazier[-2][0] == "◥" and brazier[-2][-1] == "◤"
     assert hearth[-1].count("╨") == 2 and hearth[-2].count("╥") == 2
     assert sum(c in "▓▒" for c in hearth[-1]) > sum(c in "▓▒" for c in hearth[-2]) > 4
+    # Without the blocks: glyphs, no background.
+    for w, h in fire.SIZES:
+        rows = fire.scene(1.0, w, h, fire.Look(logs=True, sparks=True))
+        assert not set("".join(plain(rows))) & set("█▐▌▀▄▓▒◥◤")
+        assert all("bg" not in run for row in rows for run in row)
+    look = fire.Look(logs=True)
+    candle, brazier, small, hearth, wide = (
+        plain(fire.scene(1.0, w, h, look))
+        for w, h in ((5, 4), (9, 5), (23, 9), (33, 11), (45, 13))
+    )
+    assert candle[-2:] == [" |_| ", " === "]
+    assert brazier[-2][0] == "\\" and brazier[-2][-1] == "/"
+    assert hearth[-1].count("╨") == 2 and hearth[-2].count("╥") == 2
+    # A pile: a log each dozen cells, one fewer across them.
+    ends = [[row.count("(@)") for row in rows[-2:]] for rows in (small, hearth, wide)]
+    assert ends == [[1, 1], [1, 2], [2, 3]]
+    assert hearth[-1][3:6] == "(@)" and hearth[-1][-4] == ")"
     # With the light, bricks behind the logs, brighter near the flames.
     lit = fire.scene(1.0, 33, 11, fire.Look(logs=True, glow=True))
     assert ink(lit, "┬┴─") > 100
@@ -116,14 +133,20 @@ def test_logs() -> None:
 
 def test_embers() -> None:
     # Burnt down: no flame, the logs glow more.
-    look = fire.Look(logs=True, cycle=True, burn=100.0)
+    for blocks in (True, False):
+        look = fire.Look(logs=True, cycle=True, burn=100.0, blocks=blocks)
 
-    def coals(t: float) -> int:
-        rows = fire.scene(t, 33, 11, look)
-        return sum("bg" in run for row in rows[-2:] for run in row)
+        def coals(t: float, look: fire.Look = look) -> int:
+            rows = fire.scene(t, 33, 11, look)
+            if look.blocks:
+                return sum("bg" in run for row in rows[-2:] for run in row)
+            return ink(rows[-2:], fire.COALS)
 
-    assert sum(coals(95.0 + i / 5) for i in range(10)) > 0
-    assert ink(fire.scene(95.0, 33, 11, look)[:-2]) < 12
+        dead = sum(coals(95.0 + i / 5) for i in range(10))
+        assert dead > 0
+        if not blocks:  # with them, a log in the flames has a background too
+            assert dead > sum(coals(5.0 + i / 5) for i in range(10))
+        assert ink(fire.scene(95.0, 33, 11, look)[:-2]) < 12
 
 
 def test_sparks() -> None:

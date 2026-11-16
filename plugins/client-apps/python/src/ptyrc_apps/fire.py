@@ -20,7 +20,7 @@ own flag; `-a` for all:
 
 - `-b`: half blocks: two rows of heat a cell, the whole ramp.
 - `-l`: what burns: a candle on its dish, a brazier, logs in a hearth
-  (border `hearth`).
+  (border `hearth`); in glyphs too without `-b`: `(@)=-~==)`.
 - `-c`: the fire burns down to embers over `--burn` seconds (3600),
   then a log is put on.
 - `-k`: sparks rise and die.
@@ -45,6 +45,7 @@ from . import _cli, _widgets
 
 __all__ = [
     "BORDERS",
+    "COALS",
     "GLYPHS",
     "RAMP",
     "SIZES",
@@ -74,6 +75,9 @@ FULL = 0.85  # the fuel of a fire that does not burn down
 POKED = 4.0  # seconds a poke lasts
 WAX, WICK, BRASS, IRON = 230, 238, 136, 240
 BARK = (94, 58, 95)
+WOOD = (130, 136, 137)  # the bark in glyphs: thin strokes, brighter
+GLOW = (172, 178, 180)  # and lit by the flames behind
+GRAIN, COALS = "=-~", ":*#"  # bark and embers, in glyphs
 LIT = (131, 95, 52, 237, 235)  # bricks, near the flames to far
 
 BORDERS: dict[str, dict[str, object]] = {
@@ -243,26 +247,35 @@ def sparks(
 
 
 def _furniture(
-    t: float, w: int, h: int, f: float, seed: int
+    t: float, w: int, h: int, f: float, seed: int, blocks: bool = True
 ) -> tuple[list[list[Cell]], int]:
     """What burns, with `logs`: its rows, the lowest of the box, and
-    how many of them the flames may lick (the fire sits that deep)."""
+    how many of them the flames may lick (the fire sits that deep).
+    `blocks`: drawn in blocks; else in glyphs, as the bare flame is."""
 
     def cells(text: str, fg: int, **style: object) -> list[Cell]:
         return [{"t": c, "fg": fg, **style} if c != " " else {"t": " "} for c in text]
 
     if w <= 5:
         # A candle; on a dish when there is a row for it.
-        body = cells("█".center(w) if w < 5 else "▐█▌".center(w), WAX)
+        if blocks:
+            wax, dish = "█" if w < 5 else "▐█▌", "▀▀▀"
+        else:
+            wax, dish = "H" if w < 5 else "|_|", "==="
+        body = cells(wax.center(w), WAX)
         if h < 4:
             return [body], 0
-        return [body, cells("▀▀▀".center(w), BRASS)], 0
+        return [body, cells(dish.center(w), BRASS)], 0
     if w <= 12:
-        bowl = cells("◥" + "█" * (w - 2) + "◤", IRON)
+        rim = "◥" + "█" * (w - 2) + "◤" if blocks else "\\" + "_" * (w - 2) + "/"
+        bowl = cells(rim, IRON)
         for x in range(1, w - 1):  # coals show along the rim
             glow = _embers(x, t, w, seed) * (0.5 + 0.5 * f)
-            if glow > 0.45:
+            if glow > 0.45 and blocks:
                 bowl[x] = {"t": "▀", "fg": _colour(glow * 0.6), "bg": IRON}
+            elif glow > 0.45:
+                coal = "o" if glow < 0.7 else "*"
+                bowl[x] = {"t": coal, "fg": _colour(glow * 0.6), "bold": True}
         legs = cells(" /" + " " * (w - 4) + "\\ ", IRON)
         return [bowl, legs], 0
     # Two logs, the shorter across the longer, on andirons.
@@ -270,7 +283,7 @@ def _furniture(
     short = max(5, long * 2 // 3)
     lean = (long - short) // 3
 
-    def log(n: int, row: int) -> list[Cell]:
+    def log(n: int, row: int, count: int = 1) -> list[Cell]:
         out: list[Cell] = []
         for i in range(n):
             x = i + row * 17
@@ -286,12 +299,49 @@ def _furniture(
         end: Cell = {"fg": 137}
         return [{"t": "▐", **end}, *out[1:-1], {"t": "▌", **end}]
 
+    def twig(n: int, row: int, at: int = 0) -> list[Cell]:
+        """A log in glyphs, `at` cells along its row: bark `=-~`, the
+        cut end `(@)` on the left of a lower log, on the right of an
+        upper."""
+        out: list[Cell] = []
+        for i in range(n):
+            x = at + i + row * 17
+            bark = WOOD[int(_hash(seed + row, x, 0) * len(WOOD))]
+            grain = _hash(seed + row, x, 1)
+            glyph = GRAIN[0 if grain < 0.62 else 1 if grain < 0.86 else 2]
+            crack = _noise(seed + 20 + row, x * 0.8, t * 0.5)
+            hot = (crack - 0.3 - 0.3 * min(1.0, f)) * 2.2
+            if hot > 0.12:
+                coal = COALS[min(len(COALS) - 1, int((hot - 0.12) * 5))]
+                out.append({"t": coal, "fg": _colour(min(0.6, hot)), "bold": True})
+            else:
+                out.append({"t": glyph, "fg": bark})
+        end = [{"t": c, "fg": 180 if c == "@" else 137} for c in "(@)"]
+        if row:
+            return [{"t": "(", "fg": 137}, *out[1:-3], *end]
+        return [*end, *out[3:-1], {"t": ")", "fg": 137}]
+
+    def pile(total: int, row: int, count: int) -> list[Cell]:
+        """`count` logs end to end over `total` cells."""
+        out: list[Cell] = []
+        for i in range(count):
+            n = total * (i + 1) // count - total * i // count
+            out += twig(n, row, len(out))
+        return out
+
+    count = 1
+    if not blocks and long >= 24:
+        # A pile: a log each dozen cells, one fewer across them.
+        count = long // 12
+        short = long * (count - 1) // count
+        lean = (long - short) // 2
+    lay = log if blocks else pile
     low = [{"t": " "} for _ in range(w)]
     low[1], low[w - 2] = {"t": "╨", "fg": IRON}, {"t": "╨", "fg": IRON}
-    low[3 : 3 + long] = log(long, 0)
+    low[3 : 3 + long] = lay(long, 0, count)
     high = [{"t": " "} for _ in range(w)]
     high[1], high[w - 2] = {"t": "╥", "fg": IRON}, {"t": "╥", "fg": IRON}
-    high[3 + lean : 3 + lean + short] = log(short, 1)
+    high[3 + lean : 3 + lean + short] = lay(short, 1, max(1, count - 1))
     return [high, low], 1
 
 
@@ -312,7 +362,7 @@ def scene(
     floor = h  # rows of flame: those over the furniture
     licked = 0
     if look.logs:
-        rows, licked = _furniture(t, w, h, f, seed)
+        rows, licked = _furniture(t, w, h, f, seed, look.blocks)
         floor = h - len(rows)
         grid[floor:] = rows
     rows_of_fire = floor + licked
@@ -341,8 +391,12 @@ def scene(
             under = grid[row][x]
             if under["t"] != " ":
                 # A log in the flames: lit from behind.
-                if "bg" not in under and max(low, high) >= 0.25:
+                if "bg" in under or max(low, high) < 0.25:
+                    pass
+                elif look.blocks:
                     grid[row][x] = {**under, "bg": _colour(0.55 * max(low, high))}
+                elif under.get("fg") in WOOD:
+                    grid[row][x] = {**under, "fg": GLOW[WOOD.index(under["fg"])]}
                 continue
             if not look.blocks:
                 glyph = GLYPHS[min(len(GLYPHS) - 1, int(low * len(GLYPHS)))]
