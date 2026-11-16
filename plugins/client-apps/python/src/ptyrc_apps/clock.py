@@ -12,8 +12,9 @@ What it shows:
   date. The driver picks the face and the place, in a quiet room,
   and moves or changes it when the app needs the place; `--border`:
   a preset, `round` here;
-- `_widgets.Deck`: the face shown is drawn on the second (on the
-  minute with `--no-seconds`), a face just put at once;
+- `_widgets.Deck`: every face is drawn on the second (on the minute
+  with `--no-seconds`), the one shown and the others: a face the
+  driver puts is never late; it is drawn again at once;
 - `--print`: every face once, at its size, without a driver.
 """
 
@@ -250,13 +251,20 @@ _BRAILLE = ((0x01, 0x08), (0x02, 0x10), (0x04, 0x20), (0x40, 0x80))
 def dial(now: datetime, w: int, h: int, *, seconds: bool) -> Rows:
     """A round dial in braille, 17 cells by 8, two dots by four a cell:
     rim and hour marks dim, the hour hand, the minute hand, the second
-    a mark on the rim. A cell has one colour: that of its foremost
-    dot."""
+    a tick inside the rim. The left half mirrors the right, the top
+    the bottom. A cell has one colour: that of its foremost dot."""
     return _fit([_dial(now, 17, 8, seconds)], w, h)
 
 
+def _snap(v: float) -> float:
+    """`v` on the middle of its dot, the centre between two: the dots
+    of `v` and `-v` mirror each other. 0 goes right, and down."""
+    k = math.floor(abs(v)) + 0.5
+    return -k if v < -1e-9 else k
+
+
 def _dial(now: datetime, w: int, h: int, seconds: bool) -> Rows:
-    cx, cy = w - 0.5, 2 * h - 0.5  # the centre, in dots
+    cx, cy = w - 0.5, 2 * h - 0.5  # the centre, in dots: between four
     r = min(cx, cy)
     dots: dict[tuple[int, int], int] = {}  # dot: rank, the foremost highest
 
@@ -264,20 +272,22 @@ def _dial(now: datetime, w: int, h: int, seconds: bool) -> Rows:
         n = max(1, int(4 * (end - start)))
         for i in range(n + 1):
             d = start + (end - start) * i / n
-            x = round(cx + d * math.sin(2 * math.pi * turn))
-            y = round(cy - d * math.cos(2 * math.pi * turn))
+            x = int(cx + _snap(d * math.sin(2 * math.pi * turn)))
+            y = int(cy + _snap(-d * math.cos(2 * math.pi * turn)))
             if 0 <= x < 2 * w and 0 <= y < 4 * h:
                 dots[x, y] = max(dots.get((x, y), 0), rank)
 
     for i in range(400):
         ray(i / 400, r, r, 1)
     for hour in range(12):
-        ray(hour / 12, r - (4 if hour % 3 == 0 else 2.5), r - 2.5, 1)
+        # Either side of the turn: a mark on an axis is two dots thick.
+        for turn in (hour / 12 - 1e-6, hour / 12 + 1e-6):
+            ray(turn, r - (4 if hour % 3 == 0 else 2.5), r - 2.5, 1)
     minute = now.minute + (now.second / 60 if seconds else 0)
     ray((now.hour % 12 + minute / 60) / 12, 0, 0.5 * r, 3)
     ray(minute / 60, 0, 0.8 * r, 2)
     if seconds:
-        ray(now.second / 60, r, r, 4)
+        ray(now.second / 60, r - 1, r, 4)
     cells: dict[tuple[int, int], list[int]] = {}
     for (x, y), rank in dots.items():
         cell = cells.setdefault((x // 2, y // 4), [0, 0])
@@ -384,7 +394,8 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None) -> None:
 
     deck = _widgets.Deck(pilot, args)
     deck.add("clock", list(faces), render)
-    deck.run(period=60.0 if args.no_seconds else 1.0, seconds=seconds, align=True)
+    period = 60.0 if args.no_seconds else 1.0
+    deck.run(period=period, seconds=seconds, align=True, every=True)
 
 
 def _zone(name: str) -> tzinfo:

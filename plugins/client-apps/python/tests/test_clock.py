@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import unicodedata
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 import pytest
+from ptyrc import Widget
 from ptyrc_apps import clock
 
 TIMES = (
@@ -99,6 +101,52 @@ def test_dial() -> None:
     assert at[clock.SECONDS] == [(8, 7)]
     quiet = clock.face(datetime(2026, 1, 1, 3, 0, 30), 17, 8, seconds=False)
     assert not any(r.get("fg") == clock.SECONDS for row in quiet for r in row)
+
+
+def test_dial_mirrors() -> None:
+    """Rim and marks: the left half mirrors the right, the top the
+    bottom. The hands, at 12:00, keep to the middle column."""
+    rows = clock.face(datetime(2026, 1, 1, 12, 0, 0), 17, 8, seconds=False)
+    bits = [
+        [ord(str(r["t"])) - 0x2800 if r["t"] != " " else 0 for r in row] for row in rows
+    ]
+    assert all(len(row) == 17 for row in bits)
+
+    def flip(b: int, pairs: tuple[tuple[int, int], ...]) -> int:
+        return sum(q * bool(b & p) + p * bool(b & q) for p, q in pairs)
+
+    across = ((0x01, 0x08), (0x02, 0x10), (0x04, 0x20), (0x40, 0x80))
+    down = ((0x01, 0x40), (0x02, 0x04), (0x08, 0x80), (0x10, 0x20))
+    for y in range(8):
+        for x in (*range(8), *range(9, 17)):
+            assert bits[y][16 - x] == flip(bits[y][x], across), (x, y)
+            assert bits[7 - y][x] == flip(bits[y][x], down), (x, y)
+
+
+def test_every_face_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each periodic draw sets every variant, by name."""
+    sets: list[str | None] = []
+
+    class Pilot:
+        def subscribe(self, *topics: str, snapshot: bool = False) -> None:
+            pass
+
+        def event(self, timeout: float | None = None) -> tuple[str, object]:
+            return ("exit", {"status": 0})
+
+        def widget(self, tag: str, sizes: object, **show: object) -> Widget:
+            return Widget(self, tag, {"id": 1})  # type: ignore[arg-type]
+
+        def batch(self) -> object:
+            return contextlib.nullcontext()
+
+        def call(self, method: str, **params: object) -> None:
+            assert method == "widget.set" and params["content"]["cells"]  # type: ignore[index]
+            sets.append(params.get("variant"))  # type: ignore[arg-type]
+
+    monkeypatch.setattr(clock._cli, "run", lambda app, args: app(Pilot(), args) or 0)
+    assert clock.main([]) == 0
+    assert sets == [f"{w}x{h}" for w, h in clock.SIZES]
 
 
 def test_ladders() -> None:

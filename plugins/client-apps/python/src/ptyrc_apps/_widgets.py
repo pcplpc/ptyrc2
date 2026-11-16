@@ -117,13 +117,26 @@ class Deck:
             self._show[id(widget)]["frame"] = frame
             self.resize(widget, self._sizes[id(widget)])
 
-    def draw(self, only: Widget | None = None) -> None:
-        """Render the variant shown of each widget, or of `only`."""
+    def draw(self, only: Widget | None = None, every: bool = False) -> None:
+        """Render the variant shown of each widget, or of `only`.
+        `every`: each variant, shown or not: the driver keeps them."""
         with self.pilot.batch():
             for widget, render in self.widgets:
                 size = widget.size
-                if size is not None and only in (None, widget):
+                if only not in (None, widget):
+                    continue
+                if every:
+                    for name, (w, h) in self._named(widget):
+                        widget.set(render(w, h), variant=name)
+                elif size is not None:
                     widget.set(render(*size))
+
+    def _named(self, widget: Widget) -> list[tuple[str, Size]]:
+        """The variants of `widget`: name, size."""
+        sizes = self._sizes[id(widget)]
+        if isinstance(sizes, Mapping):
+            return list(sizes.items())
+        return [(f"{w}x{h}", (w, h)) for w, h in sizes]
 
     def on_hover(self, widget: Widget, move: Move, leave: Leave | None = None) -> None:
         """Follow the host mouse over `widget`, a widget of the deck.
@@ -193,13 +206,16 @@ class Deck:
         seconds: float | None = None,
         tick: Callable[[], None] | None = None,
         align: bool = False,
+        every: bool = False,
     ) -> None:
         """Keep the deck fresh until the session ends, or for `seconds`.
         `tick`: the app's work before each periodic draw (read its
         data). `period`: seconds, or what gives them after each draw.
         `align`: draw on the multiples of `period` of the wall clock,
-        as a clock does."""
-        every = period if callable(period) else lambda: period
+        as a clock does. `every`: a periodic draw renders each variant:
+        one the driver puts later is a period old at most, not as old
+        as the deck."""
+        each = period if callable(period) else lambda: period
         end = None if seconds is None else clock.monotonic() + seconds
         due = clock.monotonic()
         while True:
@@ -209,8 +225,8 @@ class Deck:
             if now >= due:
                 if tick is not None:
                     tick()
-                self.draw()
-                now, period = clock.monotonic(), every()
+                self.draw(every=every)
+                now, period = clock.monotonic(), each()
                 # The wall clock is real time: one of its seconds is `rate()` here.
                 wall = (period - time.time() % period) * clock.rate()
                 due = now + (wall if align else period)
