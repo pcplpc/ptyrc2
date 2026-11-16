@@ -37,9 +37,8 @@ What it shows:
   the water down and flee it, well off the foam; a group walks off
   the side of the pane and comes back, or goes up the dry sand and
   wanders there; so does a bird alone.
-- `-b`, `-w`: footprints, of the sandpipers, of someone walking by.
-  A print lasts until a wave that peaked after it was made reaches
-  it.
+- `-w`: footprints of someone walking by. A print lasts until a wave
+  that peaked after it was made reaches it.
 - The pointer over the pane (`scare`, from the `hover` events), with
   `-b`, `-c`: sandpipers run from it, and fly, all those about, when
   it is on one; crabs run for their lives. One that rests is
@@ -56,7 +55,7 @@ import math
 import random
 import sys
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, NamedTuple
 
 from ptyrc import Pilot, PtyrcError, Sprite, clock
@@ -96,7 +95,6 @@ HIGH, LOW = 0.52, 0.82  # the still-water line, down the pane
 WALK = 50.0  # seconds between two walkers
 STEP = 0.5  # seconds a step of the walker
 STRIDE = 5  # dots a step
-TRAIL = 0.4  # seconds between two prints of a sandpiper
 PACK = 26  # columns a group of sandpipers
 OFF = 8  # dots a sandpiper keeps from the water, at least
 ROAM = (0.35, 0.08)  # share of its time a group is up the sand; of a change
@@ -219,9 +217,6 @@ class _Bird:
     flight: tuple[float, float, float] | None = None  # from when, from, to
     face: int = 1
     down: float = -math.inf  # when it landed
-    since: float = math.inf  # it was not where it would be: from, to
-    until: float = -math.inf
-    tracks: list[tuple[int, int, float]] = field(default_factory=list)
 
 
 @dataclass
@@ -549,7 +544,7 @@ class Shore:
         if self.drift:
             self._drift(glyphs, w, h, edge, wet)
         if self.birds:
-            self._birds(dots, glyphs, w, h, t, wet, washed, fear, dt)
+            self._birds(glyphs, w, h, t, fear, dt)
         if self.crabs:
             self._crabs(glyphs, w, h, t, edge, fear, dt)
         if self.day and light(t, self.day)[0] == 2:
@@ -816,13 +811,10 @@ class Shore:
 
     def _birds(
         self,
-        dots: _Dots,
         glyphs: dict[tuple[int, int], tuple[str, Ink]],
         w: int,
         h: int,
         t: float,
-        wet: list[float],
-        washed: Any,
         fear: tuple[int, int, float] | None,
         dt: float,
     ) -> None:
@@ -929,32 +921,8 @@ class Shore:
             bird.off = x - hx
             cx, cy = stand(i, x, t)
             away = bird.off != 0.0 or bird.flight is not None
-            if away:
-                if t - bird.until > 25 * TRAIL:
-                    bird.since = t
-                bird.until = t
-            # Its prints: where it would have been, and where it fled.
-            for j in range(1, 26):
-                made = t - j * TRAIL
-                if bird.since <= made <= bird.until:
-                    continue
-                if (spot := place(i, made)) is None:
-                    continue
-                fx, fy = spot
-                px, py = 2 * fx + (j & 1), 4 * fy + 2 + (j & 1)
-                if (fx, fy) != (cx, cy) and not washed(px, py, made):
-                    dots.dot(px, py, PRINT[py >= wet[px]], 2)
-            tracks = bird.tracks
-            while tracks and t - tracks[0][2] > 25 * TRAIL:
-                tracks.pop(0)
-            for px, py, made in tracks:
-                if (px >> 1, py >> 2) != (cx, cy) and not washed(px, py, made):
-                    dots.dot(px, py, PRINT[py >= wet[px]], 2)
             if not inside(x):
                 continue
-            if away and not lift and (not tracks or t - tracks[-1][2] >= TRAIL / 2):
-                odd = len(tracks) & 1
-                tracks.append((2 * cx + odd, 4 * cy + 2 + odd, t))
             if lift:
                 cy = max(0, cy - round(2.4 * lift))
                 glyph = "v^"[int(8 * t + i) & 1]
