@@ -167,7 +167,7 @@ These apps have not been exercised by real users, expect bad friction.
 
 ## Contribute your own
 
-These were made by a human banging its head on an agent, no code written.
+These were made by a human banging an agent until plagiarism comes out.
 
 Open a push request to add your own :)
 

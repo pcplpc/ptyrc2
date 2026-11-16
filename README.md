@@ -89,7 +89,7 @@ just test           # cargo test --workspace && uv run pytest
 just lint           # clippy, rustfmt, ruff
 ```
 
-Honestly, the codebase is still full of slop, it needs way more work.
+Honestly, the codebase is full of slop, it needs way more work.
 
 You can still point your agent at it to write custom apps.
 
