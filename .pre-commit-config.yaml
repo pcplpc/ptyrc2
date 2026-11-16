@@ -3,7 +3,7 @@
 default_install_hook_types: [post-commit, pre-push]
 repos:
   - repo: https://dev.archive.rip/ggs/only-vibes/rfc3161-git-hook
-    rev: ceb6e5f90d419c6c0c7181b636ffb3f5cde8ec50
+    rev: 5d72360c3351b0579686816c518f5514e8175245
     hooks:
       - id: tsa-git-stamp
       - id: tsa-git-stamp-missing
