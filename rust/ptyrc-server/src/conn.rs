@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! One client connection: non-blocking, line framed.
 
-use ptyrc_proto::{LineDecoder, encode};
+use ptyrc_proto::envelope::response;
+use ptyrc_proto::{ErrorCode, LineDecoder, MAX_LINE, RpcError, encode};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::io::{self, Read, Write};
@@ -83,7 +84,14 @@ impl Conn {
                         match self.decoder.next_line() {
                             Ok(Some(line)) => lines.push(line),
                             Ok(None) => break,
-                            Err(_) => {
+                            Err(e) => {
+                                // The stream is lost: say why, then close.
+                                let error = RpcError::new(ErrorCode::BadRequest, e.to_string())
+                                    .with_hint(format!(
+                                        "a request is one line of at most {} MiB",
+                                        MAX_LINE >> 20
+                                    ));
+                                self.send(&response(&Value::Null, Err(error)));
                                 self.dead = true;
                                 return lines;
                             }
@@ -110,5 +118,32 @@ impl Conn {
         let _ = self.stream.set_write_timeout(Some(timeout));
         let _ = self.stream.write_all(&self.out);
         self.out.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_line_too_long_is_answered_then_closed() {
+        let (ours, mut theirs) = UnixStream::pair().unwrap();
+        let mut conn = Conn::new(ours).unwrap();
+        let writer = std::thread::spawn(move || {
+            // The write may fail once the server closes: the reply stays.
+            let _ = theirs.write_all(&vec![b'y'; MAX_LINE + 2]);
+            theirs
+        });
+        while !conn.dead {
+            assert!(conn.read().is_empty());
+        }
+        drop(conn);
+        let mut theirs = writer.join().unwrap();
+        let mut reply = String::new();
+        let _ = theirs.read_to_string(&mut reply);
+        let reply: Value = serde_json::from_str(reply.trim_end()).unwrap();
+        assert_eq!(reply["id"], Value::Null);
+        assert_eq!(reply["error"]["code"], "bad-request");
+        assert_eq!(reply["error"]["message"], "line too long");
     }
 }

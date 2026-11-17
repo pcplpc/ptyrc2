@@ -1455,7 +1455,9 @@ time: real time times `$PTYRC_CLOCK_RATE` (default 1), read by the driver
 at its start and by `ptyrc.clock` at import. Programs in the pty keep real
 time. Tests run at 5.
 
-UTF-8 JSON, one object per line. Version 1.
+UTF-8 JSON, one object per line. Version 1. A line is at most 16 MiB: a
+longer one is answered `bad-request` with a null `id`, then the
+connection is closed.
 
 ```
 server -> {"event":"hello","data":{"protocol":1,"server":"ptyrc/2.0.0",
