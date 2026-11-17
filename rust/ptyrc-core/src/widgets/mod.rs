@@ -12,8 +12,8 @@ mod rooms;
 mod tests;
 
 pub use border::{
-    Align, Border, BorderPatch, BorderSpec, ChaseSpec, Side, TitlePatch, TitleSpec, compose,
-    compose_at, presets,
+    Align, Border, BorderPatch, BorderSpec, ChaseSpec, Chevrons, Motion, Side, TitlePatch,
+    TitleSpec, chevrons_fit, compose, compose_at, presets,
 };
 
 use crate::frames::{HeatClass, HeatView};
@@ -308,8 +308,7 @@ struct Drawn {
     at: (u16, u16),
     layer: i32,
     rev: u64,
-    /// Step of the border's chase.
-    step: Option<u64>,
+    motion: Motion,
 }
 
 struct Widget {
@@ -369,6 +368,19 @@ fn cyan(bold: bool) -> StyleSpec {
     }
 }
 
+/// The unlit chevrons of a widget that asks: bright cyan when loud;
+/// cyan, dim, when quiet.
+fn accent(asks: Asks) -> StyleSpec {
+    match asks {
+        Asks::Loud => cyan(false),
+        Asks::Quiet => StyleSpec {
+            fg: Some(ColorSpec(Color::Indexed(6))),
+            dim: true,
+            ..StyleSpec::default()
+        },
+    }
+}
+
 /// One frame as a look sees it.
 struct Look {
     info: SurfaceInfo,
@@ -404,7 +416,7 @@ pub struct Widgets {
     due: Option<Duration>,
     /// When the next cell of a view turns quiet.
     quiet_due: Option<Duration>,
-    /// When the chase of a border next moves.
+    /// When the chase of a border or the chevrons next move.
     chase_due: Option<Duration>,
     /// Owners whose widgets are not drawn (`hide_owner`).
     hidden: std::collections::BTreeSet<OwnerId>,
@@ -855,8 +867,9 @@ impl Widgets {
         }
     }
 
-    /// Give the keyboard to a widget that asks: it is laid out as a
-    /// modal while it has it. Another one focused loses it.
+    /// Give the keyboard to a widget that asks: it is zoomed, laid out
+    /// again at once as a modal, the largest variant centred in its
+    /// view, while it has it. Another one focused loses it.
     pub fn focus(&mut self, id: WidgetId) -> Result<(), WidgetError> {
         let Some(w) = self.widgets.iter().find(|w| w.id == id) else {
             return Err(WidgetError::NoWidget(id));
@@ -877,24 +890,19 @@ impl Widgets {
         self.blur();
         self.focus = Some(id);
         let w = self.widgets.iter_mut().find(|w| w.id == id).expect("found");
-        // Where it is, it stays; its view is the one of the next tick.
-        w.view = None;
-        w.pressed = None;
-        w.grow = None;
+        w.relayout = true;
         w.rev += 1;
         self.urgent = true;
         self.dirty = true;
         Ok(())
     }
 
-    /// Drop the focus: the widget is under its own rules again; put
-    /// over the text, it is laid out again as a new one. Returns it.
+    /// Drop the focus: the widget is laid out again as a new one, by its
+    /// own rules and options. Returns it.
     pub fn blur(&mut self) -> Option<WidgetId> {
         let id = self.focus.take()?;
         if let Some(w) = self.widgets.iter_mut().find(|w| w.id == id) {
-            if !w.modal && w.place.is_some_and(|p| p.over.is_some()) {
-                w.relayout = true;
-            }
+            w.relayout = true;
             w.rev += 1;
         }
         self.urgent = true;
@@ -998,6 +1006,10 @@ impl Widgets {
         spec
     }
 
+    fn title_of(&self, w: &Widget) -> String {
+        w.title.clone().unwrap_or_else(|| w.tag.clone())
+    }
+
     fn variants_of(&self, w: &Widget) -> &[Variant] {
         self.decls
             .get(&w.owner)
@@ -1023,7 +1035,7 @@ impl Widgets {
             size: shown.map(|v| v.size),
             rect: place.and(w.screen),
             sprite: place.and(w.sprite),
-            title: w.title.clone().unwrap_or_else(|| w.tag.clone()),
+            title: self.title_of(w),
             border: self.border_of(w).name,
             variants: variants
                 .iter()
@@ -1182,13 +1194,8 @@ impl Widgets {
                 (v.w, v.h)
             });
             if w.modal(focus) && w.live && w.place.is_some() && w.view != size {
-                if w.view.is_none() {
-                    // Just focused: it stays.
-                    w.view = size;
-                } else {
-                    w.relayout = true;
-                    self.urgent = true;
-                }
+                w.relayout = true;
+                self.urgent = true;
             }
         }
         if forgotten {
@@ -1515,11 +1522,15 @@ impl Widgets {
                 }
             }
             let modal = self.widgets[i].modal(self.focus);
-            let mut found = self.best(&self.widgets[i], look, &rects, None);
+            let zoom = fresh && self.focus == Some(self.widgets[i].id);
+            let mut found = match zoom {
+                true => self.zoom(&self.widgets[i], look, &rects),
+                false => self.best(&self.widgets[i], look, &rects, None),
+            };
             let view = look.view;
             let on_screen = |p: Place| [view.x + p.at.0, view.y + p.at.1, p.outer.0, p.outer.1];
             if fresh && found.is_none() && modal {
-                found = self.over(&self.widgets[i], view);
+                found = self.over(&self.widgets[i], view, self.widgets[i].prefer);
             } else if fresh
                 && found.is_none()
                 && let Some((j, small, place)) = self.squeeze(i, look, &taken)
@@ -1565,11 +1576,28 @@ impl Widgets {
         self.quiet_due = soonest.map(|s| now + Duration::from_secs_f32(s).max(ms(1)));
     }
 
+    /// The place of a focused widget: as a modal over the text, centred,
+    /// whatever its options. The blackout only when it is over text or
+    /// other widgets: its rect and gap not all open cells, or meeting
+    /// one of `taken`.
+    fn zoom(&self, w: &Widget, look: &Look, taken: &[Rect]) -> Option<Place> {
+        let mut place = self.over(w, look.view, Prefer::Center)?;
+        let (vw, vh) = (look.view.w, look.view.h);
+        let c = place.cover().intersect(&Rect::new(0, 0, vw, vh));
+        let vw = vw as usize;
+        let open = (c.y..c.bottom())
+            .all(|y| (c.x..c.right()).all(|x| look.open[y as usize * vw + x as usize]));
+        if open && !taken.iter().any(|t| t.intersects(&c)) {
+            place.over = None;
+        }
+        Some(place)
+    }
+
     /// The place of a modal no room takes, over the text: the largest
     /// variant that fits the view with the gap around it; without the
     /// gap when none does; the smallest, clipped, when none does. At
     /// `prefer`, centred for `any`.
-    fn over(&self, w: &Widget, view: Rect) -> Option<Place> {
+    fn over(&self, w: &Widget, view: Rect, prefer: Prefer) -> Option<Place> {
         let thick = self.border_of(w).spec.thickness();
         let outer = |v: &Variant| (v.size[0] + 2 * thick, v.size[1] + 2 * thick);
         let area = |v: &Variant| outer(v).0 as u32 * outer(v).1 as u32;
@@ -1594,7 +1622,7 @@ impl Widgets {
             }
         };
         let (ow, oh) = outer(v);
-        let (fx, fy) = prefer_point(w.prefer).unwrap_or((1, 1));
+        let (fx, fy) = prefer_point(prefer).unwrap_or((1, 1));
         let at = (
             gx + view.w.saturating_sub(ow + 2 * gx) * fx / 2,
             gy + view.h.saturating_sub(oh + 2 * gy) * fy / 2,
@@ -1630,15 +1658,32 @@ impl Widgets {
                 ]),
                 _ => None,
             };
-            let chase = self.spec_of(w).chasing().copied();
+            let spec = self.spec_of(w);
+            let chase = spec.chasing().copied();
             let focused = self.focus == Some(w.id);
-            let shown = w.place.filter(|p| p.variant < self.variants_of(w).len());
+            let shown = (w.place)
+                .and_then(|p| Some((p, self.variants_of(w).get(p.variant)?)))
+                .filter(|_| !self.hidden.contains(&w.owner));
             let want = match (shown, w.frame) {
-                (Some(p), Some(frame)) if !self.hidden.contains(&w.owner) => {
+                (Some((p, v)), Some(frame)) => {
                     let cover = p.cover();
-                    if let Some(c) = chase.filter(|_| w.live) {
-                        let t = c.next(now);
+                    // Asking, not focused: the chevrons, when they fit.
+                    let chevrons = (w.asks)
+                        .filter(|_| !focused && chevrons_fit(&spec, &self.title_of(w), v.size[0]))
+                        .map(|(asks, _)| Chevrons {
+                            accent: accent(asks),
+                            step: Chevrons::step(now),
+                        });
+                    let mut wake = |t: Duration| {
                         chase_due = Some(chase_due.map_or(t, |d: Duration| d.min(t)));
+                    };
+                    if w.live {
+                        if let Some(c) = chase {
+                            wake(c.next(now));
+                        }
+                        if chevrons.is_some() {
+                            wake(Chevrons::next(now));
+                        }
                     }
                     Some(Drawn {
                         frame,
@@ -1648,7 +1693,10 @@ impl Widgets {
                             false => w.layer.0,
                         },
                         rev: w.rev,
-                        step: chase.map(|c| c.step(now)),
+                        motion: Motion {
+                            chase: chase.map(|c| c.step(now)),
+                            chevrons,
+                        },
                     })
                 }
                 _ => None,
@@ -1657,7 +1705,7 @@ impl Widgets {
                 self.widgets[i].screen = screen;
                 continue;
             }
-            let content = want.and_then(|d| self.content_of(w, d.step));
+            let content = want.and_then(|d| self.content_of(w, d.motion));
             let w = &mut self.widgets[i];
             w.screen = screen;
             match (want, w.sprite) {
@@ -1677,7 +1725,7 @@ impl Widgets {
                             frame: (old.map(|o| o.frame) != Some(d.frame))
                                 .then_some(FrameSel::Id(d.frame)),
                             anchor: Some(anchor.clone()),
-                            content: (old.map(|o| (o.rev, o.step)) != Some((d.rev, d.step)))
+                            content: (old.map(|o| (o.rev, o.motion)) != Some((d.rev, d.motion)))
                                 .then(|| content.clone())
                                 .flatten(),
                             layer: Some(Layer(d.layer)),
@@ -1704,17 +1752,16 @@ impl Widgets {
 
     /// The sprite content of a placed widget; none when not placed on a
     /// variant of its tag.
-    fn content_of(&self, w: &Widget, step: Option<u64>) -> Option<Content> {
+    fn content_of(&self, w: &Widget, motion: Motion) -> Option<Content> {
         let place = w.place?;
         let v = self.variants_of(w).get(place.variant)?;
-        let title = w.title.clone().unwrap_or_else(|| w.tag.clone());
         Some(compose_at(
             &self.spec_of(w),
-            &title,
+            &self.title_of(w),
             v.content.as_ref(),
             v.size[0],
             v.size[1],
-            step,
+            motion,
             place.over.unwrap_or_default(),
         ))
     }

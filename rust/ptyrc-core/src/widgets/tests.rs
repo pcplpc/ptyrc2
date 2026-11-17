@@ -1409,7 +1409,11 @@ fn alert_is_bright_and_chased() {
     let spec = BorderSpec::alert();
     assert!(!spec.style.dim && spec.style.bold);
     assert_eq!(spec.chasing().map(|c| c.runs), Some(2));
-    let at = |step| compose_at(&spec, "manage", None, 8, 2, Some(step), [0; 4]);
+    let motion = |step| Motion {
+        chase: Some(step),
+        chevrons: None,
+    };
+    let at = |step| compose_at(&spec, "manage", None, 8, 2, motion(step), [0; 4]);
     assert_ne!(at(0), at(1));
     // 24 cells around, two runs: the same picture every 12 steps.
     assert_eq!(at(0), at(12));
@@ -1560,18 +1564,19 @@ fn the_look_of_one_that_asks() {
     let bold = ptyrc_vt::Attrs::BOLD;
     let dim = ptyrc_vt::Attrs::DIM;
     assert!(corner(&rig).attrs.contains(dim));
-    // Quiet: its own border.
+    // Quiet: its own border; the chevrons, next step in 200 ms.
+    let step = Some(Duration::from_millis(20_200));
     rig.w.ask(1, id, true).unwrap();
     rig.tick();
     assert!(corner(&rig).attrs.contains(dim) && corner(&rig).fg == Color::Default);
-    assert_eq!(rig.w.next_wake(), None);
+    assert_eq!(rig.w.next_wake(), step);
     // Loud: bright cyan, not dim; the title bold. No chase.
     rig.w.ask(1, id, false).unwrap();
     rig.tick();
     assert_eq!(corner(&rig).fg, cyan);
     assert!(!corner(&rig).attrs.contains(dim) && !corner(&rig).attrs.contains(bold));
     assert!(title(&rig).attrs.contains(bold));
-    assert_eq!(rig.w.next_wake(), None);
+    assert_eq!(rig.w.next_wake(), step);
     assert_eq!(
         rig.shown()[y as usize],
         format!("{:x$}┌──────────┐", "", x = x as usize)
@@ -1595,52 +1600,100 @@ fn the_look_of_one_that_asks() {
         rig.shown()[y as usize],
         format!("{:x$}┌──────────┐", "", x = x as usize)
     );
-    // The focus lost: loud again, still.
+    // The focus lost: loud again, still; the lit chevron is white.
     rig.w.blur();
     rig.tick();
-    assert_eq!(white(&rig), 0);
+    assert_eq!(white(&rig), 1);
     assert_eq!(corner(&rig).fg, cyan);
-    assert_eq!(rig.w.next_wake(), None);
-    // Released: its own.
+    assert_eq!(rig.w.next_wake(), step);
+    // Released: its own; nothing moves.
     rig.w.release(1, id);
     rig.tick();
     assert!(corner(&rig).attrs.contains(dim));
+    assert_eq!(rig.w.next_wake(), None);
 }
 
 #[test]
-fn focused_placed_stays_as_a_modal() {
+fn focused_is_zoomed_then_back() {
     let mut rig = Rig::new(40, 12);
-    rig.declare(1, "q", &[[10, 2]]);
-    let id = rig.show(1, Show::new("q"));
+    rig.declare(1, "q", &[[6, 1], [20, 5]]);
+    let small = Show {
+        prefer: Prefer::TopLeft,
+        fill: 0.1,
+        ..Show::new("q")
+    };
+    let id = rig.show(1, small.clone());
     let place = rig.rect(id).unwrap();
+    assert_eq!(place, [0, 0, 8, 3]);
     let layer = |rig: &Rig| rig.scene.list().into_iter().next().unwrap().layer;
     assert_eq!(layer(&rig), Layer::BACK.0);
     rig.w.ask(1, id, false).unwrap();
     rig.w.focus(id).unwrap();
+    // At once: the largest variant, centred, the gap kept; over nothing,
+    // no blackout.
     rig.tick();
-    assert_eq!(rig.rect(id), Some(place));
+    let info = rig.info(id);
+    assert_eq!(info.variant.as_deref(), Some("20x5"));
+    assert_eq!(info.rect, Some([9, 2, 22, 7]));
+    assert!(!info.over && !info.modal && info.focused);
     assert_eq!(layer(&rig), Layer::HUD.0);
-    assert!(!rig.info(id).over && !rig.info(id).modal);
     // Text written under it: never pressed nor evicted, the text hidden.
-    rig.write(place[0] + 2, place[1] + 1, "TYPED");
+    rig.write(12, 4, "TYPED");
     rig.run(3000);
-    assert_eq!(rig.rect(id), Some(place));
-    assert!(!rig.shown()[place[1] as usize + 1].contains("TYPED"));
-    // The focus lost: its own rules, evicted from the text.
+    assert_eq!(rig.rect(id), Some([9, 2, 22, 7]));
+    assert!(!rig.shown()[4].contains("TYPED"));
+    // The focus lost: laid out again as a new one, by its own options.
     rig.w.blur();
-    rig.run(3000);
+    rig.tick();
+    let info = rig.info(id);
+    assert_eq!((info.rect, info.over), (Some(place), false));
+    assert_eq!(info.variant.as_deref(), Some("6x1"));
     assert_eq!(layer(&rig), Layer::BACK.0);
-    assert!(rig.rect(id).is_some_and(|r| r != place));
+    assert!(rig.shown()[4].contains("TYPED"));
 
     // A layer given is kept.
     let front = Show {
         layer: Some(Layer::FRONT),
-        ..Show::new("q")
+        ..small
     };
     rig.show(1, front);
     rig.w.focus(id).unwrap();
     rig.tick();
     assert_eq!(layer(&rig), Layer::FRONT.0);
+}
+
+#[test]
+fn zoomed_over_another_blacks_it_out_and_evicts_it() {
+    let mut rig = Rig::new(40, 12);
+    rig.declare(1, "q", &[[6, 1], [20, 5]]);
+    rig.declare(2, "b", &[[6, 1]]);
+    let small = Show {
+        prefer: Prefer::TopLeft,
+        fill: 0.1,
+        ..Show::new("q")
+    };
+    let id = rig.show(1, small);
+    let centre = Show {
+        prefer: Prefer::Center,
+        fill: 0.1,
+        ..Show::new("b")
+    };
+    let b = rig.show(2, centre);
+    let cover = [7, 1, 26, 9];
+    assert!(overlaps(rig.rect(b).unwrap(), cover));
+    rig.w.ask(1, id, true).unwrap();
+    rig.w.focus(id).unwrap();
+    rig.tick();
+    let info = rig.info(id);
+    assert_eq!((info.rect, info.over), (Some([9, 2, 22, 7]), true));
+    // The other one, under it, is evicted.
+    rig.run(1000);
+    assert!(rig.rect(b).is_none_or(|r| !overlaps(r, cover)));
+    // The focus lost: no blackout left behind.
+    rig.w.blur();
+    rig.tick();
+    assert!(!rig.info(id).over);
+    assert_eq!(rig.rect(id), Some([0, 0, 8, 3]));
 }
 
 #[test]
@@ -1728,4 +1781,122 @@ fn focus_lost_with_the_owner_or_the_frame() {
     rig.tick();
     assert_eq!(rig.w.focused(), None);
     assert_eq!(rig.w.order(), [id]);
+}
+
+/// The bottom edge of a composed widget, and the styles of its cells.
+fn bottom(c: &Content) -> (String, Vec<StyleSpec>) {
+    let row = c.cells.as_ref().unwrap().last().unwrap();
+    let text = row.iter().map(|r| r.t.as_str()).collect();
+    let styles = row
+        .iter()
+        .flat_map(|r| r.t.chars().map(move |_| r.style))
+        .collect();
+    (text, styles)
+}
+
+#[test]
+fn chevrons_before_the_title() {
+    let plain = BorderSpec::default();
+    let lit = Color::Indexed(15);
+    let with = |accent, step| Motion {
+        chase: None,
+        chevrons: Some(Chevrons { accent, step }),
+    };
+    let loud = super::accent(Asks::Loud);
+    let quiet = super::accent(Asks::Quiet);
+    let c = compose_at(&plain, "clock", None, 12, 1, with(loud, 0), [0; 4]);
+    let (text, styles) = bottom(&c);
+    assert_eq!(text, "└─ >>> clock ┘");
+    // The first lit, white and bold; the two others bright cyan.
+    assert_eq!(styles[3].fg, Some(ColorSpec(lit)));
+    assert!(styles[3].bold);
+    for i in [4, 5] {
+        assert_eq!(styles[i].fg, Some(ColorSpec(Color::Indexed(14))));
+        assert!(!styles[i].dim);
+    }
+    // Quiet: cyan, dim. The highlight runs left to right.
+    let c = compose_at(&plain, "clock", None, 12, 1, with(quiet, 4), [0; 4]);
+    let (_, styles) = bottom(&c);
+    assert_eq!(styles[4].fg, Some(ColorSpec(lit)));
+    assert_eq!(styles[3].fg, Some(ColorSpec(Color::Indexed(6))));
+    assert!(styles[3].dim && styles[5].dim);
+    // Short of room: dropped first, the title cut after as without.
+    let c = compose_at(&plain, "clock", None, 9, 1, with(loud, 0), [0; 4]);
+    assert_eq!(bottom(&c).0, "└── clock ┘");
+    assert!(!chevrons_fit(&plain, "clock", 9));
+    assert!(chevrons_fit(&plain, "clock", 11));
+    let c = compose_at(&plain, "a long title", None, 9, 1, with(loud, 0), [0; 4]);
+    assert_eq!(
+        bottom(&c).0,
+        compose(&plain, "a long title", None, 9, 1).cells.unwrap()[2]
+            .iter()
+            .map(|r| r.t.as_str())
+            .collect::<String>()
+    );
+    // No title: the chevrons alone. No border: nothing.
+    let c = compose_at(&plain, "", None, 6, 1, with(loud, 0), [0; 4]);
+    assert_eq!(bottom(&c).0, "└─ >>> ┘");
+    assert!(!chevrons_fit(&BorderSpec::none(), "", 6));
+    let none = compose_at(&BorderSpec::none(), "", None, 6, 1, with(loud, 0), [0; 4]);
+    assert_eq!(none, compose(&BorderSpec::none(), "", None, 6, 1));
+}
+
+#[test]
+fn chevron_step_is_a_function_of_time() {
+    let at = Duration::from_millis;
+    assert_eq!(Chevrons::step(at(0)), 0);
+    assert_eq!(Chevrons::step(at(199)), 0);
+    assert_eq!(Chevrons::step(at(200)), 1);
+    assert_eq!(Chevrons::step(at(20_450)), 102);
+    assert_eq!(Chevrons::next(at(20_450)), at(20_600));
+    assert_eq!(Chevrons::next(at(20_400)), at(20_600));
+}
+
+#[test]
+fn chevrons_of_the_widgets_that_ask() {
+    let mut rig = Rig::new(40, 12);
+    rig.declare(1, "q", &[[10, 2]]);
+    let id = rig.show(1, Show::new("q"));
+    let [x, y, w, h] = rig.rect(id).unwrap();
+    let edge = |rig: &Rig| rig.shown()[(y + h - 1) as usize][x as usize..].to_string();
+    // The lit chevron: which of the three, if any.
+    let lit = |rig: &Rig| {
+        (0..3).find(|i| style_at(rig, x + w - 7 + i, y + h - 1).fg == Color::Indexed(15))
+    };
+    let plain = "└─────── q ┘".to_string();
+    let asking = "└─── >>> q ┘".to_string();
+    assert_eq!(edge(&rig).trim_end(), plain);
+    assert_eq!(rig.w.next_wake(), None);
+    for quiet in [false, true] {
+        rig.w.ask(1, id, quiet).unwrap();
+        rig.tick();
+        assert_eq!(edge(&rig).trim_end(), asking);
+        assert_eq!(lit(&rig), Some(100 % 3));
+        // A step: one content update, the next chevron lit.
+        rig.run(200);
+        assert_eq!(lit(&rig), Some(101 % 3));
+        assert_eq!(rig.info(id).rect, Some([x, y, w, h]));
+        rig.run(400);
+        assert_eq!(lit(&rig), Some(103 % 3));
+    }
+    // Focused: the chase says it, no chevrons.
+    rig.w.focus(id).unwrap();
+    rig.tick();
+    let focused = rig.rect(id).unwrap();
+    let row = &rig.shown()[(focused[1] + focused[3] - 1) as usize];
+    assert!(!row.contains(">>>"), "{row}");
+    rig.w.blur();
+    rig.tick();
+    // Hidden owner: costs nothing.
+    rig.w.hide_owner(1, true);
+    rig.tick();
+    assert_eq!(rig.w.next_wake(), None);
+    rig.w.hide_owner(1, false);
+    rig.tick();
+    assert!(rig.shown().iter().any(|r| r.contains(">>>")));
+    // Asks no more: nothing, and nothing to wake for.
+    rig.w.release(1, id);
+    rig.tick();
+    assert!(!rig.shown().iter().any(|r| r.contains(">>>")));
+    assert_eq!(rig.w.next_wake(), None);
 }

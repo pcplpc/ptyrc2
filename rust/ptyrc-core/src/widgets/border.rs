@@ -89,6 +89,47 @@ impl ChaseSpec {
     }
 }
 
+/// The chevrons `>>>` before the title of a widget that asks: a
+/// highlight runs through them, left to right, one every `MS`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Chevrons {
+    /// The style of the two chevrons not lit.
+    pub accent: StyleSpec,
+    /// The step, `Chevrons::step`: the lit one is `step % 3`.
+    pub step: u64,
+}
+
+impl Chevrons {
+    pub const MS: u64 = 200;
+
+    /// The step at `now`.
+    pub fn step(now: std::time::Duration) -> u64 {
+        now.as_millis() as u64 / Chevrons::MS
+    }
+
+    /// When the step after that of `now` starts.
+    pub fn next(now: std::time::Duration) -> std::time::Duration {
+        std::time::Duration::from_millis((Chevrons::step(now) + 1) * Chevrons::MS)
+    }
+
+    /// The lit chevron: bright white, bold.
+    fn lit() -> StyleSpec {
+        StyleSpec {
+            fg: Some(ColorSpec(Color::Indexed(15))),
+            bold: true,
+            ..StyleSpec::default()
+        }
+    }
+}
+
+/// What moves on a border: the chase at its step (`ChaseSpec::step`),
+/// the chevrons. Default: neither.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Motion {
+    pub chase: Option<u64>,
+    pub chevrons: Option<Chevrons>,
+}
+
 /// A border, one cell thick. `corners`: four glyphs, top-left,
 /// top-right, bottom-left, bottom-right. An edge is a pattern repeated
 /// from the top or the left. All empty: no border, no title.
@@ -457,7 +498,7 @@ pub fn compose(
     w: u16,
     h: u16,
 ) -> Content {
-    compose_at(border, title, content, w, h, None, [0; 4])
+    compose_at(border, title, content, w, h, Motion::default(), [0; 4])
 }
 
 /// The cell of a border of outer size `ow x oh` at `i` along it,
@@ -475,16 +516,15 @@ fn along(i: usize, ow: usize, oh: usize) -> (usize, usize) {
     }
 }
 
-/// `compose`, with the chase of the border at `step` (see `ChaseSpec`)
-/// and a margin of opaque blanks around it: cells on the left, top,
-/// right, bottom.
+/// `compose`, with what moves on the border (`Motion`) and a margin of
+/// opaque blanks around it: cells on the left, top, right, bottom.
 pub fn compose_at(
     border: &BorderSpec,
     title: &str,
     content: Option<&Content>,
     w: u16,
     h: u16,
-    step: Option<u64>,
+    motion: Motion,
     margin: [u16; 4],
 ) -> Content {
     let t = border.thickness() as usize;
@@ -527,7 +567,7 @@ pub fn compose_at(
         grid.push(bottom);
         // The chase goes under the title.
         let around = 2 * (ow - 1) + 2 * (oh - 1);
-        if let (Some(chase), Some(step)) = (border.chasing(), step)
+        if let (Some(chase), Some(step)) = (border.chasing(), motion.chase)
             && around > 0
         {
             let runs = (chase.runs as usize).min(around);
@@ -545,7 +585,7 @@ pub fn compose_at(
             Side::Top => 0,
             Side::Bottom => oh - 1,
         };
-        title_on(&mut grid[edge], border, title);
+        title_on(&mut grid[edge], border, title, motion.chevrons);
     }
     let [ml, mt, mr, mb] = margin.map(|m| m as usize);
     if ml + mt + mr + mb > 0 {
@@ -589,28 +629,63 @@ pub fn compose_at(
     }
 }
 
+/// Cells the chevrons take before a title: `>>>`, and a blank when a
+/// title follows.
+fn lead(title: &str) -> usize {
+    if title.is_empty() { 3 } else { 4 }
+}
+
+/// Cells for the title on an edge of inner width `w`: between the
+/// corners, less `before` and `after`.
+fn room(border: &BorderSpec, w: usize) -> usize {
+    w.saturating_sub(width(&border.title.before) + width(&border.title.after))
+}
+
+/// The chevrons show on a border of inner width `w` with this title:
+/// a border, and room for them and the whole title.
+pub fn chevrons_fit(border: &BorderSpec, title: &str, w: u16) -> bool {
+    !border.is_none() && room(border, w as usize) >= lead(title) + width(title)
+}
+
 /// Put the title on the edge `row` (corners included), between the
-/// corners: cut with `…`, absent under 3 cells of room.
-fn title_on(row: &mut [Option<Slot>], border: &BorderSpec, title: &str) {
-    if title.is_empty() {
-        return;
-    }
+/// corners: the chevrons first when given and they fit with the whole
+/// title; else the title, cut with `…`, absent under 3 cells of room.
+fn title_on(
+    row: &mut [Option<Slot>],
+    border: &BorderSpec,
+    title: &str,
+    chevrons: Option<Chevrons>,
+) {
     let spec = &border.title;
     let span = row.len().saturating_sub(2);
-    let room = span.saturating_sub(width(&spec.before) + width(&spec.after));
-    if room < 3 {
+    let room = room(border, span);
+    let chevrons = chevrons.filter(|_| room >= lead(title) + width(title));
+    if chevrons.is_none() && (title.is_empty() || room < 3) {
         return;
     }
     let text = cut(title, room);
-    let total = width(&spec.before) + width(&text) + width(&spec.after);
+    let lead = chevrons.map_or(0, |_| lead(title));
+    let total = width(&spec.before) + lead + width(&text) + width(&spec.after);
     let x = 1 + match spec.align {
         Align::Left => 0,
         Align::Center => (span - total) / 2,
         Align::Right => span - total,
     };
-    let style = spec.style;
     let end = 1 + span;
-    let x = lay(row, x, end, &spec.before, border.style);
-    let x = lay(row, x, end, &text, style);
+    let mut x = lay(row, x, end, &spec.before, border.style);
+    if let Some(c) = chevrons {
+        for i in 0..3 {
+            let style = if c.step % 3 == i {
+                Chevrons::lit()
+            } else {
+                c.accent
+            };
+            x = lay(row, x, end, ">", style);
+        }
+        if !title.is_empty() {
+            x = lay(row, x, end, " ", border.style);
+        }
+    }
+    let x = lay(row, x, end, &text, spec.style);
     lay(row, x, end, &spec.after, border.style);
 }
