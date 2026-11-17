@@ -67,10 +67,21 @@ TOP = 5  # processes kept by `glance`
 
 
 def _read(path: str | Path) -> str:
+    """The text of `path`, "" when it cannot be read. Plain `os.read`:
+    a scan of `/proc` reads a file a process."""
     try:
-        return Path(path).read_text(errors="replace")
+        fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
     except OSError:
         return ""
+    data = b""
+    try:
+        while chunk := os.read(fd, 1 << 16):
+            data += chunk
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+    return data.decode(errors="replace")
 
 
 # glance
@@ -249,17 +260,27 @@ def glance(before: Sample, after: Sample, *, hz: int = HZ, page: int = PAGE) -> 
     )
 
 
-def _procs() -> dict[int, PidStat]:
+_scan: tuple[float, dict[int, PidStat]] | None = None  # the last `_procs`
+
+
+def _procs(age: float = 0.0) -> dict[int, PidStat]:
+    """Every process. `age`: the last scan will do when it is no older,
+    in seconds."""
+    global _scan
+    now = time.monotonic()
+    if _scan is not None and now - _scan[0] < age:
+        return _scan[1]
     out = {}
     try:
-        entries = list(os.scandir(PROC))
+        names = os.listdir(PROC)
     except OSError:
         return out
-    for entry in entries:
-        if entry.name.isdigit():
-            stat = parse_pidstat(_read(PROC / entry.name / "stat"))
+    for name in names:
+        if name.isdigit():
+            stat = parse_pidstat(_read(f"{PROC}/{name}/stat"))
             if stat is not None:
                 out[stat.pid] = stat
+    _scan = now, out
     return out
 
 
@@ -447,7 +468,8 @@ def read_logins(
                 found += [one] if one is not None else []
     found = [s for s in found if s.pid <= 0 or (PROC / str(s.pid)).exists()]
     # `tty_nr` and `st_rdev` agree for the majors of terminals (< 4096).
-    groups = {p.tty: p.tpgid for p in _procs().values() if p.tty}
+    # The scan `glance` made for this refresh will do.
+    groups = {p.tty: p.tpgid for p in _procs(age=1.0).values() if p.tty}
     out = []
     for one in found:
         idle, what = _tty(one.tty, now, groups)
@@ -546,30 +568,41 @@ def _owners(inodes: set[int]) -> dict[int, str]:
     `/proc/<pid>/fd`: the user's own processes, all of them for root."""
     out: dict[int, str] = {}
     try:
-        pids = [e.name for e in os.scandir(PROC) if e.name.isdigit()]
+        pids = [name for name in os.listdir(PROC) if name.isdigit()]
     except OSError:
         return out
     for pid in pids:
         if len(out) == len(inodes):
             break
+        base = f"{PROC}/{pid}/fd"
         try:
-            fds = list(os.scandir(PROC / pid / "fd"))
+            fds = os.listdir(base)
         except OSError:
             continue
         for fd in fds:
             try:
-                link = os.readlink(fd.path)
+                link = os.readlink(f"{base}/{fd}")
             except OSError:
                 continue
             if link.startswith("socket:[") and (n := int(link[8:-1])) in inodes:
-                out.setdefault(n, _read(PROC / pid / "comm").strip() or pid)
+                out.setdefault(n, _read(f"{PROC}/{pid}/comm").strip() or pid)
     return out
 
 
+OWNED = 10.0  # seconds the owners of the same sockets are kept
+_owned: tuple[float, set[int], dict[int, str]] | None = None
+
+
 def read_listeners() -> list[Listener]:
+    """The owners are looked for when the sockets changed, or every
+    `OWNED` seconds: a scan of every `/proc/<pid>/fd`."""
+    global _owned
     sockets = parse_tcp(_read(PROC / "net/tcp")) + parse_tcp(_read(PROC / "net/tcp6"))
     wanted = {s.inode for s in sockets if outside(s.addr) and s.inode}
-    return listeners(sockets, _user, _owners(wanted))
+    now = time.monotonic()
+    if _owned is None or _owned[1] != wanted or now - _owned[0] >= OWNED:
+        _owned = now, wanted, _owners(wanted)
+    return listeners(sockets, _user, _owned[2])
 
 
 # disk-space

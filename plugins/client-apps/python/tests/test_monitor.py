@@ -324,6 +324,39 @@ def test_read_listeners() -> None:
         assert probe.outside(x.addr) if x.addr != "*" else True
 
 
+def test_read_listeners_owners(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The owners are scanned once for the same sockets, again when
+    they change or after `OWNED` seconds."""
+    texts = {"tcp": TCP, "tcp6": ""}
+    scans: list[set[int]] = []
+
+    def owners(inodes: set[int]) -> dict[int, str]:
+        scans.append(set(inodes))
+        return {101: "sshd"}
+
+    at = [100.0]
+    monkeypatch.setattr(probe, "_read", lambda path: texts[str(path)[-4:].strip("/")])
+    monkeypatch.setattr(probe, "_owners", owners)
+    monkeypatch.setattr(probe, "_owned", None)
+    monkeypatch.setattr(probe.time, "monotonic", lambda: at[0])
+    first = probe.read_listeners()
+    assert {x.port: x.process for x in first} == {22: "sshd", 8080: None, 8000: None}
+    assert probe.read_listeners() == first and scans == [{101, 103, 105}]
+    at[0] += probe.OWNED
+    assert probe.read_listeners() == first and len(scans) == 2
+    texts["tcp"] = TCP.replace(" 105 1", " 106 1")
+    probe.read_listeners()
+    assert scans[2:] == [{101, 103, 106}]
+
+
+def test_procs_age() -> None:
+    """`_procs(age)` gives the last scan while it is young enough."""
+    fresh = probe._procs()
+    assert os.getpid() in fresh
+    assert probe._procs(age=60.0) is fresh
+    assert probe._procs() is not fresh
+
+
 # disk-space
 
 
