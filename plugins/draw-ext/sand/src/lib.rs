@@ -137,6 +137,15 @@ enum Dot {
     Grain(u8, bool),
 }
 
+/// The grains of a row of dots: how many, and the columns `lo..hi` they
+/// are within.
+#[derive(Clone, Copy, Default)]
+struct Span {
+    n: u32,
+    lo: u32,
+    hi: u32,
+}
+
 /// RGB of a colour of the 256 palette above the 16 of the terminal.
 fn rgb(color: Color) -> Option<[u8; 3]> {
     match color {
@@ -244,6 +253,8 @@ pub struct Sand {
     pos: (i64, i64),
     /// `w * DW` by `h * DH`.
     dots: Vec<Dot>,
+    /// Where the grains are, a row of dots each.
+    spans: Vec<Span>,
     /// Remembered rows above and below the canvas, at the last look.
     above: usize,
     below: usize,
@@ -306,6 +317,7 @@ impl Sand {
             above: 0,
             below: 0,
             dots: Vec::new(),
+            spans: Vec::new(),
             stale: true,
             cursor: None,
             spout: None,
@@ -321,7 +333,37 @@ impl Sand {
 
     fn set(&mut self, x: usize, y: usize, dot: Dot) {
         let i = y * self.w * DW + x;
-        self.dots[i] = dot;
+        let was = std::mem::replace(&mut self.dots[i], dot);
+        let span = &mut self.spans[y];
+        let x = x as u32;
+        match (matches!(was, Dot::Grain(..)), matches!(dot, Dot::Grain(..))) {
+            (false, true) if span.n == 0 => (span.n, span.lo, span.hi) = (1, x, x + 1),
+            (false, true) => {
+                span.n += 1;
+                span.lo = span.lo.min(x);
+                span.hi = span.hi.max(x + 1);
+            }
+            (true, false) => span.n -= 1,
+            _ => {}
+        }
+    }
+
+    /// Find the grains again: the dots were written whole.
+    fn survey(&mut self) {
+        let w = self.w * DW;
+        self.spans.clear();
+        self.spans.resize(self.h * DH, Span::default());
+        if w == 0 {
+            return;
+        }
+        for (span, row) in self.spans.iter_mut().zip(self.dots.chunks(w)) {
+            let grain = |d: &Dot| matches!(d, Dot::Grain(..));
+            if let Some(lo) = row.iter().position(grain) {
+                span.n = row.iter().filter(|d| grain(d)).count() as u32;
+                span.lo = lo as u32;
+                span.hi = row.iter().rposition(grain).map_or(0, |x| x as u32 + 1);
+            }
+        }
     }
 
     fn free(&self, x: usize, y: usize) -> bool {
@@ -399,6 +441,7 @@ impl Sand {
             };
             self.attic.remove(&far);
         }
+        self.survey();
         self.stale = true;
     }
 
@@ -599,19 +642,36 @@ impl Sand {
 
     fn step(&mut self) {
         let (w, h) = (self.w * DW, self.h * DH);
+        let held = |sand: &Sand, x: usize, y: usize| x >= w || !sand.free(x, y);
         let per_step = self.params.rate * STEP_MS as f64 / 1000.0;
         let reach = (per_step / FLOW).ceil().clamp(1.0, REACH as f64) as usize;
         // Bottom up, so a grain moves once per step; the sweep changes
         // side each step, so neither is favoured.
         let reverse = self.steps & 1 == 1;
         for y in (0..h).rev() {
-            for i in 0..w {
-                let x = if reverse { w - 1 - i } else { i };
+            // Grains come to a row from above only: its span holds
+            // while it is swept.
+            let Span { n, lo, hi } = self.spans[y];
+            if n == 0 {
+                continue;
+            }
+            let (lo, hi) = (lo as usize, hi as usize);
+            for i in lo..hi {
+                let x = if reverse { lo + hi - 1 - i } else { i };
                 let Dot::Grain(shade, awake) = self.at(x, y) else {
                     continue;
                 };
                 if y + 1 < h && self.free(x, y + 1) {
                     self.shift((x, y), (x, y + 1), shade, reach > 1);
+                    continue;
+                }
+                // Asleep in the pile, a dot on each side, a thin stream:
+                // it stays, and its coin is tossed.
+                let shut = held(self, x.wrapping_sub(1), y) && held(self, x + 1, y);
+                if !awake && reach == 1 && shut {
+                    if y + 1 < h {
+                        self.rng.next_u64();
+                    }
                     continue;
                 }
                 // Held from below: down the slope, further when the
@@ -715,7 +775,13 @@ impl Sand {
     fn draw(&self, canvas: &mut Canvas) {
         let mut text = [0u8; 4];
         for cy in 0..self.ch {
-            for cx in 0..self.w {
+            let rows = &self.spans[(self.top + cy) * DH..(self.top + cy + 1) * DH];
+            let held = || rows.iter().filter(|s| s.n > 0);
+            let Some(lo) = held().map(|s| s.lo as usize).min() else {
+                continue;
+            };
+            let hi = held().map(|s| s.hi as usize).max().unwrap_or(0);
+            for cx in lo / DW..hi.div_ceil(DW) {
                 if let Some((glyph, color)) = self.glyph(cx, self.top + cy) {
                     let style = StyleSpec::fg(color);
                     canvas.put(cx as i32, cy as i32, glyph.encode_utf8(&mut text), &style);

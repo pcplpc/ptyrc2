@@ -601,3 +601,99 @@ fn sand_falls_out_of_sight_onto_remembered_text() {
     assert_eq!(sand.top, 0);
     assert_eq!(rows(&sand)[0], pile);
 }
+
+/// Microseconds of the fastest of forty runs of `f`.
+fn fastest(mut f: impl FnMut()) -> f64 {
+    (0..40)
+        .map(|_| {
+            let start = std::time::Instant::now();
+            f();
+            start.elapsed().as_secs_f64() * 1e6
+        })
+        .fold(f64::MAX, f64::min)
+}
+
+#[test]
+#[ignore = "prints the cost of a tick: cargo test --release -p ptyrc-draw-sand bench -- --ignored --nocapture"]
+fn bench() {
+    for minutes in [1, 10] {
+        for (w, h) in [(80, 24), (200, 50), (300, 80)] {
+            // A line of text every third row.
+            let line = "words in the way ".repeat(w as usize / 20);
+            let rows: Vec<&str> = (0..h)
+                .map(|y| if y % 3 == 2 { line.as_str() } else { "" })
+                .collect();
+            let grid = Grid::from_lines(w, &rows);
+            let under = Under::of(&grid);
+            let mut sand = make(json!({}));
+            let mut canvas = Canvas::new(w, h);
+            // The pile of `minutes`, then a tick timed: the canvas
+            // cleared, the look, the render.
+            let warm = minutes * 60_000 / FRAME_MS * FRAME_MS;
+            for t in (0..warm).step_by(FRAME_MS as usize) {
+                canvas.clear();
+                sand.look(&under);
+                sand.render(Duration::from_millis(t), &mut canvas);
+            }
+            let clear = fastest(|| canvas.clear());
+            let look = fastest(|| sand.look(&under));
+            let mut t = warm;
+            let render = fastest(|| {
+                t += FRAME_MS;
+                sand.render(Duration::from_millis(t), &mut canvas);
+            });
+            println!(
+                "sand {minutes} min {w}x{h}: clear {clear:.0} look {look:.0} render {render:.0} us; \
+                 {:.2}% of a core; {} grains",
+                (clear + look + render) * 1e-4 * (1000.0 / FRAME_MS as f64),
+                sand.grains(),
+            );
+        }
+    }
+}
+
+#[test]
+fn the_spans_hold_the_grains() {
+    let agrees = |sand: &Sand| {
+        let w = sand.w * DW;
+        assert_eq!(sand.spans.len(), sand.h * DH);
+        for (y, (span, row)) in sand.spans.iter().zip(sand.dots.chunks(w)).enumerate() {
+            let at: Vec<usize> = (0..w)
+                .filter(|x| matches!(row[*x], Dot::Grain(..)))
+                .collect();
+            assert_eq!(span.n as usize, at.len(), "row {y}");
+            if let (Some(lo), Some(hi)) = (at.first(), at.last()) {
+                assert!(span.lo as usize <= *lo && *hi < span.hi as usize, "row {y}");
+            }
+        }
+    };
+    let text = [
+        "",
+        "",
+        "",
+        "   ##########",
+        "",
+        "",
+        "",
+        "",
+        "      #### ####",
+        "",
+    ];
+    let mut sand = make(json!({"rate": 400, "seed": 5}));
+    look_at(&mut sand, &text, 0);
+    run(&mut sand, 64, 10, 0, 20_000);
+    assert!(sand.grains() > 1000);
+    agrees(&sand);
+    // A scroll, a shift, text over the pile, another size.
+    look_at(&mut sand, &text[2..], 2);
+    run(&mut sand, 64, 8, 20_016, 22_000);
+    agrees(&sand);
+    Effect::shift(&mut sand, 2, 4, 1);
+    look_at(&mut sand, &text, 0);
+    run(&mut sand, 64, 10, 22_032, 24_000);
+    agrees(&sand);
+    let full = "#".repeat(64);
+    look_at(&mut sand, &["", "", "", "", "", "", "", "", "", &full], 0);
+    run(&mut sand, 50, 10, 24_000, 26_000);
+    agrees(&sand);
+}
