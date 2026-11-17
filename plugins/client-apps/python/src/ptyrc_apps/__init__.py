@@ -36,5 +36,6 @@ APPS = {
     "note": "a file as a sticky note",
     "timer": "countdown, pomodoro, an hourglass that empties on time",
     "pace": "keys a minute and the words you type most",
+    "minimap": "the text of a pane in braille, the view marked",
     "ask": "a question in a widget, the answer on stdout",
 }

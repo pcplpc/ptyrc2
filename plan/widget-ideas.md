@@ -22,7 +22,7 @@ argued with. `design.md` stays the contract.
 | `timer` | productive | yes |
 | `note` | productive | yes |
 | `pace` | productive | yes, with a leaderboard of favourite words |
-| `minimap` | productive | yes, as ideas: start simple, get fancier; no work yet |
+| `minimap` | productive | yes, as ideas: start simple, get fancier; first step done (`minimap.py`) |
 | `agent` | productive | noted; no implementation, no integration for now |
 | `agenda` | productive | noted; skipped: no agenda to read |
 | `ci` | productive | no: no CI to test against |
@@ -335,8 +335,15 @@ How could it be done?
 ### `minimap`
 
 The text of a frame, small, with the view marked. Approved as a
-direction; nothing to build yet. As the other apps: simple first,
-fancier by options.
+direction. As the other apps: simple first, fancier by options.
+
+Done (`minimap.py`): the rows the driver has seen, the band of the
+view, the thin column; by options the line of the cursor, the heat,
+comments, `--mark` patterns; the hover tip (the text, no line number:
+frame rows are not file lines). Not done: the whole file by a preset,
+the file name as title, the share seen, the marks of a running
+`marks.py`, the click that scrolls, other islands than the one on
+screen.
 
 How could it be done?
 
