@@ -30,6 +30,9 @@ fn rule(grid: &Grid, area: Rect, y: u16) -> bool {
 
 /// Column where `TASKS <n> (<n> thr)` starts on a row.
 fn tasks(grid: &Grid, area: Rect, y: u16) -> Option<u16> {
+    // The row is read when a cell holds `T` and the next `A`.
+    let is = |x: u16, t: &str| grid.cell(x, y).text == t;
+    (area.x + 1..area.right()).find(|x| is(*x, "A") && is(*x - 1, "T"))?;
     let cells: Vec<(u16, &str)> = (area.x..area.right())
         .map(|x| (x, grid.cell(x, y)))
         .filter(|(_, c)| c.width != 0)
@@ -293,5 +296,24 @@ mod tests {
                 Rect::new(0, 3, COLS, 4),
             ]
         );
+    }
+
+    #[test]
+    #[ignore = "prints the cost of a look at a screen: cargo test --release -p ptyrc-tui-glances bench -- --ignored --nocapture"]
+    fn bench() {
+        for (w, h) in [(80u16, 24u16), (200, 50), (300, 80)] {
+            // A screen full of text that is not the app.
+            let line = "words in the way ".repeat(w as usize / 17);
+            let rows: Vec<&str> = (0..h).map(|_| line.as_str()).collect();
+            let grid = Grid::from_lines(w, &rows);
+            let us = (0..40)
+                .map(|_| {
+                    let start = std::time::Instant::now();
+                    std::hint::black_box(Look::of(&grid, grid.rect()).is_some());
+                    start.elapsed().as_secs_f64() * 1e6
+                })
+                .fold(f64::MAX, f64::min);
+            println!("glances {w}x{h}: detect {us:.1} us");
+        }
     }
 }
