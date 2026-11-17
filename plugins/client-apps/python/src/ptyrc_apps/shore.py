@@ -329,6 +329,7 @@ class Shore:
         self.finds: list[tuple[float, float, int, int]] = []
         self._waves: dict[int, Wave] = {}
         self._across = 0
+        self._marks: tuple[tuple[int, int], list[tuple[int, float]]] = ((0, 0), [])
         self._seen = -math.inf  # the time of the last picture
         self._flock: list[_Bird] = []
         self._dug: list[_Crab] = []
@@ -725,16 +726,22 @@ class Shore:
         self, dots: _Dots, across: int, h: int, edge: list[float], wet: list[float]
     ) -> None:
         """Ripple marks in the sand the tide uncovers."""
-        top = 4 * h * HIGH - self.reach(h)
-        low = 4 * h * LOW
-        for j in range(int((low - top) / 9) + 1):
-            y0 = top + 9 * j
-            for x in range(across):
-                if math.sin(0.19 * x + 2.4 * j + noise(self.key, j) * 9) < 0.45:
-                    continue
-                y = y0 + 1.4 * math.sin(x * math.tau / 19 + 1.9 * j)
-                if y < edge[x] - 1:
-                    dots.dot(x, int(y), RIPPLE[y >= wet[x]], 0)
+        if self._marks[0] != (across, h):
+            # Where they are does not change: worked out once a size.
+            marks = []
+            top = 4 * h * HIGH - self.reach(h)
+            low = 4 * h * LOW
+            for j in range(int((low - top) / 9) + 1):
+                y0 = top + 9 * j
+                phase = 2.4 * j + noise(self.key, j) * 9
+                for x in range(across):
+                    if math.sin(0.19 * x + phase) < 0.45:
+                        continue
+                    marks.append((x, y0 + 1.4 * math.sin(x * math.tau / 19 + 1.9 * j)))
+            self._marks = ((across, h), marks)
+        for x, y in self._marks[1]:
+            if y < edge[x] - 1:
+                dots.dot(x, int(y), RIPPLE[y >= wet[x]], 0)
 
     def _wrack(self, dots: _Dots, across: int, h: int) -> None:
         """Weed and bits along the high-water mark."""
