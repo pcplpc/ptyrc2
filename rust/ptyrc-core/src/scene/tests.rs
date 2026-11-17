@@ -2568,3 +2568,149 @@ fn hidden_owner_stands_still() {
     assert_eq!(show(&mut scene, &mock, &base(), 10_999)[0], "2  o x");
     assert_eq!(show(&mut scene, &mock, &base(), 11_000)[0], "   o x");
 }
+
+#[test]
+fn colours_and_runs_on_the_wire() {
+    let color = |v: serde_json::Value| serde_json::from_value::<ColorSpec>(v);
+    assert_eq!(color(json!(196)).unwrap().0, Color::Indexed(196));
+    assert_eq!(color(json!("red")).unwrap().0, Color::Indexed(1));
+    assert_eq!(color(json!("#0a0b0c")).unwrap().0, Color::Rgb(10, 11, 12));
+    assert_eq!(
+        serde_json::from_str::<ColorSpec>("\"bright-red\"")
+            .unwrap()
+            .0,
+        Color::Indexed(9)
+    );
+    for (bad, message) in [
+        (json!("gren"), "bad colour: gren"),
+        (json!(256), "bad colour: 256"),
+        (json!(-1), "bad colour: -1"),
+    ] {
+        assert_eq!(color(bad).unwrap_err().to_string(), message);
+    }
+    assert!(color(json!(true)).is_err());
+    assert!(color(json!(1.5)).is_err());
+
+    let wire = json!({"t": "ab", "fg": 196, "bg": "blue", "bold": true});
+    let run: Run = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(run.t, "ab");
+    assert_eq!(run.style.fg, Some(ColorSpec(Color::Indexed(196))));
+    assert_eq!(run.style.bg, Some(ColorSpec(Color::Indexed(4))));
+    assert!(run.style.bold && !run.style.dim);
+    assert_eq!(serde_json::to_value(&run).unwrap(), wire);
+    // Unknown keys are ignored, as before; the text is required.
+    assert!(serde_json::from_value::<Run>(json!({"t": "a", "x": 1})).is_ok());
+    assert!(serde_json::from_value::<Run>(json!({"fg": 1})).is_err());
+}
+
+/// A full-view sprite of braille runs, as an app redraws it each frame:
+/// `cols x rows`, a run of 1 to 8 dots then a gap, a colour per run.
+fn braille_patch(cols: usize, rows: usize, seed: u64) -> serde_json::Value {
+    let mut rng = Rng::new(seed);
+    let cells: Vec<serde_json::Value> = (0..rows)
+        .map(|_| {
+            let mut runs = Vec::new();
+            let mut x = 0;
+            while x < cols {
+                let gap = (rng.next_u64() % 12) as usize;
+                let n = 1 + (rng.next_u64() % 8) as usize;
+                let n = n.min(cols - x);
+                let dots: String = (0..n)
+                    .map(|_| char::from_u32(0x2801 + (rng.next_u64() % 255) as u32).unwrap())
+                    .collect();
+                runs.push(json!({"t": dots, "fg": 16 + rng.next_u64() % 216}));
+                x += n;
+                let gap = gap.min(cols - x);
+                if gap > 0 {
+                    runs.push(json!({"t": " ".repeat(gap)}));
+                    x += gap;
+                }
+            }
+            json!(runs)
+        })
+        .collect();
+    json!({"content": {"cells": cells}})
+}
+
+/// Cost of a sprite update and of a repaint at 200x60, best of 25
+/// rounds. `cargo test --release -p ptyrc-core cost_scene -- --ignored
+/// --nocapture`.
+#[test]
+#[ignore = "timing"]
+fn cost_scene_200x60() {
+    use std::time::Instant;
+    let (cols, rows) = (200u16, 60u16);
+    let mock = Mock {
+        infos: vec![surface(RAW, Rect::new(0, 0, cols, rows), (0, 0))],
+        ..Mock::new()
+    };
+    let lines: Vec<String> = (0..rows)
+        .map(|y| format!("{y:3} words in the way, more words here"))
+        .collect();
+    let lines: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+    let base = Grid::from_lines(cols, &lines);
+    let patches: Vec<serde_json::Value> = (0..8)
+        .map(|i| braille_patch(cols as usize, rows as usize, i))
+        .collect();
+    let bytes = serde_json::to_string(&patches[0]).unwrap().len();
+    let best = |f: &mut dyn FnMut()| {
+        (0..25)
+            .map(|_| {
+                let start = Instant::now();
+                for _ in 0..8 {
+                    f();
+                }
+                start.elapsed().as_secs_f64() * 1e6 / 8.0
+            })
+            .fold(f64::MAX, f64::min)
+    };
+    for (name, layer) in [("back", -1), ("front", 1)] {
+        let mut scene = Scene::new();
+        let mut first = spec(patches[0].clone());
+        first.layer = Some(Layer(layer));
+        let id = scene.add(1, first, ms(0)).unwrap();
+        let mut k = 0usize;
+        let parse = best(&mut || {
+            k += 1;
+            let patch: SpritePatch =
+                serde_json::from_value(patches[k % patches.len()].clone()).unwrap();
+            std::hint::black_box(patch);
+        });
+        let clone = best(&mut || {
+            k += 1;
+            std::hint::black_box(patches[k % patches.len()].clone());
+        });
+        let parsed: Vec<SpritePatch> = patches
+            .iter()
+            .map(|p| serde_json::from_value(p.clone()).unwrap())
+            .collect();
+        let update = best(&mut || {
+            k += 1;
+            scene
+                .update(id, parsed[k % parsed.len()].clone(), ms(k as u64))
+                .unwrap();
+        });
+        let patch_clone = best(&mut || {
+            k += 1;
+            std::hint::black_box(parsed[k % parsed.len()].clone());
+        });
+        let tick = best(&mut || {
+            k += 1;
+            scene.tick_on(ms(k as u64), &base, &mock);
+        });
+        let compose = best(&mut || {
+            std::hint::black_box(scene.compose(&base, &mock));
+        });
+        let grid_clone = best(&mut || {
+            std::hint::black_box(base.clone());
+        });
+        println!(
+            "  {name:5} {bytes} B  parse {:6.1} us   update {:6.1} us   tick {:5.1} us   compose {:6.1} us (grid clone {:5.1})",
+            parse - clone,
+            update - patch_clone,
+            tick,
+            compose,
+            grid_clone
+        );
+    }
+}

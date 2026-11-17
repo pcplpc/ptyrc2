@@ -7,15 +7,49 @@ use serde::{Deserialize, Serialize};
 
 /// A colour on the wire: a name (`red`, `bright-red`, `default`), an index
 /// `0..255`, or `"#rrggbb"`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "ColorRepr", into = "ColorRepr")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(into = "ColorRepr")]
 pub struct ColorSpec(pub Color);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[serde(untagged)]
 enum ColorRepr {
     Index(u8),
     Name(String),
+}
+
+/// Read without a buffer or a copy of the name: a sprite holds a colour
+/// a run.
+impl<'de> Deserialize<'de> for ColorSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<ColorSpec, D::Error> {
+        struct Visitor;
+
+        impl serde::de::Visitor<'_> for Visitor {
+            type Value = ColorSpec;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a colour: a name, an index 0..255 or \"#rrggbb\"")
+            }
+
+            fn visit_u64<E: serde::de::Error>(self, n: u64) -> Result<ColorSpec, E> {
+                u8::try_from(n)
+                    .map(|n| ColorSpec(Color::Indexed(n)))
+                    .map_err(|_| E::custom(format!("bad colour: {n}")))
+            }
+
+            fn visit_i64<E: serde::de::Error>(self, n: i64) -> Result<ColorSpec, E> {
+                u8::try_from(n)
+                    .map(|n| ColorSpec(Color::Indexed(n)))
+                    .map_err(|_| E::custom(format!("bad colour: {n}")))
+            }
+
+            fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<ColorSpec, E> {
+                s.parse().map_err(E::custom)
+            }
+        }
+
+        de.deserialize_any(Visitor)
+    }
 }
 
 const NAMES: [&str; 8] = [
@@ -54,17 +88,6 @@ impl std::str::FromStr for ColorSpec {
         match NAMES.iter().position(|n| *n == base) {
             Some(i) => Ok(ColorSpec(Color::Indexed(bright + i as u8))),
             None => Err(format!("bad colour: {s}")),
-        }
-    }
-}
-
-impl TryFrom<ColorRepr> for ColorSpec {
-    type Error = String;
-
-    fn try_from(repr: ColorRepr) -> Result<ColorSpec, String> {
-        match repr {
-            ColorRepr::Index(n) => Ok(ColorSpec(Color::Indexed(n))),
-            ColorRepr::Name(s) => s.parse(),
         }
     }
 }
@@ -170,10 +193,72 @@ impl StyleSpec {
 
 /// A run of text with its own style, for `content.cells`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "RunRepr", into = "RunRepr")]
 pub struct Run {
     pub t: String,
-    #[serde(flatten)]
     pub style: StyleSpec,
+}
+
+/// `Run` on the wire: the style beside the text. Spelled out, as a
+/// flattened field is read through a buffer, several times slower.
+#[derive(Serialize, Deserialize)]
+struct RunRepr {
+    t: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fg: Option<ColorSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bg: Option<ColorSpec>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    bold: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    dim: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    italic: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    underline: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    inverse: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    strike: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    blink: bool,
+}
+
+impl From<RunRepr> for Run {
+    fn from(r: RunRepr) -> Run {
+        Run {
+            t: r.t,
+            style: StyleSpec {
+                fg: r.fg,
+                bg: r.bg,
+                bold: r.bold,
+                dim: r.dim,
+                italic: r.italic,
+                underline: r.underline,
+                inverse: r.inverse,
+                strike: r.strike,
+                blink: r.blink,
+            },
+        }
+    }
+}
+
+impl From<Run> for RunRepr {
+    fn from(r: Run) -> RunRepr {
+        let s = r.style;
+        RunRepr {
+            t: r.t,
+            fg: s.fg,
+            bg: s.bg,
+            bold: s.bold,
+            dim: s.dim,
+            italic: s.italic,
+            underline: s.underline,
+            inverse: s.inverse,
+            strike: s.strike,
+            blink: s.blink,
+        }
+    }
 }
 
 /// What a sprite shows: `rows` with one `style`, or `cells`.
