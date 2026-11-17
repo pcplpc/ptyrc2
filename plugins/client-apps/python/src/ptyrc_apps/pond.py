@@ -318,6 +318,13 @@ def _leaf(r10: int, turn: int) -> tuple[tuple[int, int], ...]:
     return tuple(out)
 
 
+@functools.lru_cache(maxsize=512)
+def _arcs(key: int, k: int) -> tuple[float, ...]:
+    """Per bearing of ring `k` of the drop `key`, what it takes to
+    show there: a number in [0, 1)."""
+    return tuple(noise(key, 64 * k + a) for a in range(ARCS))
+
+
 class Koi:
     """A koi under the surface: it wanders, turns away from the words
     and the banks, and trails its body along the way it came."""
@@ -641,7 +648,7 @@ class Pond:
             whole = min(1.0, 0.5 + strength)
             # Whole as it leaves; then every other dot, then one in three.
             step = 1 if strength > 0.8 or r < 3 else 2 if strength > 0.35 else 3
-            arcs = [noise(one.key, 64 * k + a) < whole for a in range(ARCS)]
+            arcs = [arc < whole for arc in _arcs(one.key, k)]
             n = max(8, int(math.tau * r))
             for i in range(0, n, step):
                 if not arcs[i * ARCS // n]:
