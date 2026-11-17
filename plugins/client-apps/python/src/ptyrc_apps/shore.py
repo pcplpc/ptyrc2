@@ -329,6 +329,8 @@ class Shore:
         self.finds: list[tuple[float, float, int, int]] = []
         self._waves: dict[int, Wave] = {}
         self._across = 0
+        self._bends: dict[tuple[int, int], list[float]] = {}
+        self._gone: dict[tuple[int, int], tuple[float, list[float]]] = {}
         self._marks: tuple[tuple[int, int], list[tuple[int, float]]] = ((0, 0), [])
         self._seen = -math.inf  # the time of the last picture
         self._flock: list[_Bird] = []
@@ -348,6 +350,8 @@ class Shore:
         """Wave `k`, over `across` dot columns of `h` rows."""
         if across != self._across or len(self._waves) > 64:
             self._waves.clear()
+            self._bends.clear()
+            self._gone.clear()
             self._across = across
         got = self._waves.get((k, h))  # type: ignore[call-overload]
         if got is not None:
@@ -434,18 +438,28 @@ class Shore:
         wet = [base] * across
         back = [False] * across  # the edge is a wave on its way back
         fronts: list[tuple[Wave, list[float], list[float]]] = []
-        marks: list[tuple[Wave, float, list[float]]] = []  # wave, peak, reach
+        marks: list[tuple[Wave, float, Sequence[float]]] = []  # wave, peak, reach
         for k in range(k0 - int(LIFE + DRY) - 2, k0 + 2):
             one = self.wave(k, across, h)
             if t < one.at - 0.5 * period:
                 continue
-            was = tide(one.at, self.ebb, h)
             age = (t - one.at) / period
+            fade = max(0.0, min(1.0, (age - DRY / 2) / (DRY / 2)))
+            gone = self._gone.get((k, h))
+            if gone is None:
+                was = tide(one.at, self.ebb, h)
+                gone = self._gone[k, h] = (max(one.late), [was - r for r in one.run])
+            if (t - one.at - gone[0]) / stay >= 1.0:
+                # Off the sand at every column: its reach, the wet sand.
+                reach = gone[1]
+                wet = [min(a, top + (base - top) * fade) for a, top in zip(wet, reach)]
+                marks.append((one, one.at + PEAK * stay, reach))
+                continue
+            was = tide(one.at, self.ebb, h)
             front: list[float] = [0.0] * across
             share: list[float] = [0.0] * across
             reach: list[float] = [0.0] * across
             live = False
-            fade = max(0.0, min(1.0, (age - DRY / 2) / (DRY / 2)))
             for x in range(across):
                 p = (t - one.at - one.late[x]) / stay
                 run = one.run[x]
@@ -488,19 +502,25 @@ class Shore:
             self._wrack(dots, across, h)
 
         # The lines of foam the waves gone have left.
-        for i, (one, peak, reach) in enumerate(marks):
+        # Per wave, the highest reach of those after it.
+        over: list[Sequence[float]] = []
+        least: Sequence[float] = [math.inf] * across
+        for _, _, reach in reversed(marks):
+            over.append(least)
+            least = list(map(min, least, reach))
+        over.reverse()
+        for (one, peak, reach), later in zip(marks, over):
             age = (t - peak) / (LIFE * period)
             if not 0.0 <= age < 1.0:
                 continue
             ink = LINE[min(len(LINE) - 1, int(age * len(LINE)))]
-            later = [r for _, _, r in marks[i + 1 :]]
             row = net[one.k % TILE]
+            late = one.late
             for x in range(across):
                 y = reach[x]
-                if y >= edge[x] or t < peak + one.late[x]:
+                if y >= edge[x] or t < peak + late[x]:
                     continue
-                keep = row[x % TILE]
-                if keep < age or any(r[x] <= y + 0.5 for r in later):
+                if row[x % TILE] < age or later[x] <= y + 0.5:
                     continue
                 dot(x, int(y), ink, 3)
 
@@ -625,6 +645,14 @@ class Shore:
         rough = grit()
         for k in range(k0, k0 + far + 2):
             one = self.wave(k, across, h)
+            bends = self._bends.get((k, h))
+            if bends is None:
+                # The shape of its crest: the same all its way in.
+                bends = self._bends[k, h] = [
+                    math.sin(x * math.tau / 83 + one.bend)
+                    + 0.5 * math.sin(x * math.tau / 31 + 2.0 * one.bend)
+                    for x in range(across)
+                ]
             row = net[(one.k * 7) % TILE]
             spots = rough[(one.k * 5) % TILE]
             drift = int(3.0 * t)
@@ -634,18 +662,7 @@ class Shore:
                     continue
                 out = speed * ahead  # dots from the still-water line
                 sway = 0.35 + 0.65 * min(1.0, out / (2.0 * speed * period))
-                y = (
-                    base
-                    + out
-                    + sway
-                    * 0.2
-                    * speed
-                    * period
-                    * (
-                        math.sin(x * math.tau / 83 + one.bend)
-                        + 0.5 * math.sin(x * math.tau / 31 + 2.0 * one.bend)
-                    )
-                )
+                y = base + out + sway * 0.2 * speed * period * bends[x]
                 if y >= down or y <= edge[x] + 1:
                     continue
                 near = ahead / period
@@ -703,22 +720,34 @@ class Shore:
         """Foam over and under the words the water covers."""
         net = lace()
         size = self.reach(h)
+        dot = dots.dot
+        across = len(edge)
+        by_row: dict[int, tuple[float, int]] = {}  # what a row shares
         for x, y in rocks:
             px, py = 2 * x, 4 * y
-            if px + 1 >= len(edge):
+            if px + 1 >= across:
                 continue
-            depth = py + 2 - edge[px]
+            near = edge[px]
+            depth = py + 2 - near
             if depth < 0:
                 continue
+            row = by_row.get(y)
+            if row is None:
+                row = by_row[y] = (
+                    0.03 + 0.14 * math.exp(-max(0.0, py - base) / size),
+                    int(2.5 * math.sin(0.8 * t + y)),
+                )
             swell = 0.6 + 0.4 * math.sin(1.9 * t + 0.7 * x + 2.3 * y)
-            want = (0.03 + 0.14 * math.exp(-max(0.0, py - base) / size)) * swell
-            sway = int(2.5 * math.sin(0.8 * t + y))
-            for dy in range(4):
-                for dx in range(2):
-                    if py + dy <= edge[px + dx]:
-                        continue
-                    if net[(px + dx + sway) % TILE][(py + dy) % TILE] < want:
-                        dots.dot(px + dx, py + dy, FROTH[depth > size], 4)
+            want = row[0] * swell
+            left = net[(px + row[1]) % TILE]
+            right = net[(px + 1 + row[1]) % TILE]
+            far = edge[px + 1]
+            ink = FROTH[depth > size]
+            for qy in range(py, py + 4):
+                if qy > near and left[qy % TILE] < want:
+                    dot(px, qy, ink, 4)
+                if qy > far and right[qy % TILE] < want:
+                    dot(px + 1, qy, ink, 4)
 
     # -- the extras --------------------------------------------------
 
