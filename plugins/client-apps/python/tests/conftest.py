@@ -110,6 +110,10 @@ class Host:
         """A move with no button down on a screen cell, SGR form."""
         os.write(self.master, f"\x1b[<35;{x + 1};{y + 1}M".encode())
 
+    def press(self, x: int, y: int, down: bool = True) -> None:
+        """The left button pressed on a screen cell, or released there."""
+        os.write(self.master, f"\x1b[<0;{x + 1};{y + 1}{'M' if down else 'm'}".encode())
+
     def wait_seen(self, needle: bytes, start: int = 0) -> None:
         deadline = time.monotonic() + 5
         while needle not in self.seen[start:]:

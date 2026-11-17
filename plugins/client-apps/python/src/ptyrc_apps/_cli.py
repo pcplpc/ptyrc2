@@ -164,19 +164,32 @@ def movable(pilot: Pilot) -> bool:
 class Nozzle:
     """The host pointer over a frame, told to the effect of `sprite`:
     `Sprite.tune(hover=[x, y])`, a cell of the view, or `hover=None`
-    when the pointer is elsewhere.
+    when the pointer is elsewhere (`hover`); a press on the frame, when
+    it is released: `Sprite.tune(bomb=[x, y, ms])`, the cell pressed and
+    how long (`bomb`).
 
-    A hover is told on a sprite, and not on an effect: a sprite of
-    blanks, the size of the view, lies under the effect (`z` -1). The
-    pointer on a sprite over it is not on the frame. On a driver without
-    the topic `hover` nothing is told."""
+    A hover, a click, are told on a sprite, and not on an effect: a
+    sprite of blanks, the size of the view, lies under the effect (`z`
+    -1). The pointer on a sprite over it is not on the frame. With
+    `bomb` the driver takes the clicks on the frame: the program in it
+    gets none. On a driver without the topics `hover`, `mouse` nothing
+    is told."""
 
-    def __init__(self, pilot: Pilot, frame: Frame, sprite: Sprite) -> None:
+    def __init__(
+        self,
+        pilot: Pilot,
+        frame: Frame,
+        sprite: Sprite,
+        hover: bool = True,
+        bomb: bool = False,
+    ) -> None:
         self.sprite = sprite
         self.at: list[int] | None = None  # as last told
+        self.down: tuple[list[int], float] | None = None  # a press: where, when
         self.pad: Sprite | None = None
+        topics = [t for t, on in (("hover", hover), ("mouse", bomb)) if on]
         try:
-            pilot.subscribe("hover")
+            pilot.subscribe(*topics)
         except PtyrcError as exc:
             if exc.code != "bad-params":
                 raise
@@ -210,6 +223,19 @@ class Nozzle:
             self.at = at
             self.sprite.tune(hover=at)
 
+    def mouse(self, data: dict[str, Any]) -> None:
+        """An event of the topic `mouse`: the release of a press on the
+        frame is told, with the cell pressed and the time it was held."""
+        if self.pad is None or data.get("sprite") != self.pad.id:
+            return
+        action, at = data.get("action"), data.get("at")
+        if action == "press" and at is not None:
+            self.down = (at, clock.monotonic())
+        elif action == "release" and self.down is not None:
+            at, since = self.down
+            self.down = None
+            self.sprite.tune(bomb=[*at, int(1000 * (clock.monotonic() - since))])
+
 
 def follow(
     pilot: Pilot,
@@ -218,6 +244,7 @@ def follow(
     seconds: float | None = None,
     beats: Iterator[float] | None = None,
     hover: bool = False,
+    bomb: bool = False,
 ) -> None:
     """Stay connected, until the session ends or for `seconds`; move
     `sprite` to the pane that takes the place of `frame`. Driven by the
@@ -231,14 +258,15 @@ def follow(
     the seconds to wait before the one after: a generator does its work
     after each `yield`.
 
-    `hover`: the effect of `sprite` is told the pointer (`Nozzle`)."""
+    `hover`: the effect of `sprite` is told the pointer; `bomb`: the
+    clicks on the frame (`Nozzle`)."""
     now = clock.monotonic()
     end = None if seconds is None else now + seconds
     beat = None if beats is None else now + next(beats)
     screen: tuple[int, int] | None = None  # when `frame` was last settled
     pilot.subscribe("frames", "exit", snapshot=True)
     movable(pilot)
-    nozzle = Nozzle(pilot, frame, sprite) if hover else None
+    nozzle = Nozzle(pilot, frame, sprite, hover, bomb) if hover or bomb else None
     while True:
         now = clock.monotonic()
         if end is not None and now >= end:
@@ -254,6 +282,10 @@ def follow(
         if event[0] == "hover":
             if nozzle is not None:
                 nozzle.hover(event[1])
+            continue
+        if event[0] == "mouse":
+            if nozzle is not None:
+                nozzle.mouse(event[1])
             continue
         if nozzle is not None:
             nozzle.place(frame)  # as the last event left it

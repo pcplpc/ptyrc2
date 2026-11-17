@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""`_cli.Nozzle`: the host mouse told to an effect (`sand --hover`)."""
+"""`_cli.Nozzle`: the host mouse told to an effect (`sand --hover`,
+`sand --bomb`)."""
 
 from __future__ import annotations
 
@@ -8,7 +9,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from ptyrc import Pilot
+from ptyrc import Pilot, Sprite, clock
 from ptyrc_apps import _cli, sand
 
 if TYPE_CHECKING:
@@ -83,6 +84,97 @@ def test_nozzle() -> None:
         ("update", 9, {"frame": 4}),
         ("set", 9, 30, 8),
     ]
+
+
+def test_bomb(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = [10.0]
+    monkeypatch.setattr(clock, "monotonic", lambda: now[0])
+    wire = Wire()
+    nozzle = _cli.Nozzle(wire, Pane(3, (40, 10)), Tape(wire, 5), False, True)  # type: ignore[arg-type]
+    assert wire.calls[0] == ("subscribe", "mouse")
+    both = _cli.Nozzle(wire, Pane(3, (40, 10)), Tape(wire, 5), bomb=True)  # type: ignore[arg-type]
+    assert ("subscribe", "hover", "mouse") in wire.calls and both.pad is not None
+    wire.calls.clear()
+
+    def report(action: str, at: list[int] | None, sprite: int = 9) -> None:
+        nozzle.mouse({"sprite": sprite, "action": action, "at": at})
+
+    # A press tells nothing; its release, the cell pressed and how long,
+    # wherever it is released.
+    report("press", [4, 2])
+    report("drag", [6, 2])
+    now[0] += 0.25
+    assert wire.calls == []
+    report("release", None)
+    assert wire.calls == [("tune", 5, {"bomb": [4, 2, 250]})]
+    wire.calls.clear()
+    # A release alone, a wheel, a click on another sprite: nothing.
+    report("release", [4, 2])
+    report("wheel", [4, 2])
+    report("press", [1, 1], sprite=7)
+    report("release", [1, 1], sprite=7)
+    assert wire.calls == []
+
+
+def test_all(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`-a`: `--hover` and `--bomb`."""
+    seen: list[tuple[bool, bool]] = []
+    monkeypatch.setattr(
+        sand._cli, "run", lambda app, args: seen.append((args.hover, args.bomb)) or 0
+    )
+    for argv in (["-a"], ["--all", "--hover"], [], ["--bomb"], ["--hover"]):
+        assert sand.main(argv) == 0
+    assert seen == [
+        (True, True),
+        (True, True),
+        (False, False),
+        (False, True),
+        (True, False),
+    ]
+
+
+@pytest.mark.realtime
+def test_sand_bomb(hosted: tuple[Host, Pilot]) -> None:
+    """A click on the pile throws its sand about; it lands."""
+    host, pilot = hosted
+    args = ["-s", pilot.session, "-f", "raw", "--now", "--rate", "400", "--bomb"]
+    status: list[int] = []
+    thread = threading.Thread(target=lambda: status.append(sand.main(args, seconds=16)))
+    thread.start()
+
+    def sand_at() -> set[tuple[int, int]]:
+        rows = pilot.dump()["host"]
+        return {(x, y) for y, row in enumerate(rows) for x in grains(row)}
+
+    try:
+        host.wait_seen(b"\x1b[?1002h")
+        deadline = time.monotonic() + 8
+        while len(pile := grains(pilot.dump()["host"][23])) < 12:
+            assert time.monotonic() < deadline, pile
+            time.sleep(0.1)
+        (effect,) = (s for s in pilot.sprites() if s["kind"] == "effect:sand")
+        Sprite(pilot, effect["id"]).tune(rate=0)
+        time.sleep(1.5)  # the stream lands
+        top = min(y for _, y in sand_at())
+        pile = grains(pilot.dump()["host"][23])
+        x = pile[len(pile) // 2]
+        # Nothing until the release: no sand over the pile.
+        host.press(x, 23)
+        time.sleep(0.6)
+        assert min(y for _, y in sand_at()) >= top
+        host.press(x, 23, down=False)
+        # Sand in the air, over the pile; then on the floor, wider.
+        deadline = time.monotonic() + 3
+        while min((y for _, y in sand_at()), default=top) >= top - 2:
+            assert time.monotonic() < deadline, pilot.dump()["host"]
+            time.sleep(0.02)
+        deadline = time.monotonic() + 6
+        while len(grains(pilot.dump()["host"][23])) <= len(pile) + 4:
+            assert time.monotonic() < deadline, pilot.dump()["host"]
+            time.sleep(0.1)
+    finally:
+        thread.join()
+    assert status == [0]
 
 
 @pytest.mark.realtime

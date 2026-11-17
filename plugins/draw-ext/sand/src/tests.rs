@@ -738,3 +738,152 @@ fn the_pointer_takes_the_grains_and_the_pile_falls_in() {
     sand.tune(&json!({"hover": [2, 2]})).unwrap();
     run(&mut sand, 20, 6, 0, 100);
 }
+
+#[test]
+#[ignore = "prints a blast: cargo test -p ptyrc-draw-sand show_bomb -- --ignored --nocapture"]
+fn show_bomb() {
+    let env = |name: &str, or: i64| -> i64 {
+        let value = std::env::var(name).ok().and_then(|v| v.parse().ok());
+        value.unwrap_or(or)
+    };
+    let mut sand = make(json!({"rate": 400}));
+    run(&mut sand, 60, 16, 0, 12_000);
+    let bomb = [env("X", 30), env("Y", 14), env("MS", 1500)];
+    sand.tune(&json!({"bomb": bomb, "rate": 0})).unwrap();
+    let mut from = 12_048;
+    for t in [12_048, 12_240, 12_480, 12_960, 13_920, 16_032] {
+        run(&mut sand, 60, 16, from, t);
+        from = t + FRAME_MS;
+        println!("{t} ms, {} in the air", sand.fliers.len());
+        let air = sand.stamp();
+        for y in 0..16 {
+            let row: String = (0..60)
+                .map(|x| sand.glyph(x, y).map_or(' ', |g| g.0))
+                .collect();
+            println!("|{row}|");
+        }
+        air.into_iter().for_each(|(x, y)| sand.set(x, y, Dot::Free));
+    }
+}
+
+#[test]
+fn a_bomb_throws_the_sand_and_it_lands() {
+    let pile = || {
+        let mut sand = make(json!({"rate": 400}));
+        run(&mut sand, 40, 10, 0, 1000);
+        sand.tune(&json!({"rate": 0})).unwrap();
+        run(&mut sand, 40, 10, 1008, 6000);
+        sand
+    };
+    // Cells of the floor that hold sand.
+    let spread = |sand: &Sand| (0..40).filter(|&x| count(sand, 9, x, x + 1) > 0).count();
+    let mut sand = pile();
+    let (grains, wide) = (sand.grains(), spread(&sand));
+    let x = (1..39).max_by_key(|&x| count(&sand, 9, x, x + 1)).unwrap();
+    assert!(
+        count(&sand, 9, x, x + 1) == 8 && wide < 30,
+        "{:#?}",
+        rows(&sand)
+    );
+    // Told: its cell is empty at once, and the pile over it; the grains
+    // are in the air, none is lost.
+    sand.tune(&json!({"bomb": [x, 9, 100]})).unwrap();
+    let weak = sand.fliers.len();
+    assert!(weak > 20 && sand.grains() == grains);
+    assert_eq!((0..10).map(|y| count(&sand, y, x, x + 1)).sum::<usize>(), 0);
+    assert_eq!(sand.params.bomb, None);
+    // They are drawn, and the pile is as it was after.
+    let canvas = run(&mut sand, 40, 10, 6048, 6048);
+    let mut bare = Canvas::new(40, 10);
+    sand.draw(&mut bare);
+    assert_ne!(canvas, bare);
+    let was = rows(&sand);
+    sand.render(Duration::from_millis(6048), &mut bare);
+    assert_eq!((rows(&sand), &bare), (was, &canvas));
+    // They land: all of them, farther than the pile was.
+    run(&mut sand, 40, 10, 6096, 12_000);
+    assert!(sand.fliers.is_empty());
+    assert_eq!(sand.grains(), grains);
+    assert!(spread(&sand) > wide);
+    // Another tune is no other bomb.
+    sand.tune(&json!({"rate": 0})).unwrap();
+    assert!(sand.fliers.is_empty());
+    // Held longer: more grains, faster; `FUSE_MS` is the most.
+    let thrown = |ms: u64| {
+        let mut sand = pile();
+        sand.tune(&json!({"bomb": [x, 9, ms]})).unwrap();
+        let fast = sand.fliers.iter().map(|f| f.vx.hypot(f.vy));
+        (sand.fliers.len(), fast.fold(0.0, f32::max))
+    };
+    let (strong, most) = (thrown(FUSE_MS), thrown(60_000));
+    assert!(strong.0 > 2 * weak && strong.1 > 1.5 * thrown(100).1);
+    assert_eq!(strong, most);
+    assert!(most.1 <= THROW.1);
+    // No sand there, out of the canvas: nothing.
+    let mut sand = pile();
+    for bomb in [
+        [0, 0, 1500],
+        [-1, 9, 1500],
+        [40, 9, 1500],
+        [x as i64, 10, 1500],
+    ] {
+        sand.tune(&json!({"bomb": bomb})).unwrap();
+    }
+    sand.tune(&json!({"bomb": null})).unwrap();
+    assert!(sand.fliers.is_empty());
+    assert!(sand.tune(&json!({"bomb": [1, 2]})).is_err());
+    assert!(sand.tune(&json!({"bomb": [1, 2, -1]})).is_err());
+    // Before the first render: none.
+    let mut sand = make(json!({"rate": 400}));
+    sand.tune(&json!({"bomb": [2, 2, 100]})).unwrap();
+    run(&mut sand, 20, 6, 0, 100);
+    assert!(sand.fliers.is_empty());
+}
+
+#[test]
+fn the_sand_in_the_air_scrolls_with_the_text_and_stops_at_it() {
+    let text = [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "##########################",
+    ];
+    let mut sand = make(json!({"rate": 400}));
+    look_at(&mut sand, &text, 0);
+    run(&mut sand, 64, 10, 0, 3000);
+    let x = (1..25).max_by_key(|&x| count(&sand, 8, x, x + 1)).unwrap();
+    sand.tune(&json!({"bomb": [x, 8, 1500], "rate": 0}))
+        .unwrap();
+    let grains = sand.grains();
+    let before: Vec<(f32, f32)> = sand.fliers.iter().map(|f| (f.x, f.y)).collect();
+    assert!(before.len() > 100);
+    // The view goes two rows down: the grains in the air are two rows
+    // up in it.
+    look_at(&mut sand, &text[2..], 2);
+    let mut canvas = Canvas::new(64, 8);
+    sand.steps = u64::MAX / 2;
+    sand.render(Duration::from_millis(3048), &mut canvas);
+    let dy = (sand.top as f32 - 2.0) * DH as f32;
+    let after: Vec<(f32, f32)> = sand.fliers.iter().map(|f| (f.x, f.y)).collect();
+    assert_eq!(after.len(), before.len());
+    for (a, b) in after.iter().zip(&before) {
+        assert_eq!((a.0, a.1), (b.0, b.1 + dy));
+    }
+    // They land on the text and on the floor, never in the text.
+    sand.steps = 3048 / STEP_MS;
+    run(&mut sand, 64, 8, 3096, 12_000);
+    assert!(sand.fliers.is_empty());
+    assert!(sand.grains() <= grains && sand.grains() > grains * 9 / 10);
+    let w = sand.w * DW;
+    for (i, dot) in sand.dots.iter().enumerate() {
+        if matches!(dot, Dot::Grain(..)) {
+            assert!(!sand.wall(i % w / DW, i / w / DH));
+        }
+    }
+}

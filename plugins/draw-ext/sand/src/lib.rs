@@ -13,6 +13,8 @@
 //! - `color_ms`: time from one colour to the next (default 20000).
 //! - `hover`: `[x, y]`, the canvas cell under the pointer, or null
 //!   (default): none.
+//! - `bomb`: `[x, y, ms]`, by `tune` only: a bomb at that canvas cell,
+//!   held `ms`.
 //! - `walls`: rows of text standing for the app's, until the app is seen.
 //! - `duration_ms`: life of the effect. Absent: until removed.
 //! - `seed`.
@@ -44,6 +46,16 @@
 //! step: the pile over the hole falls in, the slopes beside it
 //! avalanche.
 //!
+//! The bomb: a blast of `BLAST` dots around the middle of its cell,
+//! from the first to the second as `ms` goes to `FUSE_MS`, no further.
+//! The grains within, and those over it, are thrown: away from the middle and up, at `THROW` dots a step at most,
+//! the stronger the faster. A thrown grain is in the air, not in the
+//! pile: it falls `GRAVITY` faster each step, passes the others thrown,
+//! turns back at a side of the world, and lands, a grain awake, where
+//! it meets a wall, the pile or the floor, on top of what slid over it
+//! meanwhile; under text, or over a column full to the top, it is lost. The grains around the hole wake. No grain there:
+//! nothing.
+//!
 //! Spout: the topmost free cell of a column. Chosen near the middle,
 //! over text, away from the ends of the run it lands on; kept while it
 //! stays so; moved when the pile reaches it. With `cursor`: the cursor's
@@ -73,6 +85,7 @@ use ptyrc_core::scene::{
 use ptyrc_vt::Color;
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::ops::Range;
 use std::time::Duration;
 
 /// One simulation step: a falling grain moves one dot.
@@ -85,6 +98,14 @@ const CATCH_UP: u64 = 16;
 const NOZZLE: i64 = 1;
 /// The pointer takes grains this long after it was last told.
 const LINGER_MS: u64 = 3000;
+/// A bomb held this long is the strongest.
+const FUSE_MS: u64 = 1500;
+/// Radius of a blast, in dots: the weakest, the strongest.
+const BLAST: (f32, f32) = (5.0, 14.0);
+/// Dots a step of the fastest grain thrown: the weakest, the strongest.
+const THROW: (f32, f32) = (0.9, 2.4);
+/// Dots a step a thrown grain gains downwards, each step.
+const GRAVITY: f32 = 0.03;
 /// Canvas cells at most.
 const MAX_CELLS: usize = 1 << 18;
 /// Dots of a cell.
@@ -118,6 +139,7 @@ struct Params {
     colors: Vec<ColorSpec>,
     color_ms: u64,
     hover: Option<(i32, i32)>,
+    bomb: Option<(i32, i32, u64)>,
     duration_ms: Option<u64>,
     seed: u64,
 }
@@ -138,6 +160,7 @@ impl Default for Params {
             .collect(),
             color_ms: 20_000,
             hover: None,
+            bomb: None,
             duration_ms: None,
             seed: 1,
         }
@@ -150,6 +173,17 @@ enum Dot {
     Wall,
     /// Shade, and whether it is awake.
     Grain(u8, bool),
+}
+
+/// A grain thrown by a bomb: its place and its speed, in dots and dots
+/// a step.
+#[derive(Clone, Copy)]
+struct Flier {
+    x: f32,
+    y: f32,
+    vx: f32,
+    vy: f32,
+    shade: u8,
 }
 
 /// The grains of a row of dots: how many, and the columns `lo..hi` they
@@ -292,6 +326,8 @@ pub struct Sand {
     owed: f64,
     /// The first step since `hover` was told; `None`: none yet.
     told: Option<u64>,
+    /// The grains in the air.
+    fliers: Vec<Flier>,
 }
 
 impl Sand {
@@ -342,6 +378,7 @@ impl Sand {
             steps: 0,
             owed: 0.0,
             told: None,
+            fliers: Vec::new(),
         }
     }
 
@@ -393,12 +430,10 @@ impl Sand {
         self.at(x * DW, y * DH) == Dot::Wall
     }
 
-    /// Grains in the pile.
+    /// Grains in the pile and in the air.
     pub fn grains(&self) -> usize {
-        self.dots
-            .iter()
-            .filter(|d| matches!(d, Dot::Grain(..)))
-            .count()
+        let pile = self.dots.iter().filter(|d| matches!(d, Dot::Grain(..)));
+        pile.count() + self.fliers.len()
     }
 
     /// Put the grains of the world away.
@@ -488,6 +523,13 @@ impl Sand {
                 }
             }
         }
+        // The grains in the air stay over their cells of the frame.
+        let (dx, dy) = (old.0.0 - pos.0, old.0.1 - pos.1);
+        let (dx, dy) = ((dx * DW as i64) as f32, (dy * DH as i64) as f32);
+        self.fliers.retain_mut(|f| {
+            (f.x, f.y) = (f.x + dx, f.y + dy);
+            f.x >= 0.0 && f.x < (w * DW) as f32 && f.y < (h * DH) as f32
+        });
         (self.pos, self.w, self.h) = (pos, w, h);
         self.dots = vec![Dot::Free; w * DW * h * DH];
         self.fetch();
@@ -667,7 +709,7 @@ impl Sand {
         if (self.steps - told) * STEP_MS > LINGER_MS || py < 0 || py as usize >= self.ch {
             return;
         }
-        let (w, h) = (self.w * DW, self.h * DH);
+        let h = self.h * DH;
         let cell = |x: i64| x.clamp(0, self.w as i64) as usize * DW;
         let (x0, x1) = (cell(px as i64 - NOZZLE), cell(px as i64 + NOZZLE + 1));
         let y0 = (py as usize + self.top) * DH;
@@ -681,16 +723,134 @@ impl Sand {
                 }
             }
         }
-        if !taken {
-            return;
+        if taken {
+            self.wake(x0.saturating_sub(1)..x1 + 1, y0.saturating_sub(1)..y1 + 1);
         }
-        for y in y0.saturating_sub(1)..(y1 + 1).min(h) {
-            for x in x0.saturating_sub(1)..(x1 + 1).min(w) {
+    }
+
+    /// The grains of these dots wake.
+    fn wake(&mut self, xs: Range<usize>, ys: Range<usize>) {
+        for y in ys.start..ys.end.min(self.h * DH) {
+            for x in xs.start..xs.end.min(self.w * DW) {
                 if let Dot::Grain(shade, false) = self.at(x, y) {
                     self.set(x, y, Dot::Grain(shade, true));
                 }
             }
         }
+    }
+
+    /// A bomb at the canvas cell `(px, py)`, held `ms`: the grains of
+    /// the blast are in the air.
+    fn blast(&mut self, (px, py, ms): (i32, i32, u64)) {
+        if px < 0 || py < 0 || px as usize >= self.w || py as usize >= self.ch {
+            return;
+        }
+        let power = ms.min(FUSE_MS) as f32 / FUSE_MS as f32;
+        let r = BLAST.0 + (BLAST.1 - BLAST.0) * power;
+        let fast = THROW.0 + (THROW.1 - THROW.0) * power;
+        let cx = (px as usize * DW) as f32 + DW as f32 / 2.0;
+        let cy = ((py as usize + self.top) * DH) as f32 + DH as f32 / 2.0;
+        let (x0, x1) = ((cx - r).max(0.0) as usize, (cx + r).ceil() as usize);
+        let (y0, y1) = (0, (cy + r).ceil() as usize);
+        let (x1, y1) = (x1.min(self.w * DW), y1.min(self.h * DH));
+        let before = self.fliers.len();
+        for y in y0..y1 {
+            if self.spans[y].n == 0 {
+                continue;
+            }
+            for x in x0..x1 {
+                let Dot::Grain(shade, _) = self.at(x, y) else {
+                    continue;
+                };
+                let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+                // The disk, and what lies over it.
+                if dy >= 0.0 && dx * dx + dy * dy > r * r {
+                    continue;
+                }
+                // Away from the middle, and up: the ground sends the
+                // blast back.
+                let d = dx.hypot(dy).max(0.5);
+                let nx = dx / d + self.rng.range(-0.4, 0.4) as f32;
+                let ny = -(dy / d).abs() - 0.5;
+                let speed = fast * self.rng.range(0.35, 1.0) as f32 / nx.hypot(ny);
+                self.set(x, y, Dot::Free);
+                self.fliers.push(Flier {
+                    x: x as f32 + 0.5,
+                    y: y as f32 + 0.5,
+                    vx: nx * speed,
+                    vy: ny * speed,
+                    shade,
+                });
+            }
+        }
+        if self.fliers.len() > before {
+            self.wake(x0.saturating_sub(2)..x1 + 2, y0.saturating_sub(2)..y1 + 2);
+        }
+    }
+
+    /// The grains in the air move; one that meets a wall, the pile or
+    /// the floor lands.
+    fn fly(&mut self) {
+        let (w, h) = ((self.w * DW) as f32, (self.h * DH) as f32);
+        if self.fliers.is_empty() || h == 0.0 {
+            return;
+        }
+        let dot = |x: f32, y: f32| (x.floor() as i64, y.floor() as i64);
+        let mut fliers = std::mem::take(&mut self.fliers);
+        fliers.retain_mut(|f| {
+            f.vy = (f.vy + GRAVITY).min(1.0);
+            // A dot at most at a time: nothing is jumped over.
+            let n = f.vx.abs().max(f.vy.abs()).ceil().max(1.0);
+            for _ in 0..n as usize {
+                let (mut nx, ny) = (f.x + f.vx / n, f.y + f.vy / n);
+                if nx < 0.0 || nx >= w {
+                    (f.vx, nx) = (-f.vx / 2.0, f.x);
+                }
+                let held = ny >= 0.0
+                    && dot(nx, ny) != dot(f.x, f.y)
+                    && (ny >= h || !self.free(nx as usize, ny as usize));
+                if held {
+                    self.land(*f);
+                    return false;
+                }
+                (f.x, f.y) = (nx, ny);
+            }
+            true
+        });
+        self.fliers = fliers;
+    }
+
+    /// A grain of the air is one of the pile: on its dot, or, the pile
+    /// having slid over it, on the first free one above; lost when a
+    /// wall or the top comes first.
+    fn land(&mut self, f: Flier) {
+        if f.y < 0.0 {
+            return;
+        }
+        let (x, y) = (f.x as usize, f.y as usize);
+        let top = (0..=y)
+            .rev()
+            .find(|y| !matches!(self.at(x, *y), Dot::Grain(..)));
+        if let Some(y) = top.filter(|y| self.free(x, *y)) {
+            self.set(x, y, Dot::Grain(f.shade, true));
+            // It shakes what it lands on and beside.
+            self.wake(x.saturating_sub(1)..x + 2, y..y + 2);
+        }
+    }
+
+    /// The grains in the air, put on their free dots to be drawn: those
+    /// dots.
+    fn stamp(&mut self) -> Vec<(usize, usize)> {
+        let mut air = Vec::new();
+        for i in 0..self.fliers.len() {
+            let f = self.fliers[i];
+            let (x, y) = (f.x as usize, f.y as usize);
+            if f.y >= 0.0 && y < self.h * DH && self.free(x, y) {
+                self.set(x, y, Dot::Grain(f.shade, true));
+                air.push((x, y));
+            }
+        }
+        air
     }
 
     fn step(&mut self) {
@@ -747,6 +907,7 @@ impl Sand {
             }
         }
         self.pour();
+        self.fly();
         self.suck();
         self.steps += 1;
     }
@@ -878,7 +1039,11 @@ impl Effect for Sand {
         while self.steps < due {
             self.step();
         }
+        let air = self.stamp();
         self.draw(canvas);
+        for (x, y) in air {
+            self.set(x, y, Dot::Free);
+        }
         true
     }
 
@@ -953,9 +1118,11 @@ impl Effect for Sand {
                 }
             }
         }
+        let bomb = params.bomb;
         self.params = Params {
             walls: Vec::new(),
             seed: self.params.seed,
+            bomb: None,
             ..params
         };
         if new.contains_key("hover") {
@@ -965,6 +1132,11 @@ impl Effect for Sand {
             if !self.dots.is_empty() {
                 self.suck();
             }
+        }
+        if let Some(bomb) = bomb
+            && !self.dots.is_empty()
+        {
+            self.blast(bomb);
         }
         self.aim();
         Ok(())
