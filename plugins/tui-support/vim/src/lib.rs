@@ -82,8 +82,10 @@ fn ruler(pane: &PaneView) -> Option<String> {
 }
 
 fn tilde_rows(pane: &PaneView) -> u16 {
+    // The first cell is read before the row.
+    let first = |r: u16| pane.grid.cell(pane.rect.x, pane.rect.y + r).text.as_str();
     (0..pane.rect.h)
-        .filter(|&r| pane.row_text(r).trim_end() == "~")
+        .filter(|&r| first(r) == "~" && pane.row_text(r).trim_end() == "~")
         .count() as u16
 }
 
@@ -299,5 +301,25 @@ mod tests {
     fn plain_text_is_not_vim() {
         let grid = Grid::from_lines(30, &["$ ls", "a  b  c", "$ "]);
         assert!(Vim.detect(&pane(&grid, "zsh")) < 0.5);
+    }
+
+    #[test]
+    #[ignore = "prints the cost of a look at a screen: cargo test --release -p ptyrc-tui-vim bench -- --ignored --nocapture"]
+    fn bench() {
+        for (w, h) in [(80u16, 24u16), (200, 50), (300, 80)] {
+            // A screen full of text that is not the app.
+            let line = "words in the way ".repeat(w as usize / 17);
+            let rows: Vec<&str> = (0..h).map(|_| line.as_str()).collect();
+            let grid = Grid::from_lines(w, &rows);
+            let p = pane(&grid, "zsh");
+            let us = (0..40)
+                .map(|_| {
+                    let start = std::time::Instant::now();
+                    std::hint::black_box((Vim.detect(&p), Vim.chrome(&p)));
+                    start.elapsed().as_secs_f64() * 1e6
+                })
+                .fold(f64::MAX, f64::min);
+            println!("vim {w}x{h}: detect and chrome {us:.1} us");
+        }
     }
 }
