@@ -36,15 +36,6 @@ fn asking(client: &mut Client, tag: &str, ask: Value) -> u64 {
     id
 }
 
-/// The raw frame is usable: a widget on it can be focused.
-fn settled(client: &mut Client) {
-    let usable = |client: &mut Client| {
-        let frames = client.call("frame.list", json!({})).unwrap();
-        frames["frames"][0]["usable"] == json!(true)
-    };
-    wait_for(|| usable(client), "a usable screen");
-}
-
 fn focus(client: &mut Client) -> Value {
     client.call("session.info", json!({})).unwrap()["focus"].clone()
 }
@@ -66,7 +57,6 @@ fn the_pair_focuses_the_widgets_that_ask_then_the_manager() {
     let mut note = sb.client("d");
     let mut quest = sb.client("d");
     let mut other = sb.client("d");
-    settled(&mut other);
     // The quiet one asks first: the loud one is before it all the same.
     let quiet = asking(&mut note, "note", json!({"quiet": true}));
     let loud = asking(&mut quest, "quest", json!({}));
@@ -147,7 +137,7 @@ fn focus_by_request() {
     let _driver = sb.headless("h", "60x16", &["cat"]);
     let mut app = sb.client("h");
     let mut other = sb.client("h");
-    settled(&mut other);
+    // From the start: the raw screen need not have settled.
 
     // Nothing asks.
     let none = other.call("widget.focus", json!({})).unwrap();

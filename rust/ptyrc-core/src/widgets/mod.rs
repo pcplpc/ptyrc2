@@ -817,9 +817,10 @@ impl Widgets {
     }
 
     /// It can be drawn: its owner is not hidden, its frame is usable
-    /// (or not looked at yet).
+    /// (or not looked at yet). The raw frame always counts: the screen
+    /// is there, a widget on it shows as soon as it settles.
     fn drawable(&self, w: &Widget) -> bool {
-        !self.hidden.contains(&w.owner) && (w.live || !w.seen)
+        !self.hidden.contains(&w.owner) && (w.live || !w.seen || w.frame == Some(RAW))
     }
 
     /// The widgets the user can focus: the loud ones, then the quiet
@@ -1154,7 +1155,7 @@ impl Widgets {
         }
 
         let focus = self.focus;
-        let mut unusable = false;
+        let mut forgotten = false;
         for w in &mut self.widgets {
             if w.frame.is_none() {
                 w.frame = surfaces.resolve(&w.sel);
@@ -1162,7 +1163,9 @@ impl Widgets {
             let info = w.frame.and_then(|id| surfaces.info(id));
             w.live = info.is_some_and(|i| i.usable);
             w.seen = true;
-            unusable |= focus == Some(w.id) && !w.live;
+            // Not usable for a while, the focus is kept; the frame gone,
+            // it is lost.
+            forgotten |= focus == Some(w.id) && w.frame.is_some() && info.is_none();
             if info.is_none() && w.place.is_some() {
                 // The frame is no more.
                 w.place = None;
@@ -1184,8 +1187,7 @@ impl Widgets {
                 }
             }
         }
-        if unusable {
-            // The frame of the focused widget is not usable.
+        if forgotten {
             self.blur();
         }
 

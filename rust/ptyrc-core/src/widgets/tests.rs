@@ -1684,16 +1684,48 @@ fn focus_lost_with_the_owner_or_the_frame() {
     rig.w.hide_owner(1, false);
     rig.tick();
     rig.w.focus(id).unwrap();
-    // The frame is no longer usable.
+    // The raw frame not usable for a while: the focus is kept, the
+    // widget is still in the order.
     rig.mock.infos[0].usable = false;
     rig.w.touch();
     rig.tick();
-    assert_eq!(rig.w.focused(), None);
-    assert!(rig.w.order().is_empty());
-    assert!(matches!(rig.w.focus(id), Err(WidgetError::NotUsable(_))));
-    assert!(!rig.info(id).focused);
+    assert_eq!(rig.w.focused(), Some((id, 1)));
+    assert_eq!(rig.w.order(), [id]);
     rig.mock.infos[0].usable = true;
+    rig.w.blur();
+
+    // A pane not usable: the focus is kept, the widget comes back with
+    // its frame; out of the order meanwhile, and not to be focused.
+    rig.mock.infos.push(surface(PANE, Rect::new(0, 0, 40, 12)));
+    rig.declare(2, "p", &[[10, 2]]);
+    let show = Show {
+        frame: FrameSel::Id(PANE),
+        ..Show::new("p")
+    };
+    let p = rig.show(2, show);
+    rig.w.ask(2, p, false).unwrap();
+    rig.w.focus(p).unwrap();
+    rig.tick();
+    let place = rig.rect(p);
+    rig.mock.infos[1].usable = false;
     rig.w.touch();
     rig.tick();
+    assert_eq!(rig.w.focused(), Some((p, 2)));
+    assert!(rig.info(p).focused);
+    assert_eq!(rig.w.order(), [id]);
+    rig.w.blur();
+    assert!(matches!(rig.w.focus(p), Err(WidgetError::NotUsable(_))));
+    rig.mock.infos[1].usable = true;
+    rig.w.touch();
+    rig.tick();
+    assert_eq!(rig.w.order(), [id, p]);
+    rig.w.focus(p).unwrap();
+    rig.tick();
+    assert_eq!(rig.rect(p), place);
+    // The frame forgotten: the focus is lost.
+    rig.mock.infos.pop();
+    rig.w.touch();
+    rig.tick();
+    assert_eq!(rig.w.focused(), None);
     assert_eq!(rig.w.order(), [id]);
 }

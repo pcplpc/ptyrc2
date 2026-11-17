@@ -82,7 +82,7 @@ impl ScreenEngine {
     /// Tell the connection that lost the focus by no doing of its own,
     /// and forget the escape keys of the widgets that ask no more.
     /// `reason`: why, when the caller knows; else it is told from the
-    /// widget: its owner paused, its frame not usable.
+    /// widget: its owner paused, its frame forgotten.
     pub(crate) fn sync_focus(&mut self, reason: Option<&str>, ctx: &mut Ctx) {
         let now = self
             .widgets
