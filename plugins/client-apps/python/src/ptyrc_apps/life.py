@@ -638,8 +638,25 @@ def picture(
         older = [plane[y : y + 4] for plane in ages[1:]] if colour else []
         ghosts = [plane[y : y + 4] for plane in gone]
         seen = alive[0] | alive[1] | alive[2] | alive[3]
+        # Bit 2x, a level: the glyph x has a cell younger than it; a
+        # cell that died then. The glyph of the dead of every level.
+        young = [
+            (m | m >> 1) & even
+            for m in (
+                (alive[0] ^ quad[0])
+                | (alive[1] ^ quad[1])
+                | (alive[2] ^ quad[2])
+                | (alive[3] ^ quad[3])
+                for quad in older
+            )
+        ]
+        dead = []
+        past = [0, 0, 0, 0]
         for quad in ghosts:
-            seen |= quad[0] | quad[1] | quad[2] | quad[3]
+            m = quad[0] | quad[1] | quad[2] | quad[3]
+            seen |= m
+            dead.append((m | m >> 1) & even)
+            past = [p | row for p, row in zip(past, quad, strict=True)]
         if shown is not None:
             seen &= shown[y]  # the same mask for the 4 rows of a glyph
         runs: list[dict[str, Any]] = []
@@ -656,14 +673,17 @@ def picture(
             color: int | str = GREEN
             if bits and colour:
                 age = 0
-                while age < len(older) and _glyph(older[age], shift) == bits:
+                for mask in young:
+                    if mask & low:
+                        break
                     age += 1
                 color = AGES[min(age, len(AGES) - 1)]
             elif not bits:
-                for k in range(len(ghosts) - 1, -1, -1):
-                    if dead := _glyph(ghosts[k], shift):
-                        bits |= dead
-                        color = TRAIL[k]
+                bits = _glyph(past, shift)
+                for k, mask in enumerate(dead):
+                    if mask & low:
+                        color = TRAIL[k]  # of the last to die
+                        break
             if color != ink and text:
                 runs.append({"t": "".join(text), "fg": ink})
                 text = []
