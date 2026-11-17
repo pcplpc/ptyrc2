@@ -988,6 +988,13 @@ keys. An app never takes the focus by itself.
   widget's (`not-usable` with no hotkey: no way out). It drops the
   focus and reaches nobody; what follows it in the same read goes to
   the app. The widget still asks.
+- **Close**: `close` at `widget.ask`, as `escape` (`ctrl+x`, or
+  false: none; not the escape key: `bad-params`). Pressed while
+  focused: the focus is dropped, the widget goes as by `widget.hide`,
+  the key reaches nobody; the owner is sent `released` `close`. A
+  `Dialog` is dismissed by it; a deck drops the widget
+  (`Deck.drop`, `closed=`) and `Deck.run` ends with its last one:
+  `ask` status 1, `note -i` that note gone.
 - `widget.focus {id}`: the focus, by a request (any connection: a
   key binding of the user, a test); `id` absent: the next of the
   order, as the pair, null past the last (the manager is not
@@ -1012,11 +1019,21 @@ keys. An app never takes the focus by itself.
   too, and a bright white chase (`len` 6, `ms` 50, `runs` 2) in place
   of the border's own. Quiet, not focused: its own border. The glyphs
   of the border are kept; a border `none` shows nothing.
-- **Focused is modal**: while focused the widget is laid out as a
-  modal one (layer `hud` unless one was given; never pressed, evicted,
-  grown nor shrunk). Placed: it stays where it is. Hidden for want of
-  a room: put over the text, at once. The focus lost: its own rules
-  again; one put over the text is laid out again as a new one.
+- **Focused is zoomed**: gaining the focus, the widget is laid out
+  again at once as a modal over the text, centred, whatever its
+  options: the largest variant whose outer size and the gap fit the
+  view, with the fallbacks of Modal; layer `hud` unless one was
+  given. The blackout only when it is over text or other widgets
+  (those are pressed, then evicted). While focused: never pressed,
+  evicted, grown nor shrunk. The focus lost: laid out again as a new
+  one, by its own rules and options.
+- **Chevrons**: a widget that asks, not focused, shows `>>>` before
+  its title (a blank between), when the room holds them and the
+  whole title; else the title alone, as ever. One of the three is
+  lit, bright white, bold, the next every 200 ms (`Chevrons::step`,
+  the time over 200 ms, no state); the others bright cyan (loud), or
+  cyan, dim (quiet). `next_wake` names the next step while such a
+  widget is drawn, and only then. A border `none` shows nothing.
 - Info: `"asks": null | "loud" | "quiet"`, `"focused": bool`; an
   event `widgets` when either changes. `session.info`: `"focus": id |
   null`.
@@ -1630,7 +1647,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `widget.show` | `tag`, `frame`, `prefer`, `fill`, `title`, `border`, `layer` | `{"widget":info}` |
 | `widget.set` | `id`, `variant`, `content`, `title` | `{}` |
 | `widget.hide` | `id` | `{}` |
-| `widget.ask` | `id`, `quiet`, `escape` | `{"widget":info}`; see Asking and focus |
+| `widget.ask` | `id`, `quiet`, `escape`, `close` | `{"widget":info}`; see Asking and focus |
 | `widget.release` | `id` | `{}` |
 | `widget.focus` | `id` (absent: the next) | `{"widget":info \| null}` |
 | `widget.blur` | | `{}` |
