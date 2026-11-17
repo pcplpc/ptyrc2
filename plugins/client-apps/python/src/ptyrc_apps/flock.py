@@ -396,7 +396,7 @@ class Flock:
     def __init__(
         self,
         rng: random.Random,
-        birds: float = 120.0,
+        birds: float = 100.0,
         second: float = 0.0,
         join: bool = False,
         hawk: bool = False,
@@ -1316,9 +1316,9 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
     out.add_argument(
         "--birds",
         type=float,
-        default=120.0,
+        default=100.0,
         metavar="N",
-        help="birds over 80 by 24 cells [default: 120]",
+        help="birds over 80 by 24 cells [default: 100]",
     )
     out.add_argument(
         "--dusk",
