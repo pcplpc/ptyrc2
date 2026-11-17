@@ -222,7 +222,7 @@ struct Driver {
     partial: Option<(Vec<u8>, Duration)>,
     /// A bracketed paste is under way on the host keyboard.
     pasting: bool,
-    /// An escape key ended the last read: the release event of that
+    /// An escape or close key ended the last read: the release event of that
     /// key, if it comes first, reaches nobody.
     drop_release: bool,
     /// The child the hotkey started, while in the table.
@@ -1225,15 +1225,19 @@ impl Driver {
                 // The keys are the focused widget's; a report of the
                 // mouse or of the host's window is no key.
                 Some(focus) => {
-                    let sorted = grab::sort_keys(bytes, &focus.escape, false, |_| true);
+                    let sorted =
+                        grab::sort_keys(bytes, &focus.escape, &focus.close, false, |_| true);
                     for (name, key) in sorted.taken {
                         let data = json!({"key": name, "bytes": keys::base64_encode(&key),
                                           "widget": focus.widget});
                         self.send_event(focus.conn, "input", data);
                     }
-                    if sorted.released {
+                    if sorted.released || sorted.closed {
                         let now = self.now();
-                        hook!(self, now, |ctx| engine.focus_escape(ctx));
+                        match sorted.closed {
+                            true => hook!(self, now, |ctx| engine.focus_close(ctx)),
+                            false => hook!(self, now, |ctx| engine.focus_escape(ctx)),
+                        }
                         self.drop_release = sorted.forward.is_empty();
                     }
                     held = sorted.forward;

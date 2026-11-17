@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The focus: the widget that has the host keyboard. A widget asks
 //! (`widget.ask`), the user gives it the keys (the hotkey,
-//! `widget.focus`); the escape key takes them back. The widgets keep who
-//! asks and who is focused (`ptyrc-core`); here are the escape keys, the
-//! requests and the word sent to a connection that loses the focus.
+//! `widget.focus`); the escape key takes them back, the close key hides
+//! the widget. The widgets keep who asks and who is focused
+//! (`ptyrc-core`); here are the escape and close keys, the requests and
+//! the word sent to a connection that loses the focus.
 
 use crate::engine::{ConnId, Ctx};
 use crate::grab;
@@ -18,6 +19,9 @@ type Res = Result<Value, RpcError>;
 /// The escape key of a widget that names none.
 pub(crate) const ESCAPE: &str = "esc";
 
+/// The close key of a widget that names none.
+pub(crate) const CLOSE: &str = "ctrl+x";
+
 /// The widget focused, as the driver's keyboard sees it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Held {
@@ -25,13 +29,17 @@ pub struct Held {
     pub widget: WidgetId,
     /// Name of the escape key; empty: none.
     pub escape: String,
+    /// Name of the close key; empty: none.
+    pub close: String,
 }
 
-/// The escape keys of the widgets that ask, and the focus last told.
+/// The escape and close keys of the widgets that ask, and the focus
+/// last told.
 #[derive(Default)]
 pub(crate) struct Focus {
-    /// Per widget that asks: the name of its escape key; empty: none.
-    escapes: HashMap<WidgetId, String>,
+    /// Per widget that asks: the names of its escape and close keys;
+    /// empty: none.
+    escapes: HashMap<WidgetId, (String, String)>,
     told: Option<(WidgetId, ConnId)>,
 }
 
@@ -65,10 +73,12 @@ impl ScreenEngine {
     /// The widget focused.
     pub(crate) fn held(&self) -> Option<Held> {
         let (widget, owner) = self.widgets.focused()?;
+        let (escape, close) = self.focus.escapes.get(&widget).cloned().unwrap_or_default();
         Some(Held {
             conn: ConnId(owner),
             widget,
-            escape: self.focus.escapes.get(&widget).cloned().unwrap_or_default(),
+            escape,
+            close,
         })
     }
 
@@ -152,14 +162,26 @@ impl ScreenEngine {
         self.widgets.focused().is_some()
     }
 
+    /// The close key: the focused widget goes as by `widget.hide`; its
+    /// owner is told `close`.
+    pub(crate) fn close_focused(&mut self, ctx: &mut Ctx) {
+        let Some((id, owner)) = self.widgets.focused() else {
+            return;
+        };
+        self.widgets.hide(owner, id);
+        self.sync_focus(Some("close"), ctx);
+        self.tick_widgets(ctx.now(), ctx);
+        ctx.request_repaint();
+    }
+
     /// Drop the focus.
     pub(crate) fn blur(&mut self, reason: &str, ctx: &mut Ctx) {
         let _ = self.set_focus(None, reason, ctx);
     }
 
-    /// `widget.ask {id, quiet, escape}`: `{"widget": info}`.
+    /// `widget.ask {id, quiet, escape, close}`: `{"widget": info}`.
     pub(crate) fn widget_ask(&mut self, conn: ConnId, params: &Value, ctx: &mut Ctx) -> Res {
-        members(params, &["id", "quiet", "escape"])?;
+        members(params, &["id", "quiet", "escape", "close"])?;
         let id = id_of(params)?.ok_or_else(|| RpcError::bad_params("id: required"))?;
         let quiet = match params.get("quiet") {
             None | Some(Value::Null) => false,
@@ -176,10 +198,26 @@ impl ScreenEngine {
             RpcError::bad_params(e)
                 .with_hint("a named key that is not text, as esc or f12; false: none")
         })?;
+        let close = match params.get("close") {
+            None | Some(Value::Null) => grab::named_key("close", CLOSE),
+            Some(Value::Bool(false)) => Ok(String::new()),
+            Some(Value::String(key)) => grab::named_key("close", key),
+            Some(_) => Err("close: a key name, or false".to_string()),
+        }
+        .map_err(|e| {
+            RpcError::bad_params(e)
+                .with_hint("a named key that is not text, as ctrl+x or f10; false: none")
+        })?;
+        if !close.is_empty() && close == escape {
+            return Err(
+                RpcError::bad_params(format!("close: the escape key: {close}"))
+                    .with_hint("the close key differs from the escape key"),
+            );
+        }
         if self.widgets.ask(conn.0, id, quiet).is_err() {
             return Err(no_widget(self, conn, id));
         }
-        self.focus.escapes.insert(id, escape);
+        self.focus.escapes.insert(id, (escape, close));
         self.tick_widgets(ctx.now(), ctx);
         Ok(json!({"widget": self.widgets.info(id)}))
     }

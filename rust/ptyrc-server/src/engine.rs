@@ -245,6 +245,9 @@ pub trait Engine {
     /// The escape key of the focused widget: drop the focus.
     fn focus_escape(&mut self, _ctx: &mut Ctx) {}
 
+    /// The close key of the focused widget: it is hidden.
+    fn focus_close(&mut self, _ctx: &mut Ctx) {}
+
     /// Members merged into the `session.info` result (an object, or null).
     fn session_extras(&self) -> Value {
         Value::Null

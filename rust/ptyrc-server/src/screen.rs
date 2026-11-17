@@ -891,6 +891,10 @@ impl Engine for ScreenEngine {
         self.blur("escape", ctx);
     }
 
+    fn focus_close(&mut self, ctx: &mut Ctx) {
+        self.close_focused(ctx);
+    }
+
     fn session_extras(&self) -> Value {
         let modes = self.app.modes();
         let mouse = [(1, 9), (2, 1000), (4, 1002), (8, 1003)];

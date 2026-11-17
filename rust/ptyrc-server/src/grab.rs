@@ -27,18 +27,26 @@ pub(crate) struct Sorted {
     pub taken: Vec<(Option<String>, Vec<u8>)>,
     /// The escape key was pressed: what follows it is in `forward`.
     pub released: bool,
+    /// The close key was pressed: what follows it is in `forward`.
+    pub closed: bool,
 }
 
 /// An escape key: a named key that is not text. Its name, as `name`
 /// gives it: the key is matched by name, whatever bytes the host sends
 /// for it (application cursor keys, CSI u).
 pub(crate) fn escape_key(escape: &str) -> Result<String, String> {
-    let named = keys::encode_key(escape, false)
+    named_key("escape", escape)
+}
+
+/// A named key that is not text, as `escape_key`; `member` names it in
+/// the error.
+pub(crate) fn named_key(member: &str, key: &str) -> Result<String, String> {
+    let named = keys::encode_key(key, false)
         .ok()
         .and_then(|bytes| name(&bytes));
     match named {
         Some(name) if name.chars().count() > 1 => Ok(name),
-        _ => Err(format!("escape: not a key: {escape}")),
+        _ => Err(format!("{member}: not a key: {key}")),
     }
 }
 
@@ -57,12 +65,13 @@ pub(crate) fn skip_release(bytes: &[u8]) -> &[u8] {
     }
 }
 
-/// Sort keys: those `taken` says, up to the key named `escape` (empty:
-/// none). `reports`: mouse and focus reports are taken as keys; else
-/// they go on.
+/// Sort keys: those `taken` says, up to the key named `escape` or
+/// `close` (empty: none). `reports`: mouse and focus reports are taken
+/// as keys; else they go on.
 pub(crate) fn sort_keys(
     bytes: &[u8],
     escape: &str,
+    close: &str,
     reports: bool,
     taken: impl Fn(Option<&str>) -> bool,
 ) -> Sorted {
@@ -76,8 +85,10 @@ pub(crate) fn sort_keys(
             continue;
         }
         let name = name(key);
-        if !escape.is_empty() && name.as_deref() == Some(escape) {
-            sorted.released = true;
+        let is = |stop: &str| !stop.is_empty() && name.as_deref() == Some(stop);
+        if is(escape) || is(close) {
+            sorted.released = is(escape);
+            sorted.closed = !sorted.released;
             // Its release event reaches nobody either.
             sorted.forward.extend_from_slice(skip_release(rest));
             break;
@@ -199,14 +210,14 @@ impl Grab {
     }
 
     pub fn sort(&self, bytes: &[u8]) -> Sorted {
-        sort_keys(bytes, &self.escape, true, |name| self.takes(name))
+        sort_keys(bytes, &self.escape, "", true, |name| self.takes(name))
     }
 
     /// Pasted bytes: no escape key among them.
     pub fn sort_paste(&self, bytes: &[u8]) -> Sorted {
         match &self.keys {
             // Every key: the text, key by key, as ever.
-            None => sort_keys(bytes, "", true, |_| true),
+            None => sort_keys(bytes, "", "", true, |_| true),
             // Some keys: a paste is not typed, it is the app's.
             Some(_) => Sorted {
                 forward: bytes.to_vec(),
@@ -549,7 +560,7 @@ mod tests {
     #[test]
     fn reports_are_no_keys_of_a_focus() {
         let typed = b"a\x1b[<0;3;4M\x1b[I\x1b[M !!b\x1b[O\x1bc";
-        let sorted = sort_keys(typed, "esc", false, |_| true);
+        let sorted = sort_keys(typed, "esc", "", false, |_| true);
         let names: Vec<_> = sorted.taken.iter().map(|(n, _)| n.clone()).collect();
         assert_eq!(
             names,
@@ -557,6 +568,35 @@ mod tests {
         );
         assert_eq!(sorted.forward, b"\x1b[<0;3;4M\x1b[I\x1b[M !!\x1b[O");
         assert!(!sorted.released);
+    }
+
+    #[test]
+    fn the_close_key_stops_as_the_escape() {
+        // Legacy, kitty, modifyOtherKeys; its release event with it.
+        for typed in [
+            &b"\x18"[..],
+            b"\x1b[120;5u",
+            b"\x1b[120;5u\x1b[120;5:3u",
+            b"\x1b[27;5;120~",
+        ] {
+            let sorted = sort_keys(
+                &[b"a", typed, b"b"].concat(),
+                "esc",
+                "ctrl+x",
+                false,
+                |_| true,
+            );
+            assert!(sorted.closed && !sorted.released, "{typed:?}");
+            assert_eq!(sorted.taken.len(), 1);
+            assert_eq!(sorted.forward, b"b");
+        }
+        let sorted = sort_keys(b"\x1bb", "esc", "ctrl+x", false, |_| true);
+        assert!(!sorted.closed && !sorted.released);
+        let sorted = sort_keys(b"\x1b[27u\x18", "esc", "ctrl+x", false, |_| true);
+        assert!(!sorted.closed && sorted.released);
+        assert_eq!(sorted.forward, b"\x18");
+        assert_eq!(named_key("close", "ctrl+x").as_deref(), Ok("ctrl+x"));
+        assert!(named_key("close", "x").unwrap_err().starts_with("close:"));
     }
 
     #[test]
