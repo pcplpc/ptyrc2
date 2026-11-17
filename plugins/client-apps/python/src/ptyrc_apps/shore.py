@@ -18,7 +18,7 @@ What it shows:
 - A scene that is a function of the time: `Shore.picture` keeps no
   state but what the pointer did to the animals. A wave is a number:
   where its crest is, how far it ran, what it left, all follow from
-  it (`Wave`). One sprite in view cells, behind the text, 12 times a
+  it (`Wave`). One sprite in view cells, behind the text, 8 times a
   second, sent when it changed.
 - Few marks: a crest is a line of long strokes, a front one dot
   thick; the sand and the water between are left almost bare.
@@ -83,7 +83,7 @@ __all__ = [
 Ink = tuple[int, int, int]
 """A colour by light: day, dusk, night."""
 
-PERIOD = 1 / 12  # seconds a tick
+PERIOD = 1 / 8  # seconds a tick
 AREA = 80 * 24  # cells `--sand` counts over
 TILE = 64  # dots a side of the foam net
 
