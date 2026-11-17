@@ -59,6 +59,10 @@ If you need to remember what matters in life:
 
 ![cats](doc/cats.gif)
 
+Give them toys and snacks:
+
+![cats-2](doc/cats-2.gif)
+
 ### snake
 
 If you want to work on your ADHD as you are reviewing bad code:
