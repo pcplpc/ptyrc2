@@ -45,7 +45,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from ._canvas import RGB, Braille, Half, mix
 from ._sky import Sky
@@ -584,12 +584,18 @@ def _lighthouse(
     return [Mark("window", x, y - tall, thing.n, pane)]
 
 
+#: The colours shaded so far, by sky and depth.
+_SHADES: dict[tuple[Sky, float], dict[RGB, RGB]] = {}
+
+
 class _Lit:
     """`Sky.shade` at one depth, and the season."""
 
     def __init__(self, sky: Sky, depth: float, season: str) -> None:
         self.sky, self.depth, self.season = sky, depth, season
-        self.memo: dict[RGB, RGB] = {}
+        if len(_SHADES) >= 64 and (sky, depth) not in _SHADES:
+            _SHADES.clear()
+        self.memo = _SHADES.setdefault((sky, depth), {})
 
     def __call__(self, c: RGB) -> RGB:
         if c not in self.memo:
@@ -647,6 +653,40 @@ def _soil(
     return c
 
 
+#: The columns of ground painted, by what they are a function of.
+_GROUND: dict[Any, dict[int, tuple[int, tuple[RGB, ...]]]] = {}
+_GROUNDS = 24  # layers, skies and sizes kept
+_COLUMNS = 4096  # columns kept of each
+
+
+def _columns(
+    layer: Layer, sky: Sky, season: str, rows: int
+) -> dict[int, tuple[int, tuple[RGB, ...]]]:
+    """The columns of the ground of `layer` painted so far under `sky`
+    on `rows` pixel rows, by their place along the layer: the row of
+    the first pixel, the colours down from it."""
+    strip, colour, fields = layer.strip, layer.colour, layer.fields
+    key = (
+        (type(strip), strip.seed, strip.kind, strip.scale, strip.period),
+        (layer.depth, layer.base, layer.amp, layer.snow, layer.streak),
+        tuple(colour.items()) if isinstance(colour, dict) else colour,
+        tuple(layer.strata),
+        fields
+        and (
+            tuple((k, tuple(v)) for k, v in fields.crops.items()),
+            (type(fields), fields.wide, fields.deep, fields.lean, fields.hedge),
+        ),
+        (sky, season, rows),
+    )
+    columns = _GROUND.pop(key, None)
+    if columns is None or len(columns) >= _COLUMNS:
+        columns = {}
+    _GROUND[key] = columns  # the last used, last
+    while len(_GROUND) > _GROUNDS:
+        del _GROUND[next(iter(_GROUND))]
+    return columns
+
+
 def paint(
     half: Half,
     layer: Layer,
@@ -665,22 +705,31 @@ def paint(
     snow = lit(SNOW)
     blocky = layer.strip.kind == "city"
     plain = not (layer.fields or layer.strata or layer.streak)
+    # A column is a function of its place along the layer: a scroll
+    # paints again what it has painted.
+    columns = _columns(layer, sky, season, rows)
     for x in range(w):
-        high = layer.strip.height(x + shift)
-        top = round(layer.base - layer.amp * high)
-        white = 0
-        if layer.snow is not None and high > layer.snow:
-            jag = 0.5 + noise(layer.strip.seed, math.floor(x + shift), 9)
-            white = round((high - layer.snow) * layer.amp * jag) + 1
-        for y in range(max(0, top), rows):
-            if y - top < white:
-                c = snow
-            elif y == top and not blocky and high > 0:
-                c = rim
-            elif plain:
-                c = ground
-            else:
-                c = _soil(layer, lit, season, x + shift, y, y - top, ground)
+        column = columns.get(x + shift)
+        if column is None:
+            high = layer.strip.height(x + shift)
+            top = round(layer.base - layer.amp * high)
+            white = 0
+            if layer.snow is not None and high > layer.snow:
+                jag = 0.5 + noise(layer.strip.seed, math.floor(x + shift), 9)
+                white = round((high - layer.snow) * layer.amp * jag) + 1
+            under = []
+            for y in range(max(0, top), rows):
+                if y - top < white:
+                    c = snow
+                elif y == top and not blocky and high > 0:
+                    c = rim
+                elif plain:
+                    c = ground
+                else:
+                    c = _soil(layer, lit, season, x + shift, y, y - top, ground)
+                under.append(c)
+            column = columns[x + shift] = (max(0, top), tuple(under))
+        for y, c in enumerate(column[1], column[0]):
             half.px[y][x] = c
     if blocky:
         _city(half, layer, sky, shift, lit)

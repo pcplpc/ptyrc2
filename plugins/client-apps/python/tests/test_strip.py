@@ -365,3 +365,48 @@ def test_pale_at_night() -> None:
     assert sum(out[0]) > 2.5 * sum(out[1]) and out[0][2] > out[0][0]
     dark = NIGHT.shade((90, 160, 40))
     assert all(abs(a - b) <= 4 for a, b in zip(out[1], dark, strict=True))
+
+
+def test_paint_remembers() -> None:
+    """The columns kept from a paint to the next change no pixel, and
+    are those of the layer, the sky, the season and the size."""
+
+    def fresh(layer: Layer, sky: _sky.Sky, shift: float, season: str, h: int = 6):
+        _strip._GROUND.clear()
+        _strip._SHADES.clear()
+        half = Half(30, h)
+        _strip.paint(half, layer, sky, shift, season)
+        return half.px
+
+    fields = _strip.Fields({s: ((200, 180, 60), (90, 140, 50)) for s in _sky.SEASONS})
+    base = Layer(Strip(4, "hills"), 0.0, 10, 6, streak=0.3, snow=0.6, fields=fields)
+    others = [
+        (base, NOON, "summer", 6),
+        (replace(base, strip=Strip(5, "hills")), NOON, "summer", 6),
+        (replace(base, strip=Strip(4, "mountains")), NOON, "summer", 6),
+        (replace(base, amp=4), NOON, "summer", 6),
+        (replace(base, colour=(120, 90, 60)), NOON, "summer", 6),
+        (replace(base, fields=replace(fields, wide=5.0)), NOON, "summer", 6),
+        (replace(base, strata=((90, 60, 40), (150, 110, 80))), NOON, "summer", 6),
+        (replace(base, streak=0.0), NOON, "summer", 6),
+        (replace(base, depth=0.5, speed=1.0), NOON, "summer", 6),
+        (base, EVENING, "summer", 6),
+        (base, NOON, "winter", 6),
+        (base, NOON, "summer", 4),
+    ]
+    want = [
+        [fresh(layer, sky, shift, season, h) for shift in range(0, 40, 7)]
+        for layer, sky, season, h in others
+    ]
+    _strip._GROUND.clear()
+    for _ in range(2):  # the second time, every column is one kept
+        for (layer, sky, season, h), pixels in zip(others, want, strict=True):
+            for shift, px in zip(range(0, 40, 7), pixels, strict=True):
+                half = Half(30, h)
+                _strip.paint(half, layer, sky, shift, season)
+                assert half.px == px
+    assert len(_strip._GROUND) == len(others)
+    # Bounded: the oldest goes.
+    for seed in range(_strip._GROUNDS + 5):
+        _strip.paint(Half(4, 2), Layer(Strip(seed), 0.0, 3, 2), NOON)
+    assert len(_strip._GROUND) == _strip._GROUNDS
