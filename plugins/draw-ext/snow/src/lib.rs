@@ -184,6 +184,10 @@ pub struct Snow {
     loose: f32,
     /// Slumping runs right to left on odd frames.
     odd: bool,
+    /// `lying` over the canvas, row-major; empty: not known.
+    view: Vec<f32>,
+    /// Scratch: the snow of a row, `(column, eighths)`.
+    row: Vec<(usize, f32)>,
 }
 
 impl Snow {
@@ -204,6 +208,8 @@ impl Snow {
             owed: 0.0,
             loose: 0.0,
             odd: false,
+            view: Vec::new(),
+            row: Vec::new(),
         }
     }
 
@@ -217,6 +223,11 @@ impl Snow {
 
     /// Eighths of snow in the canvas cell.
     pub fn depth(&self, x: usize, y: usize) -> f32 {
+        if x < self.w
+            && let Some(depth) = self.view.get(y * self.w + x)
+        {
+            return *depth;
+        }
         let key = (self.origin.1 + y as i64, self.origin.0 + x as i64);
         self.lying.get(&key).copied().unwrap_or(0.0)
     }
@@ -229,13 +240,56 @@ impl Snow {
             .sum()
     }
 
+    /// The keys of the snow in the canvas row `y`, by column.
+    fn row_keys(&self, y: usize) -> std::ops::Range<(i64, i64)> {
+        let row = self.origin.1 + y as i64;
+        (row, self.origin.0)..(row, self.origin.0 + self.w as i64)
+    }
+
+    /// The next cell with snow of the row `y` after `x`, leftwards with
+    /// `back`; from the end of the row without `x`.
+    fn next_snow(&self, y: usize, x: Option<usize>, back: bool) -> Option<usize> {
+        let mut keys = self.row_keys(y);
+        match (x, back) {
+            (Some(x), false) => keys.start.1 += x as i64 + 1,
+            (Some(x), true) => keys.end.1 = keys.start.1 + x as i64,
+            (None, _) => {}
+        }
+        let mut found = self.lying.range(keys);
+        let (key, _) = if back {
+            found.next_back()
+        } else {
+            found.next()
+        }?;
+        Some((key.1 - self.origin.0) as usize)
+    }
+
     fn put(&mut self, x: usize, y: usize, depth: f32) {
         let key = (self.origin.1 + y as i64, self.origin.0 + x as i64);
+        let depth = depth.clamp(0.0, FULL);
         if depth > 0.0 {
-            self.lying.insert(key, depth.min(FULL));
+            self.lying.insert(key, depth);
         } else {
             self.lying.remove(&key);
         }
+        if x < self.w
+            && let Some(seen) = self.view.get_mut(y * self.w + x)
+        {
+            *seen = depth;
+        }
+    }
+
+    /// Read `lying` over the canvas again.
+    fn survey(&mut self) {
+        let mut view = std::mem::take(&mut self.view);
+        view.clear();
+        view.resize(self.w * self.h, 0.0);
+        for y in 0..self.h {
+            for ((_, x), depth) in self.lying.range(self.row_keys(y)) {
+                view[y * self.w + (x - self.origin.0) as usize] = *depth;
+            }
+        }
+        self.view = view;
     }
 
     /// Something holds snow in `(x, y)`: text, the blank between two
@@ -289,15 +343,13 @@ impl Snow {
             return;
         }
         self.odd = !self.odd;
-        let cols: Vec<usize> = if self.odd {
-            (0..self.w).rev().collect()
-        } else {
-            (0..self.w).collect()
-        };
         for y in 0..self.h {
-            for &x in &cols {
+            // The cells with snow, as they are when their turn comes.
+            let mut at = None;
+            while let Some(x) = self.next_snow(y, at, self.odd) {
+                at = Some(x);
                 // Only the top of a stack slides.
-                if self.depth(x, y) <= 0.0 || (y > 0 && self.depth(x, y - 1) > 0.0) {
+                if y > 0 && self.depth(x, y - 1) > 0.0 {
                     continue;
                 }
                 let sides = if self.odd {
@@ -441,12 +493,12 @@ impl Snow {
     /// The snow in sight: written over, melting, or let go.
     fn weather(&mut self, dt: f64) {
         let melt = FULL * (dt * 1000.0) as f32 / MELT_MS;
+        let mut row = std::mem::take(&mut self.row);
         for y in (0..self.h).rev() {
-            for x in 0..self.w {
-                let depth = self.depth(x, y);
-                if depth <= 0.0 {
-                    continue;
-                }
+            row.clear();
+            let snow = self.lying.range(self.row_keys(y));
+            row.extend(snow.map(|((_, x), depth)| ((x - self.origin.0) as usize, *depth)));
+            for &(x, depth) in &row {
                 if self.wall(x, y) {
                     self.put(x, y, 0.0);
                     continue;
@@ -465,6 +517,7 @@ impl Snow {
                 }
             }
         }
+        self.row = row;
     }
 
     fn draw(&self, secs: f64, canvas: &mut Canvas) {
@@ -487,12 +540,10 @@ impl Snow {
             canvas.put(f.col(secs) as i32, f.y as i32, FLAKES[face], &bright);
         }
         for y in 0..self.h {
-            for x in 0..self.w {
-                let depth = self.depth(x, y);
-                if depth > 0.0 {
-                    let level = (depth.ceil() as usize).clamp(1, 8);
-                    canvas.put(x as i32, y as i32, DRIFT[level - 1], &white);
-                }
+            for ((_, x), depth) in self.lying.range(self.row_keys(y)) {
+                let level = (depth.ceil() as usize).clamp(1, 8);
+                let x = (x - self.origin.0) as i32;
+                canvas.put(x, y as i32, DRIFT[level - 1], &white);
             }
         }
     }
@@ -510,11 +561,15 @@ impl Effect for Snow {
         }
         if (w, h) != (self.w, self.h) {
             (self.w, self.h) = (w, h);
+            self.view.clear();
             self.flakes.retain(|f| f.x < w as f64 && (f.y as usize) < h);
         }
         let dt = ms.saturating_sub(self.last.unwrap_or(ms)).min(CATCH_UP_MS) as f64 / 1000.0;
         self.last = Some(ms);
         let secs = ms as f64 / 1000.0;
+        if self.view.len() != w * h {
+            self.survey();
+        }
         self.weather(dt);
         self.slump(dt);
         self.spawn(dt);
@@ -534,14 +589,19 @@ impl Effect for Snow {
     fn look(&mut self, under: &Under) {
         let (w, h) = under.size;
         self.seen_w = w as usize;
-        self.ink = under.inked();
-        self.hot = (0..h)
-            .flat_map(|y| (0..w).map(move |x| (x, y)))
-            .map(|(x, y)| under.heat(x, y).is_some_and(|w| w.class == HeatClass::Hot))
-            .collect();
+        self.ink.clear();
+        self.hot.clear();
+        for y in 0..h {
+            for x in 0..w {
+                self.ink.push(under.ink(x, y));
+                let hot = under.heat(x, y).is_some_and(|w| w.class == HeatClass::Hot);
+                self.hot.push(hot);
+            }
+        }
         self.cursor = under.cursor;
         if under.origin != self.origin {
             self.origin = under.origin;
+            self.view.clear();
             let rows = (self.origin.1 - ATTIC, self.origin.1 + h as i64 + ATTIC);
             let cols = (self.origin.0 - ATTIC, self.origin.0 + w as i64 + ATTIC);
             self.lying
@@ -560,6 +620,7 @@ impl Effect for Snow {
             .filter_map(|(y, x)| Some(((y + dy, x), self.lying.remove(&(y, x))?)))
             .collect();
         self.lying.extend(snow);
+        self.view.clear();
     }
 
     fn tune(&mut self, params: &serde_json::Value) -> Result<(), String> {

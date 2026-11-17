@@ -321,3 +321,98 @@ fn a_shift_moves_the_snow_of_its_rows() {
     assert_eq!(row(&snow, 4, 0, 40), 8.0 * 5.0);
     assert_eq!(row(&snow, 2, 8, 16), 0.0);
 }
+
+/// A screen of `w` by `h` with a line of text every third row, and its
+/// heat.
+fn screen(w: u16, h: u16) -> (Grid, HeatView) {
+    let line = "words in the way ".repeat(w as usize / 20);
+    let rows: Vec<&str> = (0..h)
+        .map(|y| if y % 3 == 2 { line.as_str() } else { "" })
+        .collect();
+    let n = w as usize * h as usize;
+    let heat = HeatView {
+        cols: w,
+        rows: h,
+        safe: vec![1.0; n],
+        activity: vec![0.0; n],
+        occupancy: vec![0.0; n],
+        still: vec![60.0; n],
+        class: vec![Default::default(); n],
+    };
+    (Grid::from_lines(w, &rows), heat)
+}
+
+/// Microseconds of the fastest of forty runs of `f`.
+fn fastest(mut f: impl FnMut()) -> f64 {
+    (0..40)
+        .map(|_| {
+            let start = std::time::Instant::now();
+            f();
+            start.elapsed().as_secs_f64() * 1e6
+        })
+        .fold(f64::MAX, f64::min)
+}
+
+#[test]
+#[ignore = "prints the cost of a tick: cargo test --release -p ptyrc-draw-snow bench -- --ignored --nocapture"]
+fn bench() {
+    for (cover, rate) in [(false, 14), (true, 14), (true, 300)] {
+        for (w, h) in [(80, 24), (200, 50), (300, 80)] {
+            let (grid, heat) = screen(w, h);
+            let under = Under::of(&grid).with_heat(Some(&heat));
+            let mut snow = make(json!({"cover": cover, "rate": rate}));
+            let mut canvas = Canvas::new(w, h);
+            // Five minutes of snow, then a tick timed: the canvas
+            // cleared, the look, the render.
+            let warm = 300_000;
+            for t in (0..warm).step_by(FRAME_MS as usize) {
+                canvas.clear();
+                snow.look(&under);
+                snow.render(Duration::from_millis(t), &mut canvas);
+            }
+            let clear = fastest(|| canvas.clear());
+            let look = fastest(|| snow.look(&under));
+            let mut t = warm;
+            let render = fastest(|| {
+                t += FRAME_MS;
+                snow.render(Duration::from_millis(t), &mut canvas);
+            });
+            println!(
+                "snow cover={cover} rate={rate} {w}x{h}: clear {clear:.0} look {look:.0} render {render:.0} us; \
+                 {:.2}% of a core; {} flakes, {} cells of snow",
+                (clear + look + render) * 1e-4 * (1000 / FRAME_MS) as f64,
+                snow.flakes.len(),
+                snow.lying.len(),
+            );
+        }
+    }
+}
+
+#[test]
+fn the_view_of_the_snow_follows_a_scroll_and_a_shift() {
+    let agrees = |snow: &Snow| {
+        assert_eq!(snow.view.len(), snow.w * snow.h);
+        for y in 0..snow.h {
+            for x in 0..snow.w {
+                let key = (snow.origin.1 + y as i64, snow.origin.0 + x as i64);
+                let lying = snow.lying.get(&key).copied().unwrap_or(0.0);
+                assert_eq!(snow.depth(x, y), lying, "{x}, {y}");
+            }
+        }
+    };
+    let mut snow = make(json!({"rate": 200, "cover": true, "seed": 9}));
+    look(&mut snow, &TEXT, 0, &[(8, 3), (9, 3)], Some((20, 7)));
+    run(&mut snow, 8, 0, 40_000);
+    assert!(snow.lying() > 100.0);
+    agrees(&snow);
+    look(&mut snow, &TEXT, 2, &[], None);
+    run(&mut snow, 8, 40_050, 45_000);
+    agrees(&snow);
+    snow.shift(3, 5, -1);
+    look(&mut snow, &TEXT, 0, &[], None);
+    run(&mut snow, 8, 45_050, 50_000);
+    agrees(&snow);
+    // Another size: the view is read again.
+    run(&mut snow, 6, 50_050, 51_000);
+    agrees(&snow);
+}
