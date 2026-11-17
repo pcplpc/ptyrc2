@@ -22,13 +22,19 @@ Wrap any application with `ptyrc` as follows:
 ptyrc run vim ~/.vimrc
 ```
 
-Start it with a client app already on it:
+Then attach an application to it:
 
 ```sh
-ptyrc run --app bricks -- vim ~/.vimrc
+ptyrc app bricks
 ```
 
-You can use `ptyrc python` to start an interactive session:
+You can also wrap an existing `tmux` session using `ptyrc tmux attach`.
+
+Use then `ctrl+t ctrl+t` to manage the running driver:
+
+[tutorial](doc/tutorial.gif)
+
+You can also use `ptyrc python` to interact at a low level:
 
 ![pilot](doc/interact.gif)
 
@@ -68,17 +74,13 @@ uv tool install \
 
 Use `just uninstall` to remove them.
 
-To try without installing anything outside the clone:
+To try it without installing anything outside the clone:
 
 ```sh
 just run vim        # cargo build --release && uv sync, then ptyrc run vim
 ```
 
-Use double `ctrl+t ctrl+t` in an idle driver to open an app manager:
-
-![screenshot-monitor](doc/screenshot-monitor.jpg)
-
-Use `ptyrc tmux attach` inside a `tmux` session to wrap it inside a driver.
+No official release is available.
 
 ## Development
 
