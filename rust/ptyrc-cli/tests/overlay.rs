@@ -128,6 +128,10 @@ fn the_menu_in_the_session() {
         .filter_map(Value::as_str)
         .collect();
     assert_eq!(argv[1..], ["nap", "--long"]);
+    // The options given are kept, in the config directory.
+    let kept = sb.config().join("ptyrc").join("favorites.json");
+    let kept: Value = serde_json::from_str(&std::fs::read_to_string(kept).unwrap()).unwrap();
+    assert_eq!(kept, json!({"apps": {"nap": ["--long"]}}));
     wait_for(|| shown(c).contains("● nap --long"), "its row");
     // The apps started here come first: this test, a client that reads
     // the screen, is a row below.

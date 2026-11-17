@@ -85,6 +85,7 @@ pub fn run(client: Client) -> Result<ExitCode, Fail> {
     let seed = std::process::id() as u64 ^ 0x9e37_79b9_7f4a_7c15;
     let mut menu = Menu::new(&name, seed);
     menu.catalog(catalog);
+    menu.favorites(super::favorites::load());
     let mut runner = Runner::new(menu, session);
     let mut beat = Instant::now();
     let mut drawn: Option<Value> = None;

@@ -6,6 +6,7 @@
 //! and draws `render(w, h)`.
 
 use super::catalog::{App, Catalog, Kind};
+use super::favorites::Favorites;
 use serde_json::Value;
 
 /// How a run is drawn. `fg`: a colour name of the wire.
@@ -273,6 +274,11 @@ pub enum Action {
     Highlight(Option<u64>),
     /// Read its log, then `Menu::log`.
     Log(u64),
+    /// The options an app was last given: kept for its next form.
+    Remember {
+        name: String,
+        args: Vec<String>,
+    },
     /// The session chosen.
     Session(String),
     Quit,
@@ -460,6 +466,8 @@ enum Target {
 struct Form {
     target: Target,
     name: String,
+    /// An app of the catalog: its options are remembered.
+    known: bool,
     fields: Vec<Field>,
     sel: usize,
     editing: bool,
@@ -529,6 +537,7 @@ impl Form {
         Form {
             target,
             name: name.into(),
+            known: app.is_some(),
             fields,
             sel: 0,
             editing: false,
@@ -614,6 +623,31 @@ impl Form {
                 _ => {}
             }
         }
+    }
+
+    /// Set `-a, --all`, where there is one.
+    fn all(&mut self) {
+        if let Some(at) = self.field_of("--all")
+            && let FieldKind::Flag { on } = &mut self.fields[at].kind
+        {
+            *on = true;
+        }
+    }
+
+    /// The arguments to remember: a frame by id is of this session
+    /// only, and left out.
+    fn lasting(&self) -> Vec<String> {
+        let mut form = self.clone();
+        for field in &mut form.fields {
+            let frame = field.flags.iter().any(|f| f == "--frame");
+            if let FieldKind::Value { line } = &mut field.kind
+                && frame
+                && line.string().trim().parse::<u64>().is_ok()
+            {
+                *line = Line::default();
+            }
+        }
+        form.args()
     }
 
     /// The arguments the form stands for.
@@ -754,6 +788,7 @@ pub struct Menu {
     session: String,
     apps: Vec<AppInfo>,
     catalog: Option<Catalog>,
+    favorites: Favorites,
     stack: Vec<Screen>,
     note: Option<(String, bool)>,
     seed: u64,
@@ -822,6 +857,7 @@ impl Menu {
             session: session.into(),
             apps: Vec::new(),
             catalog: None,
+            favorites: Favorites::new(),
             stack: vec![Screen::Main { sel: 0, id: None }],
             note: None,
             seed: seed | 1,
@@ -872,6 +908,11 @@ impl Menu {
     pub fn catalog(&mut self, catalog: Option<Catalog>) {
         self.catalog = catalog;
         self.follow();
+    }
+
+    /// The options each app was last given.
+    pub fn favorites(&mut self, favorites: Favorites) {
+        self.favorites = favorites;
     }
 
     /// A line for the user, until the next key. `bad`: an error.
@@ -973,8 +1014,8 @@ impl Menu {
         self.seed
     }
 
-    /// An app of the catalog and one of its argument lists, never the
-    /// one drawn last.
+    /// An app of the catalog, never the one drawn last, with the
+    /// options it was last given, else one of its argument lists.
     fn random(&mut self) -> Option<Action> {
         let catalog = self.catalog.clone()?;
         let mut pool: Vec<&App> = catalog
@@ -986,7 +1027,10 @@ impl Menu {
             pool.retain(|a| Some(&a.name) != self.drawn.as_ref());
         }
         let app = *pool.get(self.rand() as usize % pool.len().max(1))?;
-        let args = app.random[self.rand() as usize % app.random.len()].clone();
+        let args = match self.favorites.get(&app.name) {
+            Some(args) => args.clone(),
+            None => app.random[self.rand() as usize % app.random.len()].clone(),
+        };
         self.drawn = Some(app.name.clone());
         Some(Action::Start {
             name: app.name.clone(),
@@ -1233,7 +1277,12 @@ impl Menu {
                     self.stack.pop();
                 } else if matches!(key, "enter" | "right") {
                     if let Some(app) = apps.get(*sel) {
-                        let form = Form::new(Target::Start, &app.name, Some(app));
+                        // As last given; never given: with all it has.
+                        let mut form = Form::new(Target::Start, &app.name, Some(app));
+                        match self.favorites.get(&app.name) {
+                            Some(args) => form.fill(args),
+                            None => form.all(),
+                        }
                         self.stack.push(Screen::Form(Box::new(form)));
                     }
                 } else if key != "space" && filter.key(key) {
@@ -1355,6 +1404,7 @@ impl Menu {
         match (&mut field.kind, key) {
             (FieldKind::Submit, "enter" | "space") => {
                 let args = form.args();
+                let kept = form.known.then(|| (form.name.clone(), form.lasting()));
                 let action = match &form.target {
                     Target::Start => Action::Start {
                         name: form.name.clone(),
@@ -1366,7 +1416,13 @@ impl Menu {
                     },
                 };
                 self.stack.truncate(1);
-                return vec![action];
+                let mut actions = Vec::new();
+                if let Some((name, args)) = kept {
+                    self.favorites.insert(name.clone(), args.clone());
+                    actions.push(Action::Remember { name, args });
+                }
+                actions.push(action);
+                return actions;
             }
             (FieldKind::Flag { on }, "enter" | "space" | "left" | "right") => *on = !*on,
             (FieldKind::Count { n }, "enter" | "space" | "right") => *n = (*n + 1) % 10,

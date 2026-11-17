@@ -135,6 +135,12 @@ fn screens() {
     println!("restart\n{}\n", shown(&m, 64, 18));
 }
 
+/// What a form of the catalog asks: its options kept, then `action`.
+fn kept(name: &str, args: &[&str], action: Action) -> Vec<Action> {
+    let (name, args) = (name.into(), s(args));
+    vec![Action::Remember { name, args }, action]
+}
+
 fn s(words: &[&str]) -> Vec<String> {
     words.iter().map(|w| w.to_string()).collect()
 }
@@ -292,10 +298,14 @@ fn start_with_defaults_is_enter_twice() {
     );
     assert_eq!(
         keys(&mut m, "down enter enter"),
-        [Action::Start {
-            name: "clock".into(),
-            args: vec![]
-        }]
+        kept(
+            "clock",
+            &[],
+            Action::Start {
+                name: "clock".into(),
+                args: vec![]
+            }
+        )
     );
     assert!(shown(&m, 64, 18).starts_with(" apps of"));
     // The same by the entry of the list.
@@ -321,10 +331,14 @@ fn start_filters_as_typed() {
     );
     assert_eq!(
         keys(&mut m, "enter enter"),
-        [Action::Start {
-            name: "snow".into(),
-            args: vec![]
-        }]
+        kept(
+            "snow",
+            &[],
+            Action::Start {
+                name: "snow".into(),
+                args: vec![]
+            }
+        )
     );
     // j, k, q, h are letters there; nothing matches: a dim row, enter
     // does nothing.
@@ -382,22 +396,22 @@ fn the_form() {
     // Typing does not leave: `q` is a letter there.
     keys(&mut m, "space q enter");
     let action = keys(&mut m, "home enter");
-    let args = s(&[
+    // Never configured: `-a, --all` was set.
+    let args = [
         "--speed",
         "34.5",
         "--rules",
         "--bonuses",
+        "--all",
         "--seed",
         "4 2",
         "q",
-    ]);
-    assert_eq!(
-        action,
-        [Action::Start {
-            name: "bricks".into(),
-            args
-        }]
-    );
+    ];
+    let start = Action::Start {
+        name: "bricks".into(),
+        args: s(&args),
+    };
+    assert_eq!(action, kept("bricks", &args, start));
 }
 
 #[test]
@@ -445,12 +459,13 @@ fn restart_with_other_options() {
         "--bubbles",
         "--all",
     ]);
+    let restart = Action::Restart {
+        id: 2,
+        argv: Some(argv),
+    };
     assert_eq!(
         keys(&mut m, "home enter"),
-        [Action::Restart {
-            id: 2,
-            argv: Some(argv)
-        }]
+        kept("fishes", &["--count", "12", "--bubbles", "--all"], restart)
     );
 }
 
@@ -487,13 +502,21 @@ fn a_form_is_filled_from_any_argv() {
         "ever",
         "--seed",
     ]);
-    assert_eq!(
-        keys(&mut m, "enter"),
-        [Action::Restart {
-            id: 1,
-            argv: Some(argv)
-        }]
-    );
+    // A frame by id is not kept.
+    let lasting = [
+        "--speed",
+        "20",
+        "--rules",
+        "--bonuses",
+        "--what",
+        "ever",
+        "--seed",
+    ];
+    let restart = Action::Restart {
+        id: 1,
+        argv: Some(argv),
+    };
+    assert_eq!(keys(&mut m, "enter"), kept("bricks", &lasting, restart));
     // Positionals have their line.
     app = info(1, "marks -i ERROR 'two words' --no-hud", "running");
     m.apps(vec![app]);
@@ -512,13 +535,12 @@ fn a_form_is_filled_from_any_argv() {
         "ERROR",
         "two words",
     ]);
-    assert_eq!(
-        keys(&mut m, "enter"),
-        [Action::Restart {
-            id: 1,
-            argv: Some(argv)
-        }]
-    );
+    let lasting = ["--ignore-case", "--no-hud", "ERROR", "two words"];
+    let restart = Action::Restart {
+        id: 1,
+        argv: Some(argv),
+    };
+    assert_eq!(keys(&mut m, "enter"), kept("marks", &lasting, restart));
     // A program that is no app of the catalog: one free line.
     let other = AppInfo::from_json(&json!({
         "id": 2, "kind": "child", "name": "sh", "argv": ["/bin/sh", "-c", "sleep 9"],
@@ -602,6 +624,17 @@ fn random_app() {
             .len(),
         11
     );
+    // An app configured is drawn as last given.
+    m.favorites([("bricks".to_string(), s(&["-r"]))].into());
+    let mut bricks = std::collections::BTreeSet::new();
+    for _ in 0..200 {
+        if let [Action::Start { name, args }] = &keys(&mut m, "end up enter")[..]
+            && name == "bricks"
+        {
+            bricks.insert(args.clone());
+        }
+    }
+    assert_eq!(bricks.into_iter().collect::<Vec<_>>(), [s(&["-r"])]);
 }
 
 #[test]
@@ -840,12 +873,58 @@ fn the_frame_of_a_form_is_picked() {
     // Opened again, it is on the frame chosen; a name will do.
     assert_eq!(keys(&mut m, "enter"), [Action::Highlight(Some(3))]);
     keys(&mut m, "end up enter");
-    let args = s(&["--frame", "quietest"]);
-    assert_eq!(
-        keys(&mut m, "home enter"),
-        [Action::Start {
-            name: "bricks".into(),
-            args
-        }]
-    );
+    let args = ["--all", "--frame", "quietest"];
+    let start = Action::Start {
+        name: "bricks".into(),
+        args: s(&args),
+    };
+    assert_eq!(keys(&mut m, "home enter"), kept("bricks", &args, start));
+}
+
+#[test]
+fn a_form_opens_as_last_given() {
+    let mut m = menu();
+    // Never configured: `-a, --all` set where there is one.
+    keys(&mut m, "s b r i enter");
+    let screen = shown(&m, 78, 22);
+    assert!(screen.contains("[x] -a, --all"), "{screen}");
+    assert!(screen.contains("[ ] -r, --rules"), "{screen}");
+    keys(&mut m, "esc esc esc s f l o w enter");
+    let screen = shown(&m, 78, 22);
+    assert!(screen.contains("[ ] -a, --anywhere"), "{screen}");
+    // Submitted: the next form of the app is as that one.
+    keys(&mut m, "esc esc esc s b r i enter");
+    keys(&mut m, "down enter 9 enter end up up up space");
+    let args = ["--speed", "9"];
+    let start = Action::Start {
+        name: "bricks".into(),
+        args: s(&args),
+    };
+    assert_eq!(keys(&mut m, "home enter"), kept("bricks", &args, start));
+    keys(&mut m, "s b r i enter");
+    let screen = shown(&m, 78, 22);
+    assert!(screen.contains("[ ] -a, --all"), "{screen}");
+    assert!(screen.contains("--speed           9 "), "{screen}");
+    // A restart with other options is remembered too.
+    keys(&mut m, "esc esc esc home down e end up up space");
+    assert!(matches!(
+        &keys(&mut m, "home enter")[..],
+        [Action::Remember { name, .. }, Action::Restart { .. }] if name == "fishes"
+    ));
+    keys(&mut m, "s f i s h enter");
+    let screen = shown(&m, 78, 22);
+    assert!(screen.contains("[x] -d, --decorate") && screen.contains("--count        12 "));
+    // What the front read of the config directory.
+    m.favorites([("snake".to_string(), s(&["-x", "--speed=3"]))].into());
+    keys(&mut m, "esc esc esc s s n a enter");
+    let screen = shown(&m, 78, 22);
+    assert!(screen.contains("[x] -x, --enemies") && screen.contains("[ ] -a, --all"));
+    assert!(screen.contains("--speed        3 "), "{screen}");
+    // A program that is no app of the catalog: nothing kept.
+    let mut m = Menu::new("x", 1);
+    m.apps(vec![info(1, "bricks -a", "running")]);
+    assert!(matches!(
+        &keys(&mut m, "e enter")[..],
+        [Action::Restart { .. }]
+    ));
 }

@@ -162,6 +162,7 @@ impl Term {
         let seed = std::process::id() as u64 ^ (Instant::now().elapsed().as_nanos() as u64 + 1);
         let mut menu = Menu::new(&name, seed);
         menu.catalog(catalog);
+        menu.favorites(super::favorites::load());
         let mut runner = Runner::new(menu, session);
         let mut beat = Instant::now();
         let ended = loop {

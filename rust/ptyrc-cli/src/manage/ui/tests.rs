@@ -13,6 +13,9 @@ struct Fake {
     /// The next start ends at once with this on stderr.
     broken: Option<String>,
     logs: Vec<(u64, String)>,
+    /// What was to remember; `read_only`: it cannot be.
+    kept: Vec<String>,
+    read_only: bool,
 }
 
 impl Fake {
@@ -95,6 +98,15 @@ impl Backend for Fake {
     fn highlight(&mut self, frame: Option<u64>) {
         self.lit.push(frame);
     }
+
+    fn remember(&mut self, name: &str, args: &[String]) -> Result<(), Fail> {
+        if self.read_only {
+            return Err("read-only file system".into());
+        }
+        self.kept
+            .push(format!("{name} {}", args.join(" ")).trim().to_string());
+        Ok(())
+    }
 }
 
 fn runner() -> Runner<Fake> {
@@ -166,6 +178,29 @@ fn an_app_that_ends_at_once_says_why() {
     assert!(r.tick(t0 + EARLY));
     assert!(
         screen(&r).contains("confetti: ended at once, status 2"),
+        "{}",
+        screen(&r)
+    );
+}
+
+#[test]
+fn options_are_remembered() {
+    let mut r = runner();
+    let t0 = Instant::now();
+    // Never configured: with `-a, --all`; then as last given.
+    keys(&mut r, "s enter enter", t0);
+    assert_eq!(r.backend.asked.last().unwrap(), "start confetti --all");
+    keys(&mut r, "s enter end up up up up space home enter", t0);
+    assert_eq!(r.backend.asked.last().unwrap(), "start confetti");
+    keys(&mut r, "s enter enter", t0);
+    assert_eq!(r.backend.asked.last().unwrap(), "start confetti");
+    assert_eq!(r.backend.kept, ["confetti --all", "confetti", "confetti"]);
+    // Not kept: said, and the app starts all the same.
+    r.backend.read_only = true;
+    keys(&mut r, "s down enter enter", t0);
+    assert_eq!(r.backend.asked.last().unwrap(), "start clock");
+    assert!(
+        screen(&r).contains("options not remembered: read-only file system"),
         "{}",
         screen(&r)
     );

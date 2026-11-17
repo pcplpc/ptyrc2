@@ -31,10 +31,16 @@ impl Sandbox {
         self.dir.join("ptyrc").join(format!("{name}.sock"))
     }
 
+    /// The config directory of the test: never the user's.
+    pub fn config(&self) -> PathBuf {
+        self.dir.join("config")
+    }
+
     pub fn ptyrc(&self) -> Command {
         let mut command = Command::new(BIN);
         command
             .env("XDG_RUNTIME_DIR", &self.dir)
+            .env("XDG_CONFIG_HOME", self.config())
             .env_remove("PTYRC_SESSION")
             .env_remove("PTYRC_SOCKET");
         command
@@ -80,6 +86,10 @@ impl Sandbox {
             (
                 "XDG_RUNTIME_DIR".to_string(),
                 self.dir.to_string_lossy().into_owned(),
+            ),
+            (
+                "XDG_CONFIG_HOME".to_string(),
+                self.config().to_string_lossy().into_owned(),
             ),
             ("PS1".to_string(), "$ ".to_string()),
             ("ENV".to_string(), String::new()),

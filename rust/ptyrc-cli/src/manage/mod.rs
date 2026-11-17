@@ -3,6 +3,7 @@
 //! `ui.rs`.
 
 pub mod catalog;
+pub mod favorites;
 pub mod menu;
 mod overlay;
 mod tty;

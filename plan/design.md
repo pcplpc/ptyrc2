@@ -1172,7 +1172,7 @@ are named as `input.grab` names them, on both.
   `sno` enter enter starts snow). There `jkqh` are letters: `↑↓`
   move, `backspace` edits, `esc` or `←` clears, then goes back.
 - Form: first the row that starts (`▶ start bricks`: enter twice from
-  the list starts with the defaults); then a row per option, the frame
+  the list starts it as the form opens); then a row per option, the frame
   last: a flag is a checkbox (`space`, `enter`), a count and a choice
   change with `←→`, a value is typed (`enter` edits, `enter` or `esc`
   ends, `backspace` clears; unset, its default shows dim); then the
@@ -1181,6 +1181,17 @@ are named as `input.grab` names them, on both.
   with other options opens it filled from the `argv` running; words it
   does not know go to `more arguments`; a program that is no app of
   the catalog has that line alone.
+- Favorites: a form of an app of the catalog, submitted (start or
+  restart), has its arguments kept by name, a `--frame` by id left
+  out: `$XDG_CONFIG_HOME/ptyrc/favorites.json`, else
+  `~/.config/ptyrc/favorites.json`, `{"apps":{NAME:[ARG,...]}}`, read
+  when the menu opens, read again and replaced by a rename at each
+  submit (`Action::Remember`); not written: said, the app starts all
+  the same. A start form opens filled from them; an app with none
+  opens with its flag `--all` set, when it has one. `random app`
+  starts an app that has some with them, else with one of its
+  `random` lists. The verbs of `ptyrc manage` neither read nor write
+  them.
 - Frames (`f` on the main list, `frames…` among its rows): the
   frames on screen but chrome, one a row: id, kind, size, idle or
   busy, the apps on it (`app.list`, `frames`); its key or preset is the

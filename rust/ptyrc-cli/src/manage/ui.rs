@@ -3,6 +3,7 @@
 //! session tells is shown. Shared by the two fronts.
 
 use super::catalog::{self, Catalog};
+use super::favorites;
 use super::menu::{Action, AppInfo, FrameInfo, Menu, State};
 use super::{overlay, tty};
 use crate::{Common, Fail};
@@ -34,6 +35,10 @@ pub trait Backend {
     fn log(&mut self, app: &AppInfo) -> Vec<String>;
     /// Show a frame on the screen itself; `None`: no more.
     fn highlight(&mut self, _frame: Option<u64>) {}
+    /// Keep the options an app was last given.
+    fn remember(&mut self, _name: &str, _args: &[String]) -> Result<(), Fail> {
+        Ok(())
+    }
 }
 
 /// What a key leaves the front to do.
@@ -85,6 +90,7 @@ impl<B: Backend> Runner<B> {
     /// A key of the user.
     pub fn key(&mut self, key: &str, now: Instant) -> Flow {
         let mut flow = Flow::Stay;
+        let mut kept = None;
         for action in self.menu.key(key) {
             let done = match &action {
                 Action::Quit => {
@@ -97,6 +103,12 @@ impl<B: Backend> Runner<B> {
                 }
                 Action::Highlight(frame) => {
                     self.backend.highlight(*frame);
+                    continue;
+                }
+                Action::Remember { name, args } => {
+                    if let Err(fail) = self.backend.remember(name, args) {
+                        kept = Some(format!("options not remembered: {}", fail.message));
+                    }
                     continue;
                 }
                 Action::Log(id) => {
@@ -122,6 +134,9 @@ impl<B: Backend> Runner<B> {
                     self.refresh();
                     if let (Action::Start { .. }, Some(id)) = (&action, started) {
                         self.menu.select(id);
+                    }
+                    if let Some(why) = kept.take() {
+                        self.menu.note(&why, true);
                     }
                 }
                 Err(fail) => {
@@ -289,6 +304,10 @@ impl Backend for Session {
         let lines: Vec<&str> = text.lines().collect();
         let from = lines.len().saturating_sub(LOG_LINES);
         lines[from..].iter().map(|l| l.to_string()).collect()
+    }
+
+    fn remember(&mut self, name: &str, args: &[String]) -> Result<(), Fail> {
+        Ok(favorites::remember(name, args)?)
     }
 
     /// A front tint over the view of the frame. Errors are not told:
