@@ -1,18 +1,13 @@
-> This has been produced with assistance of generative coding agents.
->
-> This file was written by a human. Use at your own risk.
+> This file was written by a human. The project uses generative coding.
 
-## `ptyrc2` – the pty remote controller
+# ptyrc2
 
 This started as [`ptyrc`](https://github.com/pcplpc/ptyrc) a work done by hand
-with the love of a human, now with slop and unreviewed code.
-
-The initial goal was to wrap a CLI application like [`vim`](https://vim.org) to
-add confetti to its output.
-
-See the [`GALLERY.md`](GALLERY.md) if you want to see only the pictures.
+with the love of a human, now rebuild by the machine.
 
 ![main-demo](doc/main.gif)
+
+See the [`GALLERY.md`](GALLERY.md) if you want to see all the pictures.
 
 ## Usage
 
@@ -32,13 +27,11 @@ You can also wrap an existing `tmux` session using `ptyrc tmux attach`.
 
 Use then `ctrl+t ctrl+t` to manage the running driver:
 
-[tutorial](doc/tutorial.gif)
+![tutorial](doc/tutorial.gif)
 
-You can also use `ptyrc python` to interact at a low level:
+You can also use `ptyrc python` to [pilot](doc/interact.gif) your session.
 
-![pilot](doc/interact.gif)
-
-Running `ptyrc python script.py` runs the script with `pilot` defined.
+Running `ptyrc python script.py` runs a client script with `pilot` exposed.
 
 ## Install from source
 
