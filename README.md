@@ -12,7 +12,7 @@ add confetti to its output.
 
 See the [`GALLERY.md`](GALLERY.md) if you want to see only the pictures.
 
-![confetti](doc/confetti-all.gif)
+![main-demo](doc/main.gif)
 
 ## Usage
 
