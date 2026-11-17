@@ -4,15 +4,16 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import time
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from typing import Any, ClassVar
 
 from ptyrc import Pilot, PtyrcError, Widget, clock
 
 from . import _cli
 
-__all__ = ["FRONT", "Deck", "options"]
+__all__ = ["FRONT", "Deck", "Keys", "options"]
 
 Size = tuple[int, int]
 #: What of a widget's info a hover stands on.
@@ -24,6 +25,10 @@ Render = Callable[[int, int], Any]
 #: Returning False: nothing changed, the widget is not drawn again.
 Move = Callable[[int, int], Any]
 Leave = Callable[[], Any]
+#: `key(name)`: a key of the host keyboard, for the focused widget.
+#: Returning False: nothing changed, the widget is not drawn again.
+Key = Callable[[str], Any]
+Paste = Callable[[str], Any]
 #: The help of `--front`: `_catalog` knows an app made of widgets by it.
 FRONT = "over the app's text"
 
@@ -47,6 +52,46 @@ def options(
     out.add_argument("--front", action="store_true", help=FRONT)
 
 
+class Keys:
+    """The `input` events of a focused widget, as keys and pastes.
+
+    `feed(data)`: `("key", name)`, `("paste", text)` (a bracketed
+    paste whole, its lines parted by `\\n`), or None: nothing yet, or
+    a key without a name. The arrows with shift, which the driver does
+    not name, are `shift+up`, `shift+down`, `shift+left`,
+    `shift+right`."""
+
+    START, END = b"\x1b[200~", b"\x1b[201~"
+    SHIFTED: ClassVar[dict[bytes, str]] = {
+        b"\x1b[1;2A": "shift+up",
+        b"\x1b[1;2B": "shift+down",
+        b"\x1b[1;2C": "shift+right",
+        b"\x1b[1;2D": "shift+left",
+    }
+
+    def __init__(self) -> None:
+        self._paste: bytearray | None = None
+
+    def reset(self) -> None:
+        """The focus was lost: a paste under way is dropped."""
+        self._paste = None
+
+    def feed(self, data: dict[str, Any]) -> tuple[str, str] | None:
+        raw = base64.b64decode(data.get("bytes") or "")
+        if self._paste is not None:
+            if raw != self.END:
+                self._paste += raw
+                return None
+            text = self._paste.decode("utf-8", "replace")
+            self._paste = None
+            return ("paste", text.replace("\r\n", "\n").replace("\r", "\n"))
+        if raw == self.START:
+            self._paste = bytearray()
+            return None
+        name = data.get("key") or self.SHIFTED.get(raw)
+        return None if name is None else ("key", name)
+
+
 class Deck:
     """The widgets of an app. Each has a `render(w, h)`; the driver
     chooses the variant and the place, the deck draws what is shown.
@@ -59,6 +104,8 @@ class Deck:
     the others once a period, in one batch. A hidden widget is not
     rendered. On the topic `move` its tags are shown again on the frame
     named (`move`). `on_hover`: the host mouse over a widget.
+    `interact`: the keys of the host keyboard, once the user focused
+    it. An app with its own loop gives each event to `handle`.
     """
 
     #: Session seconds without a move after which a hover is over: the
@@ -81,6 +128,7 @@ class Deck:
         self._hover: dict[int, tuple[Move, Leave | None]] = {}
         self._over: Widget | None = None
         self._over_until: float | None = None
+        self._keys: dict[int, tuple[Key, Paste | None, Keys]] = {}
         pilot.subscribe("widgets", "exit")
         _cli.movable(pilot)
 
@@ -197,6 +245,86 @@ class Deck:
         if leave is not None and leave() is not False:
             self.draw(widget)
 
+    def interact(
+        self,
+        widget: Widget,
+        key: Key,
+        *,
+        quiet: bool = True,
+        escape: str | bool | None = None,
+        paste: Paste | None = None,
+    ) -> None:
+        """`widget`, a widget of the deck, asks for the keyboard
+        (`Widget.ask`): the user focuses it with ctrl+t twice.
+
+        `key(name)`: each key while it is focused, named as the driver
+        names them (and `Keys.SHIFTED`); `paste(text)`: a bracketed
+        paste, dropped without a handler. After either the widget is
+        drawn again, unless the handler returned False; and when the
+        focus comes or goes: its `render` reads `widget.focused`.
+        `quiet`: it does not wait for an answer. The escape key
+        (`escape`) never comes: the driver takes it."""
+        widget.ask(quiet=quiet, escape=escape)
+        self._keys[id(widget)] = (key, paste, Keys())
+
+    def input(self, data: dict[str, Any]) -> Widget | None:
+        """Give the data of an `input` event to the widget it names;
+        that widget, if it is one that interacts."""
+        for widget, _ in self.widgets:
+            if id(widget) in self._keys and widget.id == data.get("widget"):
+                break
+        else:
+            return None
+        key, paste, keys = self._keys[id(widget)]
+        if "released" in data:
+            keys.reset()
+            changed = widget.focused
+            widget.info = {**widget.info, "focused": False}
+        else:
+            # The key may come before the `widgets` event of the focus.
+            changed = not widget.focused
+            widget.info = {**widget.info, "focused": True}
+            fed = keys.feed(data)
+            if fed is not None and fed[0] == "key":
+                changed = key(fed[1]) is not False or changed
+            elif fed is not None and paste is not None:
+                changed = paste(fed[1]) is not False or changed
+        if changed:
+            self.draw(widget)
+        return widget
+
+    def handle(self, event: tuple[str, Any] | None) -> bool:
+        """Give an event of the pilot, `(topic, data)`: `hover`,
+        `move`, `input`, `widgets`. A widget whose variant or focus
+        changed is drawn again. False: not one of these."""
+        if event is None:
+            return False
+        topic, data = event
+        if topic == "hover":
+            self.hover(data)
+        elif topic == "move":
+            self.move(data["frame"])
+        elif topic == "input":
+            self.input(data)
+        elif topic == "widgets":
+            was = {id(w): (w.variant, w.focused, w.asks) for w, _ in self.widgets}
+            over = {} if self._over is None else self._over.info
+            widget = self.take(data)
+            # The widget under the mouse moved, changed or went.
+            if widget is self._over is not None and any(
+                over.get(k) != widget.info.get(k) for k in _PLACE
+            ):
+                self.leave()
+            if widget is not None and id(widget) in self._keys and not widget.focused:
+                self._keys[id(widget)][2].reset()
+            # Moved only: what it shows stands.
+            now = widget and (widget.variant, widget.focused, widget.asks)
+            if widget is not None and now != was[id(widget)]:
+                self.draw(widget)
+        else:
+            return False
+        return True
+
     def take(self, data: dict[str, Any]) -> Widget | None:
         """Give the data of a `widgets` event to the widget it tells
         of; that widget, if it is of the deck."""
@@ -238,24 +366,6 @@ class Deck:
             event = self.pilot.event(timeout=max(0.0, wake - now))
             if event is None:
                 continue
-            if event[0] == "hover":
-                self.hover(event[1])
-                continue
             if event[0] == "exit":
                 return
-            if event[0] == "move":
-                self.move(event[1]["frame"])
-                continue
-            if event[0] != "widgets":
-                continue
-            shown = {id(w): w.variant for w, _ in self.widgets}
-            over = {} if self._over is None else self._over.info
-            widget = self.take(event[1])
-            # The widget under the mouse moved, changed or went.
-            if widget is self._over is not None and any(
-                over.get(k) != widget.info.get(k) for k in _PLACE
-            ):
-                self.leave()
-            # Moved only: what it shows stands.
-            if widget is not None and widget.variant != shown[id(widget)]:
-                self.draw(widget)
+            self.handle(event)
