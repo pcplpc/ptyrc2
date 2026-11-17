@@ -12,7 +12,9 @@ What it shows:
   time: where it falls, how it swirls after a shake. No state but the
   time of the last shake;
 - a widget without a border: the dome is the content;
-- `_widgets.Deck`: the driver picks the variant and the place.
+- `_widgets.Deck`: the driver picks the variant and the place;
+- ten draws a second, thirty while the snow swirls (`swirls`): a flake
+  thrown by a shake goes cells a draw else.
 
 Bare: a house between two trees under a dome, a little snow falling.
 More, each on its own flag; `-a` for all:
@@ -52,6 +54,7 @@ __all__ = [
     "auto",
     "main",
     "scene",
+    "swirls",
     "which",
 ]
 
@@ -61,6 +64,7 @@ Rows = list[list[Run]]
 Cell = dict[str, object]
 
 PERIOD = 0.1  # seconds between two draws
+BRISK = 1 / 30  # while the snow swirls: it goes cells a draw else
 EVERY = 45.0  # seconds between two shakes
 SETTLE = 20.0  # seconds for the snow to lie, after a shake
 SWIRL = 1.3  # seconds: the swirl dies by e
@@ -388,6 +392,18 @@ def _flakes(
     return out
 
 
+def _since(t: float, look: Look, shaken: float | None) -> float | None:
+    """Seconds at `t` since the last shake, by itself or by a hand."""
+    last = max((s for s in (auto(t, look), shaken) if s is not None), default=None)
+    return None if last is None or last > t else t - last
+
+
+def swirls(t: float, look: Look, shaken: float | None = None) -> bool:
+    """Whether the snow still swirls at `t`."""
+    since = _since(t, look, shaken)
+    return since is not None and math.exp(-since / SWIRL) > 0.02
+
+
 def _dome(w: int, h: int) -> Dome:
     return next(d for d in DOMES if d.size == (w, h))
 
@@ -404,8 +420,7 @@ def scene(
     `shaken`: when a hand last shook it; `shakes`: how many times."""
     look = look or Look()
     dome = _dome(w, h)
-    last = max((s for s in (auto(t, look), shaken) if s is not None), default=None)
-    since = None if last is None or last > t else t - last
+    since = _since(t, look, shaken)
     if look.shake:
         shakes += int(t // look.every) + (auto(t, look) is not None) - 1
     grid: list[list[Cell]] = []
@@ -547,7 +562,8 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None) -> None:
         lambda x, y: hand.on_move(x, y) or False,
         lambda: hand.on_leave() or False,
     )
-    deck.run(period=PERIOD, seconds=seconds)
+    # Ten draws a second; thirty while a shake throws the flakes around.
+    deck.run(lambda: BRISK if swirls(now(), look, hand.at) else PERIOD, seconds)
 
 
 def _size(text: str) -> Size:

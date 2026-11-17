@@ -116,6 +116,19 @@ def test_shake() -> None:
                     assert (x, y) in dome.free()
 
 
+def test_swirls() -> None:
+    """The draws are brisk while a shake throws the flakes, no longer."""
+    calm, shaking = globe.Look(), globe.Look(shake=True)
+    assert not globe.swirls(50.0, calm)
+    assert globe.swirls(50.0, calm, shaken=49.0)
+    assert not globe.swirls(50.0, calm, shaken=40.0)
+    assert not globe.swirls(50.0, calm, shaken=51.0)  # not yet
+    at = globe.auto(100.0, shaking)
+    assert at is not None and globe.swirls(at + 0.5, shaking)
+    assert not globe.swirls(at + 8.0, shaking) and not globe.swirls(at - 0.5, shaking)
+    assert globe.BRISK < globe.PERIOD
+
+
 def test_drift() -> None:
     look = globe.Look(drift=True)
 
