@@ -148,3 +148,12 @@ def test_a_line_typed_then_dismissed(
     os.write(host.master, b"\x03")
     assert asked.end() == 1
     assert capsys.readouterr().out == ""
+
+    # Closed by its key: dismissed, the widget gone.
+    asked = Asked(pilot, "Sure?", "yes", "no")
+    info = asked.until(lambda w: w["asks"] == "loud")
+    pilot.focus(info["id"])
+    os.write(host.master, b"\x18")
+    assert asked.end() == 1
+    assert capsys.readouterr().out == ""
+    assert not [w for w in pilot.widgets() if w["tag"] == "ask"]

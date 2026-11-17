@@ -29,6 +29,8 @@ Leave = Callable[[], Any]
 #: Returning False: nothing changed, the widget is not drawn again.
 Key = Callable[[str], Any]
 Paste = Callable[[str], Any]
+#: `closed()`: the widget was closed by its key, out of the deck.
+Closed = Callable[[], Any]
 #: The help of `--front`: `_catalog` knows an app made of widgets by it.
 FRONT = "over the app's text"
 
@@ -65,7 +67,9 @@ class Deck:
     rendered. On the topic `move` its tags are shown again on the frame
     named (`move`). `on_hover`: the host mouse over a widget.
     `interact`: the keys of the host keyboard, once the user focused
-    it. An app with its own loop gives each event to `handle`.
+    it; closed by its key, the widget leaves the deck, and `run` ends
+    with the last. An app with its own loop gives each event to
+    `handle`.
     """
 
     #: Session seconds without a move after which a hover is over: the
@@ -89,6 +93,7 @@ class Deck:
         self._over: Widget | None = None
         self._over_until: float | None = None
         self._keys: dict[int, tuple[Key, Paste | None, Keys]] = {}
+        self._closed: dict[int, Closed] = {}
         pilot.subscribe("widgets", "exit")
         _cli.movable(pilot)
 
@@ -212,7 +217,9 @@ class Deck:
         *,
         quiet: bool = True,
         escape: str | bool | None = None,
+        close: str | bool | None = None,
         paste: Paste | None = None,
+        closed: Closed | None = None,
     ) -> None:
         """`widget`, a widget of the deck, asks for the keyboard
         (`Widget.ask`): the user focuses it with ctrl+t twice.
@@ -223,9 +230,25 @@ class Deck:
         drawn again, unless the handler returned False; and when the
         focus comes or goes: its `render` reads `widget.focused`.
         `quiet`: it does not wait for an answer. The escape key
-        (`escape`) never comes: the driver takes it."""
-        widget.ask(quiet=quiet, escape=escape)
+        (`escape`) never comes: the driver takes it. Nor the close key
+        (`close`, ctrl+x): the driver hides the widget; it leaves the
+        deck (`drop`), then `closed()`."""
+        widget.ask(quiet=quiet, escape=escape, close=close)
         self._keys[id(widget)] = (key, paste, Keys())
+        if closed is not None:
+            self._closed[id(widget)] = closed
+
+    def drop(self, widget: Widget) -> None:
+        """`widget` leaves the deck: no longer rendered, its handlers
+        forgotten. The driver is not told."""
+        if widget is self._over:
+            self._over, self._over_until = None, None
+        self.widgets = [(w, r) for w, r in self.widgets if w is not widget]
+        for table in (self._show, self._sizes, self._hover, self._keys):
+            table.pop(id(widget), None)
+        closed = self._closed.pop(id(widget), None)
+        if closed is not None:
+            closed()
 
     def input(self, data: dict[str, Any]) -> Widget | None:
         """Give the data of an `input` event to the widget it names;
@@ -236,6 +259,11 @@ class Deck:
         else:
             return None
         key, paste, keys = self._keys[id(widget)]
+        if data.get("released") == "close":
+            gone = {"state": "gone", "asks": None, "focused": False}
+            widget.info = {**widget.info, **gone}
+            self.drop(widget)
+            return widget
         if "released" in data:
             keys.reset()
             changed = widget.focused
@@ -298,7 +326,8 @@ class Deck:
         align: bool = False,
         every: bool = False,
     ) -> None:
-        """Keep the deck fresh until the session ends, or for `seconds`.
+        """Keep the deck fresh until the session ends, the last widget
+        is closed, or for `seconds`.
         `tick`: the app's work before each periodic draw (read its
         data). `period`: seconds, or what gives them after each draw.
         `align`: draw on the multiples of `period` of the wall clock,
@@ -329,3 +358,5 @@ class Deck:
             if event[0] == "exit":
                 return
             self.handle(event)
+            if not self.widgets:
+                return

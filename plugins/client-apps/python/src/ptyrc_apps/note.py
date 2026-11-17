@@ -22,7 +22,8 @@ yellow ground and the border `POSTIT`; `-a`: `-c -x -p`.
 `-i`: the notes are quiet interactive widgets (`Deck.interact`).
 Focused, a note is a list, an item a row, with a bar (`Desk`): `space`
 or `enter` ticks a box, `a` adds one under the bar, `e` edits the
-words, `d` then `y` deletes, `shift+↑↓` (`K`, `J`) moves the item.
+words, `d` then `y` deletes, `shift+↑↓` (`K`, `J`) moves the item;
+ctrl+x closes the note, the app ends with the last.
 Each change is one of a line of the file (`change`), written at once
 by a rename (`edit`); the other lines are kept as they are. A file
 that changed since it was read is read again, the key is lost. With
@@ -335,6 +336,7 @@ class Desk:
             ("e edit", 3),
             ("d delete", 4),
             ("⇧↑↓ move", 5),
+            ("^X close", 6),
             ("esc leave", 0),
         ]
 
@@ -629,6 +631,8 @@ def live(pilot: Pilot, args: argparse.Namespace, seconds: float | None) -> None:
     turn, since = 0, clock.monotonic()
     hands: bool = getattr(args, "interactive", False)
     widgets: list[_widgets.Widget] = []
+    #: The notes closed by their key (ctrl+x): out of the deck.
+    gone: set[int] = set()
     desks: list[Desk] = []
 
     def which(n: int) -> int:
@@ -688,10 +692,14 @@ def live(pilot: Pilot, args: argparse.Namespace, seconds: float | None) -> None:
     if hands:
         desks += [Desk() for _ in widgets]
         for n, widget in enumerate(widgets):
-            deck.interact(widget, key(n), paste=desks[n].paste)
+            deck.interact(
+                widget, key(n), paste=desks[n].paste, closed=lambda n=n: gone.add(n)
+            )
 
     def sync() -> None:
         for n, widget in enumerate(widgets):
+            if n in gone:
+                continue
             if (new := sizes(n)) != declared[n]:
                 declared[n] = new
                 deck.resize(widget, named(new))
@@ -725,6 +733,8 @@ def live(pilot: Pilot, args: argparse.Namespace, seconds: float | None) -> None:
             return
         was = [w.focused for w in widgets]
         deck.handle(event)
+        if hands and not deck.widgets:
+            return
         for n, desk in enumerate(desks):
             # The focus lost: what was typed is dropped.
             if was[n] and not widgets[n].focused and desk.rest():

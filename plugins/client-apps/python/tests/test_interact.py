@@ -173,3 +173,38 @@ def test_interact_survives_a_move() -> None:
     assert len(pilot.named("widget.ask")) == 1
     deck.handle(key("a", b"a"))
     assert seen == ["a"]
+
+
+def test_interact_closed() -> None:
+    pilot = Script()
+    deck = _widgets.Deck(pilot)  # type: ignore[arg-type]
+    seen: list[str] = []
+    closed: list[str] = []
+    one = deck.add("one", [(6, 2)], lambda w, h: [""] * h)
+    two = deck.add("two", [(6, 2)], lambda w, h: [""] * h)
+    deck.interact(one, seen.append, close="f10", closed=lambda: closed.append("one"))
+    deck.interact(two, seen.append, close=False)
+    assert pilot.named("widget.ask") == [
+        {"id": 1, "quiet": True, "close": "f10"},
+        {"id": 2, "quiet": True, "close": False},
+    ]
+    deck.on_hover(one, lambda x, y: None)
+    deck.handle(key("a", b"a"))
+    # Closed by its key: out of the deck, its handlers too; not drawn.
+    n = len(pilot.named("widget.set"))
+    deck.handle(("input", {"widget": 1, "released": "close"}))
+    assert closed == ["one"] and [w for w, _ in deck.widgets] == [two]
+    assert not one.focused and one.asks is None
+    assert len(pilot.named("widget.set")) == n
+    deck.handle(key("b", b"b"))
+    deck.handle(("widgets", {**one.info, "state": "gone"}))
+    deck.draw()
+    assert seen == ["a"] and all(p["id"] == 2 for p in pilot.named("widget.set")[n:])
+    # The last one closed: `run` ends.
+    pilot.queue += [
+        key("c", b"c", widget=2),
+        ("input", {"widget": 2, "released": "close"}),
+        key("d", b"d", widget=2),
+    ]
+    deck.run(period=3600.0)
+    assert seen == ["a", "c"] and deck.widgets == [] and len(pilot.queue) == 1

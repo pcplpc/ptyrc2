@@ -545,6 +545,52 @@ def test_live_interactive(
     assert path.read_text() == "# List\n\n- [ ] 3rd\n- [x] second\n"
 
 
+def test_live_interactive_closed(
+    hosted: tuple[Host, Pilot], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ctrl+x closes the focused note; the app ends with the last."""
+    host, pilot = hosted
+    monkeypatch.setattr(note, "clock", skip := Skip())
+    paths = [tmp_path / "a.md", tmp_path / "b.md"]
+    for path in paths:
+        path.write_text(f"- [ ] {path.stem}\n")
+    seen: dict[str, object] = {}
+    argv = ["-s", pilot.session, "-i", *map(str, paths)]
+    thread = threading.Thread(
+        target=lambda: seen.update(status=note.main(argv, seconds=600))
+    )
+    thread.start()
+
+    def until(what: str, test: object) -> None:
+        deadline = time.monotonic() + 8
+        while not test():  # type: ignore[operator]
+            assert time.monotonic() < deadline, what
+            time.sleep(0.03)
+
+    def asking() -> list[dict[str, object]]:
+        return [w for w in pilot.widgets() if w["asks"] == "quiet"]
+
+    try:
+        until("asks", lambda: len(asking()) == 2)
+        first = asking()[0]
+        pilot.focus(first["id"])  # type: ignore[arg-type]
+        until("focused", lambda: asking()[0]["focused"])
+        os.write(host.master, b"\x18echo h$((1+1))\r")
+        pilot.wait_for("h2")
+        until("closed", lambda: len(asking()) == 1)
+        assert asking()[0]["id"] != first["id"] and thread.is_alive()
+        assert pilot.call("session.info")["focus"] is None
+        pilot.focus(asking()[0]["id"])  # type: ignore[arg-type]
+        os.write(host.master, b"\x18")
+        thread.join(8)
+        assert not thread.is_alive()
+    finally:
+        skip.end()
+        thread.join()
+    assert seen == {"status": 0}
+    assert [path.read_text() for path in paths] == ["- [ ] a\n", "- [ ] b\n"]
+
+
 def test_interactive_is_not_in_all() -> None:
     assert not note.options(["-a"]).interactive
     assert note.options(["-i"]).interactive and not note.options(["-i"]).look.count
