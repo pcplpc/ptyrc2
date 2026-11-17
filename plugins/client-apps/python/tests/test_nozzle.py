@@ -96,17 +96,45 @@ def test_bomb(monkeypatch: pytest.MonkeyPatch) -> None:
     assert ("subscribe", "hover", "mouse") in wire.calls and both.pad is not None
     wire.calls.clear()
 
-    def report(action: str, at: list[int] | None, sprite: int = 9) -> None:
-        nozzle.mouse({"sprite": sprite, "action": action, "at": at})
+    def report(
+        action: str,
+        at: list[int] | None,
+        sprite: int = 9,
+        xy: tuple[int, int] | None = None,
+    ) -> None:
+        # The sprite is at (10, 5) of the screen.
+        x, y = xy or (at[0] + 10, at[1] + 5) if xy or at else (None, None)
+        data = {"sprite": sprite, "action": action, "at": at, "x": x, "y": y}
+        nozzle.mouse(data)
 
-    # A press tells nothing; its release, the cell pressed and how long,
-    # wherever it is released.
+    # A press tells nothing; its release, the cell pressed and how long.
     report("press", [4, 2])
-    report("drag", [6, 2])
     now[0] += 0.25
     assert wire.calls == []
-    report("release", None)
+    report("release", [4, 2])
     assert wire.calls == [("tune", 5, {"bomb": [4, 2, 250]})]
+    wire.calls.clear()
+    # Released on another cell: the cells from the press to it; off the
+    # sprite, by the screen cell; one that came back: no aim.
+    report("press", [4, 2])
+    report("drag", [6, 2])
+    report("release", [1, 3])
+    report("press", [4, 2])
+    report("drag", [6, 2])
+    report("release", None, xy=(60, 2))
+    report("press", [4, 2])
+    report("drag", [6, 2])
+    report("release", [4, 2])
+    # No screen cell at the release: the last one told.
+    report("press", [4, 2])
+    report("drag", [6, 1])
+    nozzle.mouse({"sprite": 9, "action": "release", "at": None})
+    assert wire.calls == [
+        ("tune", 5, {"bomb": [4, 2, 0, -3, 1]}),
+        ("tune", 5, {"bomb": [4, 2, 0, 46, -5]}),
+        ("tune", 5, {"bomb": [4, 2, 0]}),
+        ("tune", 5, {"bomb": [4, 2, 0, 2, -1]}),
+    ]
     wire.calls.clear()
     # A release alone, a wheel, a click on another sprite: nothing.
     report("release", [4, 2])
@@ -117,7 +145,7 @@ def test_bomb(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_all(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`-a`: `--cursor`, `--hover`, `--bomb` and `--now`."""
+    """`-a`: `--cursor`, `--bomb` and `--now`."""
     seen: list[tuple[bool, ...]] = []
     monkeypatch.setattr(
         sand._cli,
@@ -129,7 +157,7 @@ def test_all(monkeypatch: pytest.MonkeyPatch) -> None:
     for argv in (["-a"], ["--all", "--hover"], [], ["--bomb"], ["--hover"]):
         assert sand.main(argv) == 0
     assert seen == [
-        (True, True, True, True),
+        (True, False, True, True),
         (True, True, True, True),
         (False, False, False, False),
         (False, False, True, False),

@@ -166,7 +166,8 @@ class Nozzle:
     `Sprite.tune(hover=[x, y])`, a cell of the view, or `hover=None`
     when the pointer is elsewhere (`hover`); a press on the frame, when
     it is released: `Sprite.tune(bomb=[x, y, ms])`, the cell pressed and
-    how long (`bomb`).
+    how long; `bomb=[x, y, ms, dx, dy]` when released on another cell,
+    that many cells away: its aim (`bomb`).
 
     A hover, a click, are told on a sprite, and not on an effect: a
     sprite of blanks, the size of the view, lies under the effect (`z`
@@ -185,7 +186,8 @@ class Nozzle:
     ) -> None:
         self.sprite = sprite
         self.at: list[int] | None = None  # as last told
-        self.down: tuple[list[int], float] | None = None  # a press: where, when
+        # A press: its cell, when, its screen cell, the last one told.
+        self.down: tuple[list[int], float, list[int], list[int]] | None = None
         self.pad: Sprite | None = None
         topics = [t for t, on in (("hover", hover), ("mouse", bomb)) if on]
         try:
@@ -225,16 +227,27 @@ class Nozzle:
 
     def mouse(self, data: dict[str, Any]) -> None:
         """An event of the topic `mouse`: the release of a press on the
-        frame is told, with the cell pressed and the time it was held."""
+        frame is told, with the cell pressed, the time it was held and,
+        released elsewhere, the cells from the one to the other."""
         if self.pad is None or data.get("sprite") != self.pad.id:
             return
         action, at = data.get("action"), data.get("at")
+        # The screen cell: told off the sprite too, where `at` is not.
+        here = [data.get("x"), data.get("y")]
         if action == "press" and at is not None:
-            self.down = (at, clock.monotonic())
-        elif action == "release" and self.down is not None:
-            at, since = self.down
+            self.down = (at, clock.monotonic(), here, here)
+        elif action in ("drag", "release") and self.down is not None:
+            at, since, start, last = self.down
+            if None not in here:
+                last = here
+            self.down = (at, since, start, last)
+            if action == "drag":
+                return
             self.down = None
-            self.sprite.tune(bomb=[*at, int(1000 * (clock.monotonic() - since))])
+            bomb = [*at, int(1000 * (clock.monotonic() - since))]
+            if None not in start and last != start:
+                bomb += [last[0] - start[0], last[1] - start[1]]
+            self.sprite.tune(bomb=bomb)
 
 
 def follow(

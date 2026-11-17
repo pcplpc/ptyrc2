@@ -1839,7 +1839,7 @@ Shared by the apps (`_cli.py`, `_arcade.py`):
 | `fire` | `raw` | one widget, variants 3x3 to 45x13. `scene(t, w, h, look, poke)` is pure: heat is a function of the cell, the time and the seed (value noise: the height of the tongues along the bed, a churn that rises), so any moment is drawn alone and `--speed` plays an hour in a minute. `fuel(t)`: with `-c`, a period of `--burn` seconds: it catches (2 %), burns down (to 70 %), dies (to 90 %), embers. Sparks are slots, one spark a period each, drawn from the seed and the period's number. Hover: `Poke`, the time of the last poke; one a visit of the pointer, one more every 4 s it stays. Colours of the 256. The content is sent every 0.1 s: the cost noted for `chase`. |
 | `globe` | `raw` | one widget, border `none`, variants the four domes (`DOMES`). `scene(t, w, h, look, shaken, shakes)` is pure: a flake falls on a lane of the dome and wraps; after a shake (`auto`: one an `--every`, off the beat; or the hover, `Shaker`) it is thrown on a circle that dies in 1.3 s, and all the flakes fall, thinning to 40 % in a few seconds. Ten draws a second; thirty while the circle is more than 2 % of itself (`swirls`, 5 s): a flake on it goes cells a draw else. `-d`: what lies is the time since the shake, full after 20 s. Scenes are art with a mask of inks, at three scales. |
 | `gallery` | `raw` | a widget a picture hung (tags `gallery`, `gallery-2`...), border `painting`, the title the name of the picture (`NAME · AUTHOR` with `-l`, or under the pointer with `-o`). The variants of the tag are the sizes of the picture; the next picture declares the tag again. The first frame only unless `-m`. Time is the session clock times `--speed`. |
-| `sand` | `idle` | native effect `sand` (draw extension `sand`), one request; one `screen.wait {idle}` on the frame name, answered by the driver when a pane is idle (`--now`: at once), then `_cli.follow`: when its frame is gone or inactive (panes with little text resized together), the sprite is moved to its heir, on the event's data; nothing asked. `--rate`; `--cursor`: the stream falls on the cursor's column; `--hover`: the host mouse takes the sand it is over (`_cli.Nozzle`, as `snow`); `--bomb`: a click on the pile blows it up (`_cli.Nozzle` on the topic `mouse`: the press and the release on its sprite of blanks, then `Sprite.tune(bomb=[x, y, ms])`, the cell pressed and the time held; the clicks on the pane do not reach its program); `-a`, `--all`: `--cursor`, `--hover`, `--bomb`, `--now` |
+| `sand` | `idle` | native effect `sand` (draw extension `sand`), one request; one `screen.wait {idle}` on the frame name, answered by the driver when a pane is idle (`--now`: at once), then `_cli.follow`: when its frame is gone or inactive (panes with little text resized together), the sprite is moved to its heir, on the event's data; nothing asked. `--rate`; `--cursor`: the stream falls on the cursor's column; `--hover`: the host mouse takes the sand it is over (`_cli.Nozzle`, as `snow`); `--bomb`: a click on the pile blows it up (`_cli.Nozzle` on the topic `mouse`: the press and the release on its sprite of blanks, then `Sprite.tune(bomb=[x, y, ms])`, the cell pressed and the time held, or `bomb=[x, y, ms, dx, dy]` when released on another cell, `dx`, `dy` screen cells from the press: its aim; the clicks on the pane do not reach its program); `-a`, `--all`: `--cursor`, `--bomb`, `--now` |
 | `cat` | `largest` | one sprite in frame cells, back layer (`--front`); driven by the topics `idle`, `cursor` (frame cells), `screen`, `frames`, subscribed with a snapshot, no tick: it waits on the socket until its next step. It stands on a ledge (3x11 free cells over 5 cells of text at least, or the floor of the view), walks, sits, grooms; sleeps on `idle` (a looped animation, nothing sent); jumps when the cursor is within 7 columns and 2 rows, when `covered` > 0.2 or the line under it goes; `visible` false after a scroll: back into the view after 2 to 4 s |
 | `marks` | every pane, else `raw` | `PATTERN...`, `-e` regex, `-i`; one front `tint` per match in frame cells, a colour per pattern, on remembered rows too (`screen.find {known}`), 400 at most, nearest to the view first; looks again on `screen` and `frames` after 30 ms of silence (200 ms at most), finds in one batch, changes in another; topic `draw` drops what the driver removed; a display of the counts (in view, `/known`), `auto` top-right, front (`--no-hud`) |
 | `monitor` | `raw` | widgets, one tag a monitor (`--monitor glance,connected,tcp-listen,disk-space`, all by default; titles `glance`, `connected`, `listening`, `disks`), 3 or 4 variants each, 18x1 to 56x13; `render(data, w, h)` gives `cells` of at most `h` rows of `w` cells, any size. Read every `--every` seconds (2), stdlib, `/proc` and `/var/run/utmp` (else `/run/systemd/sessions`): `glance` CPU and cores from two `/proc/stat` samples, memory, swap, load, uptime, network of non-virtual interfaces, the top 5 processes by CPU; `connected` the live USER_PROCESS records, grouped by user and origin (`tmux`, `local`, the host), tty idle from its atime, its foreground process (from the scan of `glance` when under a second old); `tcp-listen` LISTEN sockets of `/proc/net/tcp{,6}` not on loopback (mapped included), the user, the process when its inode is in a readable `/proc/<pid>/fd` (looked for when the sockets change, else every 10 s), both wildcards of one port and owner as `*`; `disk-space` block devices of `/proc/mounts` (no loop, no image), one a device, `statvfs`. Heights cut to the data (`trimmed`); when they change the tag is declared again (`Deck.resize`). `--merged`: one tag `monitor`, the n-th size the largest of the n-th sizes, one monitor a turn every `--cycle` seconds (8), the title following. `--print [WxH]`: no driver, each variant once in a plain box, ANSI on a tty |
@@ -1884,17 +1884,25 @@ cell, one step every 12 ms, a render every 48 ms.
   each side are a nozzle, for 3 s after it was last told. Their grains
   are gone, when told and at each step, and those around wake: the
   pile over the hole falls in, the slopes beside it avalanche.
-- The bomb (`bomb`: `[x, y, ms]`, a canvas cell and the time held; by
-  `tune` only, an event, not kept): a blast around the middle of the
-  cell, of 5 dots for 0 ms to 14 for 1500 and more. The grains within,
-  and those over it, are thrown away from the middle and up, at 0.9 to
-  2.4 dots a step at most, by `ms` as well. A grain thrown is in the
+- The bomb (`bomb`: `[x, y, ms]`, a canvas cell and the time held, or
+  `[x, y, ms, dx, dy]`, aimed `dx`, `dy` cells away; by `tune` only, an
+  event, not kept): a blast around the middle of the
+  cell, of 5 dots for 0 ms to 14 for 1500 and more. The grains within
+  are thrown away from the middle, turned 0.4 radian at most, those
+  under it up as those over it, a quarter of the throw up, at 0.9 to
+  2.4 dots a step at most, by `ms` as well. Aimed, they are thrown
+  that way, 0.4 radian about it and a quarter of the throw up, never
+  down: a share of the throw from none to all as the aim goes to 12
+  dots (6 columns, 3 rows), the rest as with no aim. A grain thrown is in the
   air, not in the pile: it falls 0.03 dot a step faster each step, 1 at
   most, passes the others thrown, turns back at a side of the world at
   half its speed, and lands, awake, where it meets a wall, the pile or
   the floor; on top of the pile that slid over it meanwhile. One under
-  text then, or over a column full to the top, is lost. The grains
-  around the hole wake. No grain in the blast: nothing. The grains in
+  text then, or over a column full to the top, is lost. The blast
+  carries a grain through the pile, unseen: through 3 radii of grains,
+  until it is out of them once; a bomb under the pile throws its sand
+  out of it, all around. The grains around the hole wake; the pile
+  over it falls in. No grain in the blast: nothing. The grains in
   the air stay over their cells of the frame when it scrolls.
 - Params: `rate` (grains per second, 120; above 166 the stream widens),
   `cursor`, `colors`, `color_ms`, `hover` (null), `bomb`, `walls` (rows

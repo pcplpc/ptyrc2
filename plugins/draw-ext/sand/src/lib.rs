@@ -13,8 +13,8 @@
 //! - `color_ms`: time from one colour to the next (default 20000).
 //! - `hover`: `[x, y]`, the canvas cell under the pointer, or null
 //!   (default): none.
-//! - `bomb`: `[x, y, ms]`, by `tune` only: a bomb at that canvas cell,
-//!   held `ms`.
+//! - `bomb`: `[x, y, ms]` or `[x, y, ms, dx, dy]`, by `tune` only: a
+//!   bomb at that canvas cell, held `ms`, aimed `dx`, `dy` cells away.
 //! - `walls`: rows of text standing for the app's, until the app is seen.
 //! - `duration_ms`: life of the effect. Absent: until removed.
 //! - `seed`.
@@ -48,13 +48,21 @@
 //!
 //! The bomb: a blast of `BLAST` dots around the middle of its cell,
 //! from the first to the second as `ms` goes to `FUSE_MS`, no further.
-//! The grains within, and those over it, are thrown: away from the middle and up, at `THROW` dots a step at most,
-//! the stronger the faster. A thrown grain is in the air, not in the
+//! The grains within are thrown: away from the middle, those under it
+//! up as those over it (the ground sends the blast back), `LIFT` up,
+//! at `THROW` dots a step at most, the stronger the faster. Aimed, they are thrown that way, `SPREAD` radians about it
+//! and `LIFT` up, never down: a share of the throw that goes from none
+//! to all as the aim goes to `AIM` dots, the rest as with no aim. A
+//! thrown grain is in the air, not in the
 //! pile: it falls `GRAVITY` faster each step, passes the others thrown,
 //! turns back at a side of the world, and lands, a grain awake, where
 //! it meets a wall, the pile or the floor, on top of what slid over it
-//! meanwhile; under text, or over a column full to the top, it is lost. The grains around the hole wake. No grain there:
-//! nothing.
+//! meanwhile; under text, or over a column full to the top, it is lost.
+//! The blast carries it through the pile: it goes through `BORE` radii
+//! of grains, unseen, until it is out of them once; it then lands on
+//! the first it meets. A bomb under the pile throws its sand out of
+//! it, all around. The grains around the hole wake; the pile over it
+//! falls in. No grain there: nothing.
 //!
 //! Spout: the topmost free cell of a column. Chosen near the middle,
 //! over text, away from the ends of the run it lands on; kept while it
@@ -104,6 +112,14 @@ const FUSE_MS: u64 = 1500;
 const BLAST: (f32, f32) = (5.0, 14.0);
 /// Dots a step of the fastest grain thrown: the weakest, the strongest.
 const THROW: (f32, f32) = (0.9, 2.4);
+/// An aim this long, in dots, takes the whole throw.
+const AIM: f32 = 12.0;
+/// Half the angle of an aimed throw, in radians.
+const SPREAD: f64 = 0.4;
+/// What a throw goes up, of its length.
+const LIFT: f32 = 0.25;
+/// Grains a thrown grain goes through, in radii of its blast.
+const BORE: f32 = 3.0;
 /// Dots a step a thrown grain gains downwards, each step.
 const GRAVITY: f32 = 0.03;
 /// Canvas cells at most.
@@ -139,7 +155,7 @@ struct Params {
     colors: Vec<ColorSpec>,
     color_ms: u64,
     hover: Option<(i32, i32)>,
-    bomb: Option<(i32, i32, u64)>,
+    bomb: Option<Bomb>,
     duration_ms: Option<u64>,
     seed: u64,
 }
@@ -167,6 +183,34 @@ impl Default for Params {
     }
 }
 
+/// A bomb: its canvas cell, the time held, and its aim: cells from the
+/// press to the release, `(0, 0)` for none.
+#[derive(Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(try_from = "Vec<i64>")]
+struct Bomb {
+    at: (i32, i32),
+    ms: u64,
+    aim: (i32, i32),
+}
+
+impl TryFrom<Vec<i64>> for Bomb {
+    type Error = &'static str;
+
+    fn try_from(v: Vec<i64>) -> Result<Bomb, Self::Error> {
+        let cell = |n: i64| i32::try_from(n).map_err(|_| "bomb: a cell is out of range");
+        let (x, y, ms, dx, dy) = match v[..] {
+            [x, y, ms] => (x, y, ms, 0, 0),
+            [x, y, ms, dx, dy] => (x, y, ms, dx, dy),
+            _ => return Err("bomb: [x, y, ms] or [x, y, ms, dx, dy] is needed"),
+        };
+        Ok(Bomb {
+            at: (cell(x)?, cell(y)?),
+            ms: u64::try_from(ms).map_err(|_| "bomb: ms is negative")?,
+            aim: (cell(dx)?, cell(dy)?),
+        })
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Dot {
     Free,
@@ -184,6 +228,10 @@ struct Flier {
     vx: f32,
     vy: f32,
     shade: u8,
+    /// Dots of grains it may still go through.
+    bore: f32,
+    /// In the pile, going through it.
+    inside: bool,
 }
 
 /// The grains of a row of dots: how many, and the columns `lo..hi` they
@@ -739,9 +787,13 @@ impl Sand {
         }
     }
 
-    /// A bomb at the canvas cell `(px, py)`, held `ms`: the grains of
-    /// the blast are in the air.
-    fn blast(&mut self, (px, py, ms): (i32, i32, u64)) {
+    /// The grains of the blast of `bomb` are in the air.
+    fn blast(&mut self, bomb: Bomb) {
+        let ((px, py), ms) = (bomb.at, bomb.ms);
+        // The aim in dots: its direction, and its share of the throw.
+        let (ax, ay) = (bomb.aim.0 as f32 * DW as f32, bomb.aim.1 as f32 * DH as f32);
+        let far = ax.hypot(ay);
+        let aim = (far > 0.0).then(|| (ax / far, ay / far, (far / AIM).min(1.0)));
         if px < 0 || py < 0 || px as usize >= self.w || py as usize >= self.ch {
             return;
         }
@@ -751,7 +803,7 @@ impl Sand {
         let cx = (px as usize * DW) as f32 + DW as f32 / 2.0;
         let cy = ((py as usize + self.top) * DH) as f32 + DH as f32 / 2.0;
         let (x0, x1) = ((cx - r).max(0.0) as usize, (cx + r).ceil() as usize);
-        let (y0, y1) = (0, (cy + r).ceil() as usize);
+        let (y0, y1) = ((cy - r).max(0.0) as usize, (cy + r).ceil() as usize);
         let (x1, y1) = (x1.min(self.w * DW), y1.min(self.h * DH));
         let before = self.fliers.len();
         for y in y0..y1 {
@@ -763,15 +815,24 @@ impl Sand {
                     continue;
                 };
                 let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
-                // The disk, and what lies over it.
-                if dy >= 0.0 && dx * dx + dy * dy > r * r {
+                if dx * dx + dy * dy > r * r {
                     continue;
                 }
-                // Away from the middle, and up: the ground sends the
-                // blast back.
+                // Away from the middle, turned a little; the ground
+                // sends the blast back.
+                let turn = self.rng.range(-SPREAD, SPREAD) as f32;
+                let (sin, cos) = turn.sin_cos();
                 let d = dx.hypot(dy).max(0.5);
-                let nx = dx / d + self.rng.range(-0.4, 0.4) as f32;
-                let ny = -(dy / d).abs() - 0.5;
+                let (dx, dy) = (dx / d, dy / d);
+                let (mut nx, mut ny) = (dx * cos - dy * sin, dx * sin + dy * cos);
+                ny = -ny.abs() - LIFT;
+                if let Some((ux, uy, share)) = aim {
+                    let rest = (1.0 - share) / nx.hypot(ny);
+                    // About the aim, and up: never into the ground.
+                    let (ax, ay) = (ux - uy * turn, uy + ux * turn);
+                    nx = nx * rest + share * ax;
+                    ny = ny * rest - share * (ay.abs() + LIFT);
+                }
                 let speed = fast * self.rng.range(0.35, 1.0) as f32 / nx.hypot(ny);
                 self.set(x, y, Dot::Free);
                 self.fliers.push(Flier {
@@ -780,6 +841,8 @@ impl Sand {
                     vx: nx * speed,
                     vy: ny * speed,
                     shade,
+                    bore: BORE * r,
+                    inside: false,
                 });
             }
         }
@@ -806,12 +869,24 @@ impl Sand {
                 if nx < 0.0 || nx >= w {
                     (f.vx, nx) = (-f.vx / 2.0, f.x);
                 }
-                let held = ny >= 0.0
-                    && dot(nx, ny) != dot(f.x, f.y)
-                    && (ny >= h || !self.free(nx as usize, ny as usize));
-                if held {
-                    self.land(*f);
-                    return false;
+                if ny >= 0.0 && dot(nx, ny) != dot(f.x, f.y) {
+                    let there = match ny < h {
+                        true => self.at(nx as usize, ny as usize),
+                        false => Dot::Wall,
+                    };
+                    match there {
+                        // Out of the pile: the blast is behind.
+                        Dot::Free if f.inside => (f.bore, f.inside) = (0.0, false),
+                        Dot::Free => {}
+                        Dot::Grain(..) if f.bore > 0.0 => {
+                            f.bore -= f.vx.hypot(f.vy) / n;
+                            f.inside = true;
+                        }
+                        _ => {
+                            self.land(*f);
+                            return false;
+                        }
+                    }
                 }
                 (f.x, f.y) = (nx, ny);
             }

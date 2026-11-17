@@ -748,7 +748,13 @@ fn show_bomb() {
     };
     let mut sand = make(json!({"rate": 400}));
     run(&mut sand, 60, 16, 0, 12_000);
-    let bomb = [env("X", 30), env("Y", 14), env("MS", 1500)];
+    let bomb = [
+        env("X", 30),
+        env("Y", 14),
+        env("MS", 1500),
+        env("DX", 0),
+        env("DY", 0),
+    ];
     sand.tune(&json!({"bomb": bomb, "rate": 0})).unwrap();
     let mut from = 12_048;
     for t in [12_048, 12_240, 12_480, 12_960, 13_920, 16_032] {
@@ -785,8 +791,8 @@ fn a_bomb_throws_the_sand_and_it_lands() {
         "{:#?}",
         rows(&sand)
     );
-    // Told: its cell is empty at once, and the pile over it; the grains
-    // are in the air, none is lost.
+    // Told: its cell is empty at once, the low pile over it being in
+    // the blast; the grains are in the air, none is lost.
     sand.tune(&json!({"bomb": [x, 9, 100]})).unwrap();
     let weak = sand.fliers.len();
     assert!(weak > 20 && sand.grains() == grains);
@@ -833,11 +839,109 @@ fn a_bomb_throws_the_sand_and_it_lands() {
     assert!(sand.fliers.is_empty());
     assert!(sand.tune(&json!({"bomb": [1, 2]})).is_err());
     assert!(sand.tune(&json!({"bomb": [1, 2, -1]})).is_err());
+    assert!(sand.tune(&json!({"bomb": [1, 2, 3, 4]})).is_err());
+    assert!(sand.tune(&json!({"bomb": [1, 2, 3, 4, 5, 6]})).is_err());
+    assert!(
+        sand.tune(&json!({"bomb": [1, 2, 3, 1i64 << 40, 0]}))
+            .is_err()
+    );
     // Before the first render: none.
     let mut sand = make(json!({"rate": 400}));
     sand.tune(&json!({"bomb": [2, 2, 100]})).unwrap();
     run(&mut sand, 20, 6, 0, 100);
     assert!(sand.fliers.is_empty());
+}
+
+#[test]
+fn a_bomb_under_the_pile_throws_its_sand_out_all_around() {
+    let mut sand = make(json!({"rate": 400}));
+    run(&mut sand, 60, 16, 0, 12_000);
+    sand.tune(&json!({"rate": 0})).unwrap();
+    run(&mut sand, 60, 16, 12_048, 14_000);
+    let grains = sand.grains();
+    // Rows of sand over the bomb: the pile is deep there.
+    let over = |sand: &Sand| (0..10).filter(|&y| count(sand, y, 30, 31) > 0).count();
+    let deep = over(&sand);
+    assert!(deep >= 5, "{:#?}", rows(&sand));
+    sand.tune(&json!({"bomb": [30, 14, 1500]})).unwrap();
+    // The disk only: the pile over it is not thrown.
+    assert_eq!(over(&sand), deep);
+    assert!(sand.fliers.len() > 300 && sand.grains() == grains);
+    // To every side over the ground: as many flat as steep.
+    let flat = sand.fliers.iter().filter(|f| f.vx.abs() > -f.vy).count();
+    let share = flat as f32 / sand.fliers.len() as f32;
+    assert!((0.3..0.7).contains(&share), "{share}");
+    assert!(sand.fliers.iter().all(|f| f.vy < 0.0));
+    // They go through the pile and come out of it, far from the column
+    // of the bomb, on both sides.
+    run(&mut sand, 60, 16, 14_048, 14_400);
+    let out = |sand: &Sand, f: &Flier| f.y < 0.0 || sand.free(f.x as usize, f.y as usize);
+    let free: Vec<f32> = sand
+        .fliers
+        .iter()
+        .filter(|f| out(&sand, f))
+        .map(|f| f.x)
+        .collect();
+    assert!(free.len() > 150, "{}", free.len());
+    assert!(free.iter().filter(|x| **x < 60.0 - 24.0).count() > 30);
+    assert!(free.iter().filter(|x| **x > 60.0 + 24.0).count() > 30);
+    // All land.
+    run(&mut sand, 60, 16, 14_448, 24_000);
+    assert!(sand.fliers.is_empty());
+    assert_eq!(sand.grains(), grains);
+}
+
+#[test]
+fn a_bomb_aimed_throws_the_sand_that_way() {
+    let thrown = |aim: Option<(i64, i64)>| {
+        let mut sand = make(json!({"rate": 400}));
+        run(&mut sand, 80, 10, 0, 1000);
+        sand.tune(&json!({"rate": 0})).unwrap();
+        run(&mut sand, 80, 10, 1008, 6000);
+        let grains = sand.grains();
+        let dots = |sand: &Sand, x: usize| (0..10).map(|y| count(sand, y, x, x + 1)).sum::<usize>();
+        let middle =
+            |sand: &Sand| (0..80).map(|x| x * dots(sand, x)).sum::<usize>() as f32 / grains as f32;
+        // The middle of the pile.
+        let x = middle(&sand).round() as usize;
+        let bomb = match aim {
+            Some((dx, dy)) => json!([x, 9, 1500, dx, dy]),
+            None => json!([x, 9, 1500]),
+        };
+        sand.tune(&json!({ "bomb": bomb })).unwrap();
+        let fliers: Vec<(f32, f32)> = sand.fliers.iter().map(|f| (f.vx, f.vy)).collect();
+        assert!(fliers.len() > 100);
+        // The middle of the sand, in dots, once it landed: none lost.
+        run(&mut sand, 80, 10, 6048, 14_000);
+        assert!(sand.fliers.is_empty());
+        assert_eq!(sand.grains(), grains);
+        (fliers, middle(&sand) - x as f32)
+    };
+    let share = |v: &[(f32, f32)], f: fn(f32) -> bool| {
+        v.iter().filter(|(vx, _)| f(*vx)).count() as f32 / v.len() as f32
+    };
+    // No aim, an aim of no length: as many to each side.
+    let (plain, middle) = thrown(None);
+    assert_eq!(thrown(Some((0, 0))).0, plain);
+    let right = share(&plain, |vx| vx > 0.0);
+    assert!(
+        (0.35..0.65).contains(&right) && middle.abs() < 4.0,
+        "{right} {middle}"
+    );
+    // Aimed far: all of them that way, up, no faster; the pile lands
+    // on that side.
+    for (dx, sign) in [(8, 1.0), (-8, -1.0)] {
+        let (aimed, moved) = thrown(Some((dx, 0)));
+        assert!(aimed.iter().all(|(vx, vy)| vx * sign > 0.0 && *vy < 0.0));
+        assert!(aimed.iter().all(|(vx, vy)| vx.hypot(*vy) <= THROW.1 + 1e-3));
+        assert!(moved * sign > 8.0, "{moved}");
+    }
+    // Down is up; a short aim leans only.
+    let (down, _) = thrown(Some((0, 6)));
+    assert!(down.iter().all(|(_, vy)| *vy < 0.0));
+    let (short, _) = thrown(Some((2, 0)));
+    let lean = share(&short, |vx| vx > 0.0);
+    assert!(lean > right + 0.1 && lean < 1.0, "{lean}");
 }
 
 #[test]

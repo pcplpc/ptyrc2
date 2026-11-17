@@ -6,7 +6,7 @@
     ptyrc-app sand -f active --cursor --now
     ptyrc-app sand --hover         # the mouse takes the sand it is over
     ptyrc-app sand --bomb          # a click on the pile blows it up
-    ptyrc-app sand -a              # --cursor, --hover, --bomb, --now
+    ptyrc-app sand -a              # --cursor, --bomb, --now
 
 What it shows:
 
@@ -27,7 +27,9 @@ What it shows:
 - `--bomb`: an effect told the clicks (`_cli.Nozzle`, topic `mouse`):
   a click on the pile is a bomb there, on release; the sand around is
   thrown up and away, flies, and lands. The longer the press, the
-  wider and the faster, up to 1.5 s. While it runs the clicks on the
+  wider and the faster, up to 1.5 s. Released on another cell, the
+  bomb is aimed: the sand is thrown from the press towards the
+  release, the farther the more of it. While it runs the clicks on the
   pane are the app's: the program in it gets none.
 - A frame replaced: of two panes with little text, resized together,
   the driver cannot tell which is which and allocates new frames. The
@@ -119,20 +121,21 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
         "--bomb",
         action="store_true",
         help="a click on the pile blows it up, the longer held the stronger "
-        "(1.5 s at most); the clicks on the pane do not reach its program",
+        "(1.5 s at most), towards where it is released; the clicks on the "
+        "pane do not reach its program",
     )
     out.add_argument(
         "-a",
         "--all",
         action="store_true",
-        help="--cursor, --hover, --bomb and --now",
+        help="--cursor, --bomb and --now",
     )
     out.add_argument(
         "--now", action="store_true", help="do not wait for the pane to be idle"
     )
     args = _cli.parse(out, argv)
     if args.all:
-        args.cursor = args.hover = args.bomb = args.now = True
+        args.cursor = args.bomb = args.now = True
     return _cli.run(lambda pilot, args: app(pilot, args, seconds), args)
 
 
