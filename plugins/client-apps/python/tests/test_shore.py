@@ -157,6 +157,7 @@ def test_scare() -> None:
 
 def test_the_animals_flee_the_pointer() -> None:
     now = [14.0]
+    frame = 1 / 8  # seconds from a picture to the next, here
     pointer = Pointer(lambda: now[0])
     one = Shore(random.Random(3), birds=True, crabs=True)
     alone = Shore(random.Random(3), birds=True, crabs=True)
@@ -164,7 +165,7 @@ def test_the_animals_flee_the_pointer() -> None:
     def step(to: float) -> shore.Grid:
         grid = one.picture(80, 24, now[0], (), pointer)
         while now[0] < to:
-            now[0] += shore.PERIOD
+            now[0] += frame
             grid = one.picture(80, 24, now[0], (), pointer)
         return grid
 
@@ -178,7 +179,7 @@ def test_the_animals_flee_the_pointer() -> None:
     pointer.move(bx, by)
     seen: set[str] = set()
     for _ in range(12):
-        seen |= glyphs(step(now[0] + shore.PERIOD))
+        seen |= glyphs(step(now[0] + frame))
     assert seen & set("v^")
     grid = step(now[0] + 1.0)
     assert not found(grid, "v^")
@@ -188,7 +189,7 @@ def test_the_animals_flee_the_pointer() -> None:
     cx, cy = found(grid, "ж")[0]
     pointer.move(cx, cy)
     for _ in range(8):
-        grid = step(now[0] + shore.PERIOD)
+        grid = step(now[0] + frame)
         pointer.move(cx, cy)
         assert (cx, cy) not in found(grid, "ж")
     assert set(found(grid, "ж")) and not glyphs(grid) & set(".¨")
