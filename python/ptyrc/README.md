@@ -36,7 +36,8 @@ with Pilot.spawn(["vim", "notes.md"], size=(100, 30)) as pilot:
 | type | `send`, `keys`, `paste`, `write` |
 | frames | `frames`, `panes`, `frame`, `frame_at`; `Frame.text`, `known`, `find`, `heat`, `heat_classes`, `idle`, `check_idle`, `is_idle`, `to_screen`, `to_frame`, `draw` |
 | draw | `draw`, `put`, `effect`, `ext`, `sprites`, `clear`; `Sprite.set`, `ext`, `move`, `update`, `tune`, `info`, `remove` |
-| widgets | `widget`, `widgets`, `borders`; `Widget.set`, `hide`, `refresh`, `update`, `variant`, `size`, `rect`, `placed` |
+| widgets | `widget`, `widgets`, `borders`, `focus`, `blur`; `Widget.set`, `hide`, `refresh`, `update`, `variant`, `size`, `rect`, `placed`, `ask`, `release`, `asks`, `focused` |
+| ui | `ui.ask`, `ui.Dialog`; `ui.Choice`, `Line`, `Text`, `Form`, `Model`; `ui.Editor`, `Listing`, `foot`, `fit`, `cut`, `wrap`, `cells`, `run` |
 | other | `batch`, `events`, `event`, `subscribe`, `resize`, `debug_overlay`, `dump`, `call`, `show`, `attach` |
 | tools | `locator`, `Frame.locator`, `click`, `grab`, `release`, `shown`, `snapshot`; `spawn(record=)`, `Pilot.replay`, `tape` |
 
@@ -73,6 +74,46 @@ clock.set([time.strftime("%H:%M:%S")[: clock.size[0]]])  # the variant shown
 for topic, data in pilot.events("widgets"):  # placed, moved, another size
     clock.update(data)
 ```
+
+An interactive widget takes keys of the host keyboard. It asks; the
+user gives it the focus (ctrl+t twice; again: the next one, then the
+menu); its escape key (`esc`) gives the keyboard back. An app never
+takes the focus: `pilot.focus()` is for a key binding, a test.
+
+```python
+note = pilot.widget("note", [(30, 6)])
+note.ask(quiet=True)  # loud when not quiet: a question, marked on screen
+for topic, data in pilot.events("widgets"):
+    if topic == "input" and data.get("widget") == note.id:
+        data.get("key"), data.get("released")  # a key, or why the focus went
+    elif topic == "widgets":
+        note.update(data)  # note.focused, note.asks
+```
+
+`ptyrc.ui` is the toolkit on it. A model is pure: `key(name)` (None,
+`"done"`, `"cancel"`), `paste(text)`, `render(w, h, focused)` (exactly
+`h` rows of `w` cells), `result`. `Dialog` shows one in a widget that
+asks; `ask` is its loop:
+
+```python
+from ptyrc import ui
+
+answer = ui.ask(pilot, ui.Choice("Deploy?", ["yes", "no", "later"]))  # None: dismissed
+name = ui.ask(pilot, ui.Line("Name?", placeholder="you"), timeout=60)
+who, why = ui.ask(pilot, ui.Form([ui.Line("Who?"), ui.Text("Why?")])) or ("", "")
+
+dialog = ui.Dialog(pilot, ui.Choice("Which?", options, multi=True, other=True), tag="which")
+while not dialog.done:  # an app with its own loop
+    event = pilot.event(timeout=1.0)
+    if not dialog.take(event):
+        ...  # the app's own events
+dialog.result
+```
+
+`enter` validates, `ctrl+c` dismisses, the escape key leaves the
+question there. A model of your own subclasses `ui.Model`: `body(w, h,
+focused)`, `key`, `natural()`, `keys()` (the foot), on `ui.Editor` (a
+line and its cursor), `ui.Listing` (a bar on a list that scrolls).
 
 Sprites are drawn behind the app's text unless `layer="front"`; the app
 is layer 0, negative layers are behind it.
