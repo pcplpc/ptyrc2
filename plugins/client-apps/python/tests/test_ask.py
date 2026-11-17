@@ -142,12 +142,13 @@ def test_a_line_typed_then_dismissed(
     assert asked.end() == 0
     assert capsys.readouterr().out == '"anné"\n'
 
+    # ctrl+c: nothing, the question stays.
     asked = Asked(pilot, "Sure?", "yes", "no")
     info = asked.until(lambda w: w["asks"] == "loud")
     pilot.focus(info["id"])
-    os.write(host.master, b"\x03")
-    assert asked.end() == 1
-    assert capsys.readouterr().out == ""
+    os.write(host.master, b"\x03\r")
+    assert asked.end() == 0
+    assert capsys.readouterr().out == "yes\n"
 
     # Closed by its key: dismissed, the widget gone.
     asked = Asked(pilot, "Sure?", "yes", "no")

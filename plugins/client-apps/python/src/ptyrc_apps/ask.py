@@ -9,7 +9,7 @@
 
 The widget waits: the user focuses it (ctrl+t twice), answers, `enter`
 validates. Status 0 and the answer on stdout; 1 and nothing when it is
-dismissed (ctrl+c, ctrl+x), timed out or the session ended; 3 when no session
+dismissed (ctrl+x), timed out or the session ended; 3 when no session
 is there.
 
 `model(args)` is the `ptyrc.ui` model; `ptyrc.ui.ask` runs it.

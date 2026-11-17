@@ -377,7 +377,11 @@ def test_desk() -> None:
     ]
     assert desk.sel == 2 and desk.mode is None
     assert desk_keys(desk, SMALL, "a", "enter", "a", "x", "ctrl+c") == []
+    assert desk.mode == "add" and desk.editor.text == "x"  # ctrl+c: ignored
+    # Cancelled: the line cleared, then enter.
+    assert desk_keys(desk, SMALL, "ctrl+u", "enter") == []
     assert desk.sel == 2 and desk.mode is None
+    assert desk_keys(desk, SMALL, "e", "ctrl+u", "enter") == [] and desk.mode is None
     # Edited: the words as written; the same words: nothing.
     assert desk_keys(desk, SMALL, "e", "enter") == []
     assert desk_keys(desk, SMALL, "e", "ctrl+u", "o", "k", "enter") == [
@@ -436,7 +440,7 @@ def test_desk_render() -> None:
     rows = note.render(made(SMALL), 30, 7, note.PLAIN, desk)
     assert text(rows)[2] == "☐ j".ljust(30) and text(rows)[3].startswith("☐ milk")
     assert any(run.get("inverse") for run in rows[2])
-    assert text(rows)[-1].startswith("enter ok  ^C cancel")
+    assert text(rows)[-1].startswith("enter ok  empty: cancel")
     desk.rest()
     # Too long for the rows: it scrolls with the bar; two rows: no foot.
     desk.sel = 4

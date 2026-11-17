@@ -261,7 +261,8 @@ class Desk:
     make to the file, `change` makes it.
 
     `sel`: the item under the bar, among `listed`. `mode`: None,
-    `add`, `edit` (the line typed is `editor`) or `delete` (asked:
+    `add`, `edit` (the line typed is `editor`; `enter` ends it, an
+    empty line or the same words change nothing) or `delete` (asked:
     `y` does it, any other key keeps)."""
 
     def __init__(self) -> None:
@@ -286,9 +287,7 @@ class Desk:
         item = items[self.sel] if items else None
         if self.mode in ("add", "edit"):
             mode, words = self.mode, self.editor.text.strip()
-            if name == "ctrl+c":
-                self.mode = None
-            elif name == "enter":
+            if name == "enter":
                 self.mode = None
                 if words and mode == "add":
                     self.sel += 1 if item else 0
@@ -327,7 +326,7 @@ class Desk:
         """The foot: the keys of the mode, the least useful ranked
         highest."""
         if self.mode in ("add", "edit"):
-            return [("enter ok", 0), ("^C cancel", 1)]
+            return [("enter ok", 0), ("empty: cancel", 1)]
         if self.mode == "delete":
             return [("y delete", 0), ("any key keeps", 1)]
         return [
