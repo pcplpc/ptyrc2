@@ -5,6 +5,7 @@ use crate::apps::{Apps, Refused, State};
 use crate::conn::Conn;
 use crate::engine::{ConnId, Ctx, Effects, Engine, Reply, SessionInfo, Token};
 use crate::grab::{self, Grab};
+use crate::hands::Hands;
 use crate::host::Host;
 use crate::hostcolors::{Known, QUERY_BG, QUERY_FG, Replies};
 use crate::hotkey::{self, Hotkey};
@@ -35,7 +36,7 @@ use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Upper bounds of a burst (design: "Coalescing").
 const BURST_MAX_BYTES: usize = 1 << 20;
@@ -225,6 +226,11 @@ struct Driver {
     /// An escape or close key ended the last read: the release event of that
     /// key, if it comes first, reaches nobody.
     drop_release: bool,
+    /// Sorts what the user types from what the host answers.
+    hands: Hands,
+    /// When the user last typed on the host keyboard, or used its
+    /// mouse: real time, milliseconds since the epoch.
+    active_at: Option<u64>,
     /// The child the hotkey started, while in the table.
     hotkey_app: Option<u64>,
     /// The app table; `None` in a replay and when transparent.
@@ -265,12 +271,22 @@ struct Driver {
     handoff_kill: Option<Duration>,
 }
 
+/// Real time, milliseconds since the epoch.
+fn unix_ms() -> Option<u64> {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
+    u64::try_from(now.as_millis()).ok()
+}
+
 /// Name the session and listen on its socket.
 fn bind_session(cfg: &Config) -> Result<(String, PathBuf, UnixListener), RunError> {
     let name = cfg
         .name
         .clone()
         .unwrap_or_else(|| std::process::id().to_string());
+    if name == session::AUTO {
+        return Err(RunError::new(RunErrorKind::Usage, "bad session name: auto")
+            .with_hint("`-s auto` is the session the user typed in last; choose another --name"));
+    }
     if !session::valid_name(&name) {
         return Err(
             RunError::new(RunErrorKind::Usage, format!("bad session name: {name}")).with_hint(
@@ -461,6 +477,8 @@ impl Driver {
             partial: None,
             pasting: false,
             drop_release: false,
+            hands: Hands::default(),
+            active_at: None,
             apps,
             pty_eof: false,
             pty_queue: Vec::new(),
@@ -522,6 +540,8 @@ impl Driver {
             partial: None,
             pasting: false,
             drop_release: false,
+            hands: Hands::default(),
+            active_at: None,
             apps: None,
             pty_eof: true,
             pty_queue: Vec::new(),
@@ -652,6 +672,7 @@ impl Driver {
             "argv": self.info.argv,
             "size": [self.info.cols, self.info.rows],
             "headless": self.info.headless,
+            "active_at": self.active_at,
             "host_colors": self.colors.json(),
         })
     }
@@ -958,6 +979,9 @@ impl Driver {
                 }
                 if changed {
                     self.colors_changed(engine);
+                }
+                if self.hands.touch(&fed.forward) {
+                    self.active_at = unix_ms();
                 }
                 self.host_input(&fed.forward, engine);
             }

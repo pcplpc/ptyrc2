@@ -12,6 +12,7 @@ pub mod engine;
 pub mod focus;
 mod grab;
 pub use grab::{key_len, name as key_name};
+mod hands;
 mod hints;
 pub mod host;
 pub mod hostcolors;
