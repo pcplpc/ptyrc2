@@ -147,7 +147,7 @@ fn keys_reach_the_session() {
     assert!(!screen(&r).contains("bricks"));
     // Enter twice starts with the defaults.
     keys(&mut r, "s down enter enter", t0);
-    assert_eq!(r.backend.asked.last().unwrap(), "start clock");
+    assert_eq!(r.backend.asked.last().unwrap(), "start clock --front");
     assert!(screen(&r).contains("● clock"), "{}", screen(&r));
     // The selection is on the app just started.
     keys(&mut r, "s enter enter p", t0);
@@ -198,7 +198,7 @@ fn options_are_remembered() {
     // Not kept: said, and the app starts all the same.
     r.backend.read_only = true;
     keys(&mut r, "s down enter enter", t0);
-    assert_eq!(r.backend.asked.last().unwrap(), "start clock");
+    assert_eq!(r.backend.asked.last().unwrap(), "start clock --front");
     assert!(
         screen(&r).contains("options not remembered: read-only file system"),
         "{}",

@@ -12,7 +12,7 @@ from ptyrc import Pilot, PtyrcError, Widget, clock
 
 from . import _cli
 
-__all__ = ["Deck", "options"]
+__all__ = ["FRONT", "Deck", "options"]
 
 Size = tuple[int, int]
 #: What of a widget's info a hover stands on.
@@ -24,6 +24,8 @@ Render = Callable[[int, int], Any]
 #: Returning False: nothing changed, the widget is not drawn again.
 Move = Callable[[int, int], Any]
 Leave = Callable[[], Any]
+#: The help of `--front`: `_catalog` knows an app made of widgets by it.
+FRONT = "over the app's text"
 
 
 def options(
@@ -42,7 +44,7 @@ def options(
         help="top-left, top, top-right, left, center, right, bottom-left, "
         f"bottom, bottom-right, any [default: {prefer}]",
     )
-    out.add_argument("--front", action="store_true", help="over the app's text")
+    out.add_argument("--front", action="store_true", help=FRONT)
 
 
 class Deck:

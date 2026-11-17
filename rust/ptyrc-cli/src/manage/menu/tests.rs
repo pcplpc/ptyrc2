@@ -300,10 +300,10 @@ fn start_with_defaults_is_enter_twice() {
         keys(&mut m, "down enter enter"),
         kept(
             "clock",
-            &[],
+            &["--front"],
             Action::Start {
                 name: "clock".into(),
-                args: vec![]
+                args: s(&["--front"])
             }
         )
     );
@@ -889,6 +889,12 @@ fn a_form_opens_as_last_given() {
     let screen = shown(&m, 78, 22);
     assert!(screen.contains("[x] -a, --all"), "{screen}");
     assert!(screen.contains("[ ] -r, --rules"), "{screen}");
+    // `--front`, for an app made of widgets only.
+    keys(&mut m, "esc esc esc s m o n i enter");
+    assert!(shown(&m, 78, 22).contains("[x] --front"));
+    keys(&mut m, "esc esc esc s s n a k enter");
+    let screen = shown(&m, 78, 22);
+    assert!(screen.contains("[ ] --front") && screen.contains("[x] -a, --all"));
     keys(&mut m, "esc esc esc s f l o w enter");
     let screen = shown(&m, 78, 22);
     assert!(screen.contains("[ ] -a, --anywhere"), "{screen}");

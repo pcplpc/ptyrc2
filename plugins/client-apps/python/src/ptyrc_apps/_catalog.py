@@ -13,7 +13,7 @@ import importlib
 import json
 from typing import Any
 
-from . import APPS, _cli
+from . import APPS, _cli, _widgets
 
 __all__ = ["RANDOM", "catalog", "dump", "parser_of"]
 
@@ -110,6 +110,15 @@ def _positional(action: argparse.Action) -> dict[str, Any]:
     }
 
 
+def _widgets_only(parser: argparse.ArgumentParser) -> bool:
+    """Whether the app is made of widgets: `_widgets.options` on the
+    parser itself, not on a group of it (`fishes --tank`)."""
+    return any(
+        action.help is _widgets.FRONT and action.container is parser._optionals
+        for action in parser._actions
+    )
+
+
 def describe(name: str) -> dict[str, Any]:
     parser = parser_of(name)
     options, positionals = [], []
@@ -126,6 +135,7 @@ def describe(name: str) -> dict[str, Any]:
         "options": options,
         "positionals": positionals,
         "random": [list(args) for args in RANDOM.get(name, ((),))],
+        "widgets": _widgets_only(parser),
     }
 
 

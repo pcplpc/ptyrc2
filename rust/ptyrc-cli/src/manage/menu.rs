@@ -625,12 +625,21 @@ impl Form {
         }
     }
 
-    /// Set `-a, --all`, where there is one.
-    fn all(&mut self) {
-        if let Some(at) = self.field_of("--all")
+    /// Set a flag, where there is one.
+    fn set(&mut self, flag: &str) {
+        if let Some(at) = self.field_of(flag)
             && let FieldKind::Flag { on } = &mut self.fields[at].kind
         {
             *on = true;
+        }
+    }
+
+    /// The form of an app never configured: `-a, --all`; made of
+    /// widgets, `--front` too.
+    fn first(&mut self, app: &App) {
+        self.set("--all");
+        if app.widgets {
+            self.set("--front");
         }
     }
 
@@ -1277,11 +1286,11 @@ impl Menu {
                     self.stack.pop();
                 } else if matches!(key, "enter" | "right") {
                     if let Some(app) = apps.get(*sel) {
-                        // As last given; never given: with all it has.
+                        // As last given; never given: `Form::first`.
                         let mut form = Form::new(Target::Start, &app.name, Some(app));
                         match self.favorites.get(&app.name) {
                             Some(args) => form.fill(args),
-                            None => form.all(),
+                            None => form.first(app),
                         }
                         self.stack.push(Screen::Form(Box::new(form)));
                     }

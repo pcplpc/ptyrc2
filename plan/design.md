@@ -1188,7 +1188,8 @@ are named as `input.grab` names them, on both.
   when the menu opens, read again and replaced by a rename at each
   submit (`Action::Remember`); not written: said, the app starts all
   the same. A start form opens filled from them; an app with none
-  opens with its flag `--all` set, when it has one. `random app`
+  opens with its flag `--all` set, when it has one, and, made of
+  widgets (`widgets` of the catalog), with `--front`. `random app`
   starts an app that has some with them, else with one of its
   `random` lists. The verbs of `ptyrc manage` neither read nor write
   them.
@@ -1219,10 +1220,11 @@ are named as `input.grab` names them, on both.
 Catalog: `ptyrc-app --catalog` prints `{"apps":[{"name","help",
 "options":[{"flags":["-r","--rules"],"kind":"flag"|"value"|"choice"|
 "count","metavar","choices":[...],"default","help"}],"positionals":
-[{"name","nargs","help"}],"random":[[arg,...],...]}]}`, from the
-argparse parser of each app; `-h`, `-s` are left out. `random`: the
-argument lists `random app` draws from (was `demo.VARIANTS`); empty:
-never drawn. No `ptyrc-app`: the menu has no `start an app…`.
+[{"name","nargs","help"}],"random":[[arg,...],...],"widgets":bool}]}`,
+from the argparse parser of each app; `-h`, `-s` are left out.
+`random`: the argument lists `random app` draws from (was
+`demo.VARIANTS`); empty: never drawn. `widgets`: the app is made of
+widgets (`_widgets.options` on its parser, not on a group of it). No `ptyrc-app`: the menu has no `start an app…`.
 
 ## Plugins
 

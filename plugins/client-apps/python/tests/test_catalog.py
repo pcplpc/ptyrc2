@@ -38,6 +38,10 @@ def test_catalog(capsys: pytest.CaptureFixture[str]) -> None:
     assert by_name["marks"]["random"] == []
     assert by_name["flower"]["random"] == [["-a"]]
     assert by_name["clock"]["random"] == [[]]
+    # The apps made of widgets; `fishes` is one with `--tank` only.
+    widgets = {name for name, app in by_name.items() if app["widgets"]}
+    assert {"clock", "monitor", "timer", "train", "window"} <= widgets
+    assert not widgets & {"bricks", "cat", "fishes", "snake"}
     (patterns,) = by_name["marks"]["positionals"]
     assert patterns["nargs"] == "+" and patterns["name"]
 

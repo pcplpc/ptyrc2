@@ -46,6 +46,8 @@ pub struct App {
     pub positionals: Vec<Pos>,
     /// The argument lists `random app` draws from; empty: never drawn.
     pub random: Vec<Vec<String>>,
+    /// Made of widgets.
+    pub widgets: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -114,6 +116,7 @@ impl Catalog {
                     })
                     .collect(),
                 random: list("random").iter().map(texts).collect(),
+                widgets: value["widgets"].as_bool().unwrap_or(false),
             })
         };
         Ok(Catalog {
@@ -167,6 +170,9 @@ mod tests {
         );
         let marks = catalog.app("marks").unwrap();
         assert!(marks.random.is_empty());
+        let widgets = (catalog.apps.iter()).filter(|a| a.widgets);
+        let widgets: Vec<&str> = widgets.map(|a| a.name.as_str()).collect();
+        assert_eq!(widgets, ["clock", "monitor"]);
         assert_eq!(marks.positionals[0].name, "PATTERN");
         assert_eq!(
             catalog.app("snow").unwrap().options[3].default.as_deref(),
