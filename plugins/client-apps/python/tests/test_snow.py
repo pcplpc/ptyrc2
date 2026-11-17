@@ -42,6 +42,25 @@ def test_gusts() -> None:
     assert lo <= next(beats) <= hi and len(winds) == 1
 
 
+def test_max_depth(capsys: pytest.CaptureFixture[str]) -> None:
+    class Stub:
+        def effect(self, name: str, params: dict[str, object], **where: object) -> str:
+            self.sent = (name, params, where)
+            return "sprite"
+
+    class Pane:
+        id = 7
+
+    stub = Stub()
+    assert snow.snow(stub, Pane(), 14.0, -1.0, True) == "sprite"  # type: ignore[arg-type]
+    assert stub.sent[1]["max_depth"] == snow.DEEP == 3
+    snow.snow(stub, Pane(), 14.0, -1.0, True, 0)  # type: ignore[arg-type]
+    assert stub.sent[0] == "snow" and stub.sent[1]["max_depth"] == 0
+    with pytest.raises(SystemExit):
+        snow.main(["--cover", "--max-depth", "-1"])
+    assert "--max-depth must not be negative" in capsys.readouterr().err
+
+
 # The drift is shaped by the step of the effect: real time keeps it fine.
 @pytest.mark.realtime
 def test_snow(session: Pilot) -> None:
@@ -49,6 +68,7 @@ def test_snow(session: Pilot) -> None:
     session.wait_for("0" * 40, frame="raw")
     time.sleep(0.3)
     args = ["-s", session.session, "--cover", "--rate", "900", "--wind", "0"]
+    args += ["--max-depth", "2"]
     status: list[int] = []
     # Long enough to see the melt: the floor takes 6 s, the melt up to 4.
     thread = threading.Thread(target=lambda: status.append(snow.main(args, seconds=12)))

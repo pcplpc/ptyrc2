@@ -8,11 +8,14 @@
 //! - `rate`: flakes per second over 80 columns (default 14).
 //! - `wind`: drift, columns per second, to the right (default -1).
 //! - `cover`: the snow lies (default false: it only falls).
+//! - `max_depth`: cells a stack of snow holds (default 3); 0: no limit,
+//!   the snow fills the view.
 //! - `duration_ms`: life of the effect. Absent: until removed.
 //! - `seed`.
 //!
-//! `tune`: `rate`, `wind`, `cover`, `duration_ms`; the flakes and the
-//! snow stay.
+//! `tune`: `rate`, `wind`, `cover`, `max_depth`, `duration_ms`; the
+//! flakes and the snow stay, less the snow over a lower `max_depth`,
+//! that falls again.
 //!
 //! A flake is near (bright) or far (slow, faint: drawn at half
 //! opacity, its glyph by its height in the cell). It sways as it
@@ -22,8 +25,10 @@
 //! Settling, with `cover`. A ledge is a cell without ink, and none
 //! beside it, over a cell with ink, over the blank between two such
 //! cells, over a cell full of snow, or the last cell of a column: snow
-//! lies over a line, not between its words. A stack holds `DEEP` cells
-//! at most over what holds it, text or the floor. A flake takes a ledge
+//! lies over a line, not between its words. A stack holds `max_depth`
+//! cells at most over what holds it, text or the floor; without a
+//! limit, the blank beside a word holds snow as well: no column stays
+//! bare over the end of a line. A flake takes a ledge
 //! over text with probability `TAKE`, any other always. It adds `GAIN`
 //! eighths to the cell, or to the lower of its two neighbours when that
 //! one is a ledge and lower by more than `GAIN`: drifts are smooth. A
@@ -116,6 +121,7 @@ struct Params {
     rate: f64,
     wind: f64,
     cover: bool,
+    max_depth: usize,
     duration_ms: Option<u64>,
     seed: u64,
 }
@@ -126,6 +132,7 @@ impl Default for Params {
             rate: 14.0,
             wind: -1.0,
             cover: false,
+            max_depth: DEEP,
             duration_ms: None,
             seed: 1,
         }
@@ -293,19 +300,23 @@ impl Snow {
     }
 
     /// Something holds snow in `(x, y)`: text, the blank between two
-    /// words, the floor, or a stack of full snow under `DEEP` cells.
+    /// words, the floor, or a stack of full snow under `max_depth`
+    /// cells; without a limit, a stack of any height, and the blank
+    /// beside a word.
     fn held(&self, x: usize, y: usize) -> bool {
-        let gap = || x > 0 && self.wall(x - 1, y + 1) && self.wall(x + 1, y + 1);
+        let deep = self.params.max_depth;
+        let (left, right) = (x > 0 && self.wall(x - 1, y + 1), self.wall(x + 1, y + 1));
+        let gap = || (left && right) || (deep == 0 && (left || right));
         let stack = || {
             (y + 1..self.h)
-                .take(DEEP)
+                .take(deep)
                 .take_while(|&b| self.depth(x, b) >= FULL)
                 .count()
         };
         y + 1 >= self.h
             || self.wall(x, y + 1)
             || gap()
-            || (self.depth(x, y + 1) >= FULL && stack() < DEEP)
+            || (self.depth(x, y + 1) >= FULL && (deep == 0 || stack() < deep))
     }
 
     /// Snow may lie in `(x, y)`: a cell away from the text of its row,
@@ -631,6 +642,7 @@ impl Effect for Snow {
         merged.insert("rate".into(), self.params.rate.into());
         merged.insert("wind".into(), self.params.wind.into());
         merged.insert("cover".into(), self.params.cover.into());
+        merged.insert("max_depth".into(), self.params.max_depth.into());
         merged.insert("duration_ms".into(), self.params.duration_ms.into());
         merged.extend(new.clone());
         let params = checked(&merged.into())?;

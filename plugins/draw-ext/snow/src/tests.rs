@@ -185,6 +185,36 @@ fn stacks_of_deep_cells_on_text_and_on_the_floor() {
 }
 
 #[test]
+fn max_depth_bounds_a_stack_and_zero_lets_the_view_fill() {
+    let mut rows = [""; 12];
+    rows[9] = "     a line of text here";
+    let params =
+        |deep: usize| json!({"rate": 900, "seed": 5, "wind": 0, "cover": true, "max_depth": deep});
+    let mut snow = make(params(1));
+    look(&mut snow, &rows, 0, &[], None);
+    run(&mut snow, 12, 0, 40_000);
+    assert!(row(&snow, 11, 0, 40) > 0.0 && row(&snow, 8, 12, 18) > 0.0);
+    assert_eq!(row(&snow, 10, 0, 40) + row(&snow, 7, 0, 40), 0.0);
+    // No limit: the snow reaches the first row, over the text and off
+    // it. (Under the line it only slides in: that takes longer.)
+    let mut snow = make(params(0));
+    look(&mut snow, &rows, 0, &[], None);
+    run(&mut snow, 12, 0, 120_000);
+    for x in [0, 15, 35] {
+        assert!((0..9).all(|y| snow.depth(x, y) >= FULL), "{x}");
+    }
+    // None beside the words; the cell beside them holds the snow over it.
+    assert_eq!(snow.depth(4, 9) + snow.depth(24, 9), 0.0);
+    assert!(snow.depth(4, 8) >= FULL && snow.depth(24, 8) >= FULL);
+    // A lower limit, tuned: the snow over it falls again.
+    snow.tune(&json!({"max_depth": 2, "rate": 0})).unwrap();
+    run(&mut snow, 12, 120_050, 140_000);
+    assert_eq!(row(&snow, 6, 0, 40) + row(&snow, 0, 0, 40), 0.0);
+    assert!(snow.depth(15, 8) > 0.0 && snow.depth(30, 11) > 0.0);
+    assert!(super::snow(&json!({"max_depth": -1})).is_err());
+}
+
+#[test]
 fn snow_melts_where_the_screen_is_warm() {
     let mut snow = make(json!({"rate": 0}));
     look(&mut snow, &TEXT, 0, &[], None);

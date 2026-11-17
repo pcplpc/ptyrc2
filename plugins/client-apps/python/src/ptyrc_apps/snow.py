@@ -4,6 +4,7 @@ melts where they change.
 
     ptyrc-app snow
     ptyrc-app snow --cover --rate 40 --wind 2 -f active
+    ptyrc-app snow --cover --max-depth 0    # no limit: the pane fills
 
 What it shows:
 
@@ -12,7 +13,8 @@ What it shows:
 - An effect that sees the cells under it: flakes pass behind the
   text; with `--cover`, snow lies over a line of text, a cell away
   from the words of its own row, and on the floor, in smooth piles up
-  to three rows deep.
+  to `--max-depth` rows deep (3); 0: no limit, the snow fills the
+  pane.
 - An effect that sees the heat: the snow melts where the screen
   changed lately, and around the cursor. Type, and it goes.
 - Frame rows: the snow lies on the rows of the frame, so it scrolls
@@ -37,16 +39,24 @@ from . import _cli
 __all__ = ["gust", "gusts", "main", "snow"]
 
 GUST = (6.0, 15.0)  # seconds between two winds
+DEEP = 3  # rows a pile holds
 
 
 def snow(
-    pilot: Pilot, frame: Frame, rate: float, wind: float, cover: bool = False
+    pilot: Pilot,
+    frame: Frame,
+    rate: float,
+    wind: float,
+    cover: bool = False,
+    max_depth: int = DEEP,
 ) -> Sprite:
-    """Start the snow on `frame`; `cover`: it lies."""
+    """Start the snow on `frame`; `cover`: it lies, `max_depth` rows
+    deep at most, 0: without limit."""
     params = {
         "rate": rate,
         "wind": wind,
         "cover": cover,
+        "max_depth": max_depth,
         "seed": random.getrandbits(32),
     }
     return pilot.effect("snow", params, frame=frame.id, layer="back")
@@ -67,7 +77,7 @@ def gusts(sprite: Sprite, wind: float, rng: random.Random) -> Iterator[float]:
 
 def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
     frame = _cli.pick(pilot, args.frame)
-    sprite = snow(pilot, frame, args.rate, args.wind, args.cover)
+    sprite = snow(pilot, frame, args.rate, args.wind, args.cover, args.max_depth)
     beats = gusts(sprite, args.wind, random.Random()) if args.wind else None
     _cli.follow(pilot, frame, sprite, seconds, beats)
 
@@ -95,9 +105,17 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
         default=-1.0,
         help="drift, columns per second, < 0 to the left; it gusts; 0: none [default: -1]",
     )
-    return _cli.run(
-        lambda pilot, args: app(pilot, args, seconds), _cli.parse(out, argv)
+    out.add_argument(
+        "--max-depth",
+        type=int,
+        default=DEEP,
+        metavar="ROWS",
+        help=f"with --cover: rows a pile of snow holds; 0: no limit [default: {DEEP}]",
     )
+    args = _cli.parse(out, argv)
+    if args.max_depth < 0:
+        out.error("--max-depth must not be negative")
+    return _cli.run(lambda pilot, args: app(pilot, args, seconds), args)
 
 
 if __name__ == "__main__":
