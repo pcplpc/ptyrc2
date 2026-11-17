@@ -122,6 +122,7 @@ impl Canvas {
         let mut col = x;
         let mut last: Option<(u16, u16)> = None;
         let inside_row = y >= 0 && y < self.h as i32;
+        let (fg, bg, attrs) = (style.fg.map(|c| c.0), style.bg.map(|c| c.0), style.attrs());
         for ch in text.chars() {
             // A control character has no cell of its own on a terminal:
             // it is drawn as a space.
@@ -148,24 +149,20 @@ impl Canvas {
             last = None;
             if fits && (ch != ' ' || spaces) {
                 let (cx, cy) = (col as u16, y as u16);
-                let mut buf = [0u8; 4];
-                let s = ch.encode_utf8(&mut buf);
                 self.orphan(cx, cy);
-                let cell = if width == 2 {
+                if width == 2 {
                     self.orphan(cx + 1, cy);
                     self.set(cx + 1, cy, Slot::Spacer);
-                    Cell::wide(s, Style::default())
-                } else {
-                    Cell::narrow(s, Style::default())
-                };
+                }
+                let cell = Cell::glyph(ch, width, Style::default());
                 self.set(
                     cx,
                     cy,
                     Slot::Glyph(Glyph {
                         cell,
-                        fg: style.fg.map(|c| c.0),
-                        bg: style.bg.map(|c| c.0),
-                        attrs: style.attrs(),
+                        fg,
+                        bg,
+                        attrs,
                         opacity,
                     }),
                 );
