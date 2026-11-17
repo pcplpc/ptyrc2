@@ -119,6 +119,8 @@ struct Sprite {
     text_at: Option<(FramePos, u16)>,
     /// Top-left screen cell at the last tick; `None`: hidden.
     screen: Option<(i64, i64)>,
+    /// View of its frame at the last tick: what it is clipped to.
+    clip: Rect,
     /// Its owner is hidden, since then: not ticked, not drawn.
     hidden: Option<Duration>,
 }
@@ -500,6 +502,7 @@ impl Scene {
             auto: AutoState::default(),
             text_at: None,
             screen: None,
+            clip: Rect::default(),
             hidden: self.hidden.contains(&owner).then_some(now),
         };
         let at = self
@@ -1118,8 +1121,10 @@ impl Scene {
             }
 
             sprite.shown |= screen.is_some();
-            if screen != sprite.screen {
+            let clip = info.map_or(sprite.clip, |i| i.rect);
+            if screen != sprite.screen || (screen.is_some() && clip != sprite.clip) {
                 sprite.screen = screen;
+                sprite.clip = clip;
                 dirty = true;
             }
         }

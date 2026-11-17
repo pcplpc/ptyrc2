@@ -1241,6 +1241,26 @@ fn an_effect_with_a_size_sees_what_is_under_its_canvas() {
 }
 
 #[test]
+fn a_view_that_changes_under_a_still_sprite_is_dirty() {
+    let mut mock = Mock::new();
+    let mut scene = Scene::new();
+    let put = json!({
+        "frame": PANE,
+        "anchor": {"at": [0, 0], "space": "view"},
+        "content": {"rows": ["abcdef"]},
+    });
+    scene.add(1, spec(put), ms(0)).unwrap();
+    let shown = show(&mut scene, &mock, &base(), 0);
+    assert!(scene.take_dirty());
+    assert_eq!(show(&mut scene, &mock, &base(), 10), shown);
+    assert!(!scene.take_dirty());
+    // Same top-left cell, a narrower view: clipped otherwise.
+    mock.pane().rect.w = 3;
+    assert_ne!(show(&mut scene, &mock, &base(), 20), shown);
+    assert!(scene.take_dirty());
+}
+
+#[test]
 fn a_scroll_is_shown_to_an_effect_at_once() {
     let mut mock = Mock::new();
     let (mut scene, seen) = echo_scene(Looks::Cells);
