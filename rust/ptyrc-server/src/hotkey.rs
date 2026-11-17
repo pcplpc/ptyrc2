@@ -9,13 +9,21 @@ use std::time::Duration;
 const WINDOW: Duration = Duration::from_millis(350);
 const KEY: &[u8] = b"\x14";
 
+/// What becomes of keyboard bytes: keys that go on, or the pair.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Part {
+    Keys(Vec<u8>),
+    /// ctrl+t came twice in a row: it reaches nobody.
+    Pair,
+}
+
 #[derive(Default)]
 pub(crate) struct Hotkey {
     /// A first ctrl+t, as typed, and when it stops waiting.
     held: Option<(Vec<u8>, Duration)>,
-    /// Of the bytes the last `sort` sent on: how many came before the
-    /// pair.
-    before: usize,
+    /// A pair ended the last read: the release of its second key, if
+    /// it comes first, goes with it.
+    paired: bool,
 }
 
 impl Hotkey {
@@ -29,32 +37,34 @@ impl Hotkey {
         self.held.take().map(|(key, _)| key).unwrap_or_default()
     }
 
-    /// Of the bytes the last `sort` sent on, those typed before the
-    /// pair: the count of them.
-    pub fn before(&self) -> usize {
-        self.before
-    }
-
-    /// Sort keyboard bytes: what goes on, and whether ctrl+t came twice
-    /// in a row. A first ctrl+t is held, until the next key or `due`;
-    /// the pair goes nowhere. Not `armed`: nothing is held.
-    pub fn sort(&mut self, bytes: &[u8], now: Duration, armed: bool) -> (Vec<u8>, bool) {
+    /// Sort keyboard bytes, in order: what goes on, and each pair of
+    /// ctrl+t in a row. A first ctrl+t is held, until the next key or
+    /// `due`. The release event of the second one (kitty keyboard
+    /// protocol) goes with the pair. Not `armed`: nothing is held.
+    pub fn parts(&mut self, bytes: &[u8], now: Duration, armed: bool) -> Vec<Part> {
         let mut forward = self.flush();
-        if !armed {
-            forward.extend_from_slice(bytes);
-            return (forward, false);
-        }
-        let mut held = (!forward.is_empty()).then(|| std::mem::take(&mut forward));
-        let mut twice = false;
         let mut rest = bytes;
+        if std::mem::take(&mut self.paired) {
+            rest = grab::skip_release(rest);
+        }
+        if !armed {
+            forward.extend_from_slice(rest);
+            return vec![Part::Keys(forward)];
+        }
+        let mut parts = Vec::new();
+        let mut held = (!forward.is_empty()).then(|| std::mem::take(&mut forward));
         while !rest.is_empty() {
             let (key, tail) = rest.split_at(grab::key_len(rest));
             rest = tail;
             let is_key = grab::legacy(key).as_deref().unwrap_or(key) == KEY;
             match (held.take(), is_key) {
                 (Some(_), true) => {
-                    twice = true;
-                    self.before = forward.len();
+                    if !forward.is_empty() {
+                        parts.push(Part::Keys(std::mem::take(&mut forward)));
+                    }
+                    parts.push(Part::Pair);
+                    self.paired = rest.is_empty();
+                    rest = grab::skip_release(rest);
                 }
                 (None, true) => held = Some(key.to_vec()),
                 // The release of the first press, between the two.
@@ -68,7 +78,24 @@ impl Hotkey {
                 }
             }
         }
+        if !forward.is_empty() {
+            parts.push(Part::Keys(forward));
+        }
         self.held = held.map(|key| (key, now + WINDOW));
+        parts
+    }
+
+    /// `parts` as one: what goes on, and whether a pair came.
+    #[cfg(test)]
+    fn sort(&mut self, bytes: &[u8], now: Duration, armed: bool) -> (Vec<u8>, bool) {
+        let mut forward = Vec::new();
+        let mut twice = false;
+        for part in self.parts(bytes, now, armed) {
+            match part {
+                Part::Keys(keys) => forward.extend(keys),
+                Part::Pair => twice = true,
+            }
+        }
         (forward, twice)
     }
 }
@@ -87,7 +114,6 @@ mod tests {
     fn twice_in_a_row() {
         let mut d = demo();
         assert_eq!(d.sort(b"a\x14\x14b", T0, true), (b"ab".to_vec(), true));
-        assert_eq!(d.before(), 1);
         assert_eq!(d.due(), None);
         // Over two reads.
         assert_eq!(d.sort(b"\x14", T0, true), (Vec::new(), false));
@@ -115,6 +141,28 @@ mod tests {
             d.sort(b"\x14\x14", T0, false),
             (b"\x14\x14\x14".to_vec(), false)
         );
+    }
+
+    #[test]
+    fn pairs_in_order() {
+        let mut d = demo();
+        let keys = |text: &str| Part::Keys(text.as_bytes().to_vec());
+        let parts = d.parts(b"a\x14\x14b\x14\x14\x14\x14c", T0, true);
+        let expected = [
+            keys("a"),
+            Part::Pair,
+            keys("b"),
+            Part::Pair,
+            Part::Pair,
+            keys("c"),
+        ];
+        assert_eq!(parts, expected);
+        // The release of the second ctrl+t goes with the pair.
+        let parts = d.parts(b"\x1b[116;5u\x1b[116;5u\x1b[116;5:3ux", T0, true);
+        assert_eq!(parts, [Part::Pair, keys("x")]);
+        // In the next read too.
+        assert_eq!(d.parts(b"\x1b[116;5u\x1b[116;5u", T0, true), [Part::Pair]);
+        assert_eq!(d.parts(b"\x1b[116;5:3uy", T0, true), [keys("y")]);
     }
 
     #[test]

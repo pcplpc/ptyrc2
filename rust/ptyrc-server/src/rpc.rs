@@ -504,6 +504,7 @@ fn widget_hide(engine: &mut ScreenEngine, conn: ConnId, params: Value) -> Res {
     if !engine.widgets.hide(conn.0, id) {
         return Err(widget_err(engine, conn, None, WidgetError::NoWidget(id)));
     }
+    engine.ended(conn, Some(id));
     Ok(json!({}))
 }
 
@@ -828,6 +829,9 @@ pub(crate) fn handle(
         "debug.dump" => debug_dump(engine),
         _ => return Reply::Err(crate::hints::unknown_method(method)),
     };
+    if matches!(method, "draw.remove" | "draw.clear") {
+        engine.removed_by(conn);
+    }
     if method.starts_with("draw.") || method.starts_with("widget.") || method == "debug.overlay" {
         ctx.request_repaint();
     }

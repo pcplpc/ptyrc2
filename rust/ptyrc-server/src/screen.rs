@@ -247,7 +247,7 @@ impl ScreenEngine {
     /// Lay the widgets out and update their sprites; topic `widgets`.
     pub(crate) fn tick_widgets(&mut self, now: Duration, ctx: &mut Ctx) {
         if self.widgets.is_empty() {
-            return;
+            return self.sync_focus(None, ctx);
         }
         let cursor = self.app.cursor();
         let cursor = cursor.visible.then_some((cursor.col, cursor.row));
@@ -749,6 +749,7 @@ impl Engine for ScreenEngine {
     fn on_disconnect(&mut self, conn: ConnId, ctx: &mut Ctx) {
         self.waits.retain(|w| w.conn != conn);
         self.widgets.drop_owner(conn.0);
+        self.ended(conn, None);
         self.sync_focus(None, ctx);
         self.scene.drop_owner(conn.0);
         ctx.request_repaint();

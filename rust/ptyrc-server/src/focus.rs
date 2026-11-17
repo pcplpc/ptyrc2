@@ -6,7 +6,7 @@
 //! requests and the word sent to a connection that loses the focus.
 
 use crate::engine::{ConnId, Ctx};
-use crate::grab::{self, Grab};
+use crate::grab;
 use crate::screen::ScreenEngine;
 use ptyrc_core::widgets::{WidgetError, WidgetId};
 use ptyrc_proto::{ErrorCode, RpcError};
@@ -23,22 +23,15 @@ pub(crate) const ESCAPE: &str = "esc";
 pub struct Held {
     pub conn: ConnId,
     pub widget: WidgetId,
-    /// Bytes of the escape key; empty: none.
-    pub escape: Vec<u8>,
-}
-
-impl Held {
-    /// The sorter of its keys: all are the widget's but the escape key.
-    pub(crate) fn sorter(&self) -> Grab {
-        Grab::all(self.conn, self.escape.clone())
-    }
+    /// Name of the escape key; empty: none.
+    pub escape: String,
 }
 
 /// The escape keys of the widgets that ask, and the focus last told.
 #[derive(Default)]
 pub(crate) struct Focus {
-    /// Per widget that asks: the bytes of its escape key; empty: none.
-    escapes: HashMap<WidgetId, Vec<u8>>,
+    /// Per widget that asks: the name of its escape key; empty: none.
+    escapes: HashMap<WidgetId, String>,
     told: Option<(WidgetId, ConnId)>,
 }
 
@@ -79,33 +72,48 @@ impl ScreenEngine {
         })
     }
 
-    /// Tell the connection that lost the focus by no doing of its own,
-    /// and forget the escape keys of the widgets that ask no more.
-    /// `reason`: why, when the caller knows; else it is told from the
-    /// widget: its owner paused, its frame forgotten.
+    /// Tell the connection that lost the focus by no doing of its own
+    /// (`ended` says of its own), and forget the escape keys of the
+    /// widgets that ask no more. `reason`: why, when the caller knows;
+    /// else its owner is paused, or the widget cannot be drawn any
+    /// more: its frame forgotten, its sprite removed by another.
     pub(crate) fn sync_focus(&mut self, reason: Option<&str>, ctx: &mut Ctx) {
-        let now = self
-            .widgets
-            .focused()
-            .map(|(id, owner)| (id, ConnId(owner)));
+        let focused = self.widgets.focused();
+        let now = focused.map(|(id, owner)| (id, ConnId(owner)));
         let was = std::mem::replace(&mut self.focus.told, now);
         if let Some((id, conn)) = was.filter(|w| Some(*w) != now) {
-            let info = self.widgets.info(id).filter(|i| i.asks.is_some());
-            let reason = match (reason, info) {
-                // Released, hidden, gone: its own doing, or told by `widgets`.
-                (_, None) => None,
-                (Some(reason), Some(_)) => Some(reason),
-                (None, Some(_)) if self.widgets.owner_hidden(conn.0) => Some("pause"),
-                (None, Some(_)) => Some("hidden"),
+            let reason = match reason {
+                Some(reason) => reason,
+                None if self.widgets.owner_hidden(conn.0) => "pause",
+                None => "hidden",
             };
-            if let Some(reason) = reason {
-                ctx.send(conn, "input", json!({"widget": id, "released": reason}));
-            }
+            ctx.send(conn, "input", json!({"widget": id, "released": reason}));
         }
         let widgets = &self.widgets;
         self.focus
             .escapes
             .retain(|id, _| widgets.info(*id).is_some_and(|i| i.asks.is_some()));
+    }
+
+    /// The connection ends the focus itself (it releases, hides or
+    /// removes its focused widget, or leaves): no word of it. `id`:
+    /// that widget only.
+    pub(crate) fn ended(&mut self, conn: ConnId, id: Option<WidgetId>) {
+        self.focus
+            .told
+            .take_if(|(w, c)| *c == conn && id.is_none_or(|id| id == *w));
+    }
+
+    /// After a `draw.remove` or a `draw.clear` of `conn`: the sprite of
+    /// its focused widget removed is its own doing.
+    pub(crate) fn removed_by(&mut self, conn: ConnId) {
+        let gone = self.focus.told.is_some_and(|(id, _)| {
+            let sprite = self.widgets.info(id).and_then(|i| i.sprite);
+            sprite.is_none_or(|s| !self.scene.contains(s))
+        });
+        if gone {
+            self.ended(conn, None);
+        }
     }
 
     /// Focus `id`, or drop the focus; the one that had it is told
@@ -160,7 +168,7 @@ impl ScreenEngine {
         };
         let escape = match params.get("escape") {
             None | Some(Value::Null) => grab::escape_key(ESCAPE),
-            Some(Value::Bool(false)) => Ok(Vec::new()),
+            Some(Value::Bool(false)) => Ok(String::new()),
             Some(Value::String(key)) => grab::escape_key(key),
             Some(_) => Err("escape: a key name, or false".to_string()),
         }
@@ -183,6 +191,7 @@ impl ScreenEngine {
         if !self.widgets.release(conn.0, id) {
             return Err(no_widget(self, conn, id));
         }
+        self.ended(conn, Some(id));
         self.tick_widgets(ctx.now(), ctx);
         Ok(json!({}))
     }

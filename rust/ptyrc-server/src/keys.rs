@@ -5,7 +5,8 @@ use ptyrc_proto::suggest;
 
 /// The key names, as listed in an error.
 pub const KEY_NAMES: &str = "enter tab esc space backspace delete insert up down left right \
-home end pageup pagedown f1..f12 shift+tab ctrl+<a-z @ [ \\ ] ^ _ ? space> alt+<key>";
+home end pageup pagedown f1..f12 shift+tab ctrl+<a-z @ [ \\ ] ^ _ ? space> alt+<key> \
+shift+<up..f12> ctrl+<up..f12>";
 
 const NAMED: [&str; 16] = [
     "enter",
@@ -110,6 +111,51 @@ pub fn encode_key(key: &str, app_cursor: bool) -> Result<Vec<u8>, KeyError> {
     Ok(key.as_bytes().to_vec())
 }
 
+/// The special keys that take modifiers as xterm writes them: name,
+/// first parameter, final byte: `CSI 1 ; m A`, `CSI 3 ; m ~`.
+pub(crate) const MODIFIED: [(&str, &str, &str); 22] = [
+    ("up", "1", "A"),
+    ("down", "1", "B"),
+    ("right", "1", "C"),
+    ("left", "1", "D"),
+    ("home", "1", "H"),
+    ("end", "1", "F"),
+    ("insert", "2", "~"),
+    ("delete", "3", "~"),
+    ("pageup", "5", "~"),
+    ("pagedown", "6", "~"),
+    ("f1", "1", "P"),
+    ("f2", "1", "Q"),
+    ("f3", "1", "R"),
+    ("f4", "1", "S"),
+    ("f5", "15", "~"),
+    ("f6", "17", "~"),
+    ("f7", "18", "~"),
+    ("f8", "19", "~"),
+    ("f9", "20", "~"),
+    ("f10", "21", "~"),
+    ("f11", "23", "~"),
+    ("f12", "24", "~"),
+];
+
+/// A special key with shift or ctrl, alt too: `shift+up`,
+/// `ctrl+alt+left`; the modifiers in the order ctrl, alt, shift.
+fn modified(key: &str) -> Option<Vec<u8>> {
+    let mut rest = key;
+    let mut bits = 0;
+    for (bit, prefix) in [(4, "ctrl+"), (2, "alt+"), (1, "shift+")] {
+        if let Some(tail) = rest.strip_prefix(prefix) {
+            (rest, bits) = (tail, bits | bit);
+        }
+    }
+    // Alt alone is an escape before the key; shift+tab has its own bytes.
+    if bits & 5 == 0 {
+        return None;
+    }
+    let (_, code, end) = MODIFIED.iter().find(|(name, _, _)| *name == rest)?;
+    Some(format!("\x1b[{code};{}{end}", bits + 1).into_bytes())
+}
+
 fn named(key: &str, app_cursor: bool) -> Option<Vec<u8>> {
     let cursor = |c: u8| -> Vec<u8> { vec![0x1b, if app_cursor { b'O' } else { b'[' }, c] };
     let tilde = |n: u8| -> Vec<u8> { format!("\x1b[{n}~").into_bytes() };
@@ -143,6 +189,9 @@ fn named(key: &str, app_cursor: bool) -> Option<Vec<u8>> {
         "f11" => tilde(23),
         "f12" => tilde(24),
         _ => {
+            if let Some(bytes) = modified(key) {
+                return Some(bytes);
+            }
             if let Some(rest) = key.strip_prefix("ctrl+") {
                 return ctrl(rest).map(|b| vec![b]);
             }
@@ -282,13 +331,34 @@ mod tests {
             "ctrl+shift+x",
             "f13",
             "f0",
-            "shift+up",
+            "shift+x",
+            "shift+enter",
             "alt+",
         ] {
             let e = encode_key(bad, false).unwrap_err();
             assert_eq!(e.message, format!("not a key: {bad}"));
             assert!(e.hint.starts_with("keys: enter tab"), "{bad}: {}", e.hint);
         }
+    }
+
+    #[test]
+    fn special_keys_with_modifiers() {
+        for (name, bytes) in [
+            ("shift+up", &b"\x1b[1;2A"[..]),
+            ("ctrl+left", b"\x1b[1;5D"),
+            ("ctrl+shift+end", b"\x1b[1;6F"),
+            ("ctrl+alt+shift+delete", b"\x1b[3;8~"),
+            ("shift+f5", b"\x1b[15;2~"),
+            ("ctrl+f1", b"\x1b[1;5P"),
+            // Alt alone: an escape before the key.
+            ("alt+home", b"\x1b\x1b[H"),
+            ("alt+esc", b"\x1b\x1b"),
+        ] {
+            assert_eq!(encode_key(name, false).unwrap(), bytes, "{name}");
+            assert_eq!(crate::grab::name(bytes).as_deref(), Some(name));
+        }
+        // The same whatever the cursor-key mode.
+        assert_eq!(encode_key("shift+up", true).unwrap(), b"\x1b[1;2A");
     }
 
     #[test]

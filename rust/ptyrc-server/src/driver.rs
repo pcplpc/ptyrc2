@@ -7,7 +7,7 @@ use crate::engine::{ConnId, Ctx, Effects, Engine, Reply, SessionInfo, Token};
 use crate::grab::{self, Grab};
 use crate::host::Host;
 use crate::hostcolors::{Known, QUERY_BG, QUERY_FG, Replies};
-use crate::hotkey::Hotkey;
+use crate::hotkey::{self, Hotkey};
 use crate::keys;
 use crate::mouse;
 use crate::paging;
@@ -45,6 +45,8 @@ const BURST_MAX_TIME: Duration = Duration::from_millis(8);
 /// Keyboard input is not read while this much waits for the app.
 const PTY_QUEUE_HIGH: usize = 1 << 20;
 const DEFAULT_SIZE: (u16, u16) = (80, 24);
+/// An unfinished key at the end of a read waits this long for its rest.
+const PARTIAL_KEY: Duration = Duration::from_millis(25);
 /// Connections at once; one more is closed at accept.
 const MAX_CONNS: usize = 256;
 /// How long the host has to tell its colours.
@@ -215,6 +217,14 @@ struct Driver {
     grab: Option<Grab>,
     /// The sorter of the hotkey; `None`: no hotkey.
     hotkey: Option<Hotkey>,
+    /// The end of the last read of the host keyboard, an unfinished
+    /// key, and when it is given up as it is.
+    partial: Option<(Vec<u8>, Duration)>,
+    /// A bracketed paste is under way on the host keyboard.
+    pasting: bool,
+    /// An escape key ended the last read: the release event of that
+    /// key, if it comes first, reaches nobody.
+    drop_release: bool,
     /// The child the hotkey started, while in the table.
     hotkey_app: Option<u64>,
     /// The app table; `None` in a replay and when transparent.
@@ -448,6 +458,9 @@ impl Driver {
             grab: None,
             hotkey,
             hotkey_app: None,
+            partial: None,
+            pasting: false,
+            drop_release: false,
             apps,
             pty_eof: false,
             pty_queue: Vec::new(),
@@ -506,6 +519,9 @@ impl Driver {
             grab: None,
             hotkey: None,
             hotkey_app: None,
+            partial: None,
+            pasting: false,
+            drop_release: false,
             apps: None,
             pty_eof: true,
             pty_queue: Vec::new(),
@@ -560,12 +576,18 @@ impl Driver {
                 self.respond(conn, &id, Err(error));
             }
         }
+        if let Some(focus) = engine.focus() {
+            // Its widget is gone with the engine.
+            let data = json!({"widget": focus.widget, "released": "hidden"});
+            self.send_event(focus.conn, "input", data);
+        }
         if let Some(factory) = &mut self.factory {
             *engine = factory();
         }
         (self.info.cols, self.info.rows) = header.size;
         self.colors = Self::tape_colors(&self.cfg, &header);
         self.grab = None;
+        (self.partial, self.pasting, self.drop_release) = (None, false, false);
         hook!(self, Duration::ZERO, |ctx| engine.on_start(ctx));
         let colors = self.colors.colors;
         hook!(self, Duration::ZERO, |ctx| engine
@@ -674,6 +696,10 @@ impl Driver {
                 self.handoff_kill = Some(now + HANDOFF_WAIT);
                 self.signal_app(Signal::KILL);
             }
+            if self.partial.as_ref().is_some_and(|(_, t)| *t <= now) {
+                // No rest came: the key is whole as it is.
+                self.host_keys(&[], false, engine);
+            }
             if let Some(hotkey) = &mut self.hotkey
                 && hotkey.due().is_some_and(|t| t <= now)
             {
@@ -711,7 +737,8 @@ impl Driver {
                 let due = self.hotkey.as_ref().and_then(Hotkey::due);
                 let kill = self.handoff_kill.filter(|_| self.exit_status.is_none());
                 let apps = self.apps.as_ref().and_then(Apps::due);
-                let wake = [wake, self.replies_until, due, kill, apps]
+                let partial = self.partial.as_ref().map(|(_, at)| *at);
+                let wake = [wake, self.replies_until, due, kill, apps, partial]
                     .into_iter()
                     .flatten()
                     .min();
@@ -1048,34 +1075,101 @@ impl Driver {
         out
     }
 
-    /// Bytes of the host keyboard: ctrl+t twice in a row, while no key
-    /// is grabbed, is the hotkey: the next widget that asks is focused;
-    /// past the last, or when none asks, the manager.
+    /// Bytes of the host keyboard. An unfinished key at their end is
+    /// held a moment while a widget is focused or a paste is under
+    /// way: the rest of it comes with the next read. A bracketed paste
+    /// holds no key: neither the hotkey nor an escape key.
     fn host_input(&mut self, bytes: &[u8], engine: &mut dyn Engine) {
+        self.host_keys(bytes, true, engine);
+    }
+
+    fn host_keys(&mut self, bytes: &[u8], hold: bool, engine: &mut dyn Engine) {
+        let mut all = self
+            .partial
+            .take()
+            .map(|(held, _)| held)
+            .unwrap_or_default();
+        all.extend_from_slice(bytes);
+        if hold && (self.pasting || engine.focus().is_some()) {
+            let cut = all.len() - grab::incomplete(&all);
+            if cut < all.len() {
+                let tail = all.split_off(cut);
+                self.partial = Some((tail, self.clock.elapsed() + PARTIAL_KEY));
+            }
+        }
+        for piece in grab::pieces(&all, &mut self.pasting) {
+            match piece {
+                grab::Piece::Keys(keys) => self.host_typed(&keys, engine),
+                paste => self.host_paste(paste, engine),
+            }
+        }
+    }
+
+    /// Keys typed on the host keyboard: ctrl+t twice in a row, while no
+    /// key is grabbed, is the hotkey: the next widget that asks is
+    /// focused; past the last, or when none asks, the manager. Each pair
+    /// of a read in its turn; the keys between go to who has the
+    /// keyboard then.
+    fn host_typed(&mut self, bytes: &[u8], engine: &mut dyn Engine) {
+        let bytes = match std::mem::take(&mut self.drop_release) {
+            true => grab::skip_release(bytes),
+            false => bytes,
+        };
         let Some(hotkey) = &mut self.hotkey else {
             return self.forward_input(bytes, engine);
         };
         let armed = self.grab.is_none();
-        let (forward, twice) = hotkey.sort(bytes, self.clock.elapsed(), armed);
-        // What was typed before the pair is for who had the keys then.
-        let before = match twice {
-            true => hotkey.before().min(forward.len()),
-            false => forward.len(),
-        };
-        self.forward_input(&forward[..before], engine);
-        if twice {
-            // The next widget that asks; past the last, the manager.
-            // The manager up and no widget focused: the pair ends it.
-            let now = self.now();
-            let menu = engine.focus().is_none()
-                && (self.hotkey_app.zip(self.apps.as_ref()))
-                    .is_some_and(|(id, apps)| apps.get(id).is_some());
-            let focused = !menu && hook!(self, now, |ctx| engine.focus_next(ctx));
-            if !focused && !self.hotkey_pressed() {
-                let _ = self.host.write(b"\x07");
+        for part in hotkey.parts(bytes, self.clock.elapsed(), armed) {
+            match part {
+                hotkey::Part::Keys(keys) => self.forward_input(&keys, engine),
+                hotkey::Part::Pair => {
+                    // The manager up and no widget focused: the pair ends it.
+                    let now = self.now();
+                    let menu = engine.focus().is_none() && self.manager_runs();
+                    let focused = !menu && hook!(self, now, |ctx| engine.focus_next(ctx));
+                    if !focused && !self.hotkey_pressed() {
+                        let _ = self.host.write(b"\x07");
+                    }
+                }
             }
-            self.forward_input(&forward[before..], engine);
         }
+    }
+
+    /// Pasted text: the focused widget's, as text; under a grab of
+    /// every key, key by key; else the app's.
+    fn host_paste(&mut self, paste: grab::Piece, engine: &mut dyn Engine) {
+        // A ctrl+t held is not the first of a pair.
+        if let Some(hotkey) = &mut self.hotkey {
+            let held = hotkey.flush();
+            self.forward_input(&held, engine);
+        }
+        if let Some(grab) = &self.grab {
+            let sorted = grab.sort_paste(&paste.bytes());
+            let conn = grab.conn;
+            for (name, key) in sorted.taken {
+                let data = json!({"key": name, "bytes": keys::base64_encode(&key),
+                                  "grabbed": true});
+                self.send_event(conn, "input", data);
+            }
+            return self.forward_app(&sorted.forward, engine);
+        }
+        match (engine.focus(), &paste) {
+            (Some(focus), grab::Piece::Paste { text, .. }) => {
+                if !text.is_empty() {
+                    let data = json!({"widget": focus.widget,
+                                      "paste": String::from_utf8_lossy(text)});
+                    self.send_event(focus.conn, "input", data);
+                }
+            }
+            _ => self.forward_app(&paste.bytes(), engine),
+        }
+    }
+
+    /// The child of the hotkey runs.
+    fn manager_runs(&self) -> bool {
+        (self.hotkey_app.zip(self.apps.as_ref()))
+            .and_then(|(id, apps)| apps.get(id))
+            .is_some_and(|app| app.state != State::Exited)
     }
 
     /// The hotkey: end its app when it runs, else start it. False: it
@@ -1085,9 +1179,14 @@ impl Driver {
         let (Some(apps), Some(command)) = (&mut self.apps, &self.cfg.hotkey) else {
             return false;
         };
-        let running = self.hotkey_app.filter(|id| apps.get(*id).is_some());
-        if let Some(id) = running {
-            return apps.stop(id, now).is_ok();
+        // One that ended and is still in the table does not run.
+        let state = |id: &u64| apps.get(*id).map(|app| app.state);
+        match self.hotkey_app.and_then(|id| Some((id, state(&id)?))) {
+            Some((id, State::Exited)) => {
+                let _ = apps.forget(id);
+            }
+            Some((id, _)) => return apps.stop(id, now).is_ok(),
+            None => {}
         }
         self.hotkey_app = apps
             .start(command.clone(), Some("manage".into()), true, now)
@@ -1117,14 +1216,16 @@ impl Driver {
                 if sorted.released {
                     self.grab = None;
                     self.send_event(conn, "input", json!({"released": "escape"}));
+                    self.drop_release = sorted.forward.is_empty();
                 }
                 held = sorted.forward;
                 &held[..]
             }
             None => match engine.focus() {
-                // The keys are the focused widget's.
+                // The keys are the focused widget's; a report of the
+                // mouse or of the host's window is no key.
                 Some(focus) => {
-                    let sorted = focus.sorter().sort(bytes);
+                    let sorted = grab::sort_keys(bytes, &focus.escape, false, |_| true);
                     for (name, key) in sorted.taken {
                         let data = json!({"key": name, "bytes": keys::base64_encode(&key),
                                           "widget": focus.widget});
@@ -1133,6 +1234,7 @@ impl Driver {
                     if sorted.released {
                         let now = self.now();
                         hook!(self, now, |ctx| engine.focus_escape(ctx));
+                        self.drop_release = sorted.forward.is_empty();
                     }
                     held = sorted.forward;
                     &held[..]
@@ -1140,6 +1242,11 @@ impl Driver {
                 None => bytes,
             },
         };
+        self.forward_app(bytes, engine);
+    }
+
+    /// Keyboard bytes for the app.
+    fn forward_app(&mut self, bytes: &[u8], engine: &mut dyn Engine) {
         if bytes.is_empty() {
             return;
         }
@@ -1440,6 +1547,15 @@ impl Driver {
             )
             .with_hint("`widget.blur` drops the focus (ptyrc focus --none)")),
             "input.grab" => self.input_grab(conn, &params),
+            "widget.ask"
+                if self.hotkey.is_none() && params.get("escape") == Some(&json!(false)) =>
+            {
+                Err(RpcError::new(
+                    ErrorCode::NotUsable,
+                    "escape: false, and the session has no hotkey: the focus could not be left",
+                )
+                .with_hint("name an escape key (esc when absent)"))
+            }
             "widget.focus" if self.grab.is_some() => Err(RpcError::new(
                 ErrorCode::NotUsable,
                 "a client holds the keys (`input.grab`)",
@@ -1867,9 +1983,13 @@ impl Driver {
             let Some(conn) = self.conns.get_mut(&id) else {
                 continue;
             };
-            conn.paused = paused;
+            // A focus lost by the pause is told before the silence.
+            conn.paused = false;
             let topics: Vec<String> = conn.topics.iter().cloned().collect();
             hook!(self, now, |ctx| engine.hide_owner(id, paused, ctx));
+            if let Some(conn) = self.conns.get_mut(&id) {
+                conn.paused = paused;
+            }
             if paused {
                 self.grab.take_if(|g| g.conn == id);
                 continue;
@@ -1934,11 +2054,21 @@ impl Driver {
         if !given {
             return Err(RpcError::bad_params("one of text, keys, bytes"));
         }
-        self.type_in(bytes, engine)
+        match params.get("host") {
+            None | Some(Value::Null | Value::Bool(false)) => self.type_in(bytes, engine),
+            // As typed on the host keyboard: the hotkey, the focus, a
+            // grab take what is theirs.
+            Some(Value::Bool(true)) => {
+                self.can_type()?;
+                self.host_input(&bytes, engine);
+                Ok(json!({}))
+            }
+            Some(_) => Err(RpcError::bad_params("host: true or false")),
+        }
     }
 
-    /// Queue bytes for the app, on behalf of a client.
-    fn type_in(&mut self, bytes: Vec<u8>, engine: &mut dyn Engine) -> Result<Value, RpcError> {
+    /// The session takes input: no replay, the app runs.
+    fn can_type(&self) -> Result<(), RpcError> {
         if self.player.is_some() {
             return Err(RpcError::new(
                 ErrorCode::BadRequest,
@@ -1948,6 +2078,12 @@ impl Driver {
         if self.exit_status.is_some() {
             return Err(RpcError::new(ErrorCode::Gone, "the app exited"));
         }
+        Ok(())
+    }
+
+    /// Queue bytes for the app, on behalf of a client.
+    fn type_in(&mut self, bytes: Vec<u8>, engine: &mut dyn Engine) -> Result<Value, RpcError> {
+        self.can_type()?;
         self.paged(&bytes, engine);
         self.pty_queue.extend(bytes);
         Ok(json!({}))
