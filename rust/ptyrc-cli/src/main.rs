@@ -114,7 +114,8 @@ enum Verb {
     Python(apps::Python),
     /// The apps of the session: start, stop, pause, restart; alone, a menu
     Manage(manage::Manage),
-    /// A running tmux session under ptyrc: `ptyrc tmux attach`, `detach`
+    /// A running tmux session under ptyrc: `ptyrc tmux attach`, `detach`,
+    /// `restart`
     #[command(subcommand)]
     Tmux(tmux::Tmux),
     /// Debug tools

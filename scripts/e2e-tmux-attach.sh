@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
-# `ptyrc tmux attach` and `detach` against real tmux. Two private servers:
+# `ptyrc tmux attach`, `detach` and `restart` against real tmux. Two private servers:
 # `host` stands for the terminal, a client of `in` runs in its pane and is
 # the one swapped. Prints PASS or FAIL per check; exit status 1 if a
 # check failed.
 #
 #   scripts/e2e-tmux-attach.sh [SCENARIO...]     default: all
-#   scenarios: swap apps leave typed fallback outside
+#   scenarios: swap apps leave typed fallback outside restart
 
 cd "$(dirname "$0")/.." || exit 2
 ROOT=$PWD
@@ -190,7 +190,48 @@ s_outside() {
     check "outside: detach leaves a plain client" is "$(running) $(clients)" "tmux 1"
 }
 
-[ $# -eq 0 ] && set -- swap apps leave typed fallback outside
+# The binary of the driver over the client of `main`: the client keeps
+# its pid from a swap to the next.
+driver() { basename "$(readlink "/proc/$(pgrep -f "tmux wrap -t .* -S $SOCKET" | head -1)/exe")"; }
+# The child apps of the driver that run.
+children() {
+    p --json manage ls | python3 -c 'import json,sys
+print(sum(a["kind"] == "child" and a["state"] == "running" for a in json.load(sys.stdin)))'
+}
+
+s_restart() {
+    start || return
+    local before out bin=$PTYRC
+    before=$(shown)
+    # The binary before and after a build.
+    cp "$PTYRC" "$WORK/ptyrc-old"; cp "$PTYRC" "$WORK/ptyrc-new"
+    # Not attached: an attach.
+    PTYRC=$WORK/ptyrc-old
+    out=$(p tmux restart --app clock) || fail "restart: not attached, exits 0" "$out"
+    check "restart: not attached, it attaches" is "$(running) $(option @ptyrc)" "ptyrc-old tmux-main"
+    eventually '[ "$(sprites)" -ge 1 ]'
+    check "restart: a driver, its app" is "$(driver) $(children)" "ptyrc-old 1"
+    PTYRC=$WORK/ptyrc-new
+    out=$(p tmux restart) || fail "restart: exits 0" "$out"
+    check "restart: names the session" grep -q 'tmux-main' <<<"$out"
+    check "restart: the session is named in @ptyrc" is "$(option @ptyrc)" tmux-main
+    check "restart: the driver is of the binary as it is now" is "$(running) $(driver)" "ptyrc-new ptyrc-new"
+    check "restart: one client" is "$(clients)" 1
+    until_is "$before" shown
+    check "restart: the terminal shows the same" is "$(shown)" "$before"
+    eventually '[ "$(sprites)" -ge 1 ]'
+    check "restart: its app runs again, once" is "$(children) $(test "$(sprites)" -ge 1; echo $?)" "1 0"
+    # Typed in a pane of the session.
+    "${IN[@]}" send-keys -t main "$WORK/ptyrc-old tmux restart" Enter
+    eventually '[ "$(driver)" = ptyrc-old ] && [ "$(option @ptyrc)" = tmux-main ] && [ "$(children)" = 1 ]'
+    check "restart: typed in a pane" is "$(driver) $(option @ptyrc) $(children) $(clients)" "ptyrc-old tmux-main 1 1"
+    p tmux detach
+    until_is tmux running
+    check "restart: detach leaves a plain client" is "$(running) $(clients)" "tmux 1"
+    PTYRC=$bin
+}
+
+[ $# -eq 0 ] && set -- swap apps leave typed fallback outside restart
 for s in "$@"; do
     "s_$s"
 done

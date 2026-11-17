@@ -1632,6 +1632,7 @@ ptyrc manage [ls | start | stop | pause | resume | restart | forget |
       menu (Apps and the manager)
 ptyrc tmux attach [-t SESSION] [-L NAME | -S PATH] [--app APP]...
 ptyrc tmux detach [-t SESSION] [-L NAME | -S PATH]
+ptyrc tmux restart [-t SESSION] [-L NAME | -S PATH] [--app APP]...
 ```
 
 `ptyrc app` executes `ptyrc-app` with its arguments as given, `ptyrc
@@ -1650,7 +1651,8 @@ program that does.
 ### tmux
 
 `ptyrc tmux attach` puts a driver under a running tmux session; `ptyrc
-tmux detach` takes it away. The session stays in the tmux server: only
+tmux detach` takes it away; `ptyrc tmux restart` puts a new one in its
+place. The session stays in the tmux server: only
 its client is replaced, on the same terminal. Windows, panes and size
 are those of before; the screen is redrawn once.
 
@@ -1678,6 +1680,14 @@ are those of before; the screen is redrawn once.
   without a word on the terminal (hung up when tmux does not know it);
   the driver ends and executes a plain `tmux attach-session` in its
   place. Not attached: status 0, nothing is done. `-s` names the driver.
+- `restart`: `detach`, then `attach` once the plain client is there:
+  the driver is a new process image, of the binary that runs the verb
+  (after a build, the new one), under the same client pid. The child
+  apps the old driver ran (`app.list`: `child`, not `exited`, not the
+  one of the hotkey) are started again on the new one, same `argv` and
+  name, their state lost; then those of `--app`. Sprites, widgets and
+  client apps of the old driver end with it. Not attached: `attach`.
+  `-s` names the driver to end.
 - Detached by tmux (`prefix d`), or the session killed: the driver ends
   with its client, as tmux would; nothing takes its place.
 - The driver that does not start, or that breaks: a plain client is
@@ -1961,7 +1971,7 @@ windows under the driver, one drawing per pane, sand in the idle one.
 - `scripts/e2e-render.sh`: the driver in a detached tmux; what tmux shows
   is compared, text and styles, with the driver's model of the host.
 - `scripts/e2e-heat.sh`: heat classes and idle on a shell, vim and htop.
-- `scripts/e2e-tmux-attach.sh`: `ptyrc tmux attach` and `detach` on two
+- `scripts/e2e-tmux-attach.sh`: `ptyrc tmux attach`, `detach` and `restart` on two
   private tmux servers, one for the terminal: the swap and what the
   terminal shows, the session found from a pane, apps, `prefix d`, the
   verbs typed in a pane, the driver that does not start, the terminal

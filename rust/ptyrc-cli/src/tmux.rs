@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! `ptyrc tmux`: put a driver under the client of a running tmux session,
-//! and take it away.
+//! take it away, put a new one in its place.
 //!
 //! The session stays in the tmux server. `attach` has tmux replace the
 //! client by `ptyrc tmux wrap` (`detach-client -E`): a driver, on the
 //! same terminal, whose app is a new client of the same session.
 //! `detach` asks the driver for a handoff: it ends and a plain client
-//! takes its place. The tmux session names its driver in `@ptyrc`.
+//! takes its place. `restart` is `detach`, then `attach` with the child
+//! apps the driver ran: the driver is a new process, of the binary as
+//! it is now. The tmux session names its driver in `@ptyrc`.
 
 use crate::{Common, Fail, apps, connect, plugins, print_json};
 use clap::{Args, Subcommand};
@@ -27,6 +29,8 @@ pub enum Tmux {
     Attach(Attach),
     /// Take ptyrc away: the tmux session goes on, plain
     Detach(Target),
+    /// Detach, then attach: a new driver, with the apps of the old one
+    Restart(Attach),
     /// The driver over a client of a session, in place of this process
     #[command(hide = true)]
     Wrap(Wrap),
@@ -42,7 +46,7 @@ pub struct Attach {
     app: Vec<String>,
 }
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 pub struct Target {
     /// The tmux session [default: the one this pane is in]
     #[arg(short, long, value_name = "SESSION")]
@@ -87,6 +91,7 @@ pub fn tmux(common: &Common, verb: Tmux) -> Result<ExitCode, Fail> {
     match verb {
         Tmux::Attach(args) => attach(common, args),
         Tmux::Detach(args) => detach(common, args),
+        Tmux::Restart(args) => restart(common, args),
         Tmux::Wrap(args) => wrap(args),
     }
 }
@@ -269,9 +274,18 @@ fn detach(common: &Common, args: Target) -> Result<ExitCode, Fail> {
         }
         return Ok(ExitCode::SUCCESS);
     };
+    leave(&name, &args)?;
+    if common.json {
+        print_json(&json!({"session": name}), false);
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// The driver `name` ends, a plain client in its place.
+fn leave(name: &str, args: &Target) -> Result<(), Fail> {
     let named = Common {
-        session: Some(name.clone()),
-        json: common.json,
+        session: Some(name.to_string()),
+        json: false,
     };
     let mut driver = connect(&named)?;
     // The client of the driver leaves by tmux, without a word on the
@@ -286,14 +300,56 @@ fn detach(common: &Common, args: Target) -> Result<ExitCode, Fail> {
     {
         driver.call("session.handoff", json!({}))?;
     }
-    let socket = session::socket_path(&name);
+    let socket = session::socket_path(name);
     if wait_for(|| (!session::is_live(&socket)).then_some(())).is_none() {
         return Err(fail(5, format!("session {name} did not end"), ""));
     }
-    if common.json {
-        print_json(&json!({"session": name}), false);
+    Ok(())
+}
+
+/// The child apps the driver `name` runs, as `(argv, name)`: not the
+/// one of the hotkey, not one that ended.
+fn children(name: &str) -> Result<Vec<(Vec<String>, String)>, Fail> {
+    let named = Common {
+        session: Some(name.to_string()),
+        json: false,
+    };
+    let listed = connect(&named)?.call("app.list", json!({}))?;
+    let hotkey = crate::hotkey_command();
+    let child = |info: &serde_json::Value| {
+        let argv: Vec<String> = serde_json::from_value(info["argv"].clone()).ok()?;
+        let kept = info["kind"] == "child" && info["state"] != "exited";
+        (kept && !argv.is_empty() && argv != hotkey)
+            .then(|| (argv, info["name"].as_str().unwrap_or_default().to_string()))
+    };
+    let apps = listed["apps"].as_array();
+    Ok(apps.map_or_else(Vec::new, |apps| apps.iter().filter_map(child).collect()))
+}
+
+fn restart(common: &Common, args: Attach) -> Result<ExitCode, Fail> {
+    let (server, session, _) = find_session(&args.target)?;
+    let old = common.session.clone();
+    let old = old.or_else(|| driver_of(&server, &session));
+    let mut carried = Vec::new();
+    if let Some(old) = &old {
+        carried = children(old)?;
+        leave(old, &args.target)?;
+        // The plain client that took its place is the one to replace.
+        let client = || server.clients(Some(&session)).ok()?.first().map(|_| ());
+        wait_for(client);
     }
-    Ok(ExitCode::SUCCESS)
+    let status = attach(common, args)?;
+    if let Some(name) = driver_of(&server, &session).filter(|_| !carried.is_empty()) {
+        let named = Common {
+            session: Some(name),
+            json: false,
+        };
+        let mut driver = connect(&named)?;
+        for (argv, label) in &carried {
+            crate::manage::start(&mut driver, argv, label)?;
+        }
+    }
+    Ok(status)
 }
 
 /// A name no live session has: `tmux-<name>`, then `tmux-<name>-2`...
