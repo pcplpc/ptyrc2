@@ -2704,6 +2704,21 @@ fn cost_scene_200x60() {
         let grid_clone = best(&mut || {
             std::hint::black_box(base.clone());
         });
+        // The host shows a frame; the next one is composed and repaired.
+        let mut host = ptyrc_vt::Vt::new(cols, rows);
+        let mut sent = 0;
+        let repair = best(&mut || {
+            k += 1;
+            scene
+                .update(id, parsed[k % parsed.len()].clone(), ms(k as u64))
+                .unwrap();
+            scene.tick_on(ms(k as u64), &base, &mock);
+            let desired = scene.compose(&base, &mock);
+            let mut out = Vec::new();
+            ptyrc_vt::repair(&mut host, &desired, &mut out);
+            sent = out.len();
+        });
+        println!("  {name:5} update to host {repair:6.1} us, {sent} B sent");
         println!(
             "  {name:5} {bytes} B  parse {:6.1} us   update {:6.1} us   tick {:5.1} us   compose {:6.1} us (grid clone {:5.1})",
             parse - clone,
