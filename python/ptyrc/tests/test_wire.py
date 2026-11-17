@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""The connection: framing of what is read."""
+"""The connection: framing of what is read, calls that cannot be answered."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ import socket
 import threading
 from pathlib import Path
 
+import pytest
+from ptyrc import Pilot, PtyrcError
 from ptyrc._wire import Connection
 
 
@@ -50,3 +52,15 @@ def test_a_reply_in_many_pieces_among_events(tmp_path: Path) -> None:
     finally:
         conn.close()
         server.close()
+
+
+def test_a_request_the_driver_cannot_read_fails_the_call(shell: Pilot) -> None:
+    """The start of a request, as a write cut by an interrupt leaves it:
+    the next one ends that line. The driver answers without an id; the
+    call fails at once, and the connection goes on."""
+    shell._conn._sock.sendall(b'{"id":0,"method":"draw.put","params":{"content"')
+    with pytest.raises(PtyrcError) as err:
+        shell._conn.call("session.info", timeout=5.0)
+    assert err.value.code == "bad-request"
+    assert shell.info()["session"] == shell.session
+    assert not shell._conn._pending

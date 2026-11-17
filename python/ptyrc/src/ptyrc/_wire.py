@@ -226,7 +226,11 @@ class Connection:
                             self._hello.put(msg.get("data") or {})
                         else:
                             self.events.put(msg)
-                    elif "id" in msg:
+                    elif msg.get("id") is None:
+                        # The driver could not read a request, so not its
+                        # id: whoever waits may be its sender.
+                        self._fail(msg)
+                    else:
                         with self._lock:
                             waiter = self._pending.pop(msg["id"], None)
                         if waiter is not None:
@@ -235,13 +239,18 @@ class Connection:
             pass
         finally:
             self._closed = True
-            with self._lock:
-                waiters = list(self._pending.values())
-                self._pending.clear()
-            for waiter in waiters:
-                waiter.put(None)
+            self._fail(None)
             self._hello.put(None)
             self.events.put(None)
+
+    def _fail(self, msg: dict[str, Any] | None) -> None:
+        """Answer every pending call with `msg`; None: the connection is
+        closed."""
+        with self._lock:
+            waiters = list(self._pending.values())
+            self._pending.clear()
+        for waiter in waiters:
+            waiter.put(msg)
 
     def call(
         self, method: str, params: dict[str, Any] | None = None, timeout: float = 30.0
@@ -262,16 +271,15 @@ class Connection:
         try:
             with self._send_lock:
                 self._sock.sendall(line.encode() + b"\n")
-        except OSError as exc:
-            with self._lock:
-                self._pending.pop(rid, None)
-            raise PtyrcError("gone", str(exc)) from exc
-        try:
             msg = waiter.get(timeout=timeout)
+        except OSError as exc:
+            raise PtyrcError("gone", str(exc)) from exc
         except queue.Empty:
+            raise PtyrcError("timeout", f"no reply to {method}") from None
+        finally:
+            # Answered or given up, an interrupt included.
             with self._lock:
                 self._pending.pop(rid, None)
-            raise PtyrcError("timeout", f"no reply to {method}") from None
         if msg is None:
             raise PtyrcError("gone", "connection closed")
         if "error" in msg:
