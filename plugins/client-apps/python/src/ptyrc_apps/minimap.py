@@ -18,8 +18,7 @@ What it shows:
   the topics `text` and `frames`: read again when told, never on a
   period.
 - A widget: a column of one width, the driver picks the height, of
-  those the text needs: the tag is declared again as it grows. Its
-  border is drawn by the app, a cell from the edge of the view.
+  those the text needs: the tag is declared again as it grows.
 """
 
 from __future__ import annotations
@@ -222,16 +221,10 @@ def heights(count: int) -> list[int]:
     return [h for h in HEIGHTS if h < need] + [need]
 
 
-def framed(rows: Rows, w: int, name: str, left: bool = False) -> Rows:
+def framed(rows: Rows, w: int, name: str) -> Rows:
     """`rows`, `w` cells wide, in a round border with `name` on its
-    bottom edge, and a blank column on one side: `w + 3` cells by two
-    rows more. The driver puts a widget against the edge of the view;
-    the blank keeps the border a cell from it."""
+    bottom edge: `--print`."""
     name = f" {name} " if len(name) + 3 <= w else ""
-
-    def row(*runs: dict[str, Any]) -> list[dict[str, Any]]:
-        pad = {"t": " "}
-        return [pad, *runs] if left else [*runs, pad]
 
     def edge(text: str) -> dict[str, Any]:
         return {"t": text, "dim": True}
@@ -239,9 +232,9 @@ def framed(rows: Rows, w: int, name: str, left: bool = False) -> Rows:
     foot = [edge("╰" + "─" * (w - len(name)))]
     foot += [{"t": name}, edge("╯")] if name else [edge("╯")]
     return [
-        row(edge("╭" + "─" * w + "╮")),
-        *(row(edge("│"), *runs, edge("│")) for runs in rows),
-        row(*foot),
+        [edge("╭" + "─" * w + "╮")],
+        *([edge("│"), *runs, edge("│")] for runs in rows),
+        foot,
     ]
 
 
@@ -408,40 +401,23 @@ def live(
     chart.read()
     tip = Tip(pilot)
     over: list[int | None] = [None]  # the cell row under the mouse
-    # No border asked for: the app draws its own, a cell from the edge.
-    own = args.border is None
-    lead = "left" in (args.prefer or "")  # the blank is on the left
-    if own:
-        args.border = "none"
-
-    def inner(size: Size) -> Size:
-        return (size[0] - 3, size[1] - 2) if own else size
 
     def sizes() -> list[Size]:
-        w, extra = (args.width + 3, 2) if own else (args.width, 0)
-        return [(w, h + extra) for h in heights(len(chart.doc.lines))]
+        return [(args.width, h) for h in heights(len(chart.doc.lines))]
 
     def render(w: int, h: int) -> Rows:
-        w, h = inner((w, h))
-        rows = face(chart.doc, w, h, look, clock.monotonic())
-        return framed(rows, w, title(chart.doc), lead) if own else rows
+        return face(chart.doc, w, h, look, clock.monotonic())
 
     def tell() -> None:
         size = widget.size
         if over[0] is None or size is None:
             return tip.hush()
-        y = line_at(chart.doc, *inner(size), over[0])
+        y = line_at(chart.doc, *size, over[0])
         if y is None:
             return tip.hush()
-        return tip.say(widget, over[0] + own, chart.doc.lines[y - chart.doc.y0])
+        return tip.say(widget, over[0], chart.doc.lines[y - chart.doc.y0])
 
     def on_move(x: int, y: int) -> bool:
-        size = widget.size
-        if own and size is not None:  # the map inside the app's border
-            x, y = x - 1 - lead, y - 1
-            w, h = inner(size)
-            if not (0 <= x < w and 0 <= y < h):
-                return on_leave()
         over[0] = y
         tell()
         return False
@@ -459,7 +435,7 @@ def live(
         offered,
         render,
         fill=1.0,
-        title="" if own else title(chart.doc),
+        title=title(chart.doc),
     )
     pilot.subscribe("text", "frames", "cursor", snapshot=True)
     deck.hover_timeout = None  # a mouse at rest sends nothing
@@ -491,7 +467,7 @@ def live(
             chart.doc.forget(now, look.fade)
             rows, name = render(*size), title(chart.doc)
             if (size, rows, name) != sent:
-                widget.set(rows, title=None if own else name)
+                widget.set(rows, title=name)
                 sent = (size, rows, name)
         # The heat fades by itself: a look now and then while there is some.
         warm = look.heat and (chart.doc.edited or chart.doc.visited)
@@ -573,8 +549,6 @@ def options(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "minimap", "The text of a frame, small, the view marked.", frame="largest"
     )
     _widgets.options(out, border="round", prefer="right")
-    # Round, drawn by the app; one named is the driver's, on the edge.
-    out.set_defaults(border=None)
     out.add_argument(
         "-c", "--cursor", action="store_true", help="the line of the cursor"
     )

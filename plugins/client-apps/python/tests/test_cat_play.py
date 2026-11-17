@@ -67,14 +67,143 @@ def test_cat_play_art() -> None:
     left = cat.fish_look(3, right=False)["cells"][0]
     assert "".join(run["t"] for run in left) == "><\\\\\\>"
     assert len(cat.fish_look(3, flop=True)["frames"]) == 4
-    # The thread: braille, the same over a column whatever its ends.
-    wire = cat.thread(3, 20)
-    assert len(wire) == 20 and all(0x2800 < ord(ch) < 0x2900 for ch in wire)
-    assert cat.thread(5, 18) == wire[2:] and cat.thread(3, 9) == wire[:9]
-    fade = cat.thread_look(3, 20, 203, fade=True)
-    assert fade["loop"] is False and len(fade["frames"]) == 3
-    for pose in ("stare", "wiggle", "bat", "beg", "purr", "run", "hiss", "roll"):
+    for pose in ("stare", "wiggle", "bat", "beg", "purr", "hiss", "roll"):
         assert len(cat.POSES[pose]) == 2, pose
+    # The gaits: a cycle, the head still.
+    assert len(cat.POSES["walk"]) == 4 and len(cat.POSES["run"]) == 6
+    for gait in ("walk", "run"):
+        assert {rows[0] for rows, _ in cat.POSES[gait]} == {"      /\\_/\\"}
+        assert {rows[1][6:] for rows, _ in cat.POSES[gait]} == {"(O.O)", "(o.o)"} - (
+            {"(O.O)"} if gait == "walk" else {"(o.o)"}
+        )
+    # A run starts and ends slower; its paces are whole frames at 60 Hz.
+    assert list(cat.EASE) == sorted(cat.EASE, reverse=True) and cat.EASE[-1] > cat.RUN
+    for pace in (*cat.EASE, cat.RUN, cat.HOP, cat.TICK):
+        assert abs(pace * 60 - round(pace * 60)) < 1e-9, pace
+
+
+def text(look: dict[str, Any]) -> list[str]:
+    return ["".join(run["t"] for run in row) for row in look["cells"]]
+
+
+def dots(rows: list[str]) -> int:
+    return sum((ord(ch) - 0x2800).bit_count() for row in rows for ch in row if ch > " ")
+
+
+def test_cat_ball_art() -> None:
+    # The ball: 4 dots by 4 less its corners and one within, which
+    # turns; any dot of a cell can be its first.
+    assert text(cat.ball_look(203)) == ["⢮⡷"]
+    assert len({tuple(text(cat.ball_look(203, turn=i))) for i in range(8)}) == 4
+    for dx in range(2):
+        for dy in range(4):
+            rows = text(cat.ball_look(203, 1, dx, dy))
+            assert len(rows) == 1 + (dy > 0) and len(rows[0]) == cat.BW + dx
+            assert dots(rows) == 11
+    # Played out: a ring.
+    assert dots(text(cat.ball_look(203, 0))) == 8
+    assert {cat.wave(x) for x in range(40)} == {0, 1, 2}
+    # A line of words is a floor; a wide blank is a hole in it.
+    assert cat.mass(" ab  c    d ") == [c == "1" for c in "011111000010"]
+
+
+class Room:
+    """What a ball needs of a `Home`: a text, read."""
+
+    solid = cat.Home.solid
+
+    def __init__(self, rows: list[str], seed: int = 1) -> None:
+        width = max(len(row) for row in rows)
+        self.rng = random.Random(seed)
+        self.rows = [row.ljust(width) for row in rows]
+        self.walls = [cat.mass(row) for row in self.rows]
+        self.view = (0, 0, width, len(rows))
+        self.stale = False
+
+
+def roll(
+    yarn: cat.Yarn, now: float = 0.0
+) -> tuple[float, list[tuple[int, int]], float]:
+    """Its steps until all is still: when, the cells it was in, and
+    how high it went, in dots."""
+    yarn.show = lambda: None  # type: ignore[method-assign]
+    seen = []
+    while yarn.due < float("inf"):
+        assert yarn.due < now + 30.0
+        last = yarn.due
+        yarn.step(last)
+        assert not yarn.hits(yarn.px, yarn.py)
+        seen.append((yarn.x, yarn.g, yarn.py))
+    return last, [(x, g) for x, g, _ in seen], min(py for _, _, py in seen)
+
+
+def test_cat_ball_physics() -> None:
+    rows = ["", "", "", "   " + "x" * 20, "", "", "", "", "x" * 60, ""]
+    for seed in range(20):
+        room = Room(rows, seed)
+        yarn = cat.Yarn(room, 12, 3, None, float("inf"))  # type: ignore[arg-type]
+        plays = yarn.plays
+        yarn.knock(1, 0.0)
+        assert yarn.moving and yarn.plays == plays - 1 and yarn.due == 0.0
+        end, seen, top = roll(yarn)
+        # It jumped, came down on a line, and stopped on a whole cell.
+        assert top < 7, (seed, top)
+        assert not yarn.moving and not yarn.loose and end < 8.0
+        assert yarn.g in (3, 8) and yarn.x > 12, (seed, yarn.x, yarn.g)
+        assert (yarn.px, yarn.py) == (2 * yarn.x, 4 * (yarn.g - 1))
+        assert all(0 <= x <= 60 - cat.BW and g <= 8 for x, g in seen)
+        # Its thread: from where it was to where it is, on the floors.
+        assert yarn.points[0][0] in (25, 26)
+        assert abs(yarn.points[-1][0] - 2 * yarn.x - 1) <= 1
+        for x, y, rest in yarn.points:
+            assert y == rest and room.solid(x >> 1, (y >> 2) + 1), (seed, x, y)
+        # Thread on thread is one thread.
+        assert len({(x, y) for x, y, _ in yarn.points}) == len(yarn.points)
+        x0, y0, lines = yarn.strand()
+        assert all(0x2800 < ord(ch) < 0x2900 for row in lines for ch in row.strip())
+        assert x0 == min(p[0] for p in yarn.points) >> 1
+        assert yarn.g <= y0 + len(lines) <= 8
+        fade = yarn.fade()
+        assert fade["loop"] is False and len(fade["frames"]) == 3
+        assert dots(text(fade["frames"][2])) < dots(text(fade["frames"][0]))
+    # A hop, a jump or a leap; a leap goes over 3 rows of text. Off a
+    # side, one time in three, it comes back past where it was.
+    wall = [*[""] * 6, *[" " * 14 + "xx"] * 3, "x" * 40, ""]
+    tops, over, back = set(), 0, 0
+    for seed in range(120):
+        yarn = cat.Yarn(Room(wall, seed), 8, 9, None, float("inf"))  # type: ignore[arg-type]
+        yarn.knock(1, 0.0)
+        _, _, top = roll(yarn)
+        tops.add(round((32 - top) / 4))
+        over += yarn.x > 16
+        back += yarn.x < 8
+    assert tops == {0, 1, 2, 4} and over > 20 and back > 10, (tops, over, back)
+    # Bat after bat to the right: off the end of the line, down to the
+    # next, and off the side of the view it comes back.
+    room = Room(rows, 3)
+    yarn = cat.Yarn(room, 12, 3, None, float("inf"))  # type: ignore[arg-type]
+    now, floors = 0.0, set()
+    for _ in range(12):
+        yarn.knock(1, now)
+        now, seen, _ = roll(yarn, now)
+        floors.add(yarn.g)
+        assert max(x for x, _ in seen) <= 60 - cat.BW
+    assert yarn.g == 8 and floors <= {3, 8} and len(yarn.points) <= cat.THREAD
+    # The thread hangs from the end of the upper line to the lower one.
+    hang = {y >> 2 for x, y, _ in yarn.points if x >> 1 == 23}
+    x0, y0, lines = yarn.strand()
+    assert all(row[23 - x0] != " " for row in lines[3 - y0 : 7 - y0]), lines
+    assert hang <= set(range(8)) and y0 <= 2
+    # The line under it goes: it falls, its thread after it.
+    room.rows[8] = " " * 60
+    room.walls[8] = cat.mass(room.rows[8])
+    at = yarn.x
+    yarn.wake(now)
+    assert yarn.moving
+    roll(yarn, now)
+    assert (yarn.x, yarn.g) == (at, 10)
+    assert all(y == rest for _, y, rest in yarn.points)
+    assert max(y for _, y, _ in yarn.points) >> 2 == 9
 
 
 def test_cat_pointer(session: Pilot) -> None:
@@ -206,15 +335,20 @@ def test_cat_toy(session: Pilot) -> None:
     run(lambda: home.yarn is not None)
     yarn = home.yarn
     (word,) = session.find(r"\btoy\b", regex=True)
-    assert (yarn.x, yarn.g) == (word.x + 3 + cat.GAP, word.y + 1)
-    assert (yarn.lo, yarn.hi) == (yarn.x - cat.GAP, yarn.x + cat.LANE)
-    assert "●" in shown(session)
+    at = (word.x + 3 + cat.GAP, word.y + 1)
+    assert (yarn.x, yarn.g) == at and not yarn.moving
+    assert "⢮⡷" in shown(session)
     plays = yarn.plays
-    # The cat comes, bats it; it rolls and leaves its thread.
-    acts = run(lambda: yarn.plays < plays and not yarn.run and yarn.x != word.x + 6)
-    assert "bat" in acts and yarn.player is it
-    assert yarn.ends[0] < yarn.ends[1] and yarn.lo <= yarn.x <= yarn.hi
-    assert any(0x2800 < ord(ch) < 0x2900 for ch in shown(session))
+    # The cat comes, bats it: it jumps, the cat is after it.
+    acts = run(lambda: yarn.moving)
+    assert "bat" in acts and yarn.player is it and yarn.plays == plays - 1
+    acts = run(lambda: not yarn.moving and it.act == "bat")
+    assert "wiggle" in acts and ("run" in acts or "leap" in acts), acts
+    # It went, and left its thread; the cat is by it again.
+    assert (yarn.x, yarn.g) != at and len(yarn.points) > 8
+    assert it.g == yarn.g and it.x in (yarn.x - cat.W, yarn.x + cat.BW)
+    lines = shown(session).splitlines()
+    assert sum(0x2800 < ord(ch) < 0x2900 for row in lines for ch in row) > 6
     # Played out: on its back in the thread, then the ball goes, the
     # thread after it, and the word gets no other.
     acts = run(lambda: home.yarn is None)
@@ -226,7 +360,7 @@ def test_cat_toy(session: Pilot) -> None:
     deadline = time.monotonic() + 3
     while len(session.sprites()) > 1 and time.monotonic() < deadline:
         time.sleep(0.05)
-    assert len(session.sprites()) == 1 and "●" not in shown(session)
+    assert len(session.sprites()) == 1 and "⢮⡷" not in shown(session)
 
 
 def test_cat_fish_and_toys_served(session: Pilot) -> None:

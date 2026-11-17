@@ -190,6 +190,7 @@ class Widgets:
         frame: int | str | None = None,
         prefer: str | None = None,
         fill: float | None = None,
+        margin: int | None = None,
         layer: int | str | None = None,
         modal: bool = False,
         content: Callable[[int, int], Any] | None = None,
@@ -198,7 +199,8 @@ class Widgets:
         of its variants, named `WxH`, or a dict of names to sizes. The
         driver shows one of them where there is room, about `fill`
         (0.5) of it, moves it when the app needs the place, and puts
-        another size when the room changes: topic `widgets`.
+        another size when the room changes: topic `widgets`. `margin`:
+        cells kept from the edges of the view, 0 to 4 (1).
 
         `border`: a preset (`Pilot.borders()`) or its wire object;
         `title`: on the bottom edge, the tag when absent. `content(w, h)`
@@ -218,7 +220,7 @@ class Widgets:
                 variant["content"] = widget_content(content(w, h))
             variants.append(variant)
         show = {"tag": tag, "border": border, "title": title, "frame": frame}
-        show |= {"prefer": prefer, "fill": fill, "layer": layer}
+        show |= {"prefer": prefer, "fill": fill, "margin": margin, "layer": layer}
         show |= {"modal": modal or None}
         widget = Widget(self, tag)  # type: ignore[arg-type]
         self._request("widget.declare", {"widgets": variants})

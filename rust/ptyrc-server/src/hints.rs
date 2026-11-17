@@ -280,6 +280,8 @@ pub(crate) fn widget(
         )
     } else if message.starts_with("fill") {
         Some("fill: the share of the room the widget takes, 0.1 to 1 (0.5)".into())
+    } else if message.starts_with("margin") {
+        Some("margin: cells kept from the edges of the view, 0 to 4 (1)".into())
     } else {
         None
     };

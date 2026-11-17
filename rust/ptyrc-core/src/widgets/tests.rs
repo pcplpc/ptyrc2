@@ -630,17 +630,18 @@ fn text_cursor_panel_and_hot_cells_are_not_open() {
     rig.run(2000);
     rig.declare(1, "t", &[[6, 2]]);
     let id = rig.show(1, Show::new("t"));
-    // Room: columns 18..40 (22), gap 2 from the text, none at the edge:
-    // usable 20 columns, a widget of 8 centred: column 20 + 6.
+    // Room: columns 18..40 (22), gap 2 from the text, the margin 1 from
+    // the edge: usable 19 columns, a widget of 8 centred: column 20 + 5.
     let [x, _, w, h] = rig.rect(id).unwrap();
-    assert_eq!((x, w, h), (26, 8, 4));
+    assert_eq!((x, w, h), (25, 8, 4));
 
     // The cursor row: never under a widget.
-    let mut rig = Rig::new(20, 7);
+    let mut rig = Rig::new(20, 8);
     rig.cursor = Some((0, 2));
     rig.declare(1, "t", &[[16, 1]]);
     let id = rig.show(1, Show::new("t"));
-    // Rows 0 and 1 are too few: under it, a row of gap.
+    // Rows 0 and 1 are too few: under it, a row of gap, a row of margin
+    // at the bottom.
     assert_eq!(rig.rect(id), Some([1, 4, 18, 3]));
 
     // A panel everywhere: hidden.
@@ -706,12 +707,13 @@ fn prefer_names_the_side_of_the_room() {
         let id = rig.show(1, show);
         rig.rect(id).unwrap()
     };
+    // The view less its margin of 1: 78x22 from (1, 1).
     assert_eq!(at(Prefer::Any), [34, 9, 12, 5]);
     assert_eq!(at(Prefer::Center), [34, 9, 12, 5]);
-    assert_eq!(at(Prefer::TopRight), [68, 0, 12, 5]);
-    assert_eq!(at(Prefer::Top), [34, 0, 12, 5]);
-    assert_eq!(at(Prefer::Left), [0, 9, 12, 5]);
-    assert_eq!(at(Prefer::BottomLeft), [0, 19, 12, 5]);
+    assert_eq!(at(Prefer::TopRight), [67, 1, 12, 5]);
+    assert_eq!(at(Prefer::Top), [34, 1, 12, 5]);
+    assert_eq!(at(Prefer::Left), [1, 9, 12, 5]);
+    assert_eq!(at(Prefer::BottomLeft), [1, 18, 12, 5]);
 
     // Not on an edge of the view: the gap is kept.
     let mut rig = Rig::new(80, 24);
@@ -728,8 +730,112 @@ fn prefer_names_the_side_of_the_room() {
 }
 
 #[test]
+fn margin_from_the_edges_of_the_view() {
+    let at = |margin: Option<u16>, prefer: Prefer| {
+        let mut rig = Rig::new(30, 10);
+        rig.declare(1, "t", &[[6, 2]]);
+        let id = rig.show(
+            1,
+            Show {
+                prefer,
+                margin,
+                ..Show::new("t")
+            },
+        );
+        rig.rect(id)
+    };
+    // Default: one cell off every edge.
+    assert_eq!(at(None, Prefer::TopLeft), Some([1, 1, 8, 4]));
+    assert_eq!(at(None, Prefer::BottomRight), Some([21, 5, 8, 4]));
+    assert_eq!(at(Some(1), Prefer::TopRight), Some([21, 1, 8, 4]));
+    // 0: flush.
+    assert_eq!(at(Some(0), Prefer::TopLeft), Some([0, 0, 8, 4]));
+    assert_eq!(at(Some(0), Prefer::BottomRight), Some([22, 6, 8, 4]));
+    assert_eq!(at(Some(3), Prefer::BottomLeft), Some([3, 3, 8, 4]));
+
+    // The config's default, for a show that gives none.
+    let mut rig = Rig::new(30, 10);
+    rig.w = Widgets::new(WidgetConfig {
+        margin: 0,
+        ..WidgetConfig::default()
+    });
+    rig.declare(1, "t", &[[6, 2]]);
+    let mut show = Show::new("t");
+    show.prefer = Prefer::TopRight;
+    let id = rig.show(1, show.clone());
+    assert_eq!(rig.rect(id), Some([22, 0, 8, 4]));
+    show.margin = Some(2);
+    rig.show(1, show);
+    assert_eq!(rig.rect(id), Some([20, 2, 8, 4]));
+
+    // Out of bounds: refused.
+    let mut rig = Rig::new(30, 10);
+    rig.declare(1, "t", &[[6, 2]]);
+    let mut show = Show::new("t");
+    show.margin = Some(MAX_MARGIN + 1);
+    assert!(
+        matches!(rig.w.show(1, show), Err(WidgetError::BadParams(m)) if m.starts_with("margin"))
+    );
+
+    // From the view's edge, not the room's: ink on column 0, margin 4:
+    // max(gap 2 from the ink, 4 - 1) from column 1.
+    let mut rig = Rig::new(30, 14);
+    for y in 0..14 {
+        rig.write(0, y, "x");
+    }
+    rig.run(2000);
+    rig.declare(1, "t", &[[6, 2]]);
+    let mut show = Show::new("t");
+    show.prefer = Prefer::TopLeft;
+    show.margin = Some(4);
+    let id = rig.show(1, show);
+    assert_eq!(rig.rect(id), Some([4, 4, 8, 4]));
+
+    // No border: kept from the content.
+    let mut rig = Rig::new(30, 10);
+    rig.declare(1, "t", &[[6, 2]]);
+    let mut show = Show::new("t");
+    show.prefer = Prefer::BottomRight;
+    show.border = Some(Border::Name("none".into()));
+    let id = rig.show(1, show);
+    assert_eq!(rig.rect(id), Some([23, 7, 6, 2]));
+}
+
+#[test]
+fn margin_too_large_for_the_view_hides() {
+    // 8x4 outer in a 10x4 view: no room with the margin; never dropped.
+    let mut rig = Rig::new(10, 4);
+    rig.declare(1, "t", &[[6, 2]]);
+    let id = rig.show(1, Show::new("t"));
+    assert_eq!(rig.info(id).state, WidgetState::Hidden);
+    let mut show = Show::new("t");
+    show.margin = Some(0);
+    rig.show(1, show);
+    assert_eq!(rig.rect(id), Some([1, 0, 8, 4]));
+}
+
+#[test]
+fn view_shrunk_into_the_margin_presses() {
+    let mut rig = Rig::new(30, 10);
+    rig.declare(1, "t", &[[6, 2]]);
+    let mut show = Show::new("t");
+    show.prefer = Prefer::TopRight;
+    let id = rig.show(1, show);
+    assert_eq!(rig.rect(id), Some([21, 1, 8, 4]));
+    // One column less: still inside the view, not off its margin.
+    rig.grid = Grid::new(29, 10);
+    rig.mock.infos = vec![surface(RAW, Rect::new(0, 0, 29, 10))];
+    rig.w.touch();
+    rig.tick();
+    rig.run(200);
+    assert_eq!(rig.rect(id), Some([21, 1, 8, 4]));
+    rig.run(200);
+    assert_eq!(rig.rect(id), Some([20, 1, 8, 4]));
+}
+
+#[test]
 fn placed_one_shrinks_to_let_a_hidden_one_in() {
-    let mut rig = Rig::new(40, 10);
+    let mut rig = Rig::new(42, 10);
     rig.declare(1, "a", &[[10, 2], [30, 6]]);
     rig.declare(2, "b", &[[10, 2]]);
     let a = rig.show(1, Show::new("a"));
@@ -791,9 +897,10 @@ fn pressed_then_evicted_elsewhere_smaller_or_hidden() {
     );
     let _ = w;
 
-    // Text on most of the screen: smaller.
+    // Text on most of the screen: smaller (columns 31..40: the gap, 6,
+    // the margin).
     for row in 0..10 {
-        rig.write(0, row, &"x".repeat(32));
+        rig.write(0, row, &"x".repeat(31));
     }
     rig.run(400);
     assert_eq!(rig.info(id).variant.as_deref(), Some("4x1"));
@@ -1302,6 +1409,33 @@ fn modal_over_without_the_gap_then_clipped() {
 }
 
 #[test]
+fn modal_over_keeps_the_margin() {
+    // The gap (2, 1) holds the default margin: as before.
+    let mut rig = full(40, 12);
+    rig.declare(1, "m", &[[30, 6]]);
+    let id = rig.show(1, modal("m", Prefer::TopLeft));
+    assert_eq!(rig.rect(id), Some([2, 1, 32, 8]));
+    // A margin over the gap: the larger of the two.
+    let mut rig = full(40, 12);
+    rig.declare(1, "m", &[[30, 6]]);
+    let show = Show {
+        margin: Some(2),
+        ..modal("m", Prefer::TopLeft)
+    };
+    let id = rig.show(1, show);
+    assert_eq!(rig.rect(id), Some([2, 2, 32, 8]));
+    // No room for the gap: the margin alone; then nothing.
+    let mut rig = full(20, 8);
+    rig.declare(1, "m", &[[16, 4]]);
+    let id = rig.show(1, modal("m", Prefer::Any));
+    assert_eq!(rig.rect(id), Some([1, 1, 18, 6]));
+    let mut rig = full(18, 6);
+    rig.declare(1, "m", &[[16, 4]]);
+    let id = rig.show(1, modal("m", Prefer::Any));
+    assert_eq!(rig.rect(id), Some([0, 0, 18, 6]));
+}
+
+#[test]
 fn modal_laid_out_again_when_the_view_changes_size() {
     let mut rig = full(40, 12);
     rig.declare(1, "m", &[[10, 2], [30, 6]]);
@@ -1624,7 +1758,7 @@ fn focused_is_zoomed_then_back() {
     };
     let id = rig.show(1, small.clone());
     let place = rig.rect(id).unwrap();
-    assert_eq!(place, [0, 0, 8, 3]);
+    assert_eq!(place, [1, 1, 8, 3]);
     let layer = |rig: &Rig| rig.scene.list().into_iter().next().unwrap().layer;
     assert_eq!(layer(&rig), Layer::BACK.0);
     rig.w.ask(1, id, false).unwrap();
@@ -1693,7 +1827,7 @@ fn zoomed_over_another_blacks_it_out_and_evicts_it() {
     rig.w.blur();
     rig.tick();
     assert!(!rig.info(id).over);
-    assert_eq!(rig.rect(id), Some([0, 0, 8, 3]));
+    assert_eq!(rig.rect(id), Some([1, 1, 8, 3]));
 }
 
 #[test]

@@ -45,9 +45,16 @@ is caught when the cat lands on it.
 The word `fish` gets a fish (`--fish`: one on a ledge now and then). A
 cat lands by it, takes it, carries it away and eats it there; another
 may come for it: it has it, or is hissed at. The word `toy` gets a
-ball of yarn (`--toys`). A cat bats it: it rolls, and leaves its
-thread on the floor, braille; played out, the cat lies in the thread,
-the ball goes, the thread after it.
+ball of yarn (`--toys`), braille. A cat bats it: it jumps, bounces,
+rolls, falls off the end of its line to the one below; the cat runs
+after it, and leaps down to it. Its thread is left along its way, and
+sinks to the floor. Played out, the cat lies in the thread, the ball
+goes, the thread after it.
+
+The moves are paced for the eye: a run starts and ends slower, a
+column every 3 frames of a 60 Hz screen at its fastest, its gait a
+cycle of six poses, one a column; a step of a jump, a step of the
+ball: 2 frames.
 
 `--hunt`: the cats hunt the pointer of the host mouse (topic `hover`).
 The driver tells its moves over sprites only: a sprite of nothing
@@ -77,6 +84,7 @@ from ._canvas import Braille
 from ._reef import mirror, pad, paint
 
 __all__ = [
+    "BW",
     "COATS",
     "COVERED",
     "EARS",
@@ -94,6 +102,7 @@ __all__ = [
     "POSES",
     "PW",
     "REACH",
+    "TICK",
     "Cat",
     "Coat",
     "Fish",
@@ -112,17 +121,18 @@ __all__ = [
     "ledges",
     "look",
     "main",
+    "mass",
     "mouse_look",
     "near",
     "perch",
     "plate_look",
-    "thread",
-    "thread_look",
+    "wave",
 ]
 
 W, H = 11, 3  # the box of every pose
 STEP = 0.13  # seconds a step of the walk; one column
-HOP = 0.05  # seconds between two points of a jump
+HOP = 1 / 30  # seconds between two points of a jump
+RISE = 0.05  # seconds a row, straight up or down
 NEAR = (7, 2)  # columns, rows: the cursor that close is a fright
 READ = 0.3  # seconds, at least, between two reads of the text
 AWAY = (2.0, 4.0)  # seconds out of the view before it comes back
@@ -141,7 +151,8 @@ VISIT = (10.0, 20.0)  # seconds a mouse stays
 SCURRY = (0.1, 0.045)  # seconds a column of a mouse: at ease, in flight
 WITS = (0.05, 0.55)  # seconds before a mouse runs from a pounce
 TRIES = 2  # pounces of a cat at one mouse
-RUN = 0.06  # seconds a step of a run; one column
+RUN = 0.05  # seconds a step of a run, one column, at its fastest
+EASE = (0.1, 1 / 12, 1 / 15)  # and of its first columns, of its last
 NOTICE = 0.3  # seconds a cat looks at the pointer before it goes
 FUN = 8.0  # seconds its interest takes to fall to 1/e
 BORED = 0.15  # interest under which it turns away
@@ -154,10 +165,23 @@ LYING = (20.0, 40.0)  # seconds a fish of `--fish`, a ball of `--toys` wait
 FISHES = (25.0, 60.0)  # seconds between two fishes
 TOYS = (25.0, 60.0)  # seconds between two balls
 PLAYS = (3, 5)  # bats a ball of yarn takes
-ROLL = (4, 12)  # columns a bat sends it
-LANE = 24  # columns, at most, it rolls to each side
-SPIN = 0.05  # seconds a column of a ball that rolls, at its fastest
 UNDONE = 2.5  # seconds a ball stays once played out
+BW = 2  # cells of a ball, on one row: 4 dots by 4
+TICK = 1 / 30  # seconds a step of the ball, of its thread
+# The ball, in dots: a cell is 2 by 4. Speeds a second.
+BAT = (18.0, 34.0)  # what a bat gives it, along
+# And up, one of: a hop, a jump, a leap: 4 rows, over 3 rows of text.
+LIFT = ((24.0, 32.0), (36.0, 48.0), (68.0, 74.0))
+GRAVITY = 150.0  # a second squared
+FALL = 90.0  # its fastest, down
+BOUNCE = 0.5  # share of its speed a floor gives back; under `SOFT`, none
+SOFT = 14.0
+WALL = 0.6  # share a side gives back
+KICK = (1.2, 26.0)  # one time in three: this share, this speed at least
+GRIP = 28.0  # a second squared lost as it rolls
+CREEP = 4.0  # its slowest roll: to a whole cell, where it stops
+LEAD = 2  # columns a cat keeps behind a ball that moves
+THREAD = 1200  # dots of thread, at most
 MAX_CATS = 12
 
 
@@ -225,9 +249,12 @@ POSES: dict[str, tuple[tuple[tuple[str, str, str], int], ...]] = {
         (("   Z       ", " ___/\\_/\\  ", "(___( -.- )"), 900),
         (("  z        ", " ___/\\_/\\  ", "(___( -.- )"), 700),
     ),
+    # A cycle, a frame a column.
     "walk": (
         (("      /\\_/\\", " ~.___(o.o)", "   /|   |\\ "), 0),
+        (("      /\\_/\\", " ~.___(o.o)", "   ||   || "), 0),
         (("      /\\_/\\", " -.___(o.o)", "   |\\   /| "), 0),
+        (("      /\\_/\\", " -.___(o.o)", "   ||   || "), 0),
     ),
     "leap": ((("      /\\_/\\", " ~-=--(O.O)", "  ''     ``"), 0),),
     # The head down, over what is right of the box.
@@ -261,9 +288,15 @@ POSES: dict[str, tuple[tuple[tuple[str, str, str], int], ...]] = {
         (("  ♥  /\\_/\\ ", "    ( ^.^ )", "    ~> ^ < "), 500),
         ((" ♥   /\\_/\\ ", "    ( -.- )", "    _> ^ < "), 500),
     ),
+    # A gallop, a frame a column: stretched, the fore paws down, the
+    # hind ones under it, gathered, the push, off.
     "run": (
         (("      /\\_/\\", " ~-=__(O.O)", "  //    \\\\ "), 0),
-        (("      /\\_/\\", " _.-~~(O.O)", "   \\\\  //  "), 0),
+        (("      /\\_/\\", " ~-=__(O.O)", "   //   || "), 0),
+        (("      /\\_/\\", " _-=-~(O.O)", "    || //  "), 0),
+        (("      /\\_/\\", " _.-~~(O.O)", "    \\\\//   "), 0),
+        (("      /\\_/\\", " _-=-~(O.O)", "    ||  \\\\ "), 0),
+        (("      /\\_/\\", " ~-=__(O.O)", "   //   \\\\ "), 0),
     ),
     "hiss": (
         (("   _  /\\_/\\", " |/ \\_(>o<)", "  ||   ||  "), 160),
@@ -375,32 +408,28 @@ def fish_look(left: int, right: bool = True, flop: bool = False) -> dict[str, An
     }
 
 
-def ball_look(color: int, plays: int = 1) -> dict[str, Any]:
-    """A ball of yarn; smaller with no play left."""
-    return {"cells": [[{"t": "●" if plays else "•", "fg": color, "bold": True}]]}
+#: The dots of a ball; those within turn with it; played out, a ring.
+_BALL = ((1, 0), (2, 0), (0, 1), (3, 1), (0, 2), (3, 2), (1, 3), (2, 3))
+_CORE = ((1, 1), (2, 1), (2, 2), (1, 2))
 
 
-def thread(x0: int, n: int, keep: int = 1) -> str:
-    """The thread a ball left on `n` cells from the column `x0`:
-    braille, a wavy line of dots along the floor, the same over a
-    column whatever the ends. `keep`: one dot column in so many."""
-    dots = Braille(n, 1)
-    for dx in range(2 * x0, 2 * (x0 + n)):
-        if dx % keep == 0:
-            dots.set(dx - 2 * x0, 3 - round(1.0 + math.sin(0.9 * dx)))
-    return dots.rows()[0]
+def ball_look(
+    color: int, plays: int = 1, dx: int = 0, dy: int = 0, turn: int = 0
+) -> dict[str, Any]:
+    """A ball of yarn: braille, 4 dots by 4 less its corners, `dx` and
+    `dy` dots into its first cell. One dot within is off, by `turn`:
+    it rolls. With no play left, a ring."""
+    dots = Braille(BW + (dx > 0), 1 + (dy > 0))
+    core = [d for i, d in enumerate(_CORE) if i != turn % 4] if plays else []
+    for x, y in (*_BALL, *core):
+        dots.set(dx + x, dy + y)
+    return {"cells": paint(dots.rows(), {"": color}, bold=True)}
 
 
-def thread_look(x0: int, n: int, color: int, fade: bool = False) -> dict[str, Any]:
-    """The thread; `fade`: thinner and thinner, once: the driver
-    removes it after."""
-    if not fade:
-        return {"cells": paint((thread(x0, n),), {"": color})}
-    frames = [
-        {"cells": paint((thread(x0, n, keep),), {"": color}, dim=True), "ms": 300}
-        for keep in (1, 2, 4)
-    ]
-    return {"frames": frames, "loop": False}
+def wave(x: int) -> int:
+    """How high over the floor the thread lies at the dot column `x`:
+    0 to 2 dots, a wave."""
+    return round(1.0 + math.sin(0.9 * x))
 
 
 @dataclass(frozen=True)
@@ -443,6 +472,19 @@ def ledges(rows: Sequence[str], box: tuple[int, int, int, int]) -> list[Ledge]:
     return out
 
 
+def mass(row: str) -> list[bool]:
+    """The cells of a row that stop a ball: its glyphs, and the blanks
+    between two of them, `BW` + 1 at most: a line of words is a floor."""
+    out = [not ch.isspace() for ch in row]
+    last = None
+    for x, ink in enumerate(out):
+        if ink:
+            if last is not None and x - last - 1 <= BW + 1:
+                out[last + 1 : x] = [True] * (x - last - 1)
+            last = x
+    return out
+
+
 def perch(spots: Sequence[Ledge], x: int, g: int) -> Ledge | None:
     """The ledge the cat at `x` above row `g` stands on, if any."""
     return next((s for s in spots if s.g == g and s.has(x)), None)
@@ -460,7 +502,7 @@ def arc(a: tuple[int, int], b: tuple[int, int]) -> list[tuple[int, int]]:
     """The cells of a jump from `a` to `b`, one per `HOP`: a parabola,
     higher and longer for a long jump; `b` is the last."""
     far = math.hypot(b[0] - a[0], 2 * (b[1] - a[1]))
-    n = max(4, min(16, round(4 + far / 6)))
+    n = max(6, min(24, round(6 + far / 4)))
     rise = min(4.0, 1.5 + far / 20)
     out = []
     for i in range(1, n + 1):
@@ -589,57 +631,285 @@ class Fish:
 
 
 class Yarn:
-    """A ball of yarn: `x`, its column, from `lo` to `hi`, on the row
-    above `g`; frame cells. `word`, `until`: as a plate. A bat sends it
-    rolling (`knock`); it leaves its thread on the floor, from `ends[0]`
-    to `ends[1]`. `plays`: bats left; `player`: the cat that has it."""
+    """A ball of yarn, `BW` cells on one row. `x`: its left column;
+    `g`: the row under it; frame cells. `word`, `until`: as a plate.
+    `plays`: bats left; `player`: the cat that has it.
+
+    A bat (`knock`) sends it along and up: a hop, a jump, or a leap
+    over 3 rows of text. It moves in dots, 2 by 4 a cell (`px`, `py`:
+    its top left one; `vx`, `vy`: dots a second), `TICK` a step: it
+    falls, bounces on the text and on the floor of the view, off its
+    sides and off the text (slower; one time in three, faster: back
+    past the cat), rolls, slower and slower, and stops on a whole cell.
+    No text under it: it falls.
+
+    Its thread: the dots it went through (`points`: column, row, the
+    row where it rests), neighbours joined when drawn. A dot in the air
+    sinks a row of dots a step, down to the floor of its column, where
+    it lies as a wave (`wave`); a ball that rolls lays it there. Thread
+    on thread is one thread.
+    """
 
     def __init__(
         self, home: Home, x: int, g: int, word: tuple[int, int] | None, until: float
     ) -> None:
         rng = home.rng
         self.home = home
-        self.x, self.g = x, g
-        self.lo, self.hi = home.lane(x, g)
+        self.px, self.py = 2.0 * x, 4.0 * (g - 1)
+        self.vx = self.vy = 0.0
+        self.way = 1  # where it rolls, or last did
+        self.moving = False
+        self.rolled = 0.0  # dots, to the right
         self.word = word
         self.until = until
         self.color = rng.choice(YARNS)
         self.plays = rng.randint(*PLAYS)
         self.player: Cat | None = None
-        self.ends = [x, x]
-        self.way, self.run = 1, 0  # where it rolls, the columns left
+        self.points: list[list[int]] = []
+        self.tip: tuple[int, int] | None = None  # where the thread ends
+        self.loose: list[int] = []  # the points that sink
+        self.down: set[tuple[int, int]] = set()  # the dots that lie
+        self.stroke = 0  # bats taken
         self.due = math.inf
         self.ball: Sprite | None = None
         self.wire: Sprite | None = None
+        self.shown: tuple[Any, ...] | None = None  # the ball as drawn
+        self.fresh = False  # the thread changed since it was drawn
+
+    @property
+    def x(self) -> int:
+        return round(self.px) >> 1
+
+    @property
+    def g(self) -> int:
+        return (round(self.py) + 3) // 4 + 1
+
+    # -- the ball -----------------------------------------------------
+
+    def hits(self, px: float, py: float) -> bool:
+        """Its box at the dot (`px`, `py`) has a solid cell in it."""
+        solid = self.home.solid
+        return any(
+            solid(cx, cy)
+            for cy in range(math.floor(py / 4), math.ceil((py + 4) / 4))
+            for cx in range(math.floor(px / 2), math.ceil((px + 4) / 2))
+        )
+
+    def knock(self, way: int, now: float) -> None:
+        """A bat to the right (`way` 1) or to the left (-1): up and
+        away."""
+        rng = self.home.rng
+        self.plays -= 1
+        self.stroke += 1
+        self.way = way
+        self.vx = way * rng.uniform(*BAT)
+        self.vy = -rng.uniform(*rng.choice(LIFT))
+        self.moving = True
+        self.due = min(self.due, now)
+
+    def fly(self, dt: float) -> None:
+        """`dt` seconds: along, then down; an axis that would enter a
+        solid cell is turned back instead."""
+        on = self.vy >= 0 and self.hits(self.px, self.py + 0.5)
+        if on:
+            self.vy, self.py = 0.0, 4.0 * math.floor((self.py + 0.5) / 4)
+            speed = abs(self.vx) - GRIP * dt
+            if speed < CREEP:
+                at = round(self.px)
+                if at % 2 == 0:
+                    return self.stop(at)
+                speed = CREEP
+            self.vx = self.way * speed
+        else:
+            self.vy = min(self.vy + GRAVITY * dt, FALL)
+        nx = self.px + self.vx * dt
+        if self.hits(nx, self.py):
+            back = WALL * abs(self.vx)
+            if abs(self.vx) > 2 * CREEP and self.home.rng.random() < 1 / 3:
+                back = max(KICK[0] * abs(self.vx), KICK[1])  # back past the cat
+            self.way = -self.way
+            self.vx = self.way * back
+        else:
+            self.rolled += nx - self.px
+            self.px = nx
+        ny = self.py + self.vy * dt
+        if not self.hits(self.px, ny):
+            self.py = ny
+        elif self.vy > 0:  # a floor: on it
+            self.py = 4.0 * math.floor(ny / 4)
+            self.vx *= 0.85
+            self.vy = -self.vy * BOUNCE if self.vy > SOFT else 0.0
+        else:
+            self.vy *= -0.4
+
+    def stop(self, at: int) -> None:
+        self.px, self.vx, self.vy, self.moving = float(at), 0.0, 0.0, False
+        if self.hits(self.px, self.py):  # in the text: a look around
+            self.home.stale = True
+
+    # -- the thread ---------------------------------------------------
+
+    def floor(self, x: int, y: int) -> int:
+        """The row of dots where a dot of the thread at (`x`, `y`)
+        lies once fallen: over the first solid cell under it."""
+        solid, cx, cy = self.home.solid, x >> 1, y >> 2
+        if solid(cx, cy):
+            return y
+        while not solid(cx, cy + 1):
+            cy += 1
+        return 4 * cy + 3 - wave(x)
+
+    def lay(self) -> None:
+        """Thread from where it ends to the ball."""
+        x = round(self.px) + (1 if self.way > 0 else 2)
+        y = round(self.py) + 3
+        points, down = self.points, self.down
+        on = self.vy == 0.0 and self.hits(self.px, self.py + 0.5)
+        ax, ay = self.tip or (x, y)
+        # A ball that rolls lays a dot a column.
+        n = abs(x - ax) if on else max(abs(x - ax), abs(y - ay))
+        n = 1 if self.tip is None else n
+        self.tip = (x, y)
+        for i in range(1, n + 1):
+            qx, qy = round(ax + (x - ax) * i / n), round(ay + (y - ay) * i / n)
+            rest = self.floor(qx, qy)
+            if on and rest <= qy:  # laid as it lies
+                qy = max(rest, qy - 2)
+            rest = max(rest, qy)
+            if qy < rest:
+                self.loose.append(len(points))
+            elif (qx, qy) in down:
+                continue
+            else:
+                down.add((qx, qy))
+            points.append([qx, qy, rest])
+            self.fresh = True
+        if len(points) > THREAD:
+            del points[: len(points) - THREAD]
+            self.slack()
+
+    def slack(self) -> None:
+        """What sinks, what lies: counted again."""
+        self.loose = [i for i, p in enumerate(self.points) if p[1] < p[2]]
+        self.down = {(p[0], p[1]) for p in self.points if p[1] == p[2]}
+
+    def sink(self) -> None:
+        """A row of dots down, for the dots in the air; one that lands
+        on thread is dropped."""
+        if not self.loose:
+            return
+        points, down, landed = self.points, self.down, False
+        for i in self.loose:
+            p = points[i]
+            p[1] += 1
+            if p[1] == p[2]:
+                landed = True
+                if (p[0], p[1]) in down:
+                    p[2] = -1
+                else:
+                    down.add((p[0], p[1]))
+        if landed:
+            self.points = [p for p in points if p[2] >= 0]
+            self.slack()
+        self.fresh = True
+
+    def wake(self, now: float) -> None:
+        """The text changed: a ball that was batted falls if nothing
+        holds it, and its thread; one never batted stays by its word."""
+        for p in self.points:
+            p[2] = max(p[1], self.floor(p[0], p[1]))
+        self.slack()
+        if self.stroke and not self.moving:
+            self.moving = not self.hits(self.px, self.py + 0.5)
+        if self.moving or self.loose:
+            self.due = min(self.due, now)
+
+    def strand(self, keep: int = 1) -> tuple[int, int, list[str]] | None:
+        """The thread: the cell of its top left corner, its rows.
+        `keep`: one dot in so many. None: nothing of it in the view."""
+        home = self.home
+        top = 4 * home.view[1]
+        points = [p for p in self.points if p[1] >= top]
+        if not points:
+            return None
+        x0 = min(p[0] for p in points) >> 1
+        y0 = min(p[1] for p in points) >> 2
+        x1 = max(p[0] for p in points) >> 1
+        y1 = max(p[1] for p in points) >> 2
+        dots = Braille(x1 - x0 + 1, y1 - y0 + 1)
+        last = None
+        for x, y, _ in points:
+            ax, ay = (x, y) if last is None or abs(x - last[0]) > 1 else last
+            if abs(y - ay) > 2:
+                # Two floors: it hangs straight, in the column of the
+                # lower one.
+                hx = x if y > ay else ax
+                joint = [(hx, qy) for qy in range(min(y, ay), max(y, ay) + 1)]
+            else:
+                n = max(1, abs(x - ax), abs(y - ay))
+                joint = [
+                    (round(ax + (x - ax) * i / n), round(ay + (y - ay) * i / n))
+                    for i in range(n + 1)
+                ]
+            for qx, qy in joint:
+                if (qx + qy) % keep == 0:
+                    dots.set(qx - 2 * x0, qy - 4 * y0)
+            last = (x, y)
+        for cx, cy in dots.cells():
+            if home.solid(x0 + cx, y0 + cy):
+                dots.bits[cy][cx] = 0
+        return x0, y0, dots.rows()
+
+    def fade(self) -> dict[str, Any] | None:
+        """The thread, thinner and thinner, once: the driver removes it
+        after."""
+        looks = [self.strand(keep) for keep in (1, 2, 4)]
+        frames = [
+            {"cells": paint(look[2], {"": self.color}, dim=True), "ms": 300}
+            for look in looks
+            if look is not None
+        ]
+        return {"frames": frames, "loop": False} if frames else None
+
+    # -- what is due --------------------------------------------------
 
     def show(self) -> None:
-        home, y = self.home, self.g - 1
-        x0, n = self.ends[0], self.ends[1] - self.ends[0] + 1
+        home = self.home
+        ix, iy = round(self.px), round(self.py)
+        ball = (ix, iy, round(self.rolled / 2) % 4, self.plays > 0)
+        wire = self.strand() if self.fresh else None
+        self.fresh = False
+        if wire is None and ball == self.shown:
+            return
         with home.together():
-            if n > 1:
-                look = thread_look(x0, n, self.color)
-                self.wire = home.put(self.wire, x0, y, look, z=-3)
-            look = ball_look(self.color, self.plays)
-            self.ball = home.put(self.ball, self.x, y, look, z=-2)
-
-    def knock(self, way: int, now: float) -> bool:
-        """A bat to the right (`way` 1) or to the left (-1). False: no
-        room to roll there."""
-        goal = self.x + way * self.home.rng.randint(*ROLL)
-        goal = max(self.lo, min(goal, self.hi))
-        self.plays -= 1
-        if goal == self.x:
-            return False
-        self.way, self.run, self.due = way, abs(goal - self.x), now
-        return True
+            if wire is not None:
+                x0, y0, rows = wire
+                look = {"cells": paint(rows, {"": self.color})}
+                self.wire = home.put(self.wire, x0, y0, look, z=-3)
+            if ball != self.shown:
+                look = ball_look(self.color, self.plays, ix & 1, iy & 3, ball[2])
+                self.ball = home.put(self.ball, ix >> 1, iy >> 2, look, z=-2)
+                self.shown = ball
 
     def step(self, now: float) -> None:
-        """A column more, slower at the end."""
-        self.x += self.way
-        self.run -= 1
-        self.ends = [min(self.ends[0], self.x), max(self.ends[1], self.x)]
+        """The steps due, three at most, and one picture."""
+        steps = 1 + max(0, min(2, int((now - self.due) / TICK)))
+        for _ in range(steps):
+            if self.moving:
+                # A dot at most at a time: nothing is gone through.
+                n = max(1, math.ceil(max(abs(self.vx), abs(self.vy)) * TICK))
+                for _ in range(n):
+                    if self.moving:
+                        self.fly(TICK / n)
+                        self.lay()
+            self.sink()
         self.show()
-        self.due = now + SPIN * (1 + 3 / (self.run + 1)) if self.run else math.inf
+        if not self.moving and not self.loose:
+            self.due = math.inf
+        else:
+            self.due += steps * TICK
+            if self.due < now:
+                self.due = now + TICK
 
 
 class Cat:
@@ -659,7 +929,9 @@ class Cat:
         self.act = "away"
         self.due = 0.0  # when the act ends, or its next step
         self.goal = 0  # the walk: the column to reach
+        self.stride = 0  # and the columns done
         self.path: list[tuple[int, int]] = []  # the jump: cells left
+        self.beat = HOP  # and the seconds each takes
         self.landing: tuple[int, int] | None = None
         self.meal: Plate | None = None  # the plate it eats at, or goes to
         self.fish: Fish | None = None  # the fish it has
@@ -722,19 +994,32 @@ class Cat:
         self.show(pose)
 
     def walk(self, goal: int, now: float) -> None:
-        self.act, self.goal, self.due = "walk", goal, now
+        self.act, self.goal, self.due, self.stride = "walk", goal, now, 0
         self.right = goal >= self.x
 
     def run(self, goal: int, now: float) -> None:
         """A walk in a hurry, along its ledge."""
-        self.act, self.goal, self.due = "run", goal, now
+        self.act, self.goal, self.due, self.stride = "run", goal, now, 0
         self.right = goal >= self.x
+
+    def pace(self) -> float:
+        """Seconds to its next column: a run starts and ends slower."""
+        if self.act == "walk":
+            return STEP
+        i = min(self.stride - 1, abs(self.goal - self.x))
+        return EASE[i] if i < len(EASE) else RUN
+
+    def after(self, now: float, seconds: float) -> None:
+        """Its next step, `seconds` after this one was due: a late step
+        does not make the next late."""
+        late = now - self.due
+        self.due = now + seconds - (late if 0 <= late < seconds / 2 else 0.0)
 
     def jump(self, to: tuple[int, int], now: float, start: tuple[int, int]) -> None:
         """Leap from `start` (left column, row under the paws) to `to`."""
         self.act, self.due, self.landing = "leap", now, to
         self.right = to[0] >= start[0]
-        self.path = arc(start, to)
+        self.path, self.beat = arc(start, to), HOP
 
     def quit(self) -> None:
         """Leave the plate and the ball, forget the mouse. A fish it has
@@ -769,6 +1054,7 @@ class Cat:
         self.jump((x, g), now, (x, g))
         top = max(home.box()[1] + H, g - 6)
         self.path = [(x, y) for y in range(top, g + 1)]  # straight down
+        self.beat = RISE
 
     def leave(self, now: float) -> None:
         """Out of the view: wait, then come back in it. Its fish is
@@ -948,6 +1234,7 @@ class Cat:
         ups = [(self.x, self.g - i) for i in range(1, rise + 1)]
         self.act, self.due, self.landing = "leap", now, (self.x, self.g)
         self.path = [*ups, ups[-1], *reversed(ups[:-1]), (self.x, self.g)]
+        self.beat = RISE
         self.prey = "pointer"
 
     # -- the fish -----------------------------------------------------
@@ -1015,9 +1302,9 @@ class Cat:
 
     # -- the ball of yarn ---------------------------------------------
 
-    def play(self, yarn: Yarn, x: int, now: float) -> None:
-        """To the column `x`, next to `yarn`: a run along its ledge, or
-        a pounce."""
+    def play(self, yarn: Yarn, x: int, now: float, keen: bool = False) -> None:
+        """To the column `x`, next to `yarn`: a run along its ledge
+        (one time in two; `keen`: always), or a pounce."""
         yarn.player, self.toy = self, yarn
         here = perch(self.home.spots, self.x, self.g)
         if (x, yarn.g) == (self.x, self.g):
@@ -1026,7 +1313,7 @@ class Cat:
             here is not None
             and here.g == yarn.g
             and here.has(x)
-            and self.rng.random() < 0.5
+            and (keen or self.rng.random() < 0.5)
         ):
             self.run(x, now)
         else:
@@ -1034,10 +1321,13 @@ class Cat:
 
     def reach(self, now: float) -> None:
         """By its ball: a bat at it; with no play left, on its back in
-        the thread. Not by it: it gives up."""
+        the thread. The ball on its way: after it. Not by it: it gives
+        up."""
         yarn = self.toy
         assert yarn is not None
-        if self.g != yarn.g or self.x not in (yarn.x - W, yarn.x + 1) or yarn.run:
+        if yarn.moving:
+            return self.watch(now)
+        if self.g != yarn.g or self.x not in (yarn.x - W, yarn.x + BW):
             self.quit()
             return self.rest("puzzled", now, 0.8)
         self.right = yarn.x > self.x
@@ -1047,25 +1337,63 @@ class Cat:
             self.rest("roll", now, 1.8)
 
     def knock(self, now: float) -> None:
-        """The bat lands: the ball rolls away, it watches."""
+        """The bat lands: the ball is off; a look, and it is after
+        it."""
         yarn = self.toy
         assert yarn is not None
-        if yarn.knock(1 if self.right else -1, now):
-            self.rest("wiggle", now, self.rng.uniform(0.6, 1.0))
+        yarn.knock(1 if self.right else -1, now)
+        self.rest("wiggle", now, self.rng.uniform(0.2, 0.45))
+
+    def trail(self) -> int | None:
+        """The column of its ledge it runs to, after a ball that moves:
+        `LEAD` columns behind it, as far as the ledge goes. None: no
+        ledge under it, or the ball is not ahead."""
+        yarn = self.toy
+        assert yarn is not None
+        here = perch(self.home.spots, self.x, self.g)
+        if here is None:
+            return None
+        ahead = 2 * yarn.x + BW >= 2 * self.x + W
+        goal = yarn.x - W - LEAD if ahead else yarn.x + BW + LEAD
+        goal = max(here.x0, min(goal, here.x1))
+        return goal if goal != self.x and (goal > self.x) == ahead else None
+
+    def follow(self) -> None:
+        """As it runs after the ball: where the ball is now."""
+        goal = self.trail()
+        self.goal = self.x if goal is None else goal
+        if self.goal != self.x:
+            self.right = self.goal > self.x
+
+    def watch(self, now: float) -> None:
+        """Its eyes on a ball it cannot follow: at the end of its
+        ledge, or under it."""
+        yarn = self.toy
+        assert yarn is not None
+        right = 2 * yarn.x + BW >= 2 * self.x + W
+        if self.act == "wiggle" and right == self.right:
+            self.due = now + 0.15  # the same pose: nothing to send
         else:
-            yarn.plays = 0
-            self.rest("roll", now, 1.8)
+            self.right = right
+            self.rest("wiggle", now, 0.15)
 
     def chase(self, now: float) -> None:
-        """After the ball, once it stopped."""
+        """After the ball. On its way: a run behind it along the ledge,
+        then a watch. Stopped: to it, by a run or a pounce; no room by
+        it: the play is over."""
         yarn = self.toy
         assert yarn is not None
-        if yarn.run:
-            self.due = now + 0.15
+        if yarn.moving:
+            if (goal := self.trail()) is not None:
+                self.run(goal, now)
+            else:
+                self.watch(now)
         elif (x := self.home.plaything(self)) is not None:
-            self.play(yarn, x, now)
+            self.play(yarn, x, now, keen=True)
         else:
-            self.rest("roll", now, 1.8)
+            yarn.plays = 0
+            self.quit()
+            self.rest("puzzled", now, 0.8)
 
     # -- what is due --------------------------------------------------
 
@@ -1095,17 +1423,22 @@ class Cat:
             if self.path:
                 self.x, self.g = self.path.pop(0)
                 self.show("leap")
-                self.due = now + HOP
+                self.after(now, self.beat)
             else:
                 self.land(now)
         elif self.act in ("walk", "run"):
+            if self.act == "run" and self.toy is not None and self.toy.moving:
+                self.follow()
             ahead = self.x + (1 if self.goal > self.x else -1)
-            if self.x == self.goal or home.taken(self, ahead, self.g):
-                self.goal = self.x
+            if self.x == self.goal:
                 return self.halt(now)
+            if home.taken(self, ahead, self.g):
+                self.goal = self.x
+                return self.halt(now, barred=True)
             self.x = ahead
-            self.show(self.act, self.x)
-            self.due = now + (RUN if self.act == "run" else STEP)
+            self.stride += 1
+            self.show(self.act, self.stride - 1)
+            self.after(now, self.pace())
         elif self.act == "eat" and self.meal is not None and self.meal.left:
             home.bite(self.meal, now)
             self.due = now + BITE
@@ -1162,11 +1495,14 @@ class Cat:
         else:
             self.wander(now)
 
-    def halt(self, now: float) -> None:
-        """The walk is over, or the run: by the ball, or within a
-        pounce of the pointer."""
-        if self.toy is not None:
-            self.reach(now)
+    def halt(self, now: float, barred: bool = False) -> None:
+        """The walk is over, or the run: after the ball, or within a
+        pounce of the pointer. `barred`: by another cat."""
+        if self.toy is not None and barred:
+            self.quit()
+            self.rest("puzzled", now, 0.8)
+        elif self.toy is not None:
+            self.chase(now)
         elif self.act == "run":
             self.rest("wiggle", now, self.rng.uniform(0.3, 0.7))
         else:
@@ -1225,6 +1561,7 @@ class Home:
         self.idle = False
         self.cursor: tuple[int, int] | None = None
         self.rows: list[str] = []  # the text of the view, when read
+        self.walls: list[list[bool]] = []  # `mass` of each row
         self.view = (0, 0, 0, 0)  # and its box
         self.spots: list[Ledge] = []
         self.read = 0.0  # time of the last read of the text
@@ -1270,6 +1607,7 @@ class Home:
             width, height = box[2] - box[0], box[3] - box[1]
             rows = pad([*self.frame.text(), *[""] * height][:height], width)
             self.rows, self.view = rows, box
+            self.walls = [mass(row) for row in rows]
             self.spots = ledges(rows, box)
             self.read, self.stale = now, False
             if self.hunt:
@@ -1320,6 +1658,14 @@ class Home:
         rows = self.rows[y - y0 : y - y0 + h]
         return all(row[x - x0 : x - x0 + w].isspace() for row in rows)
 
+    def solid(self, x: int, y: int) -> bool:
+        """The cell stops a ball: text, a side of the view as read, or
+        under it. Over it: nothing does."""
+        x0, y0, x1, y1 = self.view
+        if not x0 <= x < x1 or y >= y1:
+            return True
+        return y >= y0 and self.walls[y - y0][x - x0]
+
     def taken(self, cat: Cat, x: int, g: int) -> bool:
         """Another cat holds cells of the box at `x` above `g`, or next
         to it."""
@@ -1367,7 +1713,7 @@ class Home:
         if fish is not None and (fish.holder is None or fish.holder.act != "leap"):
             out.append((fish.x, fish.g, FW))
         if yarn is not None:
-            out.append((yarn.x, yarn.g, 1))
+            out.append((yarn.x, yarn.g, BW))
         return out
 
     def chairs(self, x: int, g: int, w: int = PW) -> list[tuple[bool, int]]:
@@ -1454,8 +1800,12 @@ class Home:
         lying = fish is not None and fish.holder is None and fish.left
         if fish is not None and lying and lost(fish.word, fish.x, fish.g, FW):
             self.lose(fish, now)
-        if yarn is not None and lost(yarn.word, yarn.x, yarn.g, 1):
-            self.wind(now)
+        if yarn is not None:
+            gone = yarn.word is not None and yarn.word not in words
+            if gone or (not yarn.moving and lost(None, yarn.x, yarn.g, BW)):
+                self.wind(now)
+            else:
+                yarn.wake(now)
         self.eaten &= words.keys()
         laid = {plate.word for plate in self.plates} | self.eaten
         laid |= {thing.word for thing in (self.fish, self.yarn) if thing is not None}
@@ -1466,7 +1816,7 @@ class Home:
             if kind == "fish":
                 w, full = FW, self.fish is not None
             elif kind == "toy":
-                w, full = 1, self.yarn is not None
+                w, full = BW, self.yarn is not None
             if full or (at := self.beside(*word, len(kind), w)) is None:
                 continue
             if kind == "food":
@@ -1608,16 +1958,6 @@ class Home:
 
     # -- the ball of yarn ---------------------------------------------
 
-    def lane(self, x: int, g: int) -> tuple[int, int]:
-        """The columns a ball at `x` above `g` can roll to: free cells
-        of its row, `LANE` to each side at most."""
-        lo = hi = x
-        while x - lo < LANE and self.free(lo - 1, g - 1, 1, 1):
-            lo -= 1
-        while hi - x < LANE and self.free(hi + 1, g - 1, 1, 1):
-            hi += 1
-        return lo, hi
-
     def spool(
         self, at: tuple[int, int], word: tuple[int, int] | None, until: float
     ) -> None:
@@ -1631,7 +1971,7 @@ class Home:
         self.next_toy = now + 5.0  # nowhere to put it: soon again
         if self.yarn is not None or (self.stale and not self.survey(now)):
             return
-        if (at := self.site(1)) is not None:
+        if (at := self.site(BW)) is not None:
             self.spool(at, None, now + self.rng.uniform(*LYING))
             self.next_toy = math.inf  # after this one
 
@@ -1639,11 +1979,11 @@ class Home:
         """The column where `cat` stands to play with the ball: next to
         it, on its side first. None: no ball for it, or no room."""
         yarn = self.yarn
-        if yarn is None or yarn.run or yarn.player not in (None, cat):
+        if yarn is None or yarn.moving or yarn.player not in (None, cat):
             return None
         if yarn.player is None and not yarn.plays:
             return None
-        sides = [yarn.x - W, yarn.x + 1]
+        sides = [yarn.x - W, yarn.x + BW]
         if 2 * cat.x + W > 2 * yarn.x:
             sides.reverse()
         for x in sides:
@@ -1665,10 +2005,11 @@ class Home:
                 cat.rest("alert", now, 0.6)
         if yarn.ball is not None:
             yarn.ball.remove()
-        if yarn.wire is not None:
-            x0, n = yarn.ends[0], yarn.ends[1] - yarn.ends[0] + 1
+        if yarn.wire is not None and (look := yarn.fade()) is None:
+            yarn.wire.remove()
+        elif yarn.wire is not None:
             try:
-                yarn.wire.set(**thread_look(x0, n, yarn.color, fade=True))
+                yarn.wire.set(**look)
             except PtyrcError as exc:  # the driver took it, with its rows
                 if exc.code not in ("no-sprite", "gone"):
                     raise

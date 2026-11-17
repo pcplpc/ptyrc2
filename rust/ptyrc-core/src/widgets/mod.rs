@@ -35,6 +35,9 @@ pub const MAX_VARIANTS: usize = 16;
 /// Largest inner size of a variant.
 pub const MAX_SIZE: [u16; 2] = [200, 60];
 
+/// Largest margin of a widget.
+pub const MAX_MARGIN: u16 = 4;
+
 const FRAME_NAMES: [&str; 5] = ["raw", "active", "largest", "quietest", "idle"];
 
 /// Tunables. Times in milliseconds.
@@ -44,6 +47,9 @@ pub struct WidgetConfig {
     pub quiet_ms: u32,
     /// Columns and rows kept between a widget and what is around it.
     pub gap: (u16, u16),
+    /// Cells kept between a widget and the edges of its view, when
+    /// `widget.show` gives none.
+    pub margin: u16,
     /// A widget pressed this long is laid out again.
     pub evict_ms: u32,
     /// A larger variant elsewhere must be found this long before the
@@ -58,6 +64,7 @@ impl Default for WidgetConfig {
         WidgetConfig {
             quiet_ms: 1000,
             gap: (2, 1),
+            margin: 1,
             evict_ms: 300,
             replace_ms: 2000,
             look_ms: 250,
@@ -118,6 +125,10 @@ pub struct Show {
     pub prefer: Prefer,
     #[serde(default = "default_fill", deserialize_with = "or_fill")]
     pub fill: f32,
+    /// Cells kept from the edges of the view, `0..=MAX_MARGIN`; absent:
+    /// `WidgetConfig::margin`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub margin: Option<u16>,
     /// The tag when absent; `""`: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
@@ -138,6 +149,7 @@ impl Show {
             frame: FrameSel::default(),
             prefer: Prefer::Any,
             fill: default_fill(),
+            margin: None,
             title: None,
             border: None,
             layer: None,
@@ -319,6 +331,7 @@ struct Widget {
     frame: Option<FrameId>,
     prefer: Prefer,
     fill: f32,
+    margin: u16,
     title: Option<String>,
     border: Option<Framed>,
     layer: Layer,
@@ -635,6 +648,10 @@ impl Widgets {
         if !(0.1..=1.0).contains(&show.fill) {
             return bad(format!("fill: 0.1 to 1, not {}", show.fill));
         }
+        let margin = show.margin.unwrap_or(self.cfg.margin);
+        if margin > MAX_MARGIN {
+            return bad(format!("margin: 0 to {MAX_MARGIN}, not {margin}"));
+        }
         let border = show
             .border
             .as_ref()
@@ -659,6 +676,7 @@ impl Widgets {
                 w.frame = frame;
                 w.prefer = show.prefer;
                 w.fill = show.fill;
+                w.margin = margin;
                 w.title = show.title;
                 w.border = border;
                 w.layer = layer;
@@ -679,6 +697,7 @@ impl Widgets {
                     frame,
                     prefer: show.prefer,
                     fill: show.fill,
+                    margin,
                     title: show.title,
                     border,
                     layer,
@@ -1233,7 +1252,7 @@ impl Widgets {
     }
 
     /// Mark the placed widgets pressed or not: ink under them, or out of
-    /// their view.
+    /// their view less its margin.
     fn press(&mut self, now: Duration, base: &Grid, surfaces: &dyn Surfaces) {
         // What the modals cover, in screen cells.
         let covers: Vec<Rect> = self
@@ -1258,8 +1277,9 @@ impl Widgets {
             };
             let view = info.rect.intersect(&base.rect());
             let r = place.rect();
-            let out = r.right() > view.w
-                || r.bottom() > view.h
+            let m = w.margin;
+            let out = r.right() + m > view.w
+                || r.bottom() + m > view.h
                 || view.x != info.rect.x
                 || view.y != info.rect.y;
             let ink = !out
@@ -1362,14 +1382,23 @@ impl Widgets {
             .map(|v| (v.size[0] + 2 * thick, v.size[1] + 2 * thick))
             .collect();
         let (gx, gy) = self.cfg.gap;
+        let m = w.margin;
         let (vw16, vh16) = (look.view.w, look.view.h);
         let mut best: Option<(Rank, Place)> = None;
         for r in rooms::rooms(&open, vw, vh) {
-            // The gap is kept from all but the edges of the view.
-            let gl = if r.x == 0 { 0 } else { gx };
-            let gr = if r.right() == vw16 { 0 } else { gx };
-            let gt = if r.y == 0 { 0 } else { gy };
-            let gb = if r.bottom() == vh16 { 0 } else { gy };
+            // The gap is kept from all but the edges of the view; the
+            // margin from those.
+            let keep = |gap: u16, edge: u16| {
+                if edge == 0 {
+                    m
+                } else {
+                    gap.max(m.saturating_sub(edge))
+                }
+            };
+            let gl = keep(gx, r.x);
+            let gr = keep(gx, vw16 - r.right());
+            let gt = keep(gy, r.y);
+            let gb = keep(gy, vh16 - r.bottom());
             if r.w < gl + gr || r.h < gt + gb {
                 continue;
             }
@@ -1594,15 +1623,17 @@ impl Widgets {
     }
 
     /// The place of a modal no room takes, over the text: the largest
-    /// variant that fits the view with the gap around it; without the
-    /// gap when none does; the smallest, clipped, when none does. At
-    /// `prefer`, centred for `any`.
+    /// variant that fits the view with the gap, at least the margin,
+    /// around it; with the margin only when none does; with nothing when
+    /// none does; the smallest, clipped, when none does. At `prefer`,
+    /// centred for `any`.
     fn over(&self, w: &Widget, view: Rect, prefer: Prefer) -> Option<Place> {
         let thick = self.border_of(w).spec.thickness();
         let outer = |v: &Variant| (v.size[0] + 2 * thick, v.size[1] + 2 * thick);
         let area = |v: &Variant| outer(v).0 as u32 * outer(v).1 as u32;
         let variants = self.variants_of(w);
         let (gx, gy) = self.cfg.gap;
+        let m = w.margin;
         let largest = |gx: u16, gy: u16| {
             variants
                 .iter()
@@ -1610,10 +1641,14 @@ impl Widgets {
                 .filter(|(_, v)| outer(v).0 + 2 * gx <= view.w && outer(v).1 + 2 * gy <= view.h)
                 .max_by_key(|(i, v)| (area(v), Reverse(*i)))
         };
-        let (index, v, (gx, gy)) = match (largest(gx, gy), largest(0, 0)) {
-            (Some((i, v)), _) => (i, v, (gx, gy)),
-            (None, Some((i, v))) => (i, v, (0, 0)),
-            (None, None) => {
+        let (gx, gy) = (gx.max(m), gy.max(m));
+        let found = largest(gx, gy)
+            .map(|f| (f, (gx, gy)))
+            .or_else(|| largest(m, m).map(|f| (f, (m, m))))
+            .or_else(|| largest(0, 0).map(|f| (f, (0, 0))));
+        let (index, v, (gx, gy)) = match found {
+            Some(((i, v), g)) => (i, v, g),
+            None => {
                 let (i, v) = variants
                     .iter()
                     .enumerate()

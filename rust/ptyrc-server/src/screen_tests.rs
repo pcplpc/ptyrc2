@@ -1044,6 +1044,14 @@ fn widget_errors_and_hints() {
     assert_eq!(e.code, ptyrc_proto::ErrorCode::NoFrame);
     let e = rig.fail(7, "widget.show", json!({"tag": "clock", "fill": 2}));
     assert!(e.hint.unwrap().contains("0.1 to 1"));
+    let e = rig.fail(7, "widget.show", json!({"tag": "clock", "margin": 5}));
+    assert_eq!(e.code, ptyrc_proto::ErrorCode::BadParams);
+    assert_eq!(e.message, "margin: 0 to 4, not 5");
+    assert!(e.hint.unwrap().contains("edges of the view"));
+    for bad in [json!(-1), json!(1.5), json!("1")] {
+        let e = rig.fail(7, "widget.show", json!({"tag": "clock", "margin": bad}));
+        assert_eq!(e.code, ptyrc_proto::ErrorCode::BadParams);
+    }
     let e = rig.fail(7, "widget.show", json!({"tag": "clock", "layer": "bak"}));
     assert!(e.hint.unwrap().starts_with("did you mean back?"));
     let e = rig.fail(

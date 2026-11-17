@@ -52,7 +52,12 @@ def sound(home: Any) -> None:
         if fish.holder is not None:
             assert fish.holder in cats and fish.holder.fish is fish
     if yarn is not None:
-        assert yarn.plays >= 0 and yarn.lo <= yarn.x <= yarn.hi
+        x0, _, x1, y1 = home.view
+        assert yarn.plays >= 0 and len(yarn.points) <= cat.THREAD
+        # In the view as read, or over it; where it rests, on a floor.
+        assert x0 <= yarn.x <= x1 - cat.BW and yarn.g <= y1, (yarn.x, yarn.g)
+        if not yarn.moving:
+            assert yarn.px % 2 == 0 and yarn.py % 4 == 0, (yarn.px, yarn.py)
         if yarn.player is not None:
             assert yarn.player in cats and yarn.player.toy is yarn
     for plate in home.plates:
@@ -259,8 +264,9 @@ def test_cat_toy_thread_taken(session: Pilot) -> None:
     # The driver took the thread (its rows forgotten): the ball goes all
     # the same, and another comes later.
     home, yarn = toy(session)
-    yarn.word, yarn.ends = None, [yarn.x, yarn.x + 5]
-    yarn.show()
+    yarn.word = None
+    yarn.knock(1, 0.0)
+    yarn.step(0.0)
     assert yarn.wire is not None
     yarn.wire.remove()
     home.wind(1.0)

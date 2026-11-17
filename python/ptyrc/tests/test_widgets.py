@@ -85,6 +85,19 @@ def test_modal_over_the_text(spawn) -> None:  # type: ignore[no-untyped-def]
     assert pilot.shown()[3] == "0" * 39
 
 
+def test_margin(spawn) -> None:  # type: ignore[no-untyped-def]
+    pilot = spawn(["sh", "-c", "sleep 60"], size=(40, 10))
+    until(lambda: pilot.frame("raw").usable)
+    tip = pilot.widget("tip", [(6, 1)], prefer="bottom-right")
+    until(lambda: tip.refresh().placed)
+    assert tip.rect == (31, 6, 8, 3)  # a cell off the edges
+    tip = pilot.widget("tip", [(6, 1)], prefer="bottom-right", margin=0)
+    until(lambda: tip.refresh().rect == (32, 7, 8, 3))
+    with pytest.raises(PtyrcError) as err:
+        pilot.widget("tip", [(6, 1)], margin=5)
+    assert err.value.code == "bad-params" and "0 to 4" in (err.value.hint or "")
+
+
 def test_errors(shell: Pilot) -> None:
     with pytest.raises(PtyrcError) as err:
         shell.call("widget.show", tag="nope")

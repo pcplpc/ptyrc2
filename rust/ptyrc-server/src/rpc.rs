@@ -466,7 +466,8 @@ fn widget_declare(engine: &mut ScreenEngine, conn: ConnId, params: Value) -> Res
     Ok(json!({"tags": tags}))
 }
 
-/// `widget.show {tag, frame, prefer, fill, title, border, layer}`: laid
+/// `widget.show {tag, frame, prefer, fill, margin, title, border, layer,
+/// modal}`: laid
 /// out at once; `{"widget": info}`.
 fn widget_show(engine: &mut ScreenEngine, conn: ConnId, mut params: Value, ctx: &mut Ctx) -> Res {
     engine.scene.name_layer(&mut params);

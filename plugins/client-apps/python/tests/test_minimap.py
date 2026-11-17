@@ -160,13 +160,13 @@ def test_heights() -> None:
 def test_framed() -> None:
     rows = minimap.face(Doc(lines=["x"] * 8, width=8), 4, 2)
     assert plain(minimap.framed(rows, 4, "8")) == [
-        "╭────╮ ",
-        "│⡇   │ ",
-        "│⡇   │ ",
-        "╰─ 8 ╯ ",
+        "╭────╮",
+        "│⡇   │",
+        "│⡇   │",
+        "╰─ 8 ╯",
     ]
-    left = plain(minimap.framed(rows, 4, "12345", left=True))
-    assert left == [" ╭────╮", " │⡇   │", " │⡇   │", " ╰────╯"]  # no room: no name
+    long = plain(minimap.framed(rows, 4, "12345"))
+    assert long == ["╭────╮", "│⡇   │", "│⡇   │", "╰────╯"]  # no room: no name
     assert rows == minimap.face(Doc(lines=["x"] * 8, width=8), 4, 2)
 
 
@@ -176,8 +176,8 @@ def test_print(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
     assert minimap.main(["--print", "8x10", "--file", str(path), "-a"]) == 0
     out = capsys.readouterr().out.splitlines()
     assert out[0] == "8x10" and len(out) == 13
-    assert out[1] == "╭" + "─" * 8 + "╮ " and out[-1] == "╰─── 200 ╯ "
-    assert all(len(row) == 11 and row[0] == row[-2] == "│" for row in out[2:-1])
+    assert out[1] == "╭" + "─" * 8 + "╮" and out[-1] == "╰─── 200 ╯"
+    assert all(len(row) == 10 and row[0] == row[-1] == "│" for row in out[2:-1])
     assert minimap.main(["--print"]) == 0
     assert capsys.readouterr().out.count("╭") == 4
     assert minimap.main(["--print", "--file", str(tmp_path / "none")]) == 1
@@ -199,9 +199,9 @@ def widget_of(pilot: Pilot) -> dict[str, Any]:
 
 def band(pilot: Pilot, widget: dict[str, Any]) -> list[int]:
     """The rows of the map on the ground of the view, or of the cursor
-    in it. The map is inside the app's border, a blank on its right."""
+    in it. The map is inside the border."""
     x, y, w, h = widget["rect"]
-    rows = pilot.call("screen.cells", rect=[x + 1, y + 1, w - 3, h - 2], sprites=True)
+    rows = pilot.call("screen.cells", rect=[x + 1, y + 1, w - 2, h - 2], sprites=True)
     return [
         i
         for i, row in enumerate(rows["rows"])
@@ -242,25 +242,25 @@ def test_live(tmp_path: Path) -> None:
         )
         thread.start()
         # A page: 6 rows are enough. The row of the prompt is a line
-        # until it is known as chrome. A blank is kept at the edge
-        # (`shown` strips it; the rectangle tells).
+        # until it is known as chrome.
         rows = [0, 1, 2, 3, 4, 5]
         wait_state(
             pilot,
-            ([15, 8], "╰──────── 23 ╯", rows),
-            ([15, 8], "╰──────── 24 ╯", rows),
+            ([12, 6], "╰──────── 23 ╯", rows),
+            ([12, 6], "╰──────── 24 ╯", rows),
         )
-        assert widget_of(pilot)["rect"][0] == 80 - 15
+        x, y, w, h = widget_of(pilot)["rect"]
+        assert (w, h) == (14, 8) and x + w == 80 - 1  # a cell from the edge
         for page in range(1, 5):
             pilot.keys("space")
             pilot.wait_for(f"line {23 * page + 20} ")
         # 115 lines want 29 rows; 16 fit the pane: two lines a dot row,
         # the view is the last 23.
-        wait_state(pilot, ([15, 18], "╰─────── 115 ╯", [11, 12, 13, 14]))
+        wait_state(pilot, ([12, 16], "╰─────── 115 ╯", [11, 12, 13, 14]))
         time.sleep(0.5)  # the last page is remembered once it has stood
         pilot.keys("g")
         pilot.wait_for("line 3 ")
-        wait_state(pilot, ([15, 18], "╰─────── 115 ╯", [0, 1, 2]))
+        wait_state(pilot, ([12, 16], "╰─────── 115 ╯", [0, 1, 2]))
         # The mark: the first cell row, in the ink of the first pattern.
         x, y, _, _ = widget_of(pilot)["rect"]
         rows = pilot.call("screen.cells", rect=[x + 1, y + 1, 12, 1], sprites=True)
