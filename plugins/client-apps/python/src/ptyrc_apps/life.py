@@ -7,6 +7,7 @@
     ptyrc-app life -g --rate 6      # more of them, sooner
     ptyrc-app life -g --kinds ship,gun
     ptyrc-app life -w               # the text is a wall
+    ptyrc-app life --cursor         # the pointer clears the cells near it
     ptyrc-app life --all
 
 A cell of the terminal holds 2 by 4 cells of the world, the dots of a
@@ -38,8 +39,12 @@ What it shows:
   place that has few; so does a small one when no hole is left.
 - `--rate`: patterns a second into an empty world; into a crowded one,
   4 times fewer. `--rate 0`: only when the world is still. `--kinds`:
-  the kinds dropped; `filler`, which grows over the whole world, only
-  when named, or with `all`.
+  the kinds dropped, every one unless told; `filler` grows over the
+  whole world.
+- `--cursor`: the pointer of the host over the pane, no button down
+  (the `hover` events): where it moves, the cells within 6 of it die
+  (`Life.wipe`). They leave a trail (`-t`) and particles (`-p`) as
+  the others do.
 - `-p`: particles, each one request with a `motion` (`_arcade.spark`):
   where a glyph loses 5 cells at once, at most 4 a generation, and
   where a pattern lands.
@@ -51,12 +56,13 @@ What it shows:
 from __future__ import annotations
 
 import argparse
+import math
 import random
 from collections import deque
 from collections.abc import Iterable, Sequence
 from typing import Any, NamedTuple
 
-from ptyrc import Frame, Pilot, Sprite
+from ptyrc import Frame, Pilot, PtyrcError, Sprite
 
 from . import _arcade, _cli, _patterns
 from ._patterns import FILLER, GUN, OSCILLATOR, PUFFER, SEED, SHIP, Pattern
@@ -76,6 +82,7 @@ __all__ = [
     "main",
     "picture",
     "room",
+    "touched",
     "turned",
     "wall",
 ]
@@ -94,7 +101,7 @@ BLAST = 5  # cells a glyph loses at once to throw a particle
 BLASTS = 4  # particles a generation, at most
 STILL = 12  # a population that repeats at this distance is still
 QUIET = 48  # generations still before the world is renewed
-RATE = 2.0  # patterns a second dropped in an empty world
+RATE = 3.0  # patterns a second dropped in an empty world
 CROWD = 4.0  # times fewer in a world with no hole
 BLOCK = 4  # cells a side of a block of the map of room
 MARGIN = 2  # cells kept empty around a pattern dropped
@@ -108,6 +115,7 @@ CALM = 4  # blocks 2 away from any cell for one of the map: a calm world
 OPENING = 24  # patterns dropped at once in a new world, at most
 SMALL = 8  # cells a side, at most, of a pattern dropped in a full world
 SPARSE = 16  # cells of a place for one alive, at least, to drop over them
+REACH = 6  # cells around the pointer that die
 
 DOTS = ((0x01, 0x08), (0x02, 0x10), (0x04, 0x20), (0x40, 0x80))
 #: Glyph of 2 bits a row, 4 rows, the top row lowest.
@@ -133,13 +141,13 @@ SHARES: dict[str, float] = {
     _patterns.STILL: 6,
     FILLER: 4,
 }
-"""How often a kind is dropped, of 100. `FILLER`: only when asked."""
+"""How often a kind is dropped, of 100."""
 
 LIVELY = (SEED, PUFFER, GUN, FILLER)
 """The kinds that fill the world: held back until it is calm."""
 
-KINDS = tuple(kind for kind in SHARES if kind != FILLER)
-"""The kinds dropped unless told."""
+KINDS = tuple(SHARES)
+"""The kinds dropped unless told: every one."""
 
 
 class Life:
@@ -212,6 +220,24 @@ class Life:
         """Cells alive in the box; it wraps."""
         mask = self.span(x, w)
         return sum((self.rows[(y + dy) % self.h] & mask).bit_count() for dy in range(h))
+
+    def wipe(self, x: int, y: int, r: int) -> int:
+        """Kill the cells within `r` of `(x, y)`: they are `died`. It
+        does not wrap. How many."""
+        n = 0
+        full = (1 << self.w) - 1
+        for row in range(max(0, y - r), min(self.h, y + r + 1)):
+            half = math.isqrt(r * r - (row - y) ** 2)
+            lo = max(0, x - half)
+            mask = ((1 << max(0, x + half + 1 - lo)) - 1) << lo & full
+            if dead := self.rows[row] & mask:
+                n += dead.bit_count()
+                for plane in self.ages:
+                    plane[row] &= ~dead
+                for plane in self.gone[1:]:
+                    plane[row] &= ~dead
+                self.died[row] |= dead
+        return n
 
     def resize(self, w: int, h: int) -> None:
         """Cut, or grown with empty cells."""
@@ -688,6 +714,20 @@ def sparks(
             pilot.draw(frame=frame.id, at=at, space="view", **one)
 
 
+def touched(events: Iterable[tuple[str, Any]], frame: Frame) -> list[tuple[int, int]]:
+    """The cells of the world under the pointer, of the `hover` events
+    over the view of `frame`: the middle of each terminal cell."""
+    rx, ry, w, h = frame.rect
+    out = []
+    for topic, data in events:
+        if topic != "hover" or data.get("sprite") is None:
+            continue
+        x, y = data["x"] - rx, data["y"] - ry
+        if 0 <= x < w and 0 <= y < h:
+            out.append((2 * x + 1, 4 * y + 2))
+    return out
+
+
 def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
     rng = random.Random(args.seed)
     fx = random.Random(args.seed)  # the particles do not change the world
@@ -700,6 +740,12 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     sprite: Sprite | None = None
     host = Host(rng, args.kinds) if args.guests else None
     guest = host.wait(args.rate) * args.speed if host else 0.0  # generations
+    if args.cursor:
+        try:
+            pilot.subscribe("hover")
+        except PtyrcError as err:  # a driver without the topic
+            if err.code != "bad-params":
+                raise
     for _ in _cli.ticks(1.0 / args.speed, seconds):
         if not sight.look():
             continue
@@ -726,7 +772,12 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
             if not host or (landed is None and not life.population):
                 life.soup(rng)
             watch.reset()
+        for x, y in touched(sight.others, frame):
+            life.wipe(x, y, REACH)
         cells = picture(life, args.colour, args.trail, clear)
+        if args.cursor and (pad := w - sum(len(run["t"]) for run in cells[0])) > 0:
+            # The whole view is its box: a hover is told anywhere on it.
+            cells[0].append({"t": " " * pad})
         with sight.drawing(), pilot.batch():
             if sprite is None:
                 sprite = pilot.draw(
@@ -818,11 +869,17 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
     out.add_argument(
         "-w", "--walls", action="store_true", help="no cell lives under the text"
     )
-    out.add_argument("-a", "--all", action="store_true", help="-c -t -g -p -w")
+    out.add_argument(
+        "--cursor",
+        action="store_true",
+        help="the pointer of the host, moved over the pane, clears the cells near it",
+    )
+    out.add_argument("-a", "--all", action="store_true", help="-c -t -g -p -w --cursor")
     out.add_argument("--front", action="store_true", help="over the text")
     args = _cli.parse(out, argv)
     if args.all:
         args.colour = args.trail = args.guests = args.particles = args.walls = True
+        args.cursor = True
     if args.speed <= 0:
         out.error("--speed must be positive")
     if args.rate < 0:

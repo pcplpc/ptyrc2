@@ -6,11 +6,15 @@ from __future__ import annotations
 import random
 import threading
 import time
+from typing import TYPE_CHECKING
 
 from ptyrc import Pilot
 from ptyrc import clock as session_clock
 from ptyrc_apps import _patterns, life
 from ptyrc_apps.life import Life
+
+if TYPE_CHECKING:
+    from conftest import Host
 
 
 def naive(cells: set[tuple[int, int]], w: int, h: int) -> set[tuple[int, int]]:
@@ -283,7 +287,7 @@ def test_life_host_squeeze() -> None:
 def test_life_options() -> None:
     assert life._kinds("ship, gun") == ("ship", "gun")
     assert set(life._kinds("all")) == set(_patterns.KINDS)
-    assert "filler" not in life.KINDS
+    assert set(life.KINDS) == set(_patterns.KINDS) and life.RATE == 3.0
     for bad in (["--kinds", "fish"], ["--kinds", ","], ["--rate", "-1"]):
         try:
             life.main(["-g", *bad])
@@ -416,3 +420,72 @@ def test_life_all(session: Pilot) -> None:
     assert played(session, "-g", "--rate", "8", "--kinds", "all") > 20
     assert played(session, "-g", "-w", "--rate", "0") > 20
     assert played(session, "-c", "-t", "--front") > 100
+
+
+def test_life_wipe() -> None:
+    world = Life(40, 30, ages=3, gone=2)
+    for plane in world.ages:
+        plane[:] = [(1 << 40) - 1] * 30
+    world.gone[1][:] = [(1 << 40) - 1] * 30
+    near = {
+        (x, y)
+        for x in range(40)
+        for y in range(30)
+        if (x - 20) ** 2 + (y - 15) ** 2 <= 36
+    }
+    assert world.wipe(20, 15, 6) == len(near) == 113
+    full = {(x, y) for x in range(40) for y in range(30)}
+    assert world.cells() == full - near
+    for plane in world.ages[1:]:
+        assert [row.bit_count() for row in plane] == [
+            row.bit_count() for row in world.rows
+        ]
+    # They died now: the first level of the trail, no other.
+    assert sum(row.bit_count() for row in world.died) == 113
+    assert all(not d & g for d, g in zip(world.died, world.gone[1], strict=True))
+    assert world.wipe(20, 15, 6) == 0
+    # At an edge: cut, the other side is kept.
+    assert world.wipe(0, 0, 6) == sum(x * x + y * y <= 36 for x in range(7) for y in range(7))  # fmt: skip
+    assert world.rows[29] == world.rows[1] | 0x7F and world.rows[0] >> 39 == 1
+    assert world.wipe(39, 29, 2) == 6
+
+
+def test_life_touched(session: Pilot) -> None:
+    frame = session.frame("raw")
+    rx, ry, w, h = frame.rect
+    events = [
+        ("hover", {"sprite": 3, "x": rx + 2, "y": ry + 1}),
+        ("hover", {"sprite": None, "x": 0, "y": 0}),
+        ("mouse", {"sprite": 3, "x": rx, "y": ry}),
+        ("hover", {"sprite": 3, "x": rx + w, "y": ry}),
+        ("hover", {"sprite": 4, "x": rx + w - 1, "y": ry + h - 1}),
+    ]
+    assert life.touched(events, frame) == [(5, 6), (2 * w - 1, 4 * h - 2)]
+
+
+def test_life_cursor(hosted: tuple[Host, Pilot]) -> None:
+    """The pointer moved over a soup: no cell is left around it."""
+    host, pilot = hosted
+    seen = len(host.seen)
+    args = ["-s", pilot.session, "--seed", "4", "--cursor"]
+    status: list[int] = []
+    thread = threading.Thread(target=lambda: status.append(life.main(args, seconds=8)))
+    thread.start()
+    host.wait_seen(b"\x1b[?1003h", seen)
+
+    def around() -> str:
+        return pilot.dump()["host"][12][38:43]
+
+    deadline = time.monotonic() + 2
+    while dots(around()) < 4:
+        assert time.monotonic() < deadline, around()
+        time.sleep(0.02)
+    clean = 0
+    for n in range(40):
+        host.move(40 + n % 2, 12)
+        session_clock.sleep(0.03)
+        clean += n >= 20 and not around().strip()
+    assert thread.is_alive()  # else nothing is drawn at all
+    assert clean >= 16, clean
+    thread.join()
+    assert status == [0]
