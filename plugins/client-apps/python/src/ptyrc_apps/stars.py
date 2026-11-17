@@ -7,6 +7,7 @@ in a breeze along the bottom.
     ptyrc-app stars -c -g           # constellations, the milky way
     ptyrc-app stars -m -b -w        # meteors, fireflies, a meadow
     ptyrc-app stars --all
+    ptyrc-app stars --no-grass      # the sky only
     ptyrc-app stars --print 80x24   # no driver: the scene on stdout
 
 The sky is a map: a star has a place in it, `(u, v)` in [0, 1), and
@@ -21,7 +22,8 @@ What it shows:
   the app only asks what the scene is now, and sends what changed.
 - Two sprites in view cells, behind the text: the sky, looked at
   twice a second, and the grass over it, 6 times a second. The moon
-  rises and sets behind the grass.
+  rises and sets behind the grass. `--no-grass`: the sky alone, down
+  to the last row.
 - The moon: its phase is tonight's (`phase_of`); only the lit side is
   drawn, the dark one hides the stars behind it. It crosses the sky
   on an arc in `--night` seconds, then stays down for a fifth of that.
@@ -505,6 +507,7 @@ class Night:
         self.args = args
         self.sky = Sky(rng, args.stars, args.galaxy, args.constellations)
         self.grass = Grass(rng, args.wild)
+        self.rows = 0 if args.no_grass else self.grass.rows  # of grass
         self.phase = args.phase
         if self.phase is None:
             self.phase = phase_of(datetime.datetime.now(datetime.UTC))
@@ -514,17 +517,18 @@ class Night:
         args = self.args
         night = args.night
         turn = t / (TURN * night) if args.turn else 0.0
-        # No star in the last row: it is grass.
-        grid = self.sky.picture(w, h - 1, t, args.twinkle, turn)
-        grid.append({})
+        # No star in the last row when it is grass.
+        low = min(1, self.rows)
+        grid = self.sky.picture(w, h - low, t, args.twinkle, turn)
+        grid.extend({} for _ in range(low))
         f = (t / night + RISEN) % (1.0 + DOWN)
         if args.moon > 0 and f <= 1.0:
             moon(grid, *moon_at(w, h, args.moon, f), args.moon, self.phase)
         return grid
 
     def below(self, w: int, t: float) -> Grid:
-        """The grass, `grass.rows` rows."""
-        return self.grass.picture(w, t, self.args.wind)
+        """The grass, `rows` rows."""
+        return self.grass.picture(w, t, self.args.wind) if self.rows else []
 
 
 def show(args: argparse.Namespace) -> int:
@@ -563,7 +567,7 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
             continue
         w, h = frame.size
         t = clock.monotonic() - start
-        rows = min(night.grass.rows, h)
+        rows = min(night.rows, h)
         sized = (w, h) != size
         if sized or sight.changed:
             size = (w, h)
@@ -578,19 +582,20 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
                 elif cells != sent[0]:
                     sky.update(content={"cells": cells})
                 sent[0] = cells
-            cells = runs(night.below(w, t)[-rows:], w, shown[h - rows :])
-            if grass is None:
-                grass = pilot.draw(
-                    cells=cells, frame=frame.id, at=(0, h - rows), space="view", z=2
-                )
-            elif sized:
-                grass.update(
-                    anchor={"at": [0, h - rows], "space": "view"},
-                    content={"cells": cells},
-                )
-            elif cells != sent[1]:
-                grass.update(content={"cells": cells})
-            sent[1] = cells
+            if rows:
+                cells = runs(night.below(w, t)[-rows:], w, shown[h - rows :])
+                if grass is None:
+                    grass = pilot.draw(
+                        cells=cells, frame=frame.id, at=(0, h - rows), space="view", z=2
+                    )
+                elif sized:
+                    grass.update(
+                        anchor={"at": [0, h - rows], "space": "view"},
+                        content={"cells": cells},
+                    )
+                elif cells != sent[1]:
+                    grass.update(content={"cells": cells})
+                sent[1] = cells
             if args.meteors and t >= shot:
                 shot = t + fx.uniform(*METEOR)
                 pilot.draw(frame=frame.id, **meteor(fx, w, h))
@@ -695,6 +700,11 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
     )
     out.add_argument("-a", "--all", action="store_true", help="-t -r -c -g -m -b -w")
     out.add_argument(
+        "--no-grass",
+        action="store_true",
+        help="the sky only: no grass, and none of -b -w",
+    )
+    out.add_argument(
         "--print",
         nargs="?",
         type=_size,
@@ -707,6 +717,8 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
     if args.all:
         args.twinkle = args.turn = args.constellations = args.galaxy = True
         args.meteors = args.bugs = args.wild = True
+    if args.no_grass:
+        args.bugs = args.wild = False
     if args.night <= 0:
         out.error("--night must be positive")
     if args.stars < 0 or args.moon < 0:

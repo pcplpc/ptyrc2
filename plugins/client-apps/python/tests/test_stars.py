@@ -180,6 +180,12 @@ def test_print(capsys: pytest.CaptureFixture[str]) -> None:
     assert len(out) == 12 and "\x1b[38;5;230m" in "".join(out)
     assert stars.main(["--print", "-a", "--seed", "1"]) == 0
     assert len(capsys.readouterr().out.splitlines()) == 24
+    # No grass: stars down to the last row, nothing of the meadow.
+    assert stars.main(["--print", "40x12", "-a", "--no-grass", "--seed", "2"]) == 0
+    bare = capsys.readouterr().out.splitlines()
+    assert len(bare) == 12 and sum(bool(braille(c)) for c in bare[-1]) < 8
+    assert stars.main(["--print", "40x12", "-a", "--seed", "2"]) == 0
+    assert sum(bool(braille(c)) for c in capsys.readouterr().out.splitlines()[-1]) > 30
     for bad in (["--night", "0"], ["--stars", "-1"], ["--print", "0x4"]):
         with pytest.raises(SystemExit):
             stars.main(bad)
@@ -226,6 +232,12 @@ def played(pilot: Pilot, *options: str) -> tuple[int, int]:
 def test_stars(session: Pilot) -> None:
     pictures, sprites = played(session)
     assert pictures > 3 and sprites == 2
+
+
+def test_stars_without_grass(session: Pilot) -> None:
+    """The sky, a meteor at most: no grass, no firefly."""
+    pictures, sprites = played(session, "-a", "--no-grass")
+    assert pictures == 0 and 1 <= sprites <= 2
 
 
 def test_stars_all(session: Pilot) -> None:
