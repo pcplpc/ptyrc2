@@ -20,6 +20,7 @@ with the other decorations in front of them. All behind the text.
 
 from __future__ import annotations
 
+import functools
 import math
 import random
 from collections.abc import Iterable, Sequence
@@ -367,23 +368,34 @@ def depths(rows: Sequence[str], width: int) -> list[int]:
     return out
 
 
+@functools.lru_cache(maxsize=1024)
+def _ink(row: str) -> int:
+    """The cells of `row` that hold ink: bit `x` the cell `x`."""
+    return sum(1 << x for x, ch in enumerate(row) if not ch.isspace())
+
+
 def stand(rows: Sequence[str], g: int, width: int, w: int, h: int) -> list[int]:
     """Columns where a box of `w` x `h` cells stands on row `g` of
     `rows`, the view's text: ink under two cells of its base out of
     three, the box free, and a free column on each side."""
     if not h <= g < len(rows):
         return []
-
-    def free(x: int) -> bool:
-        return all(x >= len(rows[y]) or rows[y][x].isspace() for y in range(g - h, g))
-
-    clear = [free(x) for x in range(width)]
-    ground = [x < len(rows[g]) and not rows[g][x].isspace() for x in range(width)]
-    return [
-        x
-        for x in range(width - w + 1)
-        if 3 * sum(ground[x : x + w]) >= 2 * w and all(clear[max(0, x - 1) : x + w + 1])
-    ]
+    inside = (1 << max(0, width)) - 1
+    ground = _ink(rows[g]) & inside
+    shut = 0
+    for y in range(g - h, g):
+        shut |= _ink(rows[y])
+    shut &= inside
+    base = (1 << w) - 1
+    out = []
+    for x in range(width - w + 1):
+        left = max(0, x - 1)
+        if (
+            3 * (ground >> x & base).bit_count() >= 2 * w
+            and not shut >> left & (1 << (x + w + 1 - left)) - 1
+        ):
+            out.append(x)
+    return out
 
 
 def bubble(height: int, rng: random.Random) -> dict[str, Any]:
