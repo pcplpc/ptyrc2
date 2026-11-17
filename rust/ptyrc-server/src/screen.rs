@@ -101,6 +101,7 @@ pub struct ScreenEngine {
     pub(crate) frames: Frames,
     pub(crate) scene: Scene,
     pub(crate) widgets: Widgets,
+    pub(crate) focus: crate::focus::Focus,
     pub(crate) exts: Vec<Box<dyn DrawExt>>,
     pub(crate) waits: Vec<Wait>,
     /// Last time the app grid changed.
@@ -155,6 +156,7 @@ impl ScreenEngine {
             frames: Frames::new(FrameConfig::default(), supports),
             scene,
             widgets,
+            focus: Default::default(),
             exts,
             waits: Vec::new(),
             last_change: Duration::ZERO,
@@ -255,6 +257,7 @@ impl ScreenEngine {
         for info in changed {
             ctx.emit("widgets", json!(info));
         }
+        self.sync_focus(None, ctx);
     }
 
     /// Steps 4 and 5: tick the widgets and the scene, compose, repair the
@@ -746,6 +749,7 @@ impl Engine for ScreenEngine {
     fn on_disconnect(&mut self, conn: ConnId, ctx: &mut Ctx) {
         self.waits.retain(|w| w.conn != conn);
         self.widgets.drop_owner(conn.0);
+        self.sync_focus(None, ctx);
         self.scene.drop_owner(conn.0);
         ctx.request_repaint();
     }
@@ -821,6 +825,7 @@ impl Engine for ScreenEngine {
     fn hide_owner(&mut self, conn: ConnId, hidden: bool, ctx: &mut Ctx) {
         self.scene.hide_owner(conn.0, hidden, ctx.now());
         self.widgets.hide_owner(conn.0, hidden);
+        self.sync_focus(Some("pause"), ctx);
         self.widgets.touch();
         ctx.request_repaint();
     }
@@ -873,6 +878,18 @@ impl Engine for ScreenEngine {
         });
     }
 
+    fn focus(&self) -> Option<crate::focus::Held> {
+        self.held()
+    }
+
+    fn focus_next(&mut self, ctx: &mut Ctx) -> bool {
+        ScreenEngine::focus_next(self, "hotkey", ctx)
+    }
+
+    fn focus_escape(&mut self, ctx: &mut Ctx) {
+        self.blur("escape", ctx);
+    }
+
     fn session_extras(&self) -> Value {
         let modes = self.app.modes();
         let mouse = [(1, 9), (2, 1000), (4, 1002), (8, 1003)];
@@ -880,6 +897,7 @@ impl Engine for ScreenEngine {
         json!({
             "alt_screen": modes.alt_screen,
             "title": self.app.title(),
+            "focus": self.widgets.focused().map(|(id, _)| id),
             "modes": {
                 "app_cursor": modes.app_cursor,
                 "bracketed_paste": modes.bracketed_paste,

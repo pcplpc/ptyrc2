@@ -9,6 +9,7 @@ mod apps;
 mod conn;
 pub mod driver;
 pub mod engine;
+pub mod focus;
 mod grab;
 pub use grab::{key_len, name as key_name};
 mod hints;

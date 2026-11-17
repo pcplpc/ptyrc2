@@ -1049,17 +1049,33 @@ impl Driver {
     }
 
     /// Bytes of the host keyboard: ctrl+t twice in a row, while no key
-    /// is grabbed, is the hotkey.
+    /// is grabbed, is the hotkey: the next widget that asks is focused;
+    /// past the last, or when none asks, the manager.
     fn host_input(&mut self, bytes: &[u8], engine: &mut dyn Engine) {
         let Some(hotkey) = &mut self.hotkey else {
             return self.forward_input(bytes, engine);
         };
         let armed = self.grab.is_none();
         let (forward, twice) = hotkey.sort(bytes, self.clock.elapsed(), armed);
-        if twice && !self.hotkey_pressed() {
-            let _ = self.host.write(b"\x07");
+        // What was typed before the pair is for who had the keys then.
+        let before = match twice {
+            true => hotkey.before().min(forward.len()),
+            false => forward.len(),
+        };
+        self.forward_input(&forward[..before], engine);
+        if twice {
+            // The next widget that asks; past the last, the manager.
+            // The manager up and no widget focused: the pair ends it.
+            let now = self.now();
+            let menu = engine.focus().is_none()
+                && (self.hotkey_app.zip(self.apps.as_ref()))
+                    .is_some_and(|(id, apps)| apps.get(id).is_some());
+            let focused = !menu && hook!(self, now, |ctx| engine.focus_next(ctx));
+            if !focused && !self.hotkey_pressed() {
+                let _ = self.host.write(b"\x07");
+            }
+            self.forward_input(&forward[before..], engine);
         }
-        self.forward_input(&forward, engine);
     }
 
     /// The hotkey: end its app when it runs, else start it. False: it
@@ -1105,7 +1121,24 @@ impl Driver {
                 held = sorted.forward;
                 &held[..]
             }
-            None => bytes,
+            None => match engine.focus() {
+                // The keys are the focused widget's.
+                Some(focus) => {
+                    let sorted = focus.sorter().sort(bytes);
+                    for (name, key) in sorted.taken {
+                        let data = json!({"key": name, "bytes": keys::base64_encode(&key),
+                                          "widget": focus.widget});
+                        self.send_event(focus.conn, "input", data);
+                    }
+                    if sorted.released {
+                        let now = self.now();
+                        hook!(self, now, |ctx| engine.focus_escape(ctx));
+                    }
+                    held = sorted.forward;
+                    &held[..]
+                }
+                None => bytes,
+            },
         };
         if bytes.is_empty() {
             return;
@@ -1401,7 +1434,17 @@ impl Driver {
             "subscribe" => self.subscribe(conn, &params, engine),
             "input.send" => self.input_send(&params, engine),
             "input.click" => self.input_click(&params, engine),
+            "input.grab" if engine.focus().is_some() => Err(RpcError::new(
+                ErrorCode::NotUsable,
+                "a widget is focused: it has the keys",
+            )
+            .with_hint("`widget.blur` drops the focus (ptyrc focus --none)")),
             "input.grab" => self.input_grab(conn, &params),
+            "widget.focus" if self.grab.is_some() => Err(RpcError::new(
+                ErrorCode::NotUsable,
+                "a client holds the keys (`input.grab`)",
+            )
+            .with_hint("the focus is given once the keys are released")),
             "input.release" => {
                 self.grab.take_if(|g| g.conn == conn);
                 Ok(json!({}))
@@ -2143,6 +2186,9 @@ impl Driver {
         self.repaint |= fx.repaint;
         for (topic, data) in fx.events {
             self.emit(&topic, data);
+        }
+        for (conn, topic, data) in fx.direct {
+            self.send_event(conn, &topic, data);
         }
         for (token, result) in fx.completions {
             if let Some((conn, id)) = self.pending.remove(&token) {

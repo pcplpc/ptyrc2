@@ -13,6 +13,9 @@ const KEY: &[u8] = b"\x14";
 pub(crate) struct Hotkey {
     /// A first ctrl+t, as typed, and when it stops waiting.
     held: Option<(Vec<u8>, Duration)>,
+    /// Of the bytes the last `sort` sent on: how many came before the
+    /// pair.
+    before: usize,
 }
 
 impl Hotkey {
@@ -24,6 +27,12 @@ impl Hotkey {
     /// The held key, given up.
     pub fn flush(&mut self) -> Vec<u8> {
         self.held.take().map(|(key, _)| key).unwrap_or_default()
+    }
+
+    /// Of the bytes the last `sort` sent on, those typed before the
+    /// pair: the count of them.
+    pub fn before(&self) -> usize {
+        self.before
     }
 
     /// Sort keyboard bytes: what goes on, and whether ctrl+t came twice
@@ -43,7 +52,10 @@ impl Hotkey {
             rest = tail;
             let is_key = grab::legacy(key).as_deref().unwrap_or(key) == KEY;
             match (held.take(), is_key) {
-                (Some(_), true) => twice = true,
+                (Some(_), true) => {
+                    twice = true;
+                    self.before = forward.len();
+                }
                 (None, true) => held = Some(key.to_vec()),
                 // The release of the first press, between the two.
                 (Some(first), false) if grab::is_release(key) => {
@@ -75,6 +87,7 @@ mod tests {
     fn twice_in_a_row() {
         let mut d = demo();
         assert_eq!(d.sort(b"a\x14\x14b", T0, true), (b"ab".to_vec(), true));
+        assert_eq!(d.before(), 1);
         assert_eq!(d.due(), None);
         // Over two reads.
         assert_eq!(d.sort(b"\x14", T0, true), (Vec::new(), false));

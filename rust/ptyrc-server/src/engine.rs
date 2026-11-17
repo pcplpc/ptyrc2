@@ -52,6 +52,8 @@ pub enum Reply {
 pub(crate) struct Effects {
     pub pty_input: Vec<u8>,
     pub events: Vec<(String, Value)>,
+    /// Events for one connection, subscribed or not.
+    pub direct: Vec<(ConnId, String, Value)>,
     pub completions: Vec<(Token, Result<Value, RpcError>)>,
     pub repaint: bool,
 }
@@ -90,6 +92,11 @@ impl Ctx<'_> {
         if self.has_subscribers(topic) {
             self.fx.events.push((topic.to_string(), data));
         }
+    }
+
+    /// Send an event to one connection, subscribed or not.
+    pub fn send(&mut self, conn: ConnId, topic: &str, data: Value) {
+        self.fx.direct.push((conn, topic.to_string(), data));
     }
 
     /// Answer a request left `Pending`. Unknown tokens (client gone) are
@@ -223,6 +230,20 @@ pub trait Engine {
     /// The clock stands still and `stall_wake` passed: answer what cannot
     /// wait on it any longer.
     fn on_stall(&mut self, _ctx: &mut Ctx) {}
+
+    /// The widget that has the host keyboard.
+    fn focus(&self) -> Option<crate::focus::Held> {
+        None
+    }
+
+    /// The hotkey: focus the next widget that asks, the first when none
+    /// is focused. False: none is, the focus is dropped.
+    fn focus_next(&mut self, _ctx: &mut Ctx) -> bool {
+        false
+    }
+
+    /// The escape key of the focused widget: drop the focus.
+    fn focus_escape(&mut self, _ctx: &mut Ctx) {}
 
     /// Members merged into the `session.info` result (an object, or null).
     fn session_extras(&self) -> Value {

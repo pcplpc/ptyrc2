@@ -28,17 +28,30 @@ pub(crate) struct Sorted {
     pub released: bool,
 }
 
+/// The bytes of an escape key: a named key that is not text.
+pub(crate) fn escape_key(escape: &str) -> Result<Vec<u8>, String> {
+    match keys::encode_key(escape, false) {
+        Ok(bytes) if name(&bytes).is_some_and(|n| n.len() > 1) => Ok(bytes),
+        _ => Err(format!("escape: not a key: {escape}")),
+    }
+}
+
 impl Grab {
     pub fn new(conn: ConnId, keys: Option<Vec<String>>, escape: &str) -> Result<Grab, String> {
-        let escape = match keys::encode_key(escape, false) {
-            Ok(bytes) if name(&bytes).is_some_and(|n| n.len() > 1) => bytes,
-            _ => return Err(format!("escape: not a key: {escape}")),
-        };
         Ok(Grab {
             conn,
             keys: keys.map(|k| k.into_iter().collect()),
-            escape,
+            escape: escape_key(escape)?,
         })
+    }
+
+    /// Every key but `escape`, its bytes; empty: every key.
+    pub fn all(conn: ConnId, escape: Vec<u8>) -> Grab {
+        Grab {
+            conn,
+            keys: None,
+            escape,
+        }
     }
 
     pub fn sort(&self, bytes: &[u8]) -> Sorted {
