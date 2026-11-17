@@ -227,6 +227,27 @@ def test_lure_takes_spots_looked_for_once() -> None:
     assert safe == [s for s in spots if s in safe]  # not written to
 
 
+def test_swim_changes_depth_by_the_clock() -> None:
+    """A fish changes depth as often a second at any tick; a fish that
+    flees goes a cell a `BEAT`."""
+
+    class Dice(random.Random):
+        def random(self) -> float:
+            return 0.01
+
+        def choice(self, seq: Any) -> Any:
+            return seq[0]
+
+    box = (0, 0, 80, 24)
+    slow = fishes.Fish(x=10.0, y=5.0, vx=3.0, color="cyan")
+    fishes.swim(slow, 0.1, box, None, False, Dice())
+    assert slow.vy == -1.5  # 0.01 < 0.2 a second, over 0.1 s
+    fast = fishes.Fish(x=10.0, y=5.0, vx=3.0, color="cyan")
+    fishes.swim(fast, fishes.BEAT, box, None, False, Dice())
+    assert fast.vy == 0.0
+    assert fishes.FEAR * fishes.BEAT <= 1.0 < fishes.FEAR * fishes.TICK
+
+
 def test_menace_and_depart() -> None:
     rng = random.Random(5)
     box = (0, 0, 80, 24)

@@ -16,7 +16,8 @@ What it shows:
   The topic `text` tells when the text changed or scrolled: the
   hideouts are looked for again then.
 - `pilot.batch()`: all the moves of a tick go out in one request and
-  show in one repaint.
+  show in one repaint; 30 ticks a second (`BEAT`): a fish that flees
+  goes a cell a tick, not three.
 - The back layer: fishes swim behind the text, between the words.
 
 Half of the school, rounded down, drawn at birth, is shy (`--shy N`:
@@ -94,7 +95,8 @@ __all__ = [
 LEFT, RIGHT = "<*//><", "><\\\\*>"
 LENGTH = len(LEFT)
 COLORS = ("bright-cyan", "bright-yellow", "bright-magenta", "bright-green", "cyan")
-TICK = 0.1  # seconds
+TICK = 0.1  # seconds, in a tank
+BEAT = 1 / 30  # seconds a tick behind the text
 CALM, FEAR = 6.0, 30.0  # cells per second
 NEAR, NEAR_MOVING = 8.0, 16.0  # fear radius, in columns; rows count double
 WAIT = (2.0, 5.0)  # seconds out of view before a fish goes
@@ -206,7 +208,7 @@ def swim(
         # Towards its hiding place; still once there, facing as it came.
         fish.vx = approach(fish.home[0] - fish.x, CALM) or math.copysign(0.0, fish.vx)
         fish.vy = approach(fish.home[1] - fish.y, 2.0)
-    elif rng.random() < 0.02:
+    elif rng.random() < 0.2 * dt:
         fish.vy = rng.choice((-1.5, 0.0, 0.0, 1.5))  # change depth, or not
     fish.x += fish.vx * dt
     fish.y += fish.vy * dt
@@ -389,7 +391,7 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     # Told by the driver (`_cli.Sight`): the text of the view when it
     # changed or scrolled, the cursor when it moved. Nothing is asked.
     sight = _cli.Sight(pilot, frame, cursor=True)
-    for dt in _cli.ticks(TICK, seconds):
+    for dt in _cli.ticks(BEAT, seconds):
         if not sight.look():
             continue
         box = view(frame)
