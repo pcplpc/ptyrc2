@@ -2714,3 +2714,62 @@ fn cost_scene_200x60() {
         );
     }
 }
+
+/// A wide glyph of the app has one style: a translucent front cell over
+/// one of its halves veils both, and the host is repaired once.
+#[test]
+fn front_alpha_veils_a_wide_glyph_whole() {
+    use ptyrc_vt::{Vt, repair};
+    let mock = Mock::new();
+    for (at, blend, content) in [
+        (
+            2,
+            "normal",
+            json!({"rows": [" "], "style": {"bg": "red"}, "opaque": true}),
+        ),
+        (
+            3,
+            "normal",
+            json!({"rows": [" "], "style": {"bg": "red"}, "opaque": true}),
+        ),
+        (2, "tint", json!({"rows": ["x"], "style": {"bg": "red"}})),
+        (3, "tint", json!({"rows": ["x"], "style": {"fg": "red"}})),
+        (3, "tint", json!({"rows": ["界"], "style": {"bg": "red"}})),
+    ] {
+        let mut grid = base();
+        grid.put(2, 0, Cell::wide("世", Style::default()));
+        grid.put(4, 0, Cell::wide("世", Style::default()));
+        let mut scene = Scene::new();
+        let sprite = json!({
+            "anchor": {"at": [at, 0], "space": "view"},
+            "content": content,
+            "layer": 1,
+            "blend": blend,
+            "alpha": 0.5,
+        });
+        scene.add(1, spec(sprite.clone()), ms(0)).unwrap();
+        scene.tick_on(ms(0), &grid, &mock);
+        let out = scene.compose(&grid, &mock);
+        assert_eq!(out.row_text(0).trim_end(), "  世世", "{sprite}");
+        for head in [2, 4] {
+            assert_eq!(
+                out.cell(head, 0).style,
+                out.cell(head + 1, 0).style,
+                "{sprite}: the halves at {head} differ"
+            );
+        }
+        // Over the head, both halves; over the other half alone, none.
+        assert_eq!(
+            out.cell(2, 0).style == Style::default(),
+            at == 3,
+            "{sprite}"
+        );
+        let mut host = Vt::new(20, 6);
+        host.set_grid(&grid);
+        let mut bytes = Vec::new();
+        repair(&mut host, &out, &mut bytes);
+        bytes.clear();
+        repair(&mut host, &out, &mut bytes);
+        assert!(bytes.is_empty(), "{sprite}: repaired again: {bytes:?}");
+    }
+}

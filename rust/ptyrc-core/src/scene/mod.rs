@@ -1568,6 +1568,8 @@ fn flat(style: Style, host: &HostColors) -> (Rgb, Rgb) {
 ///   colours mixed with the `bg`.
 /// - A tint mixes `fg` with the foreground below, `bg` with the
 ///   background below.
+/// - Glass and a tint over a wide glyph: over its head, both halves
+///   are mixed; over its other half alone, none.
 fn paint_alpha(
     out: &mut Grid,
     x: u16,
@@ -1578,8 +1580,13 @@ fn paint_alpha(
     host: &HostColors,
 ) {
     let color = |[r, g, b]: Rgb| Color::Rgb(r, g, b);
-    // Mix the colours of the cell `(x, y)` with `fg` and `bg`.
+    // Mix the colours of the cell `(x, y)` with `fg` and `bg`. A wide
+    // glyph below has one style: veiled from its head.
     let mut veil = |x: u16, fg: Option<Rgb>, bg: Option<Rgb>, attrs: Attrs| {
+        let width = out.cell(x, y).width;
+        if width == 0 {
+            return;
+        }
         let style = &mut out.cell_mut(x, y).style;
         let (below_fg, below_bg) = flat(*style, host);
         if style.attrs.contains(Attrs::INVERSE) {
@@ -1594,6 +1601,10 @@ fn paint_alpha(
             style.bg = color(palette::mix(below_bg, bg, alpha));
         }
         style.attrs.insert(attrs.0);
+        let style = *style;
+        if width == 2 && x + 1 < out.cols() {
+            out.cell_mut(x + 1, y).style = style;
+        }
     };
     let fg = glyph.fg.map(|c| palette::rgb(c, host.fg));
     let bg = glyph.bg.map(|c| palette::rgb(c, host.bg));

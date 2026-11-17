@@ -727,6 +727,8 @@ below it. A front `tint` recolours the app's glyphs. With `alpha`, a
 front glyph's `bg` is mixed with the background below and its `fg` with
 the result; a blank with a `bg` is glass: the glyph below stays, both
 its colours mixed. A `tint` mixes each colour with the one it replaces.
+A wide glyph below has one style: glass or a tint over its head mixes
+both halves, over its other half alone none.
 A wide front glyph without `bg` over two backdrops is not drawn.
 
 The reference apps follow: confetti and sparkles are behind the text
