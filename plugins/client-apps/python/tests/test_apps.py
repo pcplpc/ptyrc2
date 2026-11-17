@@ -913,6 +913,42 @@ def test_snake_ghost() -> None:
     assert not game.ghost and list(game.body) == [(5, 4), (5, 3), (5, 2)]
 
 
+def test_snake_ghost_asks_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The largest region is worked out once a map, not at each step of
+    a ghost; the search over sets gives the step of `route`."""
+    asked = []
+    real = snake.room
+
+    def room(box, walls, start, need):
+        asked.append((start, need))
+        return real(box, walls, start, need)
+
+    monkeypatch.setattr(snake, "room", room)
+    walls = snake.walls_of(["", "", "#" * 20, "#" * 20, "", "", ""])
+    box = (0, 0, 20, 7)
+    game = snake.Game(random.Random(2))
+    game.body = deque([(5, -40 - i) for i in range(6)])
+    steps = 0
+    while steps == 0 or game.ghost:
+        game.step(box, walls)
+        steps += 1
+    assert steps >= 5 and len([a for a in asked if a[0] is None]) == 1
+    game.step(box, {(0, 0)})  # another map: asked again when needed
+    game.body = deque([(5, -40)])
+    game.step(box, {(0, 0)})
+    assert len([a for a in asked if a[0] is None]) == 2
+    rng = random.Random(7)
+    for _ in range(50):
+        taken = {(rng.randrange(8), rng.randrange(6)) for _ in range(14)}
+        start, goal = (rng.randrange(8), rng.randrange(6)), (rng.randrange(8), 5)
+
+        def free(c: tuple[int, int], taken: set = taken) -> bool:
+            return 0 <= c[0] < 8 and 0 <= c[1] < 6 and c not in taken
+
+        want = snake.route(start, goal, free)
+        assert snake._way(start, goal, (0, 0, 8, 6), taken) == want
+
+
 def test_snake_room() -> None:
     """Apples go where the head can reach, never in a dead end."""
     rows = [

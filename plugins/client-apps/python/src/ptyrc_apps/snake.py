@@ -324,6 +324,7 @@ class Game:
         self.beam_due = rng.randint(20, 50) if lasers else 0
         self.map: tuple[Box, set[Cell]] | None = None  # the last seen
         self.ghost = False  # on its way back into the view
+        self.rooms: tuple[Box, set[Cell], dict[int, list[Cell]]] | None = None
 
     def press(self, key: str) -> None:
         """An arrow (`up`, `down`, `left`, `right`): the heading of the
@@ -354,12 +355,26 @@ class Game:
         for need in (2 * (len(self.body) + self.grow + 5), 0):
             cells = [
                 c
-                for c in room(box, walls, head, need)
+                for c in (
+                    room(box, walls, head, need)
+                    if head is not None
+                    else self._largest(box, walls, need)
+                )
                 if c not in taken and c not in body
             ]
             if cells:
                 return self.rng.choice(cells)
         return self.free_cell(box, taken)
+
+    def _largest(self, box: Box, walls: set[Cell], need: int) -> list[Cell]:
+        """`room` of the largest region. Kept while the map stays: a
+        ghost asks at each step of its way."""
+        if self.rooms is None or self.rooms[:2] != (box, walls):
+            self.rooms = (box, walls, {})
+        known = self.rooms[2]
+        if need not in known:
+            known[need] = room(box, walls, None, need)
+        return known[need]
 
     def step(self, box: Box, walls: set[Cell]) -> None:
         """One move inside `box` (x0, y0, x1, y1: the view, frame cells)."""
@@ -496,7 +511,7 @@ class Game:
         hx, hy = self.body[0]
         body = set(self.body)
         for need in (2 * (len(self.body) + self.grow + 5), 0):
-            safe = [c for c in room(box, walls, None, need) if c not in body]
+            safe = [c for c in self._largest(box, walls, need) if c not in body]
             if safe:
                 break
         else:
