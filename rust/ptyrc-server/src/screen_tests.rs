@@ -139,6 +139,10 @@ impl Rig {
             e.host().grid(),
             "host model drifted from the host"
         );
+        if e.app.in_ground() && e.host().grid().cols() == e.app.grid().cols() {
+            let desired = e.scene.compose(e.app.grid(), &e.frames);
+            assert!(*e.host().grid() == desired, "the host misses a repaint");
+        }
         if e.app.in_ground() {
             assert!(e.host().same_state(&e.app), "host state is not the app's");
             assert!(
@@ -191,6 +195,125 @@ fn static_sprite_costs_nothing_at_rest() {
     // Output elsewhere: the burst alone, in one synchronized update.
     let out = rig.burst(b"more");
     assert_eq!(out, [BSU, b"more", ESU].concat());
+}
+
+#[test]
+fn nothing_is_composed_at_rest() {
+    let mut rig = Rig::new(40, 10);
+    rig.burst(b"line one\r\nline two\r\n");
+    rig.put(text_at(20, 0, "SPRITE"));
+    let paints = rig.engine.paints;
+    // Ticks, requests that read, the colours told again.
+    rig.advance(1000);
+    for _ in 0..5 {
+        rig.now += Duration::from_millis(7);
+        rig.call("draw.list", json!({}));
+        assert!(rig.tick().is_empty());
+    }
+    let colors = rig.engine.scene.host_colors();
+    rig.ctx(|e, ctx| e.on_host_colors(colors, ctx));
+    rig.tick();
+    assert_eq!(rig.engine.paints, paints);
+}
+
+/// Everything that can change what the host must show is painted at the
+/// next tick or in its own hook: `Rig::check` compares the host with the
+/// composition after each.
+#[test]
+fn a_paint_for_each_change() {
+    let mut rig = Rig::new(40, 10);
+    rig.burst(b"line one\r\nline two\r\n");
+    let id = rig.put(text_at(20, 0, "SPRITE"));
+    let mut paints = rig.engine.paints;
+    let mut painted = |rig: &mut Rig, what: &str| {
+        assert!(rig.engine.paints > paints, "no paint: {what}");
+        paints = rig.engine.paints;
+    };
+
+    rig.call(
+        "draw.update",
+        json!({"id": id, "anchor": {"at": [21, 0], "space": "view"}}),
+    );
+    rig.tick();
+    painted(&mut rig, "a sprite moved");
+    assert_eq!(rig.row(0), "line one             SPRITE");
+
+    rig.call(
+        "draw.update",
+        json!({"id": id, "content": {"rows": ["sprite"]}}),
+    );
+    rig.tick();
+    painted(&mut rig, "a sprite changed");
+    assert_eq!(rig.row(0), "line one             sprite");
+
+    // The app writes under the sprite what it holds already: the host
+    // lost the sprite's cells, the app grid did not change.
+    rig.burst(b"\x1b[1;22H      ");
+    painted(&mut rig, "a burst");
+    assert_eq!(rig.row(0), "line one             sprite");
+
+    rig.burst(b"\x1b[3;1Hline three");
+    painted(&mut rig, "a burst elsewhere");
+
+    let colors = ptyrc_core::scene::HostColors {
+        fg: [1, 2, 3],
+        bg: [4, 5, 6],
+    };
+    rig.ctx(|e, ctx| e.on_host_colors(colors, ctx));
+    rig.tick();
+    painted(&mut rig, "host colours");
+
+    rig.ctx(|e, ctx| e.hide_owner(ConnId(7), true, ctx));
+    rig.tick();
+    painted(&mut rig, "an owner hidden");
+    assert_eq!(rig.row(0), "line one");
+    rig.ctx(|e, ctx| e.hide_owner(ConnId(7), false, ctx));
+    rig.tick();
+    painted(&mut rig, "an owner shown");
+    assert_eq!(rig.row(0), "line one             sprite");
+
+    let now = rig.now;
+    let mut out = Vec::new();
+    rig.info.cols = 30;
+    rig.info.rows = 8;
+    rig.host.resize(30, 8);
+    rig.ctx(|e, ctx| e.on_resize(30, 8, now, &mut out, ctx));
+    rig.host.feed(&out);
+    rig.check();
+    rig.advance(1000);
+    painted(&mut rig, "a resize");
+    assert_eq!(rig.row(0), "line one             sprite");
+
+    let timed = rig.put(json!({
+        "anchor": {"at": [0, 5], "space": "view"}, "loop": true,
+        "frames": [{"rows": ["a"], "ms": 50}, {"rows": ["b"], "ms": 50}],
+    }));
+    painted(&mut rig, "a sprite put");
+    rig.advance(60);
+    painted(&mut rig, "a frame of an animation");
+    assert_eq!(rig.row(5), "b");
+
+    rig.call("draw.remove", json!({"id": timed}));
+    rig.tick();
+    painted(&mut rig, "a sprite removed");
+    assert_eq!(rig.row(5), "");
+
+    rig.put(json!({
+        "anchor": {"at": [0, 5], "space": "view"}, "ttl_ms": 100,
+        "content": {"rows": ["brief"]},
+    }));
+    painted(&mut rig, "a sprite put");
+    rig.advance(200);
+    painted(&mut rig, "a lifetime ended");
+    assert_eq!(rig.row(5), "");
+
+    rig.ctx(|e, ctx| e.on_disconnect(ConnId(7), ctx));
+    rig.tick();
+    painted(&mut rig, "the last sprite gone");
+    assert_eq!(rig.row(0), "line one");
+    // No sprite: nothing more.
+    rig.advance(1000);
+    assert_eq!(rig.engine.paints, paints);
 }
 
 #[test]

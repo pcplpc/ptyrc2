@@ -94,6 +94,10 @@ pub struct ScreenEngine {
     /// No sprite since the host model was last fed: it is the app model,
     /// and is copied from it when the first sprite comes.
     host_stale: bool,
+    /// The host may not show what the scene composes: the next `paint`
+    /// composes and repairs. Set by all that changes the app grid, the
+    /// host model or the frames; the scene tells for itself (`dirty`).
+    unpainted: bool,
     pub(crate) frames: Frames,
     pub(crate) scene: Scene,
     pub(crate) widgets: Widgets,
@@ -123,6 +127,8 @@ pub struct ScreenEngine {
     ticked: Duration,
     /// Ticks run.
     pub(crate) ticks: u64,
+    /// Times the scene was composed and the host repaired.
+    pub(crate) paints: u64,
     /// Time spent in `on_burst`, for `debug.dump`.
     pub(crate) burst_time: Duration,
 }
@@ -145,6 +151,7 @@ impl ScreenEngine {
             base: Grid::new(80, 24),
             painted: false,
             host_stale: false,
+            unpainted: true,
             frames: Frames::new(FrameConfig::default(), supports),
             scene,
             widgets,
@@ -163,6 +170,7 @@ impl ScreenEngine {
             bursts: 0,
             ticked: Duration::ZERO,
             ticks: 0,
+            paints: 0,
             burst_time: Duration::ZERO,
         }
     }
@@ -179,6 +187,7 @@ impl ScreenEngine {
         self.app.take_events();
         self.host.take_events();
         self.base = self.app.grid().clone();
+        self.unpainted = true;
     }
 
     /// Feed the frames with the app screen as it is now.
@@ -257,8 +266,12 @@ impl ScreenEngine {
         }
         self.tick_widgets(now, ctx);
         self.scene.tick_on(now, self.app.grid(), &self.frames);
-        self.scene.take_dirty();
+        self.unpainted |= self.scene.take_dirty();
         if self.scene.is_empty() && !self.painted {
+            return;
+        }
+        if !self.unpainted && !self.host_stale {
+            // Nothing changed since the host was repaired.
             return;
         }
         self.fresh_host();
@@ -276,6 +289,8 @@ impl ScreenEngine {
         }
         self.host.take_events();
         self.injected += (out.len() - before) as u64;
+        self.unpainted = false;
+        self.paints += 1;
     }
 
     /// Bring the host model up to date after a time without sprites.
@@ -284,6 +299,7 @@ impl ScreenEngine {
             self.host.clone_from(&self.app);
             self.host.take_events();
             self.host_stale = false;
+            self.unpainted = true;
         }
     }
 
@@ -526,6 +542,7 @@ impl Engine for ScreenEngine {
 
     fn on_burst(&mut self, burst: &[u8], now: Duration, out: &mut Vec<u8>, ctx: &mut Ctx) {
         self.bursts += 1;
+        self.unpainted = true;
         let started = std::time::Instant::now();
         let sprites = self.painted || !self.scene.is_empty();
         if sprites {
@@ -637,6 +654,7 @@ impl Engine for ScreenEngine {
         let changes = self.frames.tick(now);
         self.shift_sprites(&changes, ctx);
         if !changes.is_empty() {
+            self.unpainted = true;
             self.idle_poke(now);
             self.widgets.touch();
             if ctx.has_subscribers("frames") {
@@ -697,6 +715,7 @@ impl Engine for ScreenEngine {
     }
 
     fn on_exit(&mut self, out: &mut Vec<u8>, _ctx: &mut Ctx) {
+        self.unpainted = true;
         self.fresh_host();
         if !self.host.in_ground() {
             // The app died inside a sequence: CAN ends it on the host.

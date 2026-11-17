@@ -95,7 +95,10 @@ Per burst:
    sequence.
 6. One `write` to the host. `base = app.grid().clone()`.
 
-A timer tick (animation, pool promotion) runs steps 4 to 6 alone.
+A timer tick (animation, pool promotion) runs steps 4 to 6 alone. A tick,
+or the tick a request asks for, composes and repairs only if something
+changed since the last repair: the scene is dirty (`Scene::dirty`), a
+burst came, the frames or the size changed.
 
 `repair` paints only cells where `host.grid() != desired`, then restores
 the state it found: cursor position, pending wrap (by reprinting the last

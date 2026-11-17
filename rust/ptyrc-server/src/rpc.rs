@@ -735,6 +735,7 @@ fn debug_dump(engine: &ScreenEngine) -> Res {
                         "pending_wrap": host_cursor.pending_wrap},
         "bursts": engine.bursts,
         "ticks": engine.ticks,
+        "paints": engine.paints,
         "burst_us": engine.burst_time.as_micros() as u64,
         "app": engine.app.grid().text(),
         "host": engine.host().grid().text(),
