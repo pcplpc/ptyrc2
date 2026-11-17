@@ -2114,10 +2114,11 @@ only. Three parts, as there: models, a runner, the front is a widget.
   - `Form(steps)`: models one after another, `2/3` in the title;
     `result`: the list of theirs. `esc`-free: the way back is
     `shift+tab`.
-  - Keys of all: `enter` validates (`done`), `ctrl+c` dismisses
-    (`cancel`). The escape key never comes: the driver takes it, the
-    question stays.
-  - Building blocks, public: `Editor` (a line and its cursor),
+  - Keys of all: `enter` validates (`done`). No key of a model
+    dismisses: the close key (`ctrl+x`) is the driver's, as the
+    escape key, which leaves the question there. ctrl+c is no key
+    here: one typed by habit ends nothing.
+- Building blocks, public: `Editor` (a line and its cursor),
     `Listing` (a bar, a scroll), `foot`, `fit`, `wrap`, `cells`,
     `cut`, `run`. Variants are 24 cells wide at least.
 - `Keys`: the `input` events of a focused widget as `("key", name)`
