@@ -2113,10 +2113,10 @@ impl Driver {
     fn batch(
         &mut self,
         conn: ConnId,
-        params: Value,
+        mut params: Value,
         engine: &mut dyn Engine,
     ) -> Result<Value, RpcError> {
-        let Some(Value::Array(calls)) = params.get("calls").cloned() else {
+        let Some(Value::Array(calls)) = params.get_mut("calls").map(Value::take) else {
             return Err(RpcError::bad_params("calls: array of {method, params}"));
         };
         let mut results = Vec::with_capacity(calls.len());
