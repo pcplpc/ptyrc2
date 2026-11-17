@@ -797,6 +797,7 @@ def _painted(
     cat: _mouser.Cat | None,
 ) -> Half:
     look = look or Look()
+    when = when.replace(second=0, microsecond=0)  # the sky, a minute at a time
     sky = _sky.at(when, look.lat)
     season = sky.season if look.seasons else "summer"
     kind = look.weather

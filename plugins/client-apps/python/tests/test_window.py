@@ -89,6 +89,14 @@ def test_bare_is_still() -> None:
     )
 
 
+def test_sky_by_the_minute() -> None:
+    """The sky moves a minute at a time: within one, it is painted once."""
+    look = replace(ALL, weather=None)
+    rows = window.scene(40, 12, NOON.replace(second=5), 3.0, look)
+    assert rows == window.scene(40, 12, NOON.replace(second=50), 3.0, look)
+    assert rows != window.scene(40, 12, NOON.replace(hour=19), 3.0, look)
+
+
 def test_options_add() -> None:
     """Each option changes the picture."""
     bare = Look(seed=5)

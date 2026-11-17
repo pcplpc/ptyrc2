@@ -45,6 +45,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any, NamedTuple
 
 from ._canvas import RGB, Braille, Half, mix
@@ -296,7 +297,13 @@ class Pointer:
 def heavens(half: Half, sky: Sky, horizon: int) -> list[list[RGB]]:
     """Paint the sky down to the pixel row `horizon` (and under it, as
     at the horizon), the sun and the moon. The pixels as painted."""
-    w = half.w
+    half.px = [list(row) for row in _heavens(half.w, half.h, sky, horizon)]
+    return [list(row) for row in half.px]
+
+
+@lru_cache(maxsize=16)
+def _heavens(w: int, h: int, sky: Sky, horizon: int) -> tuple[tuple[RGB, ...], ...]:
+    half = Half(w, h)
     horizon = max(1, horizon)
     for y in range(2 * half.h):
         row = half.px[y]
@@ -315,7 +322,7 @@ def heavens(half: Half, sky: Sky, horizon: int) -> list[list[RGB]]:
         cx = math.floor(sky.moon_x * w) + 0.5
         cy = math.floor(horizon * (1 - sky.moon / ALT_TOP)) + 0.5
         _moon(half, sky, cx, cy, max(1.5, math.floor(r * 1.25) + 0.5))
-    return [list(row) for row in half.px]
+    return tuple(tuple(row) for row in half.px)
 
 
 def _moon(half: Half, sky: Sky, cx: float, cy: float, r: float) -> None:
@@ -758,15 +765,30 @@ def paint(
 # --- water, weather, lamps -------------------------------------------
 
 
-def water(half: Half, sky: Sky, hz: int, seed: int, t: float) -> None:
-    w, rows = half.w, 2 * half.h
+@lru_cache(maxsize=16)
+def _mirror(w: int, rows: int, sky: Sky, hz: int) -> tuple[tuple[RGB, ...], ...]:
+    """Still water from the pixel row `hz` down: the sky mirrored."""
     deep = sky.shade(SEA)
+    out = []
     for y in range(hz, rows):
         v = (y - hz + 0.5) / max(1, rows - hz)
+        # A mirror: the horizon far off, the zenith at one's feet.
+        murk = (0.3 + 0.15 * v) * (0.35 + 0.65 * sky.light)
+        out.append(
+            tuple(
+                mix(sky.colour((x + 0.5) / w, 1 - 0.85 * v), deep, murk)
+                for x in range(w)
+            )
+        )
+    return tuple(out)
+
+
+def water(half: Half, sky: Sky, hz: int, seed: int, t: float) -> None:
+    w, rows = half.w, 2 * half.h
+    still = _mirror(w, rows, sky, hz)
+    for y in range(hz, rows):
         for x in range(w):
-            # A mirror: the horizon far off, the zenith at one's feet.
-            murk = (0.3 + 0.15 * v) * (0.35 + 0.65 * sky.light)
-            c = mix(sky.colour((x + 0.5) / w, 1 - 0.85 * v), deep, murk)
+            c = still[y - hz][x]
             if sky.light > 0.3 and noise(seed + 9, x + int(t * 1.3) + y * 3, y) < 0.04:
                 c = mix(c, WHITE, 0.3 * sky.light)
             half.px[y][x] = c

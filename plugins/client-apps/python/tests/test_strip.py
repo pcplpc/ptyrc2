@@ -269,6 +269,14 @@ def test_water() -> None:
     _strip.heavens(noon, NOON, 8)
     _strip.water(noon, NOON, 8, 3, 0.0)
     assert all(c[2] > c[0] for row in noon.px[9:] for c in row if min(c) < 200)  # blue
+    # The sky and the still water are kept: painted again, the same.
+    again = Half(30, 8)
+    assert _strip.heavens(again, NOON, 8) == _strip.heavens(Half(30, 8), NOON, 8)
+    _strip.water(again, NOON, 8, 3, 0.0)
+    assert again.px == noon.px
+    assert _strip._heavens.cache_info().hits and _strip._mirror.cache_info().hits
+    again.px[0][0] = (1, 2, 3)  # what is painted is the canvas's own
+    assert _strip.heavens(Half(30, 8), NOON, 8)[0][0] != (1, 2, 3)
 
 
 def test_pointer() -> None:
