@@ -1438,6 +1438,16 @@ def test_rain(session: Pilot) -> None:
     # On the line of text (the row above it) and on the floor; behind
     # the text, nothing shows.
     assert 4 not in splashes, splashes
+    # Transparent: behind the line too, down to the floor.
+    splashes.clear()
+    drops.clear()
+
+    def through(host: str) -> bool:
+        seen(host)
+        return len(drops) == 2 and 23 in splashes
+
+    watch(session, lambda: rain.main([*args, "-t"], seconds=2.5), through)
+    assert splashes == {23}, splashes
     assert rain.main(["-s", session.session, "--rate", "-1"]) == 1
 
 

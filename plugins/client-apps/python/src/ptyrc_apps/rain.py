@@ -3,6 +3,7 @@
 
     ptyrc-app rain
     ptyrc-app rain --rate 60 -f active
+    ptyrc-app rain -t               # nothing stops a drop but the floor
 
 What it shows:
 
@@ -11,7 +12,8 @@ What it shows:
   nothing on the socket. The app only stays connected.
 - An effect that sees the screen: drops splash on the top of the lines
   of text, on the cursor and on the bottom of the pane; they fall
-  behind the text between two lines.
+  behind the text between two lines. With `-t` they fall behind
+  every line and behind the cursor, down to the last row of the pane.
 - The back layer: the rain shows where the app shows nothing.
 - An effect that sees the heat: it rains less on columns that changed
   in the last ten seconds, so the rain keeps away from where someone
@@ -25,6 +27,7 @@ from __future__ import annotations
 import argparse
 import random
 from collections.abc import Sequence
+from typing import Any
 
 from ptyrc import Frame, Pilot, Sprite
 
@@ -33,15 +36,18 @@ from . import _cli
 __all__ = ["main", "pour"]
 
 
-def pour(pilot: Pilot, frame: Frame, rate: float) -> Sprite:
-    """Start the rain on `frame`."""
-    params = {"rate": rate, "seed": random.getrandbits(32)}
+def pour(pilot: Pilot, frame: Frame, rate: float, transparent: bool = False) -> Sprite:
+    """Start the rain on `frame`. `transparent`: it lands on the floor
+    only."""
+    params: dict[str, Any] = {"rate": rate, "seed": random.getrandbits(32)}
+    if transparent:
+        params["transparent"] = True
     return pilot.effect("rain", params, frame=frame.id, layer="back")
 
 
 def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
     frame = _cli.pick(pilot, args.frame)
-    _cli.follow(pilot, frame, pour(pilot, frame, args.rate), seconds)
+    _cli.follow(pilot, frame, pour(pilot, frame, args.rate, args.transparent), seconds)
 
 
 def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> int:
@@ -52,6 +58,13 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
         type=float,
         default=20.0,
         help="drops per second over 80 columns [default: 20]",
+    )
+    out.add_argument(
+        "-t",
+        "--transparent",
+        action="store_true",
+        help="the drops fall through the text and the cursor, down to the "
+        "bottom of the pane",
     )
     return _cli.run(
         lambda pilot, args: app(pilot, args, seconds), _cli.parse(out, argv)

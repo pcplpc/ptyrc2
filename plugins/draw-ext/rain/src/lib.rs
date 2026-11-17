@@ -6,6 +6,7 @@
 //!
 //! - `rate`: drops per second over 80 columns of still text (default
 //!   20).
+//! - `transparent`: nothing stops a drop but the floor (default false).
 //! - `duration_ms`: life of the effect. Absent: until removed.
 //! - `seed`.
 //!
@@ -17,14 +18,17 @@
 //! cursor, or the last cell of a column. A drop takes each ledge on its
 //! way with probability `TAKE`, the cursor and the floor always: it
 //! falls behind some lines and splashes on the next. A text change
-//! draws the landing again, below the drop.
+//! draws the landing again, below the drop. With `transparent` the
+//! floor is the only ledge: a drop falls behind every line and behind
+//! the cursor, and splashes in the last row, seen or not.
 //!
 //! Cold. The effect is shown the heat: the stillness of a column is
 //! that of its least still cell, within `REACH` columns. Rain falls on a
 //! column in proportion of its stillness, from `THIN` just after a
 //! change to 1 after `STILL_MS`.
 //!
-//! `tune`: `rate`, `duration_ms`; the drops in the air stay.
+//! `tune`: `rate`, `transparent`, `duration_ms`; the drops in the air
+//! stay, and land as the new `transparent` says.
 
 use ptyrc_core::plugin::{DrawExt, FnDoc};
 use ptyrc_core::scene::{Canvas, Effect, EffectFactory, Looks, Rng, SpriteSpec, StyleSpec, Under};
@@ -66,6 +70,7 @@ const SPRAY: u8 = 153;
 #[serde(default, deny_unknown_fields)]
 struct Params {
     rate: f64,
+    transparent: bool,
     duration_ms: Option<u64>,
     seed: u64,
 }
@@ -74,6 +79,7 @@ impl Default for Params {
     fn default() -> Params {
         Params {
             rate: 20.0,
+            transparent: false,
             duration_ms: None,
             seed: 1,
         }
@@ -153,6 +159,9 @@ impl Rain {
 
     /// The row where a drop of column `x`, now in row `from`, lands.
     fn landing(&mut self, x: usize, from: usize) -> usize {
+        if self.params.transparent {
+            return self.h.saturating_sub(1);
+        }
         for y in from..self.h {
             if self.wall(x, y) || !self.ledge(x, y) {
                 continue;
@@ -336,9 +345,11 @@ impl Effect for Rain {
         };
         let mut merged = serde_json::Map::new();
         merged.insert("rate".into(), self.params.rate.into());
+        merged.insert("transparent".into(), self.params.transparent.into());
         merged.insert("duration_ms".into(), self.params.duration_ms.into());
         merged.extend(new.clone());
         let params = checked(&merged.into())?;
+        self.stale |= params.transparent != self.params.transparent;
         self.params = Params {
             seed: self.params.seed,
             ..params

@@ -150,6 +150,43 @@ fn a_wide_glyph_is_two_walls_and_shifts_nothing() {
 }
 
 #[test]
+fn transparent_rain_lands_on_the_floor_only() {
+    let line = "x".repeat(30);
+    let rows = ["", "", "", "", &line, "", "", "", "", "", "", &line];
+    let splashes = |rain: &mut Rain, from: u64| {
+        let mut at = [0usize; 12];
+        run(rain, 30, 12, from, from + 8000, |r| {
+            for s in &r.splashes {
+                at[s.y] += 1;
+            }
+        });
+        at
+    };
+    // A line, the cursor, text on the last row: the last row all the same.
+    let mut rain = make(json!({"rate": 60, "seed": 5, "transparent": true}));
+    look(&mut rain, &rows, Some((3, 8)));
+    let at = splashes(&mut rain, 0);
+    assert!(at[11] > 40, "{at:?}");
+    assert_eq!(at.iter().filter(|n| **n > 0).count(), 1, "{at:?}");
+    for _ in 0..50 {
+        assert_eq!(rain.landing(3, 0), 11);
+    }
+    // Tuned off, the drops in the air land on the line again; and back.
+    rain.tune(&json!({"transparent": false})).unwrap();
+    assert_eq!(rain.params.rate, 60.0);
+    let mut canvas = Canvas::new(30, 12);
+    assert!(rain.render(Duration::from_millis(8040), &mut canvas));
+    assert!(rain.drops.iter().all(|d| d.land != 11), "text on the floor");
+    rain.splashes.clear();
+    let at = splashes(&mut rain, 8080);
+    assert!(at[3] > 20 && at[7] > 0 && at[11] == 0, "{at:?}");
+    rain.tune(&json!({"transparent": true})).unwrap();
+    assert!(rain.render(Duration::from_millis(16200), &mut canvas));
+    assert!(rain.drops.iter().all(|d| d.land == 11));
+    assert!(rain.tune(&json!({"transparent": 1})).is_err());
+}
+
+#[test]
 fn a_running_rain_takes_a_new_rate() {
     let mut rain = make(json!({"rate": 80, "seed": 2}));
     run(&mut rain, 40, 10, 0, 1000, |_| {});
