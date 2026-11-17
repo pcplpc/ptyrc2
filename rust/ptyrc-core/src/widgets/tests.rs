@@ -1456,3 +1456,244 @@ fn hidden_owner_keeps_its_place() {
     assert_eq!(rig.rect(b), Some(place));
     assert!(rig.rect(a).is_none_or(|r| !overlaps(r, place)));
 }
+
+/// Style of the composed cell at `(x, y)`.
+fn style_at(rig: &Rig, x: u16, y: u16) -> Style {
+    rig.scene.compose(&rig.grid, &rig.mock).cell(x, y).style
+}
+
+#[test]
+fn asks_loud_then_quiet_in_the_order() {
+    let mut rig = Rig::new(80, 20);
+    for (owner, tag) in [(1, "a"), (1, "b"), (2, "c"), (2, "d")] {
+        rig.declare(owner, tag, &[[6, 1]]);
+    }
+    let a = rig.show(1, Show::new("a"));
+    let b = rig.show(1, Show::new("b"));
+    let c = rig.show(2, Show::new("c"));
+    let d = rig.show(2, Show::new("d"));
+    assert!(rig.w.order().is_empty());
+    assert_eq!(rig.w.next(), None);
+    // Not its own, not there.
+    assert_eq!(rig.w.ask(2, a, false), Err(WidgetError::NoWidget(a)));
+    assert!(!rig.w.release(2, a));
+    rig.w.ask(1, a, true).unwrap();
+    rig.w.ask(1, b, false).unwrap();
+    rig.w.ask(2, c, true).unwrap();
+    rig.w.ask(2, d, false).unwrap();
+    // The loud ones, then the quiet ones, by first ask.
+    assert_eq!(rig.w.order(), [b, d, a, c]);
+    rig.tick();
+    assert_eq!(rig.info(a).asks, Some(Asks::Quiet));
+    assert_eq!(rig.info(b).asks, Some(Asks::Loud));
+    assert!(rig.events.iter().any(|e| e.id == b && e.asks.is_some()));
+    // Asked again: the options change, the rank is kept.
+    rig.w.ask(1, a, false).unwrap();
+    assert_eq!(rig.w.order(), [a, b, d, c]);
+    // Shown again: it still asks.
+    rig.show(1, Show::new("a"));
+    assert_eq!(rig.info(a).asks, Some(Asks::Loud));
+    // A hidden owner is not in the order.
+    rig.w.hide_owner(2, true);
+    assert_eq!(rig.w.order(), [a, b]);
+    rig.w.hide_owner(2, false);
+    // Released, hidden: out.
+    assert!(rig.w.release(1, a));
+    rig.w.hide(2, d);
+    assert_eq!(rig.w.order(), [b, c]);
+    assert_eq!(rig.info(a).asks, None);
+}
+
+#[test]
+fn focus_goes_down_the_order() {
+    let mut rig = Rig::new(80, 20);
+    rig.declare(1, "a", &[[6, 1]]);
+    rig.declare(1, "b", &[[6, 1]]);
+    rig.declare(2, "c", &[[6, 1]]);
+    let a = rig.show(1, Show::new("a"));
+    let b = rig.show(1, Show::new("b"));
+    let c = rig.show(2, Show::new("c"));
+    // One that does not ask, one that is not there.
+    assert!(matches!(rig.w.focus(a), Err(WidgetError::NotUsable(_))));
+    assert_eq!(rig.w.focus(99), Err(WidgetError::NoWidget(99)));
+    rig.w.ask(1, a, true).unwrap();
+    rig.w.ask(2, c, false).unwrap();
+    assert_eq!(rig.w.focused(), None);
+    assert_eq!(rig.w.next(), Some(c));
+    rig.w.focus(c).unwrap();
+    assert_eq!(rig.w.focused(), Some((c, 2)));
+    assert_eq!(rig.w.next(), Some(a));
+    rig.w.focus(a).unwrap();
+    assert_eq!(rig.w.focused(), Some((a, 1)));
+    rig.events.clear();
+    rig.tick();
+    assert!(rig.info(a).focused && !rig.info(c).focused);
+    assert!(rig.events.iter().any(|e| e.id == a && e.focused));
+    assert!(rig.events.iter().any(|e| e.id == c && !e.focused));
+    // Past the last.
+    assert_eq!(rig.w.next(), None);
+    assert_eq!(rig.w.blur(), Some(a));
+    assert_eq!(rig.w.blur(), None);
+    // Ended by the app: release, hide, the connection.
+    rig.w.focus(a).unwrap();
+    rig.w.release(1, a);
+    assert_eq!(rig.w.focused(), None);
+    rig.w.focus(c).unwrap();
+    rig.w.hide(2, c);
+    assert_eq!(rig.w.focused(), None);
+    rig.w.ask(1, b, false).unwrap();
+    rig.w.focus(b).unwrap();
+    rig.w.drop_owner(1);
+    assert_eq!(rig.w.focused(), None);
+}
+
+#[test]
+fn the_look_of_one_that_asks() {
+    let mut rig = Rig::new(40, 12);
+    rig.declare(1, "q", &[[10, 2]]);
+    let id = rig.show(1, Show::new("q"));
+    let [x, y, w, h] = rig.rect(id).unwrap();
+    let cyan = Color::Indexed(14);
+    let corner = |rig: &Rig| style_at(rig, x, y);
+    // The title is on the bottom edge, right: ` q `.
+    let title = |rig: &Rig| style_at(rig, x + w - 3, y + h - 1);
+    let bold = ptyrc_vt::Attrs::BOLD;
+    let dim = ptyrc_vt::Attrs::DIM;
+    assert!(corner(&rig).attrs.contains(dim));
+    // Quiet: its own border.
+    rig.w.ask(1, id, true).unwrap();
+    rig.tick();
+    assert!(corner(&rig).attrs.contains(dim) && corner(&rig).fg == Color::Default);
+    assert_eq!(rig.w.next_wake(), None);
+    // Loud: bright cyan, not dim; the title bold. No chase.
+    rig.w.ask(1, id, false).unwrap();
+    rig.tick();
+    assert_eq!(corner(&rig).fg, cyan);
+    assert!(!corner(&rig).attrs.contains(dim) && !corner(&rig).attrs.contains(bold));
+    assert!(title(&rig).attrs.contains(bold));
+    assert_eq!(rig.w.next_wake(), None);
+    assert_eq!(
+        rig.shown()[y as usize],
+        format!("{:x$}┌──────────┐", "", x = x as usize)
+    );
+    // Focused: bold, the title cyan too, a white chase of two runs.
+    rig.w.focus(id).unwrap();
+    rig.tick();
+    assert_eq!(title(&rig).fg, cyan);
+    assert!(title(&rig).attrs.contains(bold));
+    assert_eq!(rig.w.next_wake(), Some(Duration::from_millis(20_050)));
+    let white = |rig: &Rig| {
+        let grid = rig.scene.compose(&rig.grid, &rig.mock);
+        let cells = (0..h).flat_map(|dy| (0..w).map(move |dx| (x + dx, y + dy)));
+        cells
+            .filter(|(cx, cy)| grid.cell(*cx, *cy).style.fg == Color::Indexed(15))
+            .count()
+    };
+    // Under the title: some of the 12 cells may be hidden by it.
+    assert!((9..=12).contains(&white(&rig)), "{}", white(&rig));
+    assert_eq!(
+        rig.shown()[y as usize],
+        format!("{:x$}┌──────────┐", "", x = x as usize)
+    );
+    // The focus lost: loud again, still.
+    rig.w.blur();
+    rig.tick();
+    assert_eq!(white(&rig), 0);
+    assert_eq!(corner(&rig).fg, cyan);
+    assert_eq!(rig.w.next_wake(), None);
+    // Released: its own.
+    rig.w.release(1, id);
+    rig.tick();
+    assert!(corner(&rig).attrs.contains(dim));
+}
+
+#[test]
+fn focused_placed_stays_as_a_modal() {
+    let mut rig = Rig::new(40, 12);
+    rig.declare(1, "q", &[[10, 2]]);
+    let id = rig.show(1, Show::new("q"));
+    let place = rig.rect(id).unwrap();
+    let layer = |rig: &Rig| rig.scene.list().into_iter().next().unwrap().layer;
+    assert_eq!(layer(&rig), Layer::BACK.0);
+    rig.w.ask(1, id, false).unwrap();
+    rig.w.focus(id).unwrap();
+    rig.tick();
+    assert_eq!(rig.rect(id), Some(place));
+    assert_eq!(layer(&rig), Layer::HUD.0);
+    assert!(!rig.info(id).over && !rig.info(id).modal);
+    // Text written under it: never pressed nor evicted, the text hidden.
+    rig.write(place[0] + 2, place[1] + 1, "TYPED");
+    rig.run(3000);
+    assert_eq!(rig.rect(id), Some(place));
+    assert!(!rig.shown()[place[1] as usize + 1].contains("TYPED"));
+    // The focus lost: its own rules, evicted from the text.
+    rig.w.blur();
+    rig.run(3000);
+    assert_eq!(layer(&rig), Layer::BACK.0);
+    assert!(rig.rect(id).is_some_and(|r| r != place));
+
+    // A layer given is kept.
+    let front = Show {
+        layer: Some(Layer::FRONT),
+        ..Show::new("q")
+    };
+    rig.show(1, front);
+    rig.w.focus(id).unwrap();
+    rig.tick();
+    assert_eq!(layer(&rig), Layer::FRONT.0);
+}
+
+#[test]
+fn focused_hidden_is_put_over_the_text() {
+    let mut rig = full(40, 12);
+    rig.declare(1, "q", &[[10, 2], [30, 6]]);
+    let id = rig.show(1, Show::new("q"));
+    assert_eq!(rig.info(id).state, WidgetState::Hidden);
+    rig.w.ask(1, id, false).unwrap();
+    // Hidden for want of a room: in the order.
+    assert_eq!(rig.w.order(), [id]);
+    rig.w.focus(id).unwrap();
+    // At once.
+    rig.tick();
+    let info = rig.info(id);
+    assert!(info.over && info.focused && !info.modal);
+    assert_eq!(info.rect, Some([4, 2, 32, 8]));
+    assert_eq!(rig.shown()[1], format!("xx{}xx", " ".repeat(36)));
+    rig.run(3000);
+    assert_eq!(rig.rect(id), Some([4, 2, 32, 8]));
+    // The focus lost: laid out again as a new one; no room, hidden.
+    rig.w.blur();
+    rig.tick();
+    let info = rig.info(id);
+    assert_eq!((info.state, info.over), (WidgetState::Hidden, false));
+    assert_eq!(rig.shown()[1], "x".repeat(40));
+    assert_eq!(info.asks, Some(Asks::Loud));
+}
+
+#[test]
+fn focus_lost_with_the_owner_or_the_frame() {
+    let mut rig = Rig::new(40, 12);
+    rig.declare(1, "q", &[[10, 2]]);
+    let id = rig.show(1, Show::new("q"));
+    rig.w.ask(1, id, false).unwrap();
+    rig.w.focus(id).unwrap();
+    rig.w.hide_owner(1, true);
+    assert_eq!(rig.w.focused(), None);
+    assert!(rig.w.order().is_empty());
+    assert!(matches!(rig.w.focus(id), Err(WidgetError::NotUsable(_))));
+    rig.w.hide_owner(1, false);
+    rig.tick();
+    rig.w.focus(id).unwrap();
+    // The frame is no longer usable.
+    rig.mock.infos[0].usable = false;
+    rig.w.touch();
+    rig.tick();
+    assert_eq!(rig.w.focused(), None);
+    assert!(rig.w.order().is_empty());
+    assert!(matches!(rig.w.focus(id), Err(WidgetError::NotUsable(_))));
+    assert!(!rig.info(id).focused);
+    rig.mock.infos[0].usable = true;
+    rig.w.touch();
+    rig.tick();
+    assert_eq!(rig.w.order(), [id]);
+}

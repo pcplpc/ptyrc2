@@ -17,9 +17,11 @@ pub use border::{
 };
 
 use crate::frames::{HeatClass, HeatView};
-use crate::scene::{Anchor, Content, Layer, Scene, Space, SpritePatch, SpriteSpec};
+use crate::scene::{
+    Anchor, ColorSpec, Content, Layer, Scene, Space, SpritePatch, SpriteSpec, StyleSpec,
+};
 use crate::types::{FrameId, FrameSel, OwnerId, Prefer, RAW, SpriteId, SurfaceInfo, Surfaces};
-use ptyrc_vt::{Grid, Rect};
+use ptyrc_vt::{Color, Grid, Rect};
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
 use std::time::Duration;
@@ -166,6 +168,15 @@ pub enum WidgetState {
     Gone,
 }
 
+/// How a widget asks for the keyboard: `loud` waits for an answer,
+/// `quiet` does not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Asks {
+    Loud,
+    Quiet,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VariantInfo {
     pub name: String,
@@ -191,6 +202,10 @@ pub struct WidgetInfo {
     pub modal: bool,
     /// A modal put over the text, for want of a room.
     pub over: bool,
+    /// It asks for the keyboard.
+    pub asks: Option<Asks>,
+    /// It has the keyboard.
+    pub focused: bool,
 }
 
 /// Widget failure; `code` is the wire error code.
@@ -308,7 +323,13 @@ struct Widget {
     title: Option<String>,
     border: Option<Framed>,
     layer: Layer,
+    /// A layer was given at `widget.show`.
+    layer_given: bool,
     modal: bool,
+    /// It asks, and its rank in the order: the count of first asks.
+    asks: Option<(Asks, u64)>,
+    /// Ticked once: `live` is known.
+    seen: bool,
     /// Size of the view a modal was laid out in.
     view: Option<(u16, u16)>,
     /// Back from a hidden owner: laid out again if its place is taken.
@@ -330,6 +351,22 @@ struct Widget {
     live: bool,
     /// The info last returned by `tick`.
     told: Option<WidgetInfo>,
+}
+
+impl Widget {
+    /// Laid out as a modal: shown as one, or focused.
+    fn modal(&self, focus: Option<WidgetId>) -> bool {
+        self.modal || focus == Some(self.id)
+    }
+}
+
+/// Bright cyan, bold or not: the border of a widget that asks.
+fn cyan(bold: bool) -> StyleSpec {
+    StyleSpec {
+        fg: Some(ColorSpec(Color::Indexed(14))),
+        bold,
+        ..StyleSpec::default()
+    }
 }
 
 /// One frame as a look sees it.
@@ -371,6 +408,10 @@ pub struct Widgets {
     chase_due: Option<Duration>,
     /// Owners whose widgets are not drawn (`hide_owner`).
     hidden: std::collections::BTreeSet<OwnerId>,
+    /// The widget that has the keyboard.
+    focus: Option<WidgetId>,
+    /// First asks so far.
+    asked: u64,
 }
 
 fn ms(n: u32) -> Duration {
@@ -395,6 +436,8 @@ impl Widgets {
             quiet_due: None,
             chase_due: None,
             hidden: Default::default(),
+            focus: None,
+            asked: 0,
         };
         for (name, spec) in presets() {
             widgets.register_border(name, spec);
@@ -607,6 +650,7 @@ impl Widgets {
                 w.title = show.title;
                 w.border = border;
                 w.layer = layer;
+                w.layer_given = show.layer.is_some();
                 w.modal = show.modal;
                 w.relayout = true;
                 w.rev += 1;
@@ -626,7 +670,10 @@ impl Widgets {
                     title: show.title,
                     border,
                     layer,
+                    layer_given: show.layer.is_some(),
                     modal: show.modal,
+                    asks: None,
+                    seen: false,
                     view: None,
                     recheck: false,
                     place: None,
@@ -720,9 +767,143 @@ impl Widgets {
             return false;
         };
         let w = self.widgets.remove(at);
+        self.focus.take_if(|f| *f == id);
         self.gone.push((self.gone_info(&w), w.sprite));
         self.dirty = true;
         true
+    }
+
+    /// The widget asks for the keyboard: the user can focus it. Asked
+    /// again: loud or quiet as now told, its rank in the order kept.
+    pub fn ask(&mut self, owner: OwnerId, id: WidgetId, quiet: bool) -> Result<(), WidgetError> {
+        let Some(w) = self
+            .widgets
+            .iter_mut()
+            .find(|w| w.id == id && w.owner == owner)
+        else {
+            return Err(WidgetError::NoWidget(id));
+        };
+        let asks = if quiet { Asks::Quiet } else { Asks::Loud };
+        let rank = match w.asks {
+            Some((_, rank)) => rank,
+            None => {
+                self.asked += 1;
+                self.asked
+            }
+        };
+        if w.asks != Some((asks, rank)) {
+            w.asks = Some((asks, rank));
+            w.rev += 1;
+            self.pending = true;
+        }
+        Ok(())
+    }
+
+    /// The widget asks no more; focused, the focus is dropped. False:
+    /// no such widget for this owner.
+    pub fn release(&mut self, owner: OwnerId, id: WidgetId) -> bool {
+        if !self.widgets.iter().any(|w| w.id == id && w.owner == owner) {
+            return false;
+        }
+        if self.focus == Some(id) {
+            self.blur();
+        }
+        let w = self.widgets.iter_mut().find(|w| w.id == id).expect("found");
+        if w.asks.take().is_some() {
+            w.rev += 1;
+            self.pending = true;
+        }
+        true
+    }
+
+    /// It can be drawn: its owner is not hidden, its frame is usable
+    /// (or not looked at yet).
+    fn drawable(&self, w: &Widget) -> bool {
+        !self.hidden.contains(&w.owner) && (w.live || !w.seen)
+    }
+
+    /// The widgets the user can focus: the loud ones, then the quiet
+    /// ones, each by the time they first asked. Those that cannot be
+    /// drawn are left out.
+    pub fn order(&self) -> Vec<WidgetId> {
+        let mut asking: Vec<(bool, u64, WidgetId)> = self
+            .widgets
+            .iter()
+            .filter(|w| self.drawable(w))
+            .filter_map(|w| {
+                let (asks, rank) = w.asks?;
+                Some((asks == Asks::Quiet, rank, w.id))
+            })
+            .collect();
+        asking.sort();
+        asking.into_iter().map(|(_, _, id)| id).collect()
+    }
+
+    /// The widget after the focused one in the order; the first when
+    /// none is focused. None past the last.
+    pub fn next(&self) -> Option<WidgetId> {
+        let order = self.order();
+        match self.focus {
+            None => order.first().copied(),
+            Some(id) => {
+                let at = order.iter().position(|o| *o == id)?;
+                order.get(at + 1).copied()
+            }
+        }
+    }
+
+    /// Give the keyboard to a widget that asks: it is laid out as a
+    /// modal while it has it. Another one focused loses it.
+    pub fn focus(&mut self, id: WidgetId) -> Result<(), WidgetError> {
+        let Some(w) = self.widgets.iter().find(|w| w.id == id) else {
+            return Err(WidgetError::NoWidget(id));
+        };
+        if w.asks.is_none() {
+            return Err(WidgetError::NotUsable(format!(
+                "widget {id} does not ask for the keyboard"
+            )));
+        }
+        if !self.drawable(w) {
+            return Err(WidgetError::NotUsable(format!(
+                "widget {id} cannot be drawn"
+            )));
+        }
+        if self.focus == Some(id) {
+            return Ok(());
+        }
+        self.blur();
+        self.focus = Some(id);
+        let w = self.widgets.iter_mut().find(|w| w.id == id).expect("found");
+        // Where it is, it stays; its view is the one of the next tick.
+        w.view = None;
+        w.pressed = None;
+        w.grow = None;
+        w.rev += 1;
+        self.urgent = true;
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// Drop the focus: the widget is under its own rules again; put
+    /// over the text, it is laid out again as a new one. Returns it.
+    pub fn blur(&mut self) -> Option<WidgetId> {
+        let id = self.focus.take()?;
+        if let Some(w) = self.widgets.iter_mut().find(|w| w.id == id) {
+            if !w.modal && w.place.is_some_and(|p| p.over.is_some()) {
+                w.relayout = true;
+            }
+            w.rev += 1;
+        }
+        self.urgent = true;
+        self.dirty = true;
+        Some(id)
+    }
+
+    /// The widget that has the keyboard, and its owner.
+    pub fn focused(&self) -> Option<(WidgetId, OwnerId)> {
+        let id = self.focus?;
+        let w = self.widgets.iter().find(|w| w.id == id)?;
+        Some((id, w.owner))
     }
 
     /// The owner is gone: its widgets and its declarations.
@@ -732,6 +913,7 @@ impl Widgets {
             .partition(|w| w.owner == owner);
         self.widgets = kept;
         for w in gone {
+            self.focus.take_if(|f| *f == w.id);
             self.gone.push((self.gone_info(&w), w.sprite));
             self.dirty = true;
         }
@@ -750,6 +932,9 @@ impl Widgets {
         };
         if !changed {
             return;
+        }
+        if hidden && self.focused().is_some_and(|(_, o)| o == owner) {
+            self.blur();
         }
         for w in self.widgets.iter_mut().filter(|w| w.owner == owner) {
             w.recheck = !hidden;
@@ -783,6 +968,31 @@ impl Widgets {
                 name: Some("plain".into()),
                 spec: BorderSpec::default(),
             })
+    }
+
+    /// The border as drawn: the widget's, in the look of one that asks.
+    /// Loud: bright cyan, the title bold. Focused: bright cyan, bold,
+    /// the title too, a bright white chase. The glyphs are its own.
+    fn spec_of(&self, w: &Widget) -> BorderSpec {
+        let mut spec = self.border_of(w).spec;
+        if self.focus == Some(w.id) {
+            spec.style = cyan(true);
+            spec.title.style = cyan(true);
+            spec.chase = Some(ChaseSpec {
+                len: 6,
+                ms: 50,
+                runs: 2,
+                style: StyleSpec {
+                    fg: Some(ColorSpec(Color::Indexed(15))),
+                    bold: true,
+                    ..StyleSpec::default()
+                },
+            });
+        } else if matches!(w.asks, Some((Asks::Loud, _))) {
+            spec.style = cyan(false);
+            spec.title.style.bold = true;
+        }
+        spec
     }
 
     fn variants_of(&self, w: &Widget) -> &[Variant] {
@@ -821,6 +1031,8 @@ impl Widgets {
                 .collect(),
             modal: w.modal,
             over: place.is_some_and(|p| p.over.is_some()),
+            asks: w.asks.map(|(asks, _)| asks),
+            focused: self.focus == Some(w.id),
         }
     }
 
@@ -832,6 +1044,7 @@ impl Widgets {
             rect: None,
             sprite: None,
             over: false,
+            focused: false,
             ..self.info_of(w)
         }
     }
@@ -934,17 +1147,22 @@ impl Widgets {
         for id in lost {
             if let Some(at) = self.widgets.iter().position(|w| w.id == id) {
                 let w = self.widgets.remove(at);
+                self.focus.take_if(|f| *f == id);
                 changed.push(self.gone_info(&w));
                 self.dirty = true;
             }
         }
 
+        let focus = self.focus;
+        let mut unusable = false;
         for w in &mut self.widgets {
             if w.frame.is_none() {
                 w.frame = surfaces.resolve(&w.sel);
             }
             let info = w.frame.and_then(|id| surfaces.info(id));
             w.live = info.is_some_and(|i| i.usable);
+            w.seen = true;
+            unusable |= focus == Some(w.id) && !w.live;
             if info.is_none() && w.place.is_some() {
                 // The frame is no more.
                 w.place = None;
@@ -956,10 +1174,19 @@ impl Widgets {
                 let v = i.rect.intersect(&base.rect());
                 (v.w, v.h)
             });
-            if w.modal && w.live && w.place.is_some() && w.view != size {
-                w.relayout = true;
-                self.urgent = true;
+            if w.modal(focus) && w.live && w.place.is_some() && w.view != size {
+                if w.view.is_none() {
+                    // Just focused: it stays.
+                    w.view = size;
+                } else {
+                    w.relayout = true;
+                    self.urgent = true;
+                }
             }
+        }
+        if unusable {
+            // The frame of the focused widget is not usable.
+            self.blur();
         }
 
         let timer = self.due.is_some_and(|d| now >= d);
@@ -971,7 +1198,7 @@ impl Widgets {
             .is_none_or(|l| now >= l + ms(self.cfg.look_ms));
         if self.urgent || timer || (self.dirty && paced) {
             self.look(now, base, cursor, surfaces);
-            if self.widgets.iter().any(|w| w.modal) {
+            if self.widgets.iter().any(|w| w.modal(self.focus)) {
                 // What a modal just covered is pressed from now.
                 self.press(now, base, surfaces);
             }
@@ -999,18 +1226,18 @@ impl Widgets {
         let covers: Vec<Rect> = self
             .widgets
             .iter()
-            .filter(|w| w.modal && w.live && !self.hidden.contains(&w.owner))
+            .filter(|w| w.modal(self.focus) && w.live && !self.hidden.contains(&w.owner))
             .filter_map(|w| {
                 let (p, info) = (w.place?, surfaces.info(w.frame?)?);
                 let c = p.cover();
                 Some(Rect::new(info.rect.x + c.x, info.rect.y + c.y, c.w, c.h))
             })
             .collect();
-        let hidden = &self.hidden;
+        let (hidden, focus) = (&self.hidden, self.focus);
         for w in self
             .widgets
             .iter_mut()
-            .filter(|w| w.live && !w.modal && !hidden.contains(&w.owner))
+            .filter(|w| w.live && !w.modal(focus) && !hidden.contains(&w.owner))
         {
             let (Some(place), Some(info)) = (w.place, w.frame.and_then(|id| surfaces.info(id)))
             else {
@@ -1193,7 +1420,7 @@ impl Widgets {
             .filter(|(j, o)| {
                 *j != i
                     && o.live
-                    && !o.modal
+                    && !o.modal(self.focus)
                     && !self.hidden.contains(&o.owner)
                     && o.frame == w.frame
                     && !o.relayout
@@ -1243,7 +1470,7 @@ impl Widgets {
             };
             let evicted = w.pressed.is_some_and(|t| now >= t + ms(self.cfg.evict_ms));
             let mut fresh = w.place.is_none() || w.relayout || evicted;
-            if !fresh && !w.recheck && (w.pressed.is_some() || w.modal) {
+            if !fresh && !w.recheck && (w.pressed.is_some() || w.modal(self.focus)) {
                 // Pressed, not yet evicted: it stays. A modal stays.
                 continue;
             }
@@ -1277,11 +1504,11 @@ impl Widgets {
                 fresh |= own.is_some_and(|r| rects.iter().any(|t| !t.intersect(&r).is_empty()));
                 self.widgets[i].recheck = false;
                 let w = &self.widgets[i];
-                if !fresh && (w.pressed.is_some() || w.modal) {
+                if !fresh && (w.pressed.is_some() || w.modal(self.focus)) {
                     continue;
                 }
             }
-            let modal = self.widgets[i].modal;
+            let modal = self.widgets[i].modal(self.focus);
             let mut found = self.best(&self.widgets[i], look, &rects, None);
             let view = look.view;
             let on_screen = |p: Place| [view.x + p.at.0, view.y + p.at.1, p.outer.0, p.outer.1];
@@ -1397,7 +1624,8 @@ impl Widgets {
                 ]),
                 _ => None,
             };
-            let chase = self.border_of(w).spec.chasing().copied();
+            let chase = self.spec_of(w).chasing().copied();
+            let focused = self.focus == Some(w.id);
             let shown = w.place.filter(|p| p.variant < self.variants_of(w).len());
             let want = match (shown, w.frame) {
                 (Some(p), Some(frame)) if !self.hidden.contains(&w.owner) => {
@@ -1409,7 +1637,10 @@ impl Widgets {
                     Some(Drawn {
                         frame,
                         at: (cover.x, cover.y),
-                        layer: w.layer.0,
+                        layer: match focused && !w.layer_given {
+                            true => Layer::HUD.0,
+                            false => w.layer.0,
+                        },
                         rev: w.rev,
                         step: chase.map(|c| c.step(now)),
                     })
@@ -1472,7 +1703,7 @@ impl Widgets {
         let v = self.variants_of(w).get(place.variant)?;
         let title = w.title.clone().unwrap_or_else(|| w.tag.clone());
         Some(compose_at(
-            &self.border_of(w).spec,
+            &self.spec_of(w),
             &title,
             v.content.as_ref(),
             v.size[0],
