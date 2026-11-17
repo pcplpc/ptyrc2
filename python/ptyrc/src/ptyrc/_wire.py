@@ -203,15 +203,19 @@ class Connection:
         return self._closed
 
     def _read_loop(self) -> None:
-        buf = b""
+        # The chunks of a line not ended yet: joined once, when it ends.
+        parts: list[bytes] = []
         seen_hello = False
         try:
             while True:
                 chunk = self._sock.recv(65536)
                 if not chunk:
                     break
-                buf += chunk
-                *lines, buf = buf.split(b"\n")
+                parts.append(chunk)
+                if b"\n" not in chunk:
+                    continue
+                *lines, rest = b"".join(parts).split(b"\n")
+                parts = [rest] if rest else []
                 for line in lines:
                     if not line.strip():
                         continue
