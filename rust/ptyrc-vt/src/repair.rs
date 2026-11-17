@@ -2,7 +2,7 @@
 //! The repair painter: the bytes that turn what the host shows into a
 //! desired grid, leaving the terminal state as found.
 
-use crate::grid::{Cell, Grid, Style};
+use crate::grid::{Attrs, Cell, Color, Grid, Style};
 use crate::sgr::{push_num, write_sgr, write_sgr_from};
 use crate::vt::{Charset, Vt};
 use std::io::Write;
@@ -95,6 +95,31 @@ impl Painter<'_> {
         self.pen = style;
     }
 
+    /// A default blank under a pen that is not the default one: erased,
+    /// it costs no change of pen. The erasure fills with the background
+    /// of the pen, the default one here, as on a host without BCE.
+    fn erases(&self, cell: &Cell) -> bool {
+        self.pen != Style::default()
+            && self.pen.bg == Color::Default
+            && !self.pen.attrs.contains(Attrs::INVERSE)
+            && *cell == Cell::default()
+    }
+
+    /// Erase `n` cells from `(col, row)`, or to the end of the row; the
+    /// cursor stays.
+    fn erase(&mut self, col: u16, row: u16, n: u16, to_end: bool) {
+        self.goto(col, row);
+        self.buf.extend_from_slice(b"\x1b[");
+        if to_end {
+            self.buf.push(b'K');
+        } else {
+            if n > 1 {
+                push_num(&mut self.buf, n);
+            }
+            self.buf.push(b'X');
+        }
+    }
+
     /// Print the cell at `(col, row)`; `col` is not a spacer.
     fn cell(&mut self, col: u16, row: u16, cell: &Cell) {
         self.goto(col, row);
@@ -168,6 +193,22 @@ pub fn repair(host: &mut Vt, desired: &Grid, out: &mut Vec<u8>) {
             let w = cell.width.max(1) as u16;
             let end = (col + w).min(cols) as usize;
             if have[col as usize..end] != want[col as usize..end] {
+                if p.erases(cell) {
+                    // The run of such blanks, up to the last that differs
+                    // or to the end of the row.
+                    let run = want[col as usize..]
+                        .iter()
+                        .take_while(|c| **c == Cell::default())
+                        .count();
+                    let to_end = col as usize + run == cols as usize;
+                    let n = (0..run)
+                        .rev()
+                        .find(|i| have[col as usize + i] != want[col as usize + i])
+                        .map_or(1, |i| i + 1);
+                    p.erase(col, row, n as u16, to_end);
+                    col += if to_end { run } else { n } as u16;
+                    continue;
+                }
                 if cell.width == 0 {
                     // A spacer that differs alone: its head is repainted.
                     if col > 0 && want[col as usize - 1].width == 2 {

@@ -427,3 +427,27 @@ fn colour_changes_alone_are_sent_alone() {
         "\x1b[0;1;38;5;196;48;2;1;2;3ma\x1b[38;5;46mb\x1b[48;5;17mc\x1b[39;49md\x1b[32;44me\x1b[0;32mf\x1b[1;1H\x1b[39m"
     );
 }
+
+/// Default blanks between coloured glyphs are erased, not printed: the
+/// pen is not reset and set again around them.
+#[test]
+fn blanks_under_a_coloured_pen_are_erased() {
+    let mut host = Vt::new(12, 2);
+    host.feed("\x1b[32mabcdefgh世界\r\nklmn\x1b[1;1H".as_bytes());
+    let before = host.clone();
+    let mut want = Vt::new(12, 2);
+    want.feed("\x1b[32mAb\x1b[2CE\x1b[2Ch\r\nk\x1b[2Cn".as_bytes());
+    let mut out = Vec::new();
+    repair(&mut host, want.grid(), &mut out);
+    assert_eq!(host.grid(), want.grid());
+    assert_eq!((host.pen(), host.cursor()), (before.pen(), before.cursor()));
+    let text = String::from_utf8(out).unwrap();
+    let body = text
+        .strip_prefix("\x1b[?2026h")
+        .and_then(|t| t.strip_suffix("\x1b[?2026l"))
+        .unwrap();
+    assert_eq!(
+        body,
+        "A\x1b[C\x1b[2X\x1b[2CE\x1b[2X\x1b[3C\x1b[K\x1b[2;2H\x1b[2X\x1b[1;1H"
+    );
+}
