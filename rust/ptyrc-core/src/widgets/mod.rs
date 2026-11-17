@@ -820,7 +820,9 @@ impl Widgets {
     /// (or not looked at yet). The raw frame always counts: the screen
     /// is there, a widget on it shows as soon as it settles.
     fn drawable(&self, w: &Widget) -> bool {
-        !self.hidden.contains(&w.owner) && (w.live || !w.seen || w.frame == Some(RAW))
+        !self.hidden.contains(&w.owner)
+            && (w.live || !w.seen || w.frame == Some(RAW))
+            && !self.variants_of(w).is_empty()
     }
 
     /// The widgets the user can focus: the loud ones, then the quiet
@@ -1155,7 +1157,9 @@ impl Widgets {
         }
 
         let focus = self.focus;
-        let mut forgotten = false;
+        // No variant left to show: it cannot be drawn.
+        let mut forgotten =
+            (self.widgets.iter()).any(|w| focus == Some(w.id) && self.variants_of(w).is_empty());
         for w in &mut self.widgets {
             if w.frame.is_none() {
                 w.frame = surfaces.resolve(&w.sel);
