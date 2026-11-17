@@ -25,7 +25,7 @@
 //! Cold. The effect is shown the heat: the stillness of a column is
 //! that of its least still cell, within `REACH` columns. Rain falls on a
 //! column in proportion of its stillness, from `THIN` just after a
-//! change to 1 after `STILL_MS`.
+//! change to 1 after `STILL_MS`. The heat is read every `HEAT_MS`.
 //!
 //! `tune`: `rate`, `transparent`, `duration_ms`; the drops in the air
 //! stay, and land as the new `transparent` says.
@@ -40,6 +40,8 @@ use std::time::Duration;
 const FRAME_MS: u64 = 40;
 /// A late render advances the rain by this much at most.
 const CATCH_UP_MS: u64 = 200;
+/// Time between two reads of the heat.
+const HEAT_MS: u64 = 200;
 /// Canvas cells at most.
 const MAX_CELLS: usize = 1 << 18;
 /// Drops at once, at most.
@@ -120,6 +122,9 @@ struct Rain {
     /// Per column: seconds its least still cell has been still; empty:
     /// the heat is not known.
     still: Vec<f32>,
+    /// The heat is read at the next look, and when it was last asked.
+    heat_due: bool,
+    heat_at: u64,
     drops: Vec<Drop>,
     splashes: Vec<Splash>,
     /// Time of the last render.
@@ -141,6 +146,8 @@ impl Rain {
             cursor: None,
             stale: true,
             still: Vec::new(),
+            heat_due: true,
+            heat_at: 0,
             drops: Vec::new(),
             splashes: Vec::new(),
             last: None,
@@ -303,6 +310,9 @@ impl Effect for Rain {
         }
         let dt = ms.saturating_sub(self.last.unwrap_or(ms)).min(CATCH_UP_MS) as f64 / 1000.0;
         self.last = Some(ms);
+        if ms.saturating_sub(self.heat_at) >= HEAT_MS {
+            (self.heat_due, self.heat_at) = (true, ms);
+        }
         self.spawn(dt);
         self.fall(ms, dt);
         self.draw(ms, canvas);
@@ -318,14 +328,26 @@ impl Effect for Rain {
     }
 
     fn look(&mut self, under: &Under) {
-        let seen = under.inked();
-        let seen_w = under.size.0 as usize;
-        if (seen_w, &seen) != (self.seen_w, &self.seen) || self.cursor != under.cursor {
-            (self.seen_w, self.seen) = (seen_w, seen);
+        let (w, h) = under.size;
+        let cells = w as usize * h as usize;
+        let mut same = self.seen_w == w as usize && self.seen.len() == cells;
+        self.seen_w = w as usize;
+        self.seen.resize(cells, false);
+        let mut seen = self.seen.iter_mut();
+        for y in 0..h {
+            for (x, was) in (0..w).zip(&mut seen) {
+                let ink = under.ink(x, y);
+                same &= *was == ink;
+                *was = ink;
+            }
+        }
+        if !same || self.cursor != under.cursor {
             self.cursor = under.cursor;
             self.stale = true;
         }
-        let (w, h) = under.size;
+        if !std::mem::take(&mut self.heat_due) && self.still.len() == w as usize {
+            return;
+        }
         self.still = match under.heat(0, 0) {
             None => Vec::new(),
             Some(_) => (0..w)

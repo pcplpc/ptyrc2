@@ -132,7 +132,11 @@ fn it_rains_less_where_the_text_changes() {
     }
     assert!(cold > 50, "{cold}");
     assert!(busy * 4 < cold, "{busy} {cold}");
-    // No heat: it rains alike everywhere.
+    // No heat: it rains alike everywhere, once the heat is read again.
+    rain.look(&Under::of(&grid));
+    assert!(rain.weight(3) < 1.0);
+    let mut canvas = Canvas::new(80, 10);
+    rain.render(Duration::from_millis(12_000 + HEAT_MS), &mut canvas);
     rain.look(&Under::of(&grid));
     assert_eq!(rain.weight(3), 1.0);
 }
@@ -225,4 +229,69 @@ fn factory_checks_its_parameters() {
     let mut canvas = Canvas::new(10, 5);
     assert!(done.render(Duration::from_millis(50), &mut canvas));
     assert!(!done.render(Duration::from_millis(100), &mut canvas));
+}
+
+/// A screen of `w` by `h` with a line of text every third row, and its
+/// heat.
+fn screen(w: u16, h: u16) -> (Grid, HeatView) {
+    let line = "words in the way ".repeat(w as usize / 20);
+    let rows: Vec<&str> = (0..h)
+        .map(|y| if y % 3 == 2 { line.as_str() } else { "" })
+        .collect();
+    let n = w as usize * h as usize;
+    let heat = HeatView {
+        cols: w,
+        rows: h,
+        safe: vec![1.0; n],
+        activity: vec![0.0; n],
+        occupancy: vec![0.0; n],
+        still: vec![60.0; n],
+        class: vec![Default::default(); n],
+    };
+    (Grid::from_lines(w, &rows), heat)
+}
+
+/// Microseconds of the fastest of forty runs of `f`.
+fn fastest(mut f: impl FnMut()) -> f64 {
+    (0..40)
+        .map(|_| {
+            let start = std::time::Instant::now();
+            f();
+            start.elapsed().as_secs_f64() * 1e6
+        })
+        .fold(f64::MAX, f64::min)
+}
+
+#[test]
+#[ignore = "prints the cost of a tick: cargo test --release -p ptyrc-draw-rain bench -- --ignored --nocapture"]
+fn bench() {
+    for rate in [20, 200] {
+        for (w, h) in [(80, 24), (200, 50), (300, 80)] {
+            let (grid, heat) = screen(w, h);
+            let under = Under::of(&grid).with_heat(Some(&heat));
+            let mut rain = make(json!({"rate": rate}));
+            let mut canvas = Canvas::new(w, h);
+            // A minute of rain, then a tick timed: the canvas cleared,
+            // the look, the render.
+            let warm = 60_000;
+            for t in (0..warm).step_by(FRAME_MS as usize) {
+                canvas.clear();
+                rain.look(&under);
+                rain.render(Duration::from_millis(t), &mut canvas);
+            }
+            let clear = fastest(|| canvas.clear());
+            let look = fastest(|| rain.look(&under));
+            let mut t = warm;
+            let render = fastest(|| {
+                t += FRAME_MS;
+                rain.render(Duration::from_millis(t), &mut canvas);
+            });
+            println!(
+                "rain rate={rate} {w}x{h}: clear {clear:.0} look {look:.0} render {render:.0} us; \
+                 {:.2}% of a core; {} drops",
+                (clear + look + render) * 1e-4 * (1000 / FRAME_MS) as f64,
+                rain.drops.len(),
+            );
+        }
+    }
 }
