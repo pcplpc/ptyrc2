@@ -233,6 +233,84 @@ pub struct Grab {
     escape: String,
 }
 
+#[derive(Args)]
+pub struct Focus {
+    /// A widget that asks: its id, or its tag [default: the next one,
+    /// as ctrl+t ctrl+t]
+    widget: Option<String>,
+    /// Drop the focus: the keys are the app's again
+    #[arg(long, conflicts_with = "widget")]
+    none: bool,
+}
+
+/// The widget `name` tells: an id, or the tag of one widget that asks.
+fn asking(list: &[Value], name: &str) -> Result<u64, Fail> {
+    if let Ok(id) = name.parse::<u64>() {
+        return Ok(id);
+    }
+    let ids = |asks: bool| -> Vec<u64> {
+        (list.iter())
+            .filter(|w| w["tag"].as_str() == Some(name) && (!asks || w["asks"].is_string()))
+            .filter_map(|w| w["id"].as_u64())
+            .collect()
+    };
+    let named = |ids: &[u64]| {
+        let ids: Vec<String> = ids.iter().map(u64::to_string).collect();
+        ids.join(", ")
+    };
+    match (&ids(true)[..], &ids(false)[..]) {
+        ([id], _) => Ok(*id),
+        ([], []) => Err(Fail {
+            status: 4,
+            message: format!("no such widget: {name}"),
+            hint: Some("ptyrc widgets".into()),
+        }),
+        ([], all) => Err(Fail {
+            status: 4,
+            message: format!("{name} does not ask for the keyboard"),
+            hint: Some(format!("widgets of that tag: {}", named(all))),
+        }),
+        (several, _) => Err(Fail::usage(
+            format!("several widgets {name} ask"),
+            format!("name one by its id: {}", named(several)),
+        )),
+    }
+}
+
+/// `ptyrc focus [ID | TAG]`, `ptyrc focus --none`: the focus, by a
+/// request. Status 1 when no widget asks.
+pub fn focus(common: &Common, args: Focus) -> Done {
+    let mut client = connect(common)?;
+    if args.none {
+        client.call("widget.blur", json!({}))?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    let id = match &args.widget {
+        Some(name) => {
+            let list = client.call("widget.list", json!({}))?;
+            let list = list["widgets"].as_array().cloned().unwrap_or_default();
+            json!(asking(&list, name)?)
+        }
+        None => Value::Null,
+    };
+    let result = client.call("widget.focus", json!({"id": id}))?;
+    if common.json {
+        print_json(&result, false);
+    }
+    let widget = &result["widget"];
+    if widget.is_null() {
+        if !common.json {
+            eprintln!("ptyrc: no widget asks for the keyboard");
+        }
+        return Ok(ExitCode::from(1));
+    }
+    if !common.json {
+        let tag = widget["tag"].as_str().unwrap_or("");
+        println!("{} {tag}: focused", widget["id"]);
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
 /// Take keys from the host keyboard of the session and print them, one
 /// JSON object per line, until released.
 pub fn grab(common: &Common, args: Grab) -> Done {

@@ -95,6 +95,9 @@ enum Verb {
     Attach(tools::Attach),
     /// Take keys from the session's keyboard before the app; print them
     Grab(tools::Grab),
+    /// Give the keyboard to a widget that asks for it: the next one, or
+    /// the one named
+    Focus(tools::Focus),
     /// Click on a cell, or on text, as the app's mouse mode wants it
     Click(tools::Click),
     /// A picture of the screen: SVG, HTML, or text with escapes
@@ -339,6 +342,7 @@ fn run(cli: Cli) -> Result<ExitCode, Fail> {
         Verb::Show => verbs::show(&common),
         Verb::Attach(args) => tools::attach(&common, args),
         Verb::Grab(args) => tools::grab(&common, args),
+        Verb::Focus(args) => tools::focus(&common, args),
         Verb::Click(args) => tools::click(&common, args),
         Verb::Shot(args) => tools::shot(&common, args),
         Verb::Snap => replay::snap(&common),

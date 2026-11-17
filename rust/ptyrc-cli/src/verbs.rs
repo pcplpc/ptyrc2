@@ -272,8 +272,8 @@ pub fn frames(common: &Common, args: Frames) -> Done {
 
 fn print_widgets(list: &[Value]) {
     println!(
-        "{:>4}  {:>5}  {:<12}  {:<6}  {:<10}  {:<14}  {:>5}  {:<8}  TITLE",
-        "ID", "OWNER", "TAG", "STATE", "VARIANT", "RECT", "FRAME", "BORDER"
+        "{:>4}  {:>5}  {:<12}  {:<6}  {:<10}  {:<14}  {:>5}  {:<8}  {:<5}  TITLE",
+        "ID", "OWNER", "TAG", "STATE", "VARIANT", "RECT", "FRAME", "BORDER", "ASKS"
     );
     let text = |v: &Value| v.as_str().map_or("-".to_string(), str::to_string);
     for w in list {
@@ -284,7 +284,7 @@ fn print_widgets(list: &[Value]) {
             "-".into()
         };
         println!(
-            "{:>4}  {:>5}  {:<12}  {:<6}  {:<10}  {:<14}  {:>5}  {:<8}  {}",
+            "{:>4}  {:>5}  {:<12}  {:<6}  {:<10}  {:<14}  {:>5}  {:<8}  {:<5}  {}",
             w["id"].to_string(),
             w["owner"].to_string(),
             text(&w["tag"]),
@@ -298,6 +298,11 @@ fn print_widgets(list: &[Value]) {
             rect,
             w["frame"].as_u64().map_or("-".into(), |f| f.to_string()),
             text(&w["border"]),
+            // It asks for the keyboard: `loud`, `quiet`; it has it.
+            match w["focused"] == true {
+                true => "focus".into(),
+                false => text(&w["asks"]),
+            },
             text(&w["title"]),
         );
     }
