@@ -92,6 +92,9 @@ def test_keys() -> None:
     assert feed(None, b"\x1b[201~") == ("paste", "a\né\x1b[1;2A\nb")
     assert feed(None, b"\x1b[200~") is None and feed("x", b"x") is None
     keys.reset()  # the focus lost: the paste is dropped
+    # A paste told by the driver: one event a read, no marks.
+    assert keys.feed({"widget": 7, "paste": "a\r\nb\rc\n"}) == ("paste", "a\nb\nc\n")
+    assert keys.feed({"widget": 7, "paste": ""}) == ("paste", "")
     assert feed("y", b"y") == ("key", "y")
 
 
@@ -393,6 +396,10 @@ def test_dialog_paste() -> None:
     for event in events:
         assert dialog.take(event) and not dialog.done
     assert model.text == "ab\né\n c"
+    assert dialog.take(("input", {"widget": 7, "paste": "\rz"}))
+    assert model.text == "ab\né\n c\nz" and not dialog.done
+    for name in ("backspace", "backspace"):
+        dialog.take(key(name))
     # A paste cut by the focus lost is dropped.
     dialog.take(key(None, b"\x1b[200~"))
     dialog.take(key("x", b"x"))

@@ -169,10 +169,11 @@ _TILDES = {2: "insert", 3: "delete", 5: "pageup", 6: "pagedown"}
 class Keys:
     """The `input` events of a focused widget, as keys and pastes.
 
-    `feed(data)`, `data` that of an event with `key` and `bytes`:
-    `("key", name)`, `("paste", text)` (a bracketed paste whole, its
-    lines parted by `\\n`), or None: nothing yet, or a key without a
-    name. `reset()`: the focus was lost, a paste under way is dropped.
+    `feed(data)`, `data` that of an event: `("key", name)`, `("paste",
+    text)` (its lines parted by `\\n`), or None: nothing yet, or a key
+    without a name. A paste is an event `{"paste": text}` (a focused
+    widget: one a read, as it comes), or the keys between the marks
+    `START` and `END` (under `input.grab`), then given whole. `reset()`: the focus was lost, a paste under way is dropped.
     Pure: one instance a widget."""
 
     START, END = b"\x1b[200~", b"\x1b[201~"
@@ -200,6 +201,9 @@ class Keys:
         self._paste = None
 
     def feed(self, data: dict[str, Any]) -> tuple[str, str] | None:
+        if isinstance(data.get("paste"), str):
+            text = data["paste"]
+            return ("paste", text.replace("\r\n", "\n").replace("\r", "\n"))
         raw = base64.b64decode(data.get("bytes") or "")
         if self._paste is not None:
             if raw != self.END:

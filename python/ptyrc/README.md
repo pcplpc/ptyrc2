@@ -114,7 +114,8 @@ dialog.result
 
 `ui.Keys()` reads the `input` events of a focused widget, for an app
 without a `Dialog`: `feed(data)` is `("key", name)`, `("paste", text)`
-(a bracketed paste whole) or None; an arrow, `home`, `end`, `delete` or
+(an event `{"paste": text}` of the driver, or the keys between the
+paste marks, whole) or None; an arrow, `home`, `end`, `delete` or
 a page key held with modifiers, which the driver does not name, is
 named from its bytes (`shift+up`, `ctrl+left`; `Keys.name(raw)`);
 `reset()` when the focus is lost.
