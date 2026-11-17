@@ -20,6 +20,7 @@ __all__ = ["RANDOM", "catalog", "dump", "parser_of"]
 #: Argument lists `random app` draws from, a tuple per version; none:
 #: never drawn. An app not named here is drawn bare.
 RANDOM: dict[str, tuple[tuple[str, ...], ...]] = {
+    "ask": (),  # it wants a question
     "bricks": ((), ("-a",)),
     "confetti": ((), ("-a",)),
     "fire": ((), ("-a",)),
