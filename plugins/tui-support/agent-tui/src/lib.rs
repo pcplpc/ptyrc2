@@ -62,9 +62,17 @@ fn prompt_top(pane: &PaneView) -> Option<u16> {
         return None;
     }
     let min = (pane.rect.w as usize * 6) / 10;
-    let rows: Vec<String> = (0..h).map(|r| pane.row_text(r)).collect();
-    // Searched upwards, within the lower two thirds.
+    // Searched upwards, within the lower two thirds: the rows above are
+    // not read.
     let floor = h / 3;
+    let text = |r: u16| {
+        if r < floor {
+            String::new()
+        } else {
+            pane.row_text(r)
+        }
+    };
+    let rows: Vec<String> = (0..h).map(text).collect();
     if let Some(top) = panel_top(&rows, floor as usize) {
         return Some(top as u16);
     }
@@ -192,5 +200,25 @@ mod tests {
     fn shell_is_not() {
         let grid = Grid::from_lines(24, &["$ ls", "a b", "$ ", "", "", ""]);
         assert_eq!(AgentTui.detect(&pane(&grid)), 0.0);
+    }
+
+    #[test]
+    #[ignore = "prints the cost of a look at a screen: cargo test --release -p ptyrc-tui-agent-tui bench -- --ignored --nocapture"]
+    fn bench() {
+        for (w, h) in [(80u16, 24u16), (200, 50), (300, 80)] {
+            // A screen full of text that is not the app.
+            let line = "words in the way ".repeat(w as usize / 17);
+            let rows: Vec<&str> = (0..h).map(|_| line.as_str()).collect();
+            let grid = Grid::from_lines(w, &rows);
+            let p = pane(&grid);
+            let us = (0..40)
+                .map(|_| {
+                    let start = std::time::Instant::now();
+                    std::hint::black_box((AgentTui.detect(&p), AgentTui.chrome(&p)));
+                    start.elapsed().as_secs_f64() * 1e6
+                })
+                .fold(f64::MAX, f64::min);
+            println!("agent-tui {w}x{h}: detect and chrome {us:.1} us");
+        }
     }
 }
