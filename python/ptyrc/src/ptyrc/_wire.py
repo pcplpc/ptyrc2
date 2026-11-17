@@ -108,6 +108,38 @@ def live_sessions() -> list[str]:
     return [p.stem for p in socks if _alive(p)]
 
 
+def _active_at(path: Path) -> int | None:
+    """When the user last typed on the host keyboard of the session at
+    `path`: `active_at` of its `hello`, milliseconds since the epoch."""
+    try:
+        with _connect(path, 0.5) as sock, sock.makefile("rb") as lines:
+            date = json.loads(lines.readline())["data"].get("active_at")
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return date if isinstance(date, int) else None
+
+
+def _auto() -> Path:
+    """Socket of the session the user typed in last, on its host
+    keyboard; of the only live one, typed in or not. The same date: the
+    last by name."""
+    base = runtime_dir()
+    live = live_sessions()
+    if not live:
+        raise PtyrcError("gone", "no session", "start one: ptyrc run -- CMD")
+    dates = {name: _active_at(base / f"{name}.sock") for name in live}
+    typed = [name for name in live if dates[name] is not None]
+    if typed:
+        return base / f"{max(typed, key=lambda name: (dates[name], name))}.sock"
+    if len(live) == 1:
+        return base / f"{live[0]}.sock"
+    raise PtyrcError(
+        "bad-request",
+        f"{len(live)} sessions, the user typed in none: auto has no choice",
+        f"pick one with session= or PTYRC_SESSION: {', '.join(live)}",
+    )
+
+
 def _of_tmux() -> str | None:
     """The session the tmux session of this pane names in `@ptyrc`."""
     pane = os.environ.get("TMUX_PANE")
@@ -133,13 +165,15 @@ def _of_tmux() -> str | None:
 def socket_path(session: str | None = None) -> Path:
     """Socket of `session`, else of `PTYRC_SOCKET` / `PTYRC_SESSION`, else of
     the session over the tmux session of this pane, else of the only live
-    session."""
+    session. The name `auto`: the session the user typed in last."""
     if session is None:
         direct = os.environ.get("PTYRC_SOCKET")
         if direct:
             return Path(direct)
         session = os.environ.get("PTYRC_SESSION")
     _trusted_dir()
+    if session == "auto":
+        return _auto()
     if session is not None:
         path = runtime_dir() / f"{session}.sock"
         if not _alive(path):

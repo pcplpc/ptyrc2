@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import os
+import pty
+import subprocess
 import time
 
 import pytest
@@ -95,3 +97,52 @@ def test_an_open_socket_directory_is_refused(tmp_path, monkeypatch) -> None:
     (tmp_path / "ptyrc").symlink_to(tmp_path / "real")
     with pytest.raises(PtyrcError, match="not a directory of ours"):
         live_sessions()
+
+
+def test_auto_is_the_session_typed_in_last() -> None:
+    def until(ready: object) -> None:
+        deadline = time.monotonic() + 5
+        while not ready():  # type: ignore[operator]
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+
+    def hosted(name: str) -> tuple[int, subprocess.Popen[bytes]]:
+        """A driver on a pty of the test: its host keyboard."""
+        host, tty = pty.openpty()
+        argv = [os.environ["PTYRC_BIN"], "run", "--name", name, "cat"]
+        driver = subprocess.Popen(argv, stdin=tty, stdout=tty, stderr=tty)
+        os.close(tty)
+        until(lambda: name in live_sessions())
+        return host, driver
+
+    def typed(name: str) -> int | None:
+        with Pilot(name) as pilot:
+            return pilot.hello["active_at"]
+
+    with pytest.raises(PtyrcError) as err:
+        socket_path("auto")
+    assert err.value.code == "gone"
+
+    with Pilot.spawn(["cat"], name="auto-h"):
+        # The only one, typed in or not.
+        assert socket_path("auto") == runtime_dir() / "auto-h.sock"
+        hosts = [hosted("auto-a"), hosted("auto-b")]
+        try:
+            # Several, typed in by nobody.
+            with pytest.raises(PtyrcError) as err:
+                socket_path("auto")
+            assert err.value.code == "bad-request"
+            assert "auto-a, auto-b, auto-h" in (err.value.hint or "")
+
+            for name, (host, _) in (("auto-a", hosts[0]), ("auto-b", hosts[1])):
+                time.sleep(0.003)
+                os.write(host, b"x")
+                until(lambda name=name: typed(name) is not None)
+                assert socket_path("auto") == runtime_dir() / f"{name}.sock"
+                with Pilot("auto") as pilot:
+                    assert pilot.session == name
+        finally:
+            for host, driver in hosts:
+                driver.terminate()
+                driver.wait(5)
+                os.close(host)
