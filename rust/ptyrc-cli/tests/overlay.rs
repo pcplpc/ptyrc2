@@ -105,8 +105,8 @@ fn the_menu_in_the_session() {
 
     // Start: the list of the catalog, the form, enter.
     host.type_in(b"s");
-    wait_for(|| shown(c).contains("start an app"), "the start list");
-    assert!(shown(c).contains("nap  sleeps"), "{}", shown(c));
+    // "start an app" is on the menu too: wait for a row of the list.
+    wait_for(|| shown(c).contains("nap  sleeps"), "the start list");
     host.type_in(b"\r");
     wait_for(|| shown(c).contains("▶ start nap"), "the form");
     // A flag, by the arrows and space.
