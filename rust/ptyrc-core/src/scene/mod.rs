@@ -60,6 +60,8 @@ struct Fx {
     name: String,
     effect: Box<dyn Effect>,
     canvas: Canvas,
+    /// What the render before the last drew.
+    before: Canvas,
     size: Option<[u16; 2]>,
     next: Duration,
     /// Frame position of the canvas at the last look.
@@ -70,7 +72,7 @@ struct Fx {
 
 enum Body {
     Anim(Anim),
-    Fx(Fx),
+    Fx(Box<Fx>),
 }
 
 #[derive(Default)]
@@ -230,6 +232,9 @@ pub struct Scene {
     effects: BTreeMap<String, EffectFactory>,
     dirty: bool,
     last_tick: Duration,
+    /// When the sprites with a `motion` last moved: all at once, a
+    /// `MOTION_STEP` apart, however often the scene is ticked.
+    moved: Duration,
     host: HostColors,
     /// Layer names declared by clients.
     layers: BTreeMap<String, i32>,
@@ -252,6 +257,7 @@ impl Scene {
             effects: BTreeMap::new(),
             dirty: false,
             last_tick: Duration::ZERO,
+            moved: Duration::ZERO,
             host: HostColors::default(),
             layers: BTreeMap::new(),
             hidden: BTreeSet::new(),
@@ -449,15 +455,16 @@ impl Scene {
                     .ok_or_else(|| SceneError::BadParams(format!("unknown effect: {}", fx.name)))?;
                 let effect = make(&fx.params).map_err(SceneError::BadParams)?;
                 let [w, h] = spec.size.unwrap_or([0, 0]);
-                Body::Fx(Fx {
+                Body::Fx(Box::new(Fx {
                     name: fx.name.clone(),
                     effect,
                     canvas: Canvas::new(w, h),
+                    before: Canvas::default(),
                     size: spec.size,
                     next: now,
                     origin: None,
                     heat: None,
-                })
+                }))
             }
             None => {
                 let mut anim = self.body(&spec.content, &spec.frames, spec.looping)?;
@@ -566,15 +573,16 @@ impl Scene {
                 Body::Anim(_) => None,
             };
             let [w, h] = size.unwrap_or([0, 0]);
-            sprite.body = Body::Fx(Fx {
+            sprite.body = Body::Fx(Box::new(Fx {
                 name,
                 effect,
                 canvas: Canvas::new(w, h),
+                before: Canvas::default(),
                 size,
                 next: now,
                 origin: None,
                 heat: None,
-            });
+            }));
             sprite.shown = false;
             sprite.born = now;
         }
@@ -858,6 +866,10 @@ impl Scene {
 
     fn advance(&mut self, now: Duration, base: Option<&Grid>, surfaces: &dyn Surfaces) {
         self.last_tick = now;
+        let step = now >= self.moved + MOTION_STEP;
+        if step {
+            self.moved = now;
+        }
         let cursor = surfaces.cursor();
         let mut dirty = false;
         let mut dead: Vec<SpriteId> = Vec::new();
@@ -949,6 +961,7 @@ impl Scene {
                             (None, Some(info)) => (info.rect.w, info.rect.h),
                             (None, None) => (0, 0),
                         };
+                        std::mem::swap(&mut fx.canvas, &mut fx.before);
                         fx.canvas.resize(w, h);
                         fx.canvas.clear();
                         if let (Some(base), Some(((x, y), origin, info))) = (base, stand) {
@@ -982,12 +995,15 @@ impl Scene {
                         if now >= fx.next {
                             fx.next = now + fx.effect.period().max(Duration::from_millis(1));
                         }
-                        dirty = true;
+                        // The same picture again: nothing to repaint.
+                        dirty |= !fx.canvas.same_as(&fx.before);
                     }
                 }
             }
 
-            if let Some(m) = &mut sprite.mover {
+            if let Some(m) = &mut sprite.mover
+                && step
+            {
                 let dt = now.saturating_sub(m.last).as_secs_f64();
                 m.last = now;
                 m.vel.0 += m.motion.ax * dt;
@@ -1133,7 +1149,7 @@ impl Scene {
             if let Some(m) = &s.mover
                 && (m.vel != (0.0, 0.0) || m.motion.ax != 0.0 || m.motion.ay != 0.0)
             {
-                at(self.last_tick.max(m.last) + MOTION_STEP);
+                at(self.moved + MOTION_STEP);
             }
             if matches!(s.anchor, Anchor::Auto { .. }) {
                 at(s.auto.next_check.max(self.last_tick));

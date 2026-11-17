@@ -551,6 +551,10 @@ Sprite, as JSON (the wire form; serde on the core types):
   given without `space` means `frame`); `loop` false: an animation plays
   once and the sprite is removed; frame `ms` 100.
 - `size: [w, h]`: canvas of an effect; default the frame's view.
+- `motion`: cells a second (`vx`, `vy`) and a second squared (`ax`, `ay`).
+  The sprites that move do so together, 30 times a second, whatever else
+  ticks the scene. An effect that draws the picture it drew, and a tick
+  between two steps of motion, leave the scene clean (`Scene::dirty`).
 - `frame`: an id, or `"raw"`, `"active"` (pane holding the cursor),
   `"largest"`, `"quietest"` (least mean activity), `"idle"` (highest idle
   score, then most free, then largest). A name is resolved when the sprite is added.

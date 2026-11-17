@@ -42,12 +42,23 @@ pub(crate) fn char_width(c: char) -> u8 {
 const CELL_BYTES: usize = 32;
 
 /// A rectangle of slots. Effects draw on it as their canvas.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub struct Canvas {
     w: u16,
     h: u16,
     slots: Vec<Slot>,
+    /// Indices of the slots written since the last `clear`: every slot
+    /// that is not empty is in it.
+    drawn: Vec<u32>,
 }
+
+impl PartialEq for Canvas {
+    fn eq(&self, other: &Canvas) -> bool {
+        (self.w, self.h) == (other.w, other.h) && self.slots == other.slots
+    }
+}
+
+impl Eq for Canvas {}
 
 impl Canvas {
     pub fn new(w: u16, h: u16) -> Canvas {
@@ -55,6 +66,7 @@ impl Canvas {
             w,
             h,
             slots: vec![Slot::Empty; w as usize * h as usize],
+            drawn: Vec::new(),
         }
     }
 
@@ -68,7 +80,24 @@ impl Canvas {
 
     /// Make every cell transparent.
     pub fn clear(&mut self) {
-        self.slots.fill(Slot::Empty);
+        if self.drawn.len() < self.slots.len() / 4 {
+            for &i in &self.drawn {
+                self.slots[i as usize] = Slot::Empty;
+            }
+        } else {
+            self.slots.fill(Slot::Empty);
+        }
+        self.drawn.clear();
+    }
+
+    /// Same cells as `other`, at the cost of the cells drawn on either.
+    pub(crate) fn same_as(&self, other: &Canvas) -> bool {
+        (self.w, self.h) == (other.w, other.h)
+            && self
+                .drawn
+                .iter()
+                .chain(&other.drawn)
+                .all(|&i| self.slots[i as usize] == other.slots[i as usize])
     }
 
     pub(crate) fn resize(&mut self, w: u16, h: u16) {
@@ -83,6 +112,9 @@ impl Canvas {
 
     fn set(&mut self, x: u16, y: u16, slot: Slot) {
         let i = y as usize * self.w as usize + x as usize;
+        if slot != Slot::Empty {
+            self.drawn.push(i as u32);
+        }
         self.slots[i] = slot;
     }
 

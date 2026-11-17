@@ -1258,7 +1258,8 @@ fn a_scroll_is_shown_to_an_effect_at_once() {
     scene.tick_on(ms(20), &base(), &mock);
     assert_eq!(seen.lock().unwrap().looks, 2);
     assert_eq!(seen.lock().unwrap().origin, (0, 3));
-    assert!(scene.take_dirty());
+    // It drew what it had drawn: nothing to repaint.
+    assert!(!scene.take_dirty());
     assert_eq!(scene.next_wake(), Some(ms(50)));
     // Without the screen an effect is shown nothing.
     scene.tick(ms(50), &mock);
@@ -2880,4 +2881,139 @@ fn composed_wide_pairs_are_whole() {
         repair(&mut host, &out, &mut bytes);
         assert!(bytes.is_empty(), "round {round}: repaired twice");
     }
+}
+
+/// Draws `n` glyphs a row apart; the same ones while `still`.
+struct Dots {
+    n: u16,
+    still: bool,
+    renders: u32,
+}
+
+impl Effect for Dots {
+    fn render(&mut self, _t: Duration, canvas: &mut Canvas) -> bool {
+        self.renders += 1;
+        let shift = if self.still {
+            0
+        } else {
+            self.renders as i32 % 2
+        };
+        for i in 0..self.n as i32 {
+            canvas.put(
+                i * 3 + shift,
+                i % canvas.height().max(1) as i32,
+                "*",
+                &StyleSpec::default(),
+            );
+        }
+        true
+    }
+
+    fn period(&self) -> Duration {
+        Duration::from_millis(10)
+    }
+}
+
+fn dots_scene(n: u16, still: bool) -> Scene {
+    let mut scene = Scene::new();
+    scene.register_effect(
+        "dots",
+        Box::new(move |_| {
+            Ok(Box::new(Dots {
+                n,
+                still,
+                renders: 0,
+            }))
+        }),
+    );
+    scene
+        .add(1, spec(json!({"effect": {"name": "dots"}})), ms(0))
+        .unwrap();
+    scene
+}
+
+/// An effect that draws the picture it drew leaves the scene clean; the
+/// canvas is cleared of the last picture whatever was drawn.
+#[test]
+fn an_effect_that_draws_the_same_is_not_dirty() {
+    let mock = Mock::new();
+    let grid = base();
+    for (still, n) in [(true, 3), (false, 3), (true, 60), (false, 60)] {
+        let mut scene = dots_scene(n, still);
+        let mut seen = Vec::new();
+        for k in 0..6 {
+            scene.tick_on(ms(k * 10), &grid, &mock);
+            let dirty = scene.take_dirty();
+            assert_eq!(dirty, k == 0 || !still, "still {still}, {n} dots, tick {k}");
+            let rows = scene.compose(&grid, &mock).text();
+            let stars = rows
+                .iter()
+                .flat_map(|r| r.chars())
+                .filter(|c| *c == '*')
+                .count();
+            seen.push((rows, stars));
+        }
+        // Nothing of an earlier picture stays on the canvas.
+        assert!(
+            seen.iter().all(|(_, stars)| *stars == seen[0].1),
+            "{seen:?}"
+        );
+        assert_eq!(seen[0].0 == seen[1].0, still);
+        assert_eq!(seen[1].0, seen[3].0);
+    }
+}
+
+/// Cost of the tick of an effect that draws 50 cells of 300x80, best of
+/// 25 rounds. `cargo test --release -p ptyrc-core cost_effect -- --ignored
+/// --nocapture`.
+#[test]
+#[ignore = "timing"]
+fn cost_effect_tick_300x80() {
+    let mock = Mock {
+        infos: vec![surface(RAW, Rect::new(0, 0, 300, 80), (0, 0))],
+        ..Mock::new()
+    };
+    let grid = Grid::new(300, 80);
+    let mut scene = dots_scene(50, false);
+    let mut k = 0;
+    let best = (0..25)
+        .map(|_| {
+            let start = std::time::Instant::now();
+            for _ in 0..20 {
+                k += 10;
+                scene.tick_on(ms(k), &grid, &mock);
+            }
+            start.elapsed().as_secs_f64() * 1e6 / 20.0
+        })
+        .fold(f64::MAX, f64::min);
+    println!("  effect tick, 50 cells of 300x80: {best:.1} us");
+}
+
+/// Sprites with a `motion` move together, 30 times a second, however
+/// often the scene is ticked: a tick between two steps repaints nothing.
+#[test]
+fn motions_share_one_clock() {
+    let mock = Mock::new();
+    let mut scene = Scene::new();
+    for (i, at) in [0u64, 7, 19].into_iter().enumerate() {
+        let v = 40.0 + 20.0 * i as f64;
+        let sprite = json!({"content": {"rows": ["o"]}, "motion": {"vx": v, "bounce": true}});
+        scene.add(1, spec(sprite), ms(at)).unwrap();
+    }
+    scene.tick(ms(20), &mock);
+    scene.take_dirty();
+    let mut repaints = 0;
+    for t in (21..=1020).step_by(3) {
+        scene.tick(ms(t), &mock);
+        let wake = scene.next_wake().unwrap();
+        assert!(
+            wake > ms(t) && wake <= ms(t) + MOTION_STEP,
+            "{wake:?} at {t}"
+        );
+        repaints += scene.take_dirty() as u32;
+    }
+    assert!(
+        (25..=31).contains(&repaints),
+        "{repaints} repaints in a second"
+    );
 }
