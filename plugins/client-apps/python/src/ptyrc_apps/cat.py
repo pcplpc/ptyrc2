@@ -6,7 +6,9 @@
     ptyrc-app cat -f active --front
     ptyrc-app cat --count 3 --random     # three cats, each its own look
     ptyrc-app cat --food --mice          # plates and mice, now and then
-    ptyrc-app cat -a                     # --random --food --mice, two cats
+    ptyrc-app cat --fish --toys          # a fish, a ball of yarn
+    ptyrc-app cat --hunt                 # they hunt the host mouse
+    ptyrc-app cat -a                     # all of these, two cats
 
 What it shows:
 
@@ -38,23 +40,40 @@ of it, left of it, else on it. The cats come and eat, one on each
 side; an empty plate goes, and the word gets no other. `--food` lays a
 plate on a ledge now and then, for a while. `--mice`: a mouse walks a
 ledge now and then; a cat that sees it pounces, the mouse runs, and
-is caught when the cat lands on it. `-a`: `--random --food --mice`,
-and two cats unless `--count` says otherwise.
+is caught when the cat lands on it.
+
+The word `fish` gets a fish (`--fish`: one on a ledge now and then). A
+cat lands by it, takes it, carries it away and eats it there; another
+may come for it: it has it, or is hissed at. The word `toy` gets a
+ball of yarn (`--toys`). A cat bats it: it rolls, and leaves its
+thread on the floor, braille; played out, the cat lies in the thread,
+the ball goes, the thread after it.
+
+`--hunt`: the cats hunt the pointer of the host mouse (topic `hover`).
+The driver tells its moves over sprites only: a sprite of nothing
+covers the view (`Home.mat`). A cat looks at the pointer, runs to it,
+wiggles, pounces, bats it; stands up under it and leaps when it is
+over its box; looks for it when it goes; loses interest in one that
+rests, and purrs if it rests on it. A sleeper is poked awake.
+
+`-a`: every option, and two cats unless `--count` says otherwise.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import math
 import random
 import re
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from ptyrc import Frame, Pilot, PtyrcError, Sprite, clock
 
 from . import _cli
+from ._canvas import Braille
 from ._reef import mirror, pad, paint
 
 __all__ = [
@@ -62,6 +81,8 @@ __all__ = [
     "COVERED",
     "EARS",
     "EYES",
+    "FISH",
+    "FW",
     "GAP",
     "GROUND",
     "MOUSE",
@@ -72,8 +93,10 @@ __all__ = [
     "PLATE",
     "POSES",
     "PW",
+    "REACH",
     "Cat",
     "Coat",
+    "Fish",
     "H",
     "Home",
     "Ledge",
@@ -81,8 +104,11 @@ __all__ = [
     "Plate",
     "Skin",
     "W",
+    "Yarn",
     "arc",
+    "ball_look",
     "dress",
+    "fish_look",
     "ledges",
     "look",
     "main",
@@ -90,6 +116,8 @@ __all__ = [
     "near",
     "perch",
     "plate_look",
+    "thread",
+    "thread_look",
 ]
 
 W, H = 11, 3  # the box of every pose
@@ -113,6 +141,23 @@ VISIT = (10.0, 20.0)  # seconds a mouse stays
 SCURRY = (0.1, 0.045)  # seconds a column of a mouse: at ease, in flight
 WITS = (0.05, 0.55)  # seconds before a mouse runs from a pounce
 TRIES = 2  # pounces of a cat at one mouse
+RUN = 0.06  # seconds a step of a run; one column
+NOTICE = 0.3  # seconds a cat looks at the pointer before it goes
+FUN = 8.0  # seconds its interest takes to fall to 1/e
+BORED = 0.15  # interest under which it turns away
+POUNCE = 14  # columns, at most, of a pounce along a ledge
+REACH = 3  # rows over its box a cat leaps up to
+POKE = (12, 3)  # columns, rows: the pointer that close wakes a sleeper
+FW = 6  # cells of a fish, on one row
+STEALS = 2  # tries of the others at one fish
+LYING = (20.0, 40.0)  # seconds a fish of `--fish`, a ball of `--toys` wait
+FISHES = (25.0, 60.0)  # seconds between two fishes
+TOYS = (25.0, 60.0)  # seconds between two balls
+PLAYS = (3, 5)  # bats a ball of yarn takes
+ROLL = (4, 12)  # columns a bat sends it
+LANE = 24  # columns, at most, it rolls to each side
+SPIN = 0.05  # seconds a column of a ball that rolls, at its fastest
+UNDONE = 2.5  # seconds a ball stays once played out
 MAX_CATS = 12
 
 
@@ -192,6 +237,43 @@ POSES: dict[str, tuple[tuple[tuple[str, str, str], int], ...]] = {
         (("           ", " -._/\\_/\\  ", " (__( >.< )"), 200),
         (("           ", " ~._/\\_/\\  ", " (__( -.- )"), 200),
     ),
+    # The pointer, a fish, a ball: it looks, its tail beats.
+    "stare": (
+        (("     /\\_/\\ ", "    ( O.O )", "    ~> ^ < "), 180),
+        (("     /\\_/\\ ", "    ( O.O )", "    _> ^ < "), 180),
+    ),
+    "wiggle": (
+        (("           ", "  ~_/\\_/\\  ", " (__( O.O )"), 130),
+        (("           ", " ~_ /\\_/\\  ", "(___( O.O )"), 130),
+    ),
+    # A paw at what is right of the box.
+    "bat": (
+        (("    /\\_/\\  ", "   ( O.O )/", "   ~> ^ <  "), 140),
+        (("    /\\_/\\  ", "   ( O.O ) ", "   _> ^ <-,"), 180),
+    ),
+    # Up on its hind legs, under what is out of reach.
+    "beg": (
+        (("    \\/\\_/\\/", "    ( O.O )", "     | ^ | "), 250),
+        (("     /\\_/\\ ", "    ( O.O )", "    /| ^ |\\"), 250),
+    ),
+    "puzzled": ((("   ? /\\_/\\ ", "    ( o.O )", "    ~> ^ < "), 400),),
+    "purr": (
+        (("  ♥  /\\_/\\ ", "    ( ^.^ )", "    ~> ^ < "), 500),
+        ((" ♥   /\\_/\\ ", "    ( -.- )", "    _> ^ < "), 500),
+    ),
+    "run": (
+        (("      /\\_/\\", " ~-=__(O.O)", "  //    \\\\ "), 0),
+        (("      /\\_/\\", " _.-~~(O.O)", "   \\\\  //  "), 0),
+    ),
+    "hiss": (
+        (("   _  /\\_/\\", " |/ \\_(>o<)", "  ||   ||  "), 160),
+        (("   _  /\\_/\\", " \\/ \\_(>O<)", "  ||   ||  "), 160),
+    ),
+    # On its back, the thread round its paws.
+    "roll": (
+        (("           ", "    '' ''  ", " ~(___(^.^)"), 220),
+        (("           ", "    `` ``  ", " _(___(^.^)"), 220),
+    ),
 }
 
 # A plate, by portions left.
@@ -202,8 +284,15 @@ PLATE_INK = {"": 75, "oO": 173, ".": 130}
 MOUSE = ('~-(,_,"°>', '~~(,_,"°>', '-~(_,_"°>')
 MOUSE_INK = {"": 250, "~-": 217, ">": 211, "°": 231, ",": 245}
 
+# A fish, its head to the left, by portions left; then as it flops.
+FISH = (" .,'. ", "<+++><", "<//+><", "<///><")
+FLOP = "<\\\\\\><"
+FISH_INK = {"": 117, "<>": 75, "+": 252, ".,'": 244}
+
+YARNS = (203, 213, 81, 220, 120, 141)  # colours of a ball
+
 _FACE = re.compile(r"\((\s?)(\S)(\S)(\S)(\s?)\)")
-_WORD = re.compile(r"\bfood\b", re.IGNORECASE)
+_WORD = re.compile(r"\b(?:food|fish|toy)\b", re.IGNORECASE)
 
 
 def dress(rows: Sequence[str], skin: Skin) -> tuple[str, ...]:
@@ -232,6 +321,8 @@ def look(
         "oO" + skin.eyes: coat.eyes,
         "^wxv": coat.nose,
         "zZ": 244,
+        "?": 229,
+        "♥": 204,
         "~_.": coat.shade,
     }
 
@@ -266,6 +357,50 @@ def mouse_look(right: bool = True, step: int | None = None) -> dict[str, Any]:
         "frames": [{"cells": cells(row), "ms": 400} for row in MOUSE[:2]],
         "loop": True,
     }
+
+
+def fish_look(left: int, right: bool = True, flop: bool = False) -> dict[str, Any]:
+    """A fish with `left` portions: by a cat that faces `right`, its
+    head to it; `flop`: alive, on the floor."""
+
+    def cells(row: str) -> list[list[dict[str, Any]]]:
+        return paint((row,) if right else mirror((row,)), FISH_INK, bold=True)
+
+    if not flop:
+        return {"cells": cells(FISH[left])}
+    beat = ((FISH[-1], 700), (FLOP, 180), (FISH[-1], 250), (FLOP, 180))
+    return {
+        "frames": [{"cells": cells(row), "ms": ms} for row, ms in beat],
+        "loop": True,
+    }
+
+
+def ball_look(color: int, plays: int = 1) -> dict[str, Any]:
+    """A ball of yarn; smaller with no play left."""
+    return {"cells": [[{"t": "●" if plays else "•", "fg": color, "bold": True}]]}
+
+
+def thread(x0: int, n: int, keep: int = 1) -> str:
+    """The thread a ball left on `n` cells from the column `x0`:
+    braille, a wavy line of dots along the floor, the same over a
+    column whatever the ends. `keep`: one dot column in so many."""
+    dots = Braille(n, 1)
+    for dx in range(2 * x0, 2 * (x0 + n)):
+        if dx % keep == 0:
+            dots.set(dx - 2 * x0, 3 - round(1.0 + math.sin(0.9 * dx)))
+    return dots.rows()[0]
+
+
+def thread_look(x0: int, n: int, color: int, fade: bool = False) -> dict[str, Any]:
+    """The thread; `fade`: thinner and thinner, once: the driver
+    removes it after."""
+    if not fade:
+        return {"cells": paint((thread(x0, n),), {"": color})}
+    frames = [
+        {"cells": paint((thread(x0, n, keep),), {"": color}, dim=True), "ms": 300}
+        for keep in (1, 2, 4)
+    ]
+    return {"frames": frames, "loop": False}
 
 
 @dataclass(frozen=True)
@@ -417,6 +552,96 @@ class Mouse:
         self.due = now + self.pace
 
 
+class Fish:
+    """A fish: its left column `x`, on the row `y`; frame cells.
+    `word`, `until`: as a plate. `left`: portions; `holder`: the cat
+    that has it; `steals`: the tries of the others at it."""
+
+    def __init__(
+        self, home: Home, x: int, g: int, word: tuple[int, int] | None, until: float
+    ) -> None:
+        self.home = home
+        self.x, self.y = x, g - 1
+        self.word = word
+        self.until = until
+        self.left = len(FISH) - 1
+        self.holder: Cat | None = None
+        self.steals = 0
+        self.right = True
+        self.sprite: Sprite | None = None
+
+    @property
+    def g(self) -> int:
+        """The row under it, when it lies."""
+        return self.y + 1
+
+    def show(self, flop: bool = False) -> None:
+        look = fish_look(self.left, self.right, flop)
+        self.sprite = self.home.put(self.sprite, self.x, self.y, look, z=-1)
+
+    def by(self, cat: Cat, mouth: bool = False) -> None:
+        """Next to `cat`, on the side it faces: on the floor, or in its
+        `mouth`."""
+        self.x = cat.x + W if cat.right else cat.x - FW
+        self.y = cat.g - (2 if mouth else 1)
+        self.right = cat.right
+        self.show()
+
+
+class Yarn:
+    """A ball of yarn: `x`, its column, from `lo` to `hi`, on the row
+    above `g`; frame cells. `word`, `until`: as a plate. A bat sends it
+    rolling (`knock`); it leaves its thread on the floor, from `ends[0]`
+    to `ends[1]`. `plays`: bats left; `player`: the cat that has it."""
+
+    def __init__(
+        self, home: Home, x: int, g: int, word: tuple[int, int] | None, until: float
+    ) -> None:
+        rng = home.rng
+        self.home = home
+        self.x, self.g = x, g
+        self.lo, self.hi = home.lane(x, g)
+        self.word = word
+        self.until = until
+        self.color = rng.choice(YARNS)
+        self.plays = rng.randint(*PLAYS)
+        self.player: Cat | None = None
+        self.ends = [x, x]
+        self.way, self.run = 1, 0  # where it rolls, the columns left
+        self.due = math.inf
+        self.ball: Sprite | None = None
+        self.wire: Sprite | None = None
+
+    def show(self) -> None:
+        home, y = self.home, self.g - 1
+        x0, n = self.ends[0], self.ends[1] - self.ends[0] + 1
+        with home.together():
+            if n > 1:
+                look = thread_look(x0, n, self.color)
+                self.wire = home.put(self.wire, x0, y, look, z=-3)
+            look = ball_look(self.color, self.plays)
+            self.ball = home.put(self.ball, self.x, y, look, z=-2)
+
+    def knock(self, way: int, now: float) -> bool:
+        """A bat to the right (`way` 1) or to the left (-1). False: no
+        room to roll there."""
+        goal = self.x + way * self.home.rng.randint(*ROLL)
+        goal = max(self.lo, min(goal, self.hi))
+        self.plays -= 1
+        if goal == self.x:
+            return False
+        self.way, self.run, self.due = way, abs(goal - self.x), now
+        return True
+
+    def step(self, now: float) -> None:
+        """A column more, slower at the end."""
+        self.x += self.way
+        self.run -= 1
+        self.ends = [min(self.ends[0], self.x), max(self.ends[1], self.x)]
+        self.show()
+        self.due = now + SPIN * (1 + 3 / (self.run + 1)) if self.run else math.inf
+
+
 class Cat:
     """A cat of a `Home`: where it stands (`x`, left column; `g`, the
     row under its paws; frame cells), what it does (`act`) and until
@@ -437,8 +662,15 @@ class Cat:
         self.path: list[tuple[int, int]] = []  # the jump: cells left
         self.landing: tuple[int, int] | None = None
         self.meal: Plate | None = None  # the plate it eats at, or goes to
-        self.prey = False  # the jump is a pounce
+        self.fish: Fish | None = None  # the fish it has
+        self.toy: Yarn | None = None  # the ball it plays with
+        #: What the jump is at: `mouse`, `fish`, `steal`, `pointer`.
+        self.prey: str | None = None
         self.tries = 0  # pounces at the mouse there is
+        self.fun = 0.0  # its interest in the pointer, 0 to 1, at `mused`
+        self.mused = 0.0
+        self.ignored: tuple[int, int] | None = None  # the pointer it turned from
+        self.spooked = False  # hissed at: it goes
 
     # -- what the cat knows -------------------------------------------
 
@@ -449,7 +681,7 @@ class Cat:
         out = [(self.x, self.g)]
         if self.act == "leap" and self.landing is not None:
             out.append(self.landing)
-        elif self.act == "walk":
+        elif self.act in ("walk", "run"):
             out.append((self.goal, self.g))
         return out
 
@@ -478,7 +710,11 @@ class Cat:
     def show(self, pose: str, step: int | None = None) -> None:
         """Pose and place, in one request: one repaint."""
         content = look(pose, self.right, step, self.coat, self.skin)
-        self.sprite = self.home.put(self.sprite, self.x, self.g - H, content, z=self.z)
+        home = self.home
+        with home.together():
+            self.sprite = home.put(self.sprite, self.x, self.g - H, content, z=self.z)
+            if self.fish is not None and self.act == "leap":
+                self.fish.by(self, mouth=True)
 
     def rest(self, pose: str, now: float, seconds: float | None) -> None:
         """A pose held `seconds`; None: until something happens."""
@@ -489,6 +725,11 @@ class Cat:
         self.act, self.goal, self.due = "walk", goal, now
         self.right = goal >= self.x
 
+    def run(self, goal: int, now: float) -> None:
+        """A walk in a hurry, along its ledge."""
+        self.act, self.goal, self.due = "run", goal, now
+        self.right = goal >= self.x
+
     def jump(self, to: tuple[int, int], now: float, start: tuple[int, int]) -> None:
         """Leap from `start` (left column, row under the paws) to `to`."""
         self.act, self.due, self.landing = "leap", now, to
@@ -496,12 +737,15 @@ class Cat:
         self.path = arc(start, to)
 
     def quit(self) -> None:
-        """Leave the plate, forget the mouse."""
+        """Leave the plate and the ball, forget the mouse. A fish it has
+        stays with it."""
         if self.meal is not None:
             seats = self.meal.seats
             for side in [k for k, cat in seats.items() if cat is self]:
                 del seats[side]
-        self.meal, self.prey = None, False
+        if self.toy is not None and self.toy.player is self:
+            self.toy.player = None
+        self.meal, self.toy, self.prey = None, None, None
 
     def flee(self, now: float) -> None:
         """Somewhere else, at once; nowhere to go: stay."""
@@ -527,8 +771,12 @@ class Cat:
         self.path = [(x, y) for y in range(top, g + 1)]  # straight down
 
     def leave(self, now: float) -> None:
-        """Out of the view: wait, then come back in it."""
+        """Out of the view: wait, then come back in it. Its fish is
+        lost."""
         self.quit()
+        if self.fish is not None:
+            self.home.lose(self.fish, now)
+        self.spooked = False
         self.act, self.due = "away", now + self.rng.uniform(*AWAY)
 
     def dine(self, plate: Plate, right: bool, now: float) -> None:
@@ -542,7 +790,7 @@ class Cat:
         """Pounce: `to` is where the mouse is, or will be."""
         self.tries += 1
         self.jump(to, now, (self.x, self.g))
-        self.prey = True
+        self.prey = "mouse"
         if (mouse := self.home.mouse) is not None:
             mouse.scare(to[0], now)
 
@@ -551,16 +799,275 @@ class Cat:
         home = self.home
         self.x, self.g = self.landing or (self.x, self.g)
         home.stale = True  # a look around, soon
-        if self.meal is not None:
+        prey, self.prey = self.prey, None
+        if self.fish is not None:
+            self.settle(now)
+        elif self.meal is not None:
             self.right = self.meal.x > self.x
             self.rest("eat", now, BITE)
-        elif self.prey and home.caught(self):
-            self.prey = False
+        elif self.toy is not None:
+            self.reach(now)
+        elif prey == "mouse" and home.caught(self):
             home.shoo(now)
             self.rest("eat", now, 2.0)
+        elif prey == "fish":
+            self.grab(now)
+        elif prey == "steal":
+            self.snatch(now)
+        elif prey == "pointer" and self.holds(home.pointer):
+            self.swat(now)
+        elif prey == "pointer" and self.under(home.pointer):
+            self.rest("stare", now, 0.7)
+        elif prey == "pointer":
+            self.rest("puzzled", now, 0.8)
         else:
-            self.prey = False
             self.rest("alert", now, 0.9)
+
+    # -- the pointer --------------------------------------------------
+
+    def amuse(self, now: float) -> None:
+        """Its interest fades."""
+        self.fun *= math.exp(-max(0.0, now - self.mused) / FUN)
+        self.mused = now
+
+    def holds(self, p: tuple[int, int] | None) -> bool:
+        """The pointer at `p` is in its box, or next to it."""
+        return (
+            p is not None
+            and self.x - 1 <= p[0] <= self.x + W
+            and self.g - H <= p[1] < self.g
+        )
+
+    def under(self, p: tuple[int, int] | None) -> int:
+        """The rows from its box up to the pointer at `p` over it, when
+        it can leap that high; else 0."""
+        if p is None or not self.x <= p[0] < self.x + W:
+            return 0
+        rise = self.g - H - p[1]
+        return rise if 0 < rise <= REACH else 0
+
+    def notice(self, was: tuple[int, int] | None, now: float) -> None:
+        """The pointer moved from `was`, or went."""
+        p = self.home.pointer
+        self.amuse(now)
+        if p is None:
+            if self.toy is None and self.act in ("stare", "wiggle", "beg"):
+                self.rest("puzzled", now, 0.8)
+            return
+        if was is None:
+            self.fun = max(self.fun, 0.7)
+        else:
+            far = abs(p[0] - was[0]) + 2 * abs(p[1] - was[1])
+            self.fun = min(1.0, self.fun + 0.1 + 0.03 * far)
+        self.ignored = None
+        right = p[0] >= self.x + W // 2
+        if (
+            self.act in ("stare", "wiggle")
+            and self.toy is None
+            and self.fish is None
+            and right != self.right
+        ):
+            self.right = right  # it keeps its eyes on it
+            self.show(self.act)
+        if self.act in ("sleep", "yawn"):
+            dx, dy = POKE
+            close = abs(p[0] - self.x - W // 2) <= dx and abs(p[1] - self.g + 2) <= dy
+            if close:  # poked awake
+                self.rest("alert", now, 0.5)
+        elif self.act in ("sit", "groom", "alert", "stare", "puzzled", "purr"):
+            self.due = min(self.due, now + NOTICE)
+
+    def swat(self, now: float) -> None:
+        """It has the pointer: a few bats at it."""
+        p = self.home.pointer
+        if p is not None:
+            self.right = p[0] >= self.x + W // 2
+        self.rest("bat", now, 0.32 * self.rng.randint(2, 4))
+
+    def stalk(self, now: float) -> bool:
+        """What it does of the pointer. False: nothing, it has no
+        interest in it."""
+        home, rng = self.home, self.rng
+        p = home.pointer
+        self.amuse(now)
+        if p is None or p == self.ignored:
+            return False
+        if self.fun < BORED:
+            # A pointer that rests: under its paws, it purrs; else it
+            # turns away. Both until the pointer moves.
+            self.ignored = p
+            if self.holds(p):
+                self.rest("purr", now, rng.uniform(3.0, 5.0))
+            elif self.act in ("stare", "bat", "puzzled"):
+                self.right = p[0] < self.x + W // 2
+                self.rest("groom", now, rng.uniform(2.5, 5.0))
+            else:
+                return False
+            return True
+        home.fresh(now)
+        self.right = p[0] >= self.x + W // 2
+        to = home.below(self, p)
+        here = perch(home.spots, self.x, self.g)
+        if self.holds(p):
+            self.swat(now)
+        elif self.under(p):
+            self.rest("beg", now, rng.uniform(0.6, 1.2))
+        elif to is None:  # out of reach: it watches
+            self.rest("stare", now, 0.8)
+        elif (
+            here is not None
+            and to[1] == self.g
+            and here.has(to[0])
+            and abs(to[0] - self.x) > POUNCE
+        ):
+            gap = rng.randint(6, 10)
+            self.run(to[0] + (gap if to[0] < self.x else -gap), now)
+        else:
+            wait = (0.4 + 0.45 * rng.random()) * (1.25 - 0.5 * self.fun)
+            self.rest("wiggle", now, wait)
+        return True
+
+    def pounce(self, now: float) -> None:
+        """After the wiggle: at the pointer, where it is now."""
+        home = self.home
+        p = home.pointer
+        to = home.below(self, p) if p is not None else None
+        if to is None:
+            self.rest("stare" if p is not None else "puzzled", now, 0.8)
+        elif to == (self.x, self.g):
+            self.rest("stare", now, 0.2)
+        else:
+            self.jump(to, now, (self.x, self.g))
+            self.prey = "pointer"
+
+    def hop(self, now: float) -> None:
+        """After it begged: straight up at the pointer, and down."""
+        rise = self.under(self.home.pointer)
+        if not rise:
+            return self.rest("stare", now, 0.5)
+        ups = [(self.x, self.g - i) for i in range(1, rise + 1)]
+        self.act, self.due, self.landing = "leap", now, (self.x, self.g)
+        self.path = [*ups, ups[-1], *reversed(ups[:-1]), (self.x, self.g)]
+        self.prey = "pointer"
+
+    # -- the fish -----------------------------------------------------
+
+    def beside(self, fish: Fish) -> bool:
+        """It stands at an end of `fish`, which lies."""
+        return fish.y == self.g - 1 and self.x in (fish.x - W, fish.x + FW)
+
+    def grab(self, now: float) -> None:
+        """Landed by the fish that lay there: a paw on it."""
+        fish = self.home.fish
+        if fish is None or fish.holder is not None or not fish.left:
+            return self.rest("puzzled", now, 0.8)  # another has it
+        if not self.beside(fish):
+            return self.rest("alert", now, 0.9)
+        self.right = fish.x > self.x
+        fish.holder, self.fish, fish.until = self, fish, math.inf
+        fish.right = self.right
+        fish.show()
+        self.rest("bat", now, 0.5)
+
+    def snatch(self, now: float) -> None:
+        """Landed by the fish another eats: it has it, one time in two;
+        else it is hissed at, and goes."""
+        fish = self.home.fish
+        owner = fish.holder if fish is not None else None
+        if (
+            fish is None
+            or owner is None
+            or owner is self
+            or owner.act != "eat"
+            or not fish.left
+            or not self.beside(fish)
+        ):
+            return self.rest("puzzled", now, 0.8)
+        self.right = fish.x > self.x
+        if self.rng.random() < 0.5:
+            owner.fish = None
+            owner.rest("hiss", now, 1.2)
+            fish.holder, self.fish = self, fish
+            self.rest("bat", now, 0.35)
+        else:
+            owner.rest("hiss", now, 1.0)
+            self.spooked = True
+            self.rest("alert", now, 0.5)
+
+    def carry(self, now: float) -> None:
+        """Away with its fish, to eat it; nowhere to go: here."""
+        self.home.fresh(now)
+        if (to := self.pick(far=True)) is None:
+            return self.settle(now)
+        self.jump((to[0], to[1].g), now, (self.x, self.g))
+
+    def settle(self, now: float) -> None:
+        """Its fish down before it, on the side with room, and a bite."""
+        home, fish = self.home, self.fish
+        assert fish is not None
+        y = self.g - 1
+        if not home.free(self.x + W, y, FW, 1) and home.free(self.x - FW, y, FW, 1):
+            self.right = False
+        elif home.free(self.x + W, y, FW, 1):
+            self.right = True
+        fish.by(self)
+        self.rest("eat", now, BITE)
+
+    # -- the ball of yarn ---------------------------------------------
+
+    def play(self, yarn: Yarn, x: int, now: float) -> None:
+        """To the column `x`, next to `yarn`: a run along its ledge, or
+        a pounce."""
+        yarn.player, self.toy = self, yarn
+        here = perch(self.home.spots, self.x, self.g)
+        if (x, yarn.g) == (self.x, self.g):
+            self.reach(now)
+        elif (
+            here is not None
+            and here.g == yarn.g
+            and here.has(x)
+            and self.rng.random() < 0.5
+        ):
+            self.run(x, now)
+        else:
+            self.jump((x, yarn.g), now, (self.x, self.g))
+
+    def reach(self, now: float) -> None:
+        """By its ball: a bat at it; with no play left, on its back in
+        the thread. Not by it: it gives up."""
+        yarn = self.toy
+        assert yarn is not None
+        if self.g != yarn.g or self.x not in (yarn.x - W, yarn.x + 1) or yarn.run:
+            self.quit()
+            return self.rest("puzzled", now, 0.8)
+        self.right = yarn.x > self.x
+        if yarn.plays > 0:
+            self.rest("bat", now, 0.45)
+        else:
+            self.rest("roll", now, 1.8)
+
+    def knock(self, now: float) -> None:
+        """The bat lands: the ball rolls away, it watches."""
+        yarn = self.toy
+        assert yarn is not None
+        if yarn.knock(1 if self.right else -1, now):
+            self.rest("wiggle", now, self.rng.uniform(0.6, 1.0))
+        else:
+            yarn.plays = 0
+            self.rest("roll", now, 1.8)
+
+    def chase(self, now: float) -> None:
+        """After the ball, once it stopped."""
+        yarn = self.toy
+        assert yarn is not None
+        if yarn.run:
+            self.due = now + 0.15
+        elif (x := self.home.plaything(self)) is not None:
+            self.play(yarn, x, now)
+        else:
+            self.rest("roll", now, 1.8)
+
+    # -- what is due --------------------------------------------------
 
     def stir(self, now: float) -> None:
         """The pane went idle, or busy."""
@@ -591,30 +1098,79 @@ class Cat:
                 self.due = now + HOP
             else:
                 self.land(now)
-        elif self.act == "walk":
+        elif self.act in ("walk", "run"):
             ahead = self.x + (1 if self.goal > self.x else -1)
             if self.x == self.goal or home.taken(self, ahead, self.g):
                 self.goal = self.x
-                return self.rest("sit", now, rng.uniform(2.0, 6.0))
+                return self.halt(now)
             self.x = ahead
-            self.show("walk", self.x)
-            self.due = now + STEP
+            self.show(self.act, self.x)
+            self.due = now + (RUN if self.act == "run" else STEP)
         elif self.act == "eat" and self.meal is not None and self.meal.left:
             home.bite(self.meal, now)
             self.due = now + BITE
+        elif self.act == "eat" and self.fish is not None:
+            if home.nibble(self.fish, now):
+                self.due = now + BITE
+            else:
+                self.fish = None
+                self.rest("groom", now, rng.uniform(2.5, 5.0))
         elif self.act == "eat":  # the plate is empty, the mouse eaten
             self.quit()
             self.rest("groom", now, rng.uniform(2.5, 5.0))
+        elif self.act == "bat" and self.toy is not None:
+            self.knock(now)
+        elif self.act == "bat" and self.fish is not None:
+            self.carry(now)
+        elif self.act == "bat":  # at the pointer: it looks at it
+            self.rest("stare", now, rng.uniform(0.9, 2.5))
+        elif self.act == "hiss" and self.fish is not None:
+            self.rest("eat", now, BITE)
+        elif self.act == "wiggle" and self.toy is not None:
+            self.chase(now)
+        elif self.act == "wiggle":
+            self.pounce(now)
+        elif self.act == "beg":
+            self.hop(now)
+        elif self.act == "roll" and self.toy is not None:
+            self.toy.until = min(self.toy.until, now + UNDONE)
+            self.quit()
+            self.rest("groom", now, rng.uniform(2.5, 5.0))
+        elif self.spooked:
+            self.spooked = False
+            self.flee(now)
+            if self.act != "leap":
+                self.rest("sit", now, rng.uniform(2.0, 5.0))
+        elif self.stalk(now):
+            pass
         elif (aim := home.scent(self)) is not None:
             self.hunt(aim, now)
+        elif (aim := home.bait(self)) is not None:
+            self.jump(aim, now, (self.x, self.g))
+            self.prey = "fish"
+        elif (aim := home.loot(self)) is not None:
+            self.jump(aim, now, (self.x, self.g))
+            self.prey = "steal"
         elif (seat := home.seat(self)) is not None:
             self.dine(*seat, now)
+        elif (x := home.plaything(self)) is not None and home.yarn is not None:
+            self.play(home.yarn, x, now)
         elif self.act == "yawn":
             self.rest("sleep", now, None)
         elif home.idle:
             self.rest("yawn", now, 1.4)
         else:
             self.wander(now)
+
+    def halt(self, now: float) -> None:
+        """The walk is over, or the run: by the ball, or within a
+        pounce of the pointer."""
+        if self.toy is not None:
+            self.reach(now)
+        elif self.act == "run":
+            self.rest("wiggle", now, self.rng.uniform(0.3, 0.7))
+        else:
+            self.rest("sit", now, self.rng.uniform(2.0, 6.0))
 
     def wander(self, now: float) -> None:
         """Awake with nothing to do: groom, walk the ledge, hop to
@@ -639,10 +1195,12 @@ class Cat:
 
 class Home:
     """What the cats share: the frame, its text and its ledges, the
-    cursor, whether the pane is idle; the plates and the mouse.
+    cursor, whether the pane is idle; the plates, the mouse, the fish
+    and the ball of yarn; the pointer.
 
     `count` cats, a coat each; `varied`: coats and skins drawn. `food`,
-    `mice`: plates and mice now and then, from `now` on."""
+    `mice`, `fish`, `toys`: plates, mice, fishes and balls now and
+    then, from `now` on. `hunt`: the host mouse is told (`mat`)."""
 
     def __init__(
         self,
@@ -655,6 +1213,9 @@ class Home:
         varied: bool = False,
         food: bool = False,
         mice: bool = False,
+        fish: bool = False,
+        toys: bool = False,
+        hunt: bool = False,
         now: float = 0.0,
     ) -> None:
         self.pilot = pilot
@@ -682,6 +1243,16 @@ class Home:
         self.mouse: Mouse | None = None
         self.next_food = now + rng.uniform(4.0, 10.0) if food else math.inf
         self.next_mouse = now + rng.uniform(3.0, 8.0) if mice else math.inf
+        self.fish: Fish | None = None
+        self.yarn: Yarn | None = None
+        self.next_fish = now + rng.uniform(5.0, 12.0) if fish else math.inf
+        self.next_toy = now + rng.uniform(6.0, 14.0) if toys else math.inf
+        self.hunt = hunt
+        self.pointer: tuple[int, int] | None = None  # frame cells
+        #: A sprite of nothing over the view: the host mouse is told on
+        #: sprites only. With its size.
+        self.mat: tuple[Sprite, int, int] | None = None
+        self.joint = False  # in `together`
 
     # -- the place ----------------------------------------------------
 
@@ -701,9 +1272,45 @@ class Home:
             self.rows, self.view = rows, box
             self.spots = ledges(rows, box)
             self.read, self.stale = now, False
+            if self.hunt:
+                self.carpet(width, height)
             self.lay(now)
             return True
         return False
+
+    def fresh(self, now: float) -> None:
+        """Read the view if it changed, or was read long ago."""
+        if self.stale or now - self.read > 2.0:
+            self.survey(now)
+
+    def carpet(self, width: int, height: int) -> None:
+        """The mat, as large as the view."""
+        if self.mat is not None:
+            if self.mat[1:] == (width, height):
+                return
+            self.mat[0].remove()
+        mat = self.pilot.draw(
+            frame=self.frame.id,
+            at=(0, 0),
+            space="view",
+            layer=self.layer,
+            z=-9,
+            cells=[[{"t": " " * width}]] * height,
+        )
+        self.mat = (mat, width, height)
+
+    @contextlib.contextmanager
+    def together(self) -> Iterator[None]:
+        """What is `put` inside: one request, one repaint."""
+        if self.joint:
+            yield
+            return
+        self.joint = True
+        try:
+            with self.pilot.batch():
+                yield
+        finally:
+            self.joint = False
 
     def free(self, x: int, y: int, w: int, h: int) -> bool:
         """The box at (`x`, `y`) is in the view as read, with no text."""
@@ -736,7 +1343,7 @@ class Home:
                 z=z,
                 **content,
             )
-        with self.pilot.batch():
+        with self.together():
             sprite.update(anchor={"at": [x, y], "space": "frame"})
             sprite.set(**content)
         return sprite
@@ -745,43 +1352,75 @@ class Home:
         """Something new to see: the cats at rest look soon; of those
         asleep, a share."""
         for cat in self.cats:
-            if cat.act in ("sit", "groom", "alert") or (
+            if cat.act in ("sit", "groom", "alert", "stare", "puzzled", "purr") or (
                 cat.act in ("sleep", "yawn") and self.rng.random() < asleep
             ):
                 cat.due = min(cat.due, now + self.rng.uniform(0.2, 1.2))
 
     # -- the plates ---------------------------------------------------
 
-    def chairs(self, x: int, g: int) -> list[tuple[bool, int]]:
-        """The sides of a plate at `x` above `g` with room for a cat:
-        whether it faces right there, and its column."""
-        sides = ((True, x - W), (False, x + PW))
+    def things(self) -> list[tuple[int, int, int]]:
+        """What lies on a floor, a row high: its left column, the row
+        under it, its width. Plates, a fish, a ball."""
+        out = [(p.x, p.g, PW) for p in self.plates]
+        fish, yarn = self.fish, self.yarn
+        if fish is not None and (fish.holder is None or fish.holder.act != "leap"):
+            out.append((fish.x, fish.g, FW))
+        if yarn is not None:
+            out.append((yarn.x, yarn.g, 1))
+        return out
+
+    def chairs(self, x: int, g: int, w: int = PW) -> list[tuple[bool, int]]:
+        """The sides of a thing of `w` cells at `x` above `g` with room
+        for a cat: whether it faces right there, and its column."""
+        sides = ((True, x - W), (False, x + w))
         return [(r, cx) for r, cx in sides if self.free(cx, g - H, W, H)]
 
-    def room(self, x: int, g: int) -> bool:
-        """A plate fits at `x` above `g`: no text, no other plate."""
-        return self.free(x, g - PH, PW, PH) and not any(
-            abs(x - p.x) < PW + 1 and abs(g - p.g) < PH for p in self.plates
+    def room(self, x: int, g: int, w: int = PW) -> bool:
+        """A thing of `w` cells fits at `x` above `g`: no text, no
+        other thing."""
+        return self.free(x, g - 1, w, 1) and not any(
+            tg == g and x < tx + tw + 1 and tx < x + w + 1
+            for tx, tg, tw in self.things()
         )
 
     def laid(self, x: int, g: int) -> bool:
-        """A plate is in the box of a cat at `x` above `g`."""
+        """A thing is in the box of a cat at `x` above `g`."""
         return any(
-            abs(g - p.g) < H and x < p.x + PW and p.x < x + W for p in self.plates
+            abs(g - tg) < H and x < tx + tw and tx < x + W
+            for tx, tg, tw in self.things()
         )
 
-    def beside(self, x: int, y: int, n: int) -> tuple[int, int] | None:
-        """Where the plate of the word at (`x`, `y`), `n` cells, goes:
-        right of it, left of it, or on it; first where a cat can sit."""
+    def beside(self, x: int, y: int, n: int, w: int = PW) -> tuple[int, int] | None:
+        """Where the thing of `w` cells of the word at (`x`, `y`), `n`
+        cells, goes: right of it, left of it, or on it; first where a
+        cat can sit."""
         x0, _, x1, _ = self.view
-        over = max(x0, min(x + (n - PW) // 2, x1 - PW))
+        over = max(x0, min(x + (n - w) // 2, x1 - w))
         sites = [
             site
-            for site in ((x + n + GAP, y + 1), (x - PW - GAP, y + 1), (over, y))
-            if self.room(*site)
+            for site in ((x + n + GAP, y + 1), (x - w - GAP, y + 1), (over, y))
+            if self.room(*site, w)
         ]
-        seated = (site for site in sites if self.chairs(*site))
+        seated = (site for site in sites if self.chairs(*site, w))
         return next(seated, sites[0] if sites else None)
+
+    def site(self, w: int) -> tuple[int, int] | None:
+        """A place on a ledge for a thing of `w` cells: off the cats
+        and the cursor, with room for a cat next to it."""
+        rng = self.rng
+        for s in rng.sample(self.spots, len(self.spots)):
+            x = rng.randint(s.x0, s.x1 + W - w)
+            busy = any(
+                og == s.g and ox < x + w + 1 and x < ox + W + 1
+                for cat in self.cats
+                for ox, og in cat.claims()
+            )
+            if busy or near(x, s.g, self.cursor) or not self.room(x, s.g, w):
+                continue
+            if self.chairs(x, s.g, w):
+                return (x, s.g)
+        return None
 
     def dish(
         self, at: tuple[int, int], word: tuple[int, int] | None, until: float
@@ -792,27 +1431,51 @@ class Home:
         return plate
 
     def lay(self, now: float) -> None:
-        """After a read: a plate for each `food` in the view; those
-        whose word went, or with text over them, go. The mouse goes
-        with its ledge."""
+        """After a read: a plate for each `food` in the view, a fish
+        for a `fish`, a ball for a `toy`, one at a time; those whose
+        word went, or with text over them, go. The mouse goes with its
+        ledge."""
         x0, y0 = self.view[:2]
         words = {
-            (x0 + m.start(), y0 + y): len(m[0])
+            (x0 + m.start(), y0 + y): m[0].lower()
             for y, row in enumerate(self.rows)
             for m in _WORD.finditer(row)
         }
+
+        def lost(word: tuple[int, int] | None, x: int, g: int, w: int) -> bool:
+            return (word is not None and word not in words) or not self.free(
+                x, g - 1, w, 1
+            )
+
         for plate in [*self.plates]:
-            gone = plate.word is not None and plate.word not in words
-            if gone or not self.free(plate.x, plate.g - PH, PW, PH):
+            if lost(plate.word, plate.x, plate.g, PW):
                 self.clear(plate, now)
+        fish, yarn = self.fish, self.yarn
+        lying = fish is not None and fish.holder is None and fish.left
+        if fish is not None and lying and lost(fish.word, fish.x, fish.g, FW):
+            self.lose(fish, now)
+        if yarn is not None and lost(yarn.word, yarn.x, yarn.g, 1):
+            self.wind(now)
         self.eaten &= words.keys()
         laid = {plate.word for plate in self.plates} | self.eaten
-        for word, n in words.items():
-            if len(self.plates) >= PLATES:
-                break
-            if word not in laid and (at := self.beside(*word, n)) is not None:
+        laid |= {thing.word for thing in (self.fish, self.yarn) if thing is not None}
+        for word, kind in words.items():
+            if word in laid:
+                continue
+            w, full = PW, len(self.plates) >= PLATES
+            if kind == "fish":
+                w, full = FW, self.fish is not None
+            elif kind == "toy":
+                w, full = 1, self.yarn is not None
+            if full or (at := self.beside(*word, len(kind), w)) is None:
+                continue
+            if kind == "food":
                 self.dish(at, word, math.inf)
                 self.call(now)
+            elif kind == "fish":
+                self.drop(at, word, math.inf)
+            else:
+                self.spool(at, word, math.inf)
         mouse = self.mouse
         if mouse is not None and not any(
             s.g == mouse.g and s.x0 <= mouse.lo and mouse.hi <= s.x1 + W - MW
@@ -822,23 +1485,13 @@ class Home:
 
     def serve(self, now: float) -> None:
         """A plate of `--food`, on a ledge with room for a cat."""
-        rng = self.rng
         self.next_food = now + 5.0  # nowhere to put it: soon again
         if len(self.plates) >= PLATES or (self.stale and not self.survey(now)):
             return
-        for s in rng.sample(self.spots, len(self.spots)):
-            x = rng.randint(s.x0, s.x1 + W - PW)
-            busy = any(
-                og == s.g and ox < x + PW + 1 and x < ox + W + 1
-                for cat in self.cats
-                for ox, og in cat.claims()
-            )
-            if busy or near(x, s.g, self.cursor) or not self.room(x, s.g):
-                continue
-            if self.chairs(x, s.g):
-                self.dish((x, s.g), None, now + rng.uniform(*SERVED))
-                self.next_food = math.inf  # after this one
-                return self.call(now)
+        if (at := self.site(PW)) is not None:
+            self.dish(at, None, now + self.rng.uniform(*SERVED))
+            self.next_food = math.inf  # after this one
+            self.call(now)
 
     def seat(self, cat: Cat) -> tuple[Plate, bool] | None:
         """The nearest free side of a plate with food left."""
@@ -875,6 +1528,186 @@ class Home:
                 cat.rest("alert", now, 0.6)
         if plate.word is None:
             self.next_food = now + self.rng.uniform(*FOOD)
+
+    # -- the fish -----------------------------------------------------
+
+    def drop(
+        self, at: tuple[int, int], word: tuple[int, int] | None, until: float
+    ) -> None:
+        """A fish at `at`, alive."""
+        self.fish = Fish(self, *at, word, until)
+        self.fish.show(flop=True)
+        self.call(now=self.read, asleep=0.5)
+
+    def toss(self, now: float) -> None:
+        """A fish of `--fish`, on a ledge with room for a cat."""
+        self.next_fish = now + 5.0  # nowhere to put it: soon again
+        if self.fish is not None or (self.stale and not self.survey(now)):
+            return
+        if (at := self.site(FW)) is not None:
+            self.drop(at, None, now + self.rng.uniform(*LYING))
+            self.next_fish = math.inf  # after this one
+
+    def lose(self, fish: Fish, now: float) -> None:
+        """The fish goes: eaten, lost, or never taken."""
+        if fish.sprite is not None:
+            fish.sprite.remove()
+        if fish.holder is not None:
+            fish.holder.fish = None
+        if fish is self.fish:
+            self.fish = None
+            if fish.word is None:
+                self.next_fish = now + self.rng.uniform(*FISHES)
+
+    def bait(self, cat: Cat) -> tuple[int, int] | None:
+        """Where `cat` lands to take the fish that lies: its nearest
+        free end."""
+        fish = self.fish
+        if fish is None or fish.holder is not None or not fish.left:
+            return None
+        ends = [
+            (math.hypot(cx - cat.x, 2 * (fish.g - cat.g)), cx)
+            for _, cx in self.chairs(fish.x, fish.g, FW)
+            if not near(cx, fish.g, self.cursor) and not self.taken(cat, cx, fish.g)
+        ]
+        return (min(ends)[1], fish.g) if ends else None
+
+    def loot(self, cat: Cat) -> tuple[int, int] | None:
+        """Where `cat` lands to steal the fish another eats: its other
+        end. One time in two, `STEALS` tries a fish."""
+        fish = self.fish
+        owner = fish.holder if fish is not None else None
+        if (
+            fish is None
+            or owner is None
+            or owner is cat
+            or owner.act != "eat"
+            or not fish.left
+            or fish.steals >= STEALS
+            or self.rng.random() < 0.5
+        ):
+            return None
+        x = fish.x + FW if owner.right else fish.x - W
+        free = self.free(x, fish.g - H, W, H) and not self.taken(cat, x, fish.g)
+        if not free or near(x, fish.g, self.cursor):
+            return None
+        fish.steals += 1
+        return (x, fish.g)
+
+    def nibble(self, fish: Fish, now: float) -> bool:
+        """A portion less. False at the last: what is left goes soon,
+        and its word gets no other."""
+        fish.left -= 1
+        fish.show()
+        if fish.left:
+            return True
+        fish.holder, fish.until = None, now + EMPTY
+        if fish.word is not None:
+            self.eaten.add(fish.word)
+        return False
+
+    # -- the ball of yarn ---------------------------------------------
+
+    def lane(self, x: int, g: int) -> tuple[int, int]:
+        """The columns a ball at `x` above `g` can roll to: free cells
+        of its row, `LANE` to each side at most."""
+        lo = hi = x
+        while x - lo < LANE and self.free(lo - 1, g - 1, 1, 1):
+            lo -= 1
+        while hi - x < LANE and self.free(hi + 1, g - 1, 1, 1):
+            hi += 1
+        return lo, hi
+
+    def spool(
+        self, at: tuple[int, int], word: tuple[int, int] | None, until: float
+    ) -> None:
+        """A ball of yarn at `at`."""
+        self.yarn = Yarn(self, *at, word, until)
+        self.yarn.show()
+        self.call(now=self.read, asleep=0.5)
+
+    def throw(self, now: float) -> None:
+        """A ball of `--toys`, on a ledge with room for a cat."""
+        self.next_toy = now + 5.0  # nowhere to put it: soon again
+        if self.yarn is not None or (self.stale and not self.survey(now)):
+            return
+        if (at := self.site(1)) is not None:
+            self.spool(at, None, now + self.rng.uniform(*LYING))
+            self.next_toy = math.inf  # after this one
+
+    def plaything(self, cat: Cat) -> int | None:
+        """The column where `cat` stands to play with the ball: next to
+        it, on its side first. None: no ball for it, or no room."""
+        yarn = self.yarn
+        if yarn is None or yarn.run or yarn.player not in (None, cat):
+            return None
+        if yarn.player is None and not yarn.plays:
+            return None
+        sides = [yarn.x - W, yarn.x + 1]
+        if 2 * cat.x + W > 2 * yarn.x:
+            sides.reverse()
+        for x in sides:
+            free = self.free(x, yarn.g - H, W, H) and not self.taken(cat, x, yarn.g)
+            if free and not near(x, yarn.g, self.cursor):
+                return x
+        return None
+
+    def wind(self, now: float) -> None:
+        """The ball goes, its thread after it; played out, its word
+        gets no other."""
+        yarn = self.yarn
+        if yarn is None:
+            return
+        self.yarn = None
+        if (cat := yarn.player) is not None:
+            cat.quit()
+            if cat.act in ("bat", "wiggle", "roll"):
+                cat.rest("alert", now, 0.6)
+        if yarn.ball is not None:
+            yarn.ball.remove()
+        if yarn.wire is not None:
+            x0, n = yarn.ends[0], yarn.ends[1] - yarn.ends[0] + 1
+            try:
+                yarn.wire.set(**thread_look(x0, n, yarn.color, fade=True))
+            except PtyrcError as exc:  # the driver took it, with its rows
+                if exc.code not in ("no-sprite", "gone"):
+                    raise
+        if yarn.word is None:
+            self.next_toy = now + self.rng.uniform(*TOYS)
+        elif not yarn.plays:
+            self.eaten.add(yarn.word)
+
+    # -- the pointer --------------------------------------------------
+
+    def below(self, cat: Cat, p: tuple[int, int]) -> tuple[int, int] | None:
+        """Where `cat` stands to have the pointer at `p` in its box, or
+        over it within `REACH` rows: the place under it first, then the
+        nearest."""
+        px, py = p
+        best = None
+        for s in self.spots:
+            x = max(s.x0, min(px - W // 2, s.x1))
+            if not (s.g - H - REACH <= py < s.g and x <= px < x + W):
+                continue
+            if near(x, s.g, self.cursor) or self.laid(x, s.g):
+                continue
+            if self.taken(cat, x, s.g):
+                continue
+            rise = max(0, s.g - H - py)
+            cost = (rise, math.hypot(x - cat.x, 2 * (s.g - cat.g)), x, s.g)
+            best = cost if best is None else min(best, cost)
+        return best[2:] if best is not None else None
+
+    def point(self, data: dict[str, Any], now: float) -> None:
+        """A move of the host mouse: where it is in the frame, None
+        when it is out of it."""
+        at = None
+        if data.get("sprite") is not None and data.get("frame") == self.frame.id:
+            at = tuple(data["pos"])
+        was, self.pointer = self.pointer, at
+        if at != was:
+            for cat in self.cats:
+                cat.notice(was, now)
 
     # -- the mouse ----------------------------------------------------
 
@@ -944,6 +1777,8 @@ class Home:
             for cat in self.cats:
                 if near(cat.x, cat.g, self.cursor):
                     cat.flee(now)
+        elif topic == "hover":
+            self.point(data, now)
         elif topic in ("screen", "frames"):
             self.stale = True
 
@@ -968,7 +1803,8 @@ class Home:
         if not self.survey(now):
             return
         for cat, info in seen:
-            off = cat.meal is None and perch(self.spots, cat.x, cat.g) is None
+            held = cat.meal is not None or cat.fish is not None or cat.toy is not None
+            off = not held and perch(self.spots, cat.x, cat.g) is None
             if info is not None and (info["covered"] > COVERED or off):
                 cat.flee(now)
 
@@ -994,6 +1830,22 @@ class Home:
                     self.clear(plate, now)
         if now >= self.next_food:
             self.serve(now)
+        fish, yarn = self.fish, self.yarn
+        if fish is not None and now >= fish.until:
+            self.lose(fish, now)
+        elif fish is None and now >= self.next_fish:
+            self.toss(now)
+        if yarn is not None and now >= yarn.due:
+            yarn.step(now)
+        if yarn is not None and not yarn.plays and yarn.player is None:
+            yarn.until = min(yarn.until, now + UNDONE)  # played out, left
+        if yarn is not None and now >= yarn.until:
+            if yarn.plays and yarn.player is not None:
+                yarn.until = now + 2 * BITE  # not under its paws
+            else:
+                self.wind(now)
+        elif yarn is None and now >= self.next_toy:
+            self.throw(now)
 
     def due(self, now: float) -> float:
         """When `step` has something to do."""
@@ -1001,6 +1853,9 @@ class Home:
         times += [plate.until for plate in self.plates]
         times += [self.next_food, now + READ if self.stale else math.inf]
         times.append(self.next_mouse if self.mouse is None else self.mouse.due)
+        fish, yarn = self.fish, self.yarn
+        times.append(self.next_fish if fish is None else fish.until)
+        times.append(self.next_toy if yarn is None else min(yarn.due, yarn.until))
         return min(times)
 
     def move(self, frame: Frame, now: float) -> None:
@@ -1011,11 +1866,18 @@ class Home:
                 if cat.sprite is not None:
                     cat.sprite.remove()
                     cat.sprite = None
+        if self.mat is not None:
+            self.mat[0].remove()
+            self.mat = None
         self.frame = frame
+        self.pointer = None
         for plate in [*self.plates]:
             self.clear(plate, now)
         if self.mouse is not None:
             self.shoo(now)
+        if self.fish is not None:
+            self.lose(self.fish, now)
+        self.wind(now)
         for cat in self.cats:
             cat.leave(now)
 
@@ -1033,11 +1895,17 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
         varied=args.random,
         food=args.food,
         mice=args.mice,
+        fish=args.fish,
+        toys=args.toys,
+        hunt=args.hunt,
         now=start,
     )
     # With a snapshot the first events tell what already is: whether
     # the frame is idle, where the cursor is. Nothing is asked.
     pilot.subscribe("idle", "cursor", "screen", "frames", snapshot=True)
+    if args.hunt:
+        # The driver asks the host for the moves of its mouse.
+        pilot.subscribe("hover")
     end = None if seconds is None else start + seconds
     lost = 0.0  # since when the frame is out of sight
     # Until the session ends: a closed connection raises out of `events`.
@@ -1086,12 +1954,14 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
     )
     out.add_argument("--food", action="store_true", help="a plate now and then")
     out.add_argument("--mice", action="store_true", help="a mouse now and then")
-    out.add_argument(
-        "-a", "--all", action="store_true", help="--random --food --mice, two cats"
-    )
+    out.add_argument("--fish", action="store_true", help="a fish now and then")
+    out.add_argument("--toys", action="store_true", help="a ball of yarn now and then")
+    out.add_argument("--hunt", action="store_true", help="the cats hunt the host mouse")
+    out.add_argument("-a", "--all", action="store_true", help="all of these, two cats")
     args = _cli.parse(out, argv)
     if args.all:
         args.random = args.food = args.mice = True
+        args.fish = args.toys = args.hunt = True
     if args.count is None:
         args.count = 2 if args.all else 1
     if not 1 <= args.count <= MAX_CATS:
