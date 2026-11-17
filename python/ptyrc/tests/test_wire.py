@@ -54,6 +54,39 @@ def test_a_reply_in_many_pieces_among_events(tmp_path: Path) -> None:
         server.close()
 
 
+@pytest.mark.parametrize("refused", [True, False])
+def test_a_request_cut_by_the_driver(tmp_path: Path, refused: bool) -> None:
+    """The driver closes before a request is all sent: the call fails
+    with the error it wrote first, when it wrote one."""
+    path = tmp_path / "s.sock"
+    server = socket.socket(socket.AF_UNIX)
+    server.bind(str(path))
+    server.listen(1)
+    error = {"code": "bad-request", "message": "line too long", "hint": "16 MiB"}
+
+    def serve() -> None:
+        peer, _ = server.accept()
+        peer.sendall(line({"event": "hello", "data": {"protocol": 1}}))
+        peer.recv(65536)
+        if refused:
+            peer.sendall(line({"id": None, "error": error}))
+        peer.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    conn = Connection(path)
+    try:
+        with pytest.raises(PtyrcError) as err:
+            conn.call("draw.put", {"content": "y" * (8 << 20)}, timeout=5.0)
+        if refused:
+            assert (err.value.code, err.value.hint) == ("bad-request", "16 MiB")
+        else:
+            assert err.value.code == "gone" and "Errno" in err.value.message
+        assert not conn._pending
+    finally:
+        conn.close()
+        server.close()
+
+
 def test_a_request_the_driver_cannot_read_fails_the_call(shell: Pilot) -> None:
     """The start of a request, as a write cut by an interrupt leaves it:
     the next one ends that line. The driver answers without an id; the

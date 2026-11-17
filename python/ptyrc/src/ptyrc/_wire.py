@@ -269,11 +269,20 @@ class Connection:
             separators=(",", ":"),
         )
         try:
-            with self._send_lock:
-                self._sock.sendall(line.encode() + b"\n")
-            msg = waiter.get(timeout=timeout)
-        except OSError as exc:
-            raise PtyrcError("gone", str(exc)) from exc
+            try:
+                with self._send_lock:
+                    self._sock.sendall(line.encode() + b"\n")
+            except OSError as exc:
+                # The driver may have refused the line and closed: the
+                # reader then has its words, or the end, in a moment.
+                try:
+                    msg = waiter.get(timeout=min(timeout, 1.0))
+                except queue.Empty:
+                    msg = None
+                if msg is None:
+                    raise PtyrcError("gone", str(exc)) from exc
+            else:
+                msg = waiter.get(timeout=timeout)
         except queue.Empty:
             raise PtyrcError("timeout", f"no reply to {method}") from None
         finally:
