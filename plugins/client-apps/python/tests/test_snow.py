@@ -6,11 +6,15 @@ from __future__ import annotations
 import random
 import threading
 import time
+from typing import TYPE_CHECKING
 
 import pytest
 from ptyrc import Pilot, PtyrcError, Sprite
 from ptyrc import clock as session_clock
 from ptyrc_apps import snow
+
+if TYPE_CHECKING:
+    from conftest import Host
 
 DRIFT = "▁▂▃▄▅▆▇█"
 
@@ -135,3 +139,56 @@ def test_snow_without_cover(session: Pilot) -> None:
         assert seen > looks // 2
     finally:
         thread.join()
+
+
+def test_all(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`-a`: `--cover`, `--hover`, and no limit unless one is given."""
+    seen: list[tuple[bool, bool, int]] = []
+    monkeypatch.setattr(
+        snow._cli,
+        "run",
+        lambda app, args: seen.append((args.cover, args.hover, args.max_depth)) or 0,
+    )
+    for argv in (["-a"], ["--all", "--max-depth", "2"], [], ["--hover"]):
+        assert snow.main(argv) == 0
+    assert seen == [
+        (True, True, 0),
+        (True, True, 2),
+        (False, False, snow.DEEP),
+        (False, True, snow.DEEP),
+    ]
+
+
+@pytest.mark.realtime
+def test_hover(hosted: tuple[Host, Pilot]) -> None:
+    """The host mouse takes the snow it is over; it lies again after."""
+    host, pilot = hosted
+    args = ["-s", pilot.session, "-a", "-f", "raw", "--rate", "900", "--wind", "0"]
+    status: list[int] = []
+    thread = threading.Thread(target=lambda: status.append(snow.main(args, seconds=20)))
+    thread.start()
+
+    def floor() -> str:
+        return pilot.dump()["host"][23]
+
+    try:
+        host.wait_seen(b"\x1b[?1003h")
+        deadline = time.monotonic() + 10
+        while floor()[30:50] != "█" * 20:
+            assert time.monotonic() < deadline, floor()
+            time.sleep(0.1)
+        # Three cells of the row; a flake may be on its way through.
+        host.move(40, 23)
+        deadline = time.monotonic() + 3
+        while any(c in DRIFT for c in floor()[39:42]):
+            assert time.monotonic() < deadline, floor()
+            time.sleep(0.05)
+        assert floor()[36:39] == floor()[42:45] == "███", floor()
+        # The pointer rests: after a while it snows there again.
+        deadline = time.monotonic() + 9
+        while floor()[39:42] != "███":
+            assert time.monotonic() < deadline, floor()
+            time.sleep(0.1)
+    finally:
+        thread.join()
+    assert status == [0]

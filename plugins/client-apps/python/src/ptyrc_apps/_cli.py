@@ -12,6 +12,7 @@ from typing import Any
 from ptyrc import Cursor, Frame, Pilot, PtyrcError, Sprite, clock
 
 __all__ = [
+    "Nozzle",
     "Sight",
     "follow",
     "frame_arg",
@@ -160,12 +161,63 @@ def movable(pilot: Pilot) -> bool:
     return True
 
 
+class Nozzle:
+    """The host pointer over a frame, told to the effect of `sprite`:
+    `Sprite.tune(hover=[x, y])`, a cell of the view, or `hover=None`
+    when the pointer is elsewhere.
+
+    A hover is told on a sprite, and not on an effect: a sprite of
+    blanks, the size of the view, lies under the effect (`z` -1). The
+    pointer on a sprite over it is not on the frame. On a driver without
+    the topic `hover` nothing is told."""
+
+    def __init__(self, pilot: Pilot, frame: Frame, sprite: Sprite) -> None:
+        self.sprite = sprite
+        self.at: list[int] | None = None  # as last told
+        self.pad: Sprite | None = None
+        try:
+            pilot.subscribe("hover")
+        except PtyrcError as exc:
+            if exc.code != "bad-params":
+                raise
+            return
+        self._on = (frame.id, frame.size)
+        self.pad = pilot.draw(
+            self._blank(frame), frame=frame.id, at=(0, 0), space="view", z=-1
+        )
+
+    @staticmethod
+    def _blank(frame: Frame) -> list[str]:
+        w, h = frame.size
+        return [" " * w] * h
+
+    def place(self, frame: Frame) -> None:
+        """The frame followed is `frame` now, or has another size."""
+        if self.pad is None or self._on == (frame.id, frame.size):
+            return
+        with contextlib.suppress(PtyrcError):  # gone, or settling: the next one
+            if self._on[0] != frame.id:
+                self.pad.update(frame=frame.id)
+            self.pad.set(self._blank(frame))
+            self._on = (frame.id, frame.size)
+
+    def hover(self, data: dict[str, Any]) -> None:
+        """An event of the topic `hover`."""
+        if self.pad is None:
+            return
+        at = data.get("at") if data.get("sprite") == self.pad.id else None
+        if at != self.at:
+            self.at = at
+            self.sprite.tune(hover=at)
+
+
 def follow(
     pilot: Pilot,
     frame: Frame,
     sprite: Sprite,
     seconds: float | None = None,
     beats: Iterator[float] | None = None,
+    hover: bool = False,
 ) -> None:
     """Stay connected, until the session ends or for `seconds`; move
     `sprite` to the pane that takes the place of `frame`. Driven by the
@@ -177,13 +229,16 @@ def follow(
 
     `beats`: the app's own work between two events. Each `next()` gives
     the seconds to wait before the one after: a generator does its work
-    after each `yield`."""
+    after each `yield`.
+
+    `hover`: the effect of `sprite` is told the pointer (`Nozzle`)."""
     now = clock.monotonic()
     end = None if seconds is None else now + seconds
     beat = None if beats is None else now + next(beats)
     screen: tuple[int, int] | None = None  # when `frame` was last settled
     pilot.subscribe("frames", "exit", snapshot=True)
     movable(pilot)
+    nozzle = Nozzle(pilot, frame, sprite) if hover else None
     while True:
         now = clock.monotonic()
         if end is not None and now >= end:
@@ -196,6 +251,12 @@ def follow(
             continue
         if event[0] == "exit":
             return
+        if event[0] == "hover":
+            if nozzle is not None:
+                nozzle.hover(event[1])
+            continue
+        if nozzle is not None:
+            nozzle.place(frame)  # as the last event left it
         if event[0] == "move":
             try:
                 new = pilot.frame(event[1]["frame"])

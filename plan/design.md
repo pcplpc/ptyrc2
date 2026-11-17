@@ -1830,7 +1830,7 @@ Shared by the apps (`_cli.py`, `_arcade.py`):
 | `timer` | `raw` | one tag, faces 5x1 to 46x12. `Run(phases, now, speed, loop)` gives a `State` at a time of the session clock (`toggle`: pause); `face(state, w, h, look, hover)` is pure. The hourglass of `k` rows a bulb is `2k + 1` cells by `2k + 2`; `bulbs(k)` orders the dots of each bulb (2 by 4 a cell, the walls and plates apart): the upper in the order they leave, the lower in the order they are taken; `fallen(k, share)` is `floor(N * share)`, `N` only when the share is 1: the glass is empty when the time ends, not before. A new phase: `spin`, half a turn in `TURN` (1.2 s), drawn in braille and made smaller while it does not fit. The end: `widget.show` again with the border `alert` (`-r`) and, or, `modal` (`--modal`); `confetti.burst` at the widget (`-b`). The title is set with the content: the time left, on a glass alone. |
 | `pace` | `raw` | topics `input`, `cursor`, `text`, `widgets`, `hover`. Keys are counted by slot of 10 s over 30 min (`Meter`); no byte is kept. Words come from the screen: `Reader.see(row, text, x, keyed)` on the row of the cursor after the events of a burst; a word counts when at least half of it grew a cell a key and a separator or a new line ended it; growth of more cells than keys came since the last look is not typed. Known limit: the screen row and the cursor cell are taken as one index (wide glyphs before the cursor shift it). `wordy(word, token)`: the filter; measured in `tests/test_pace.py`: under 1 % of the pieces of random base64, base32 and SHA-256 pass, over 95 % of the words of a text do. |
 | `rain` | `raw` | native effect `rain` (draw extension `rain`), one request, back layer; `--rate` drops per second over 80 columns; a drop lands on a free cell over text with probability 0.45, on the cursor and the floor always; `-t`, `--transparent` (param `transparent`, tunable): on the floor only, the last row of the pane, behind every line and the cursor; a column whose least still cell (heat, within 3 columns) just changed gets 10 % of its rain, all of it after 10 s; a replaced frame is followed as `sand` does |
-| `snow` | `largest` | native effect `snow` (draw extension `snow`), one request, back layer; `--rate` flakes per second over 80 columns (14), `--cover`: the snow lies, else it only falls, `--max-depth` rows a pile holds (3; 0: no limit), `--wind` columns per second (-1): every 6 to 15 s the app sends another wind, 0.2 to 2 times as strong, the other way one time in five (`Sprite.tune(wind=)`: tuned in place), as the `beats` of `_cli.follow` |
+| `snow` | `largest` | native effect `snow` (draw extension `snow`), one request, back layer; `--rate` flakes per second over 80 columns (14), `--cover`: the snow lies, else it only falls, `--max-depth` rows a pile holds (3; 0: no limit), `--hover`: the host mouse takes the snow it is over (`_cli.Nozzle`: topic `hover`, a sprite of blanks the size of the view under the effect, `z` -1; `Sprite.tune(hover=[x, y])`, null off it), `-a`, `--all`: `--cover`, `--hover`, and `--max-depth` 0 unless given, `--wind` columns per second (-1): every 6 to 15 s the app sends another wind, 0.2 to 2 times as strong, the other way one time in five (`Sprite.tune(wind=)`: tuned in place), as the `beats` of `_cli.follow` |
 
 Draw extension `sand`: effect `sand`. Grains are braille dots, 2 x 4 a
 cell, one step every 12 ms, a render every 48 ms.
@@ -1887,8 +1887,13 @@ Draw extension `snow`: effect `snow`, a render every 80 ms.
   Melt: a full cell in 1.5 s where its cell or the one that holds it
   is hot, and within 3 columns of the cursor on its row and the row
   above.
+- The pointer (`hover`: a canvas cell, or null): its cell and one on
+  each side are a nozzle, for 3 s after it was last told. Their snow is
+  gone, when told and at each render; a flake that enters them too.
+  The snow over it lost its hold and falls in; the piles beside it
+  slump in.
 - Params: `rate` (14), `wind` (-1), `cover` (false), `max_depth` (3),
-  `duration_ms`, `seed`; `tune`: all but `seed`.
+  `hover` (null), `duration_ms`, `seed`; `tune`: all but `seed`.
 
 `gallery`: a picture file, UTF-8, `*.pic`:
 

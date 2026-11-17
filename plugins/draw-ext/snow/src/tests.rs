@@ -446,3 +446,38 @@ fn the_view_of_the_snow_follows_a_scroll_and_a_shift() {
     run(&mut snow, 6, 50_050, 51_000);
     agrees(&snow);
 }
+
+#[test]
+fn the_pointer_takes_the_snow_and_what_falls_into_it() {
+    let rows = [""; 8];
+    let mut snow = make(json!({"rate": 900, "seed": 5, "wind": 0, "cover": true, "max_depth": 0}));
+    look(&mut snow, &rows, 0, &[], None);
+    run(&mut snow, 8, 0, 90_000);
+    assert!((1..8).all(|y| snow.depth(20, y) >= FULL && snow.depth(5, y) >= FULL));
+    // Told: the nozzle is empty at once, three cells of one row.
+    snow.tune(&json!({"hover": [20, 5], "rate": 0})).unwrap();
+    assert_eq!(row(&snow, 5, 19, 22), 0.0);
+    assert!(snow.depth(18, 5) >= FULL && snow.depth(22, 5) >= FULL);
+    // The snow over it lost its hold: it falls in, and is gone. Under
+    // it and away from it the snow stays.
+    let before = snow.lying();
+    run(&mut snow, 8, 90_050, 92_000);
+    assert_eq!((0..6).map(|y| row(&snow, y, 19, 22)).sum::<f32>(), 0.0);
+    assert!(snow.depth(20, 7) >= FULL && snow.depth(5, 4) >= FULL);
+    assert!(snow.lying() < before - 3.0 * 4.0 * FULL);
+    // Another tune keeps the pointer; an out of sight one takes nothing.
+    snow.tune(&json!({"wind": 1})).unwrap();
+    run(&mut snow, 8, 92_050, 92_500);
+    assert_eq!(row(&snow, 5, 19, 22), 0.0);
+    snow.tune(&json!({"hover": [-4, 99]})).unwrap();
+    // Not told for `LINGER_MS`: it snows in again.
+    snow.tune(&json!({"hover": [20, 5], "rate": 900, "wind": 0}))
+        .unwrap();
+    run(&mut snow, 8, 92_550, 92_550 + LINGER_MS);
+    assert_eq!(row(&snow, 5, 19, 22), 0.0);
+    run(&mut snow, 8, 92_600 + LINGER_MS, 200_000);
+    assert!(row(&snow, 5, 19, 22) >= 3.0 * FULL);
+    // None: no pointer.
+    snow.tune(&json!({"hover": null})).unwrap();
+    assert!(snow.tune(&json!({"hover": "here"})).is_err());
+}

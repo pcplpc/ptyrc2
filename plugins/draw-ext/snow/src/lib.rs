@@ -10,12 +10,14 @@
 //! - `cover`: the snow lies (default false: it only falls).
 //! - `max_depth`: cells a stack of snow holds (default 3); 0: no limit,
 //!   the snow fills the view.
+//! - `hover`: `[x, y]`, the canvas cell under the pointer, or null
+//!   (default): none.
 //! - `duration_ms`: life of the effect. Absent: until removed.
 //! - `seed`.
 //!
-//! `tune`: `rate`, `wind`, `cover`, `max_depth`, `duration_ms`; the
-//! flakes and the snow stay, less the snow over a lower `max_depth`,
-//! that falls again.
+//! `tune`: `rate`, `wind`, `cover`, `max_depth`, `hover`,
+//! `duration_ms`; the flakes and the snow stay, less the snow over a
+//! lower `max_depth`, that falls again.
 //!
 //! A flake is near (bright) or far (slow, faint: drawn at half
 //! opacity, its glyph by its height in the cell). It sways as it
@@ -55,6 +57,13 @@
 //! columns of the cursor on its row and the row above. Snow written
 //! over is gone. Snow that lost what held it (text erased, a floor
 //! scrolled away) falls again as flakes.
+//!
+//! The pointer. The cell `hover` and `NOZZLE` columns on each side are
+//! a nozzle: their snow is gone when `hover` is tuned and at each
+//! render, a flake that enters them as well, for `LINGER_MS` after the
+//! last `hover` told (a pointer that left the window tells nothing).
+//! The rest is the rules above: the snow over the nozzle lost what held
+//! it and falls into it, the piles beside it slump into it.
 
 use ptyrc_core::frames::HeatClass;
 use ptyrc_core::plugin::{DrawExt, FnDoc};
@@ -92,6 +101,10 @@ const SLIDE: f32 = 4.0;
 const EASE_MS: f64 = 1500.0;
 /// Columns on each side of the cursor that are warm.
 const WARM: i64 = 3;
+/// Columns on each side of the pointer that take the snow.
+const NOZZLE: i64 = 1;
+/// The pointer takes snow this long after it was last told.
+const LINGER_MS: u64 = 3000;
 /// Rows, and columns, of snow kept above and below the view.
 const ATTIC: i64 = 2000;
 /// Speed, rows per second: near, far.
@@ -122,6 +135,7 @@ struct Params {
     wind: f64,
     cover: bool,
     max_depth: usize,
+    hover: Option<(i64, i64)>,
     duration_ms: Option<u64>,
     seed: u64,
 }
@@ -133,6 +147,7 @@ impl Default for Params {
             wind: -1.0,
             cover: false,
             max_depth: DEEP,
+            hover: None,
             duration_ms: None,
             seed: 1,
         }
@@ -185,6 +200,9 @@ pub struct Snow {
     flakes: Vec<Flake>,
     /// Time of the last render.
     last: Option<u64>,
+    /// Time of the first render since `hover` was told; `None`: not
+    /// rendered since.
+    told: Option<u64>,
     /// Flakes owed, a fraction.
     owed: f64,
     /// Eighths let go and not yet a flake.
@@ -212,6 +230,7 @@ impl Snow {
             lying: BTreeMap::new(),
             flakes: Vec::new(),
             last: None,
+            told: None,
             owed: 0.0,
             loose: 0.0,
             odd: false,
@@ -347,6 +366,33 @@ impl Snow {
         cursor || self.seen(&self.hot, x, y) || self.seen(&self.hot, x, y + 1)
     }
 
+    /// The pointer takes what is in `(x, y)`.
+    fn nozzle(&self, x: usize, y: usize) -> bool {
+        let fresh = match (self.told, self.last) {
+            (Some(told), Some(last)) => last.saturating_sub(told) <= LINGER_MS,
+            _ => true,
+        };
+        self.params
+            .hover
+            .is_some_and(|(px, py)| fresh && py == y as i64 && (px - x as i64).abs() <= NOZZLE)
+    }
+
+    /// The snow in the nozzle is gone.
+    fn suck(&mut self) {
+        let Some((px, py)) = self.params.hover else {
+            return;
+        };
+        if py < 0 || py >= self.h as i64 {
+            return;
+        }
+        for x in (px - NOZZLE).max(0)..(px + NOZZLE + 1).min(self.w as i64) {
+            let (x, y) = (x as usize, py as usize);
+            if self.nozzle(x, y) && self.depth(x, y) > 0.0 {
+                self.put(x, y, 0.0);
+            }
+        }
+    }
+
     /// Steps steeper than `SLOPE` slide down, a share each frame.
     fn slump(&mut self, dt: f64) {
         let share = (SLIDE * dt as f32).min(1.0);
@@ -387,7 +433,7 @@ impl Snow {
                         }
                         continue;
                     };
-                    if self.warm(nx, ny) {
+                    if self.warm(nx, ny) && !self.nozzle(nx, ny) {
                         continue;
                     }
                     let (top, low) = (self.surface(x, y), self.surface(nx, ny));
@@ -453,12 +499,18 @@ impl Snow {
                 f.x = f.x.rem_euclid(w as f64);
                 return (f.y as usize) < h;
             }
+            let x = x as usize;
+            if self.nozzle(x, f.y as usize) {
+                return false;
+            }
             if !self.params.cover {
                 return (f.y as usize) < h;
             }
-            let x = x as usize;
             // Each row it enters, once.
             for y in (from + 1)..=(f.y as usize).min(h - 1) {
+                if self.nozzle(x, y) {
+                    return false;
+                }
                 if self.depth(x, y) >= FULL {
                     // The cell filled up under it: it stays above.
                     if self.ledge(x, y - 1) {
@@ -581,8 +633,11 @@ impl Effect for Snow {
         if self.view.len() != w * h {
             self.survey();
         }
+        self.told.get_or_insert(ms);
+        self.suck();
         self.weather(dt);
         self.slump(dt);
+        self.suck();
         self.spawn(dt);
         self.fall(secs, dt);
         self.draw(secs, canvas);
@@ -643,6 +698,7 @@ impl Effect for Snow {
         merged.insert("wind".into(), self.params.wind.into());
         merged.insert("cover".into(), self.params.cover.into());
         merged.insert("max_depth".into(), self.params.max_depth.into());
+        merged.insert("hover".into(), serde_json::json!(self.params.hover));
         merged.insert("duration_ms".into(), self.params.duration_ms.into());
         merged.extend(new.clone());
         let params = checked(&merged.into())?;
@@ -650,6 +706,12 @@ impl Effect for Snow {
             seed: self.params.seed,
             ..params
         };
+        if new.contains_key("hover") {
+            // Now, not at the next render: a pointer that runs tells
+            // more than one cell between two.
+            self.told = None;
+            self.suck();
+        }
         Ok(())
     }
 }

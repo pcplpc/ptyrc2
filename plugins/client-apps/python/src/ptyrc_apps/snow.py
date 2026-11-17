@@ -5,6 +5,7 @@ melts where they change.
     ptyrc-app snow
     ptyrc-app snow --cover --rate 40 --wind 2 -f active
     ptyrc-app snow --cover --max-depth 0    # no limit: the pane fills
+    ptyrc-app snow -a                       # the same, and --hover
 
 What it shows:
 
@@ -17,6 +18,10 @@ What it shows:
   pane.
 - An effect that sees the heat: the snow melts where the screen
   changed lately, and around the cursor. Type, and it goes.
+- An effect told the pointer (`--hover`, `_cli.Nozzle`): the snow
+  under the host mouse is taken, three cells of its row, and the
+  flakes that fall there; the snow over it falls in, the piles beside
+  it slide in.
 - Frame rows: the snow lies on the rows of the frame, so it scrolls
   with the text; snow that lost its line falls again.
 - An effect tuned in place: every few seconds the app sends a new
@@ -79,7 +84,7 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     frame = _cli.pick(pilot, args.frame)
     sprite = snow(pilot, frame, args.rate, args.wind, args.cover, args.max_depth)
     beats = gusts(sprite, args.wind, random.Random()) if args.wind else None
-    _cli.follow(pilot, frame, sprite, seconds, beats)
+    _cli.follow(pilot, frame, sprite, seconds, beats, args.hover)
 
 
 def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> int:
@@ -108,11 +113,26 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
     out.add_argument(
         "--max-depth",
         type=int,
-        default=DEEP,
         metavar="ROWS",
-        help=f"with --cover: rows a pile of snow holds; 0: no limit [default: {DEEP}]",
+        help="with --cover: rows a pile of snow holds; 0: no limit "
+        f"[default: {DEEP}; 0 with --all]",
+    )
+    out.add_argument(
+        "--hover",
+        action="store_true",
+        help="the host mouse takes the snow it is over, and what falls there",
+    )
+    out.add_argument(
+        "-a",
+        "--all",
+        action="store_true",
+        help="--cover and --hover; --max-depth is 0 unless given",
     )
     args = _cli.parse(out, argv)
+    if args.all:
+        args.cover = args.hover = True
+    if args.max_depth is None:
+        args.max_depth = 0 if args.all else DEEP
     if args.max_depth < 0:
         out.error("--max-depth must not be negative")
     return _cli.run(lambda pilot, args: app(pilot, args, seconds), args)

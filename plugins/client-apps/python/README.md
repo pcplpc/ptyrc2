@@ -36,7 +36,7 @@ python -m ptyrc_apps.clock -s NAME
 | `cat` | an app driven by events (`idle`, `cursor`, `screen`, `frames`), asleep on the socket between two things to do; it stands on lines of text in frame coordinates (`cat.ledges`), sleeps when the pane is idle, and jumps away from the cursor, from text written over it (`covered`) and back into the view after a scroll (`visible`). `--count N`: cats that share one read of the text (`cat.Home`) and keep off each other, a coat each; `-r`: coats and features (ears, eyes, nose) drawn. The word `food` on screen gets a plate next to it, where the cats come and eat; `--food`: a plate on a ledge now and then; `--mice`: a mouse walks a ledge now and then, the cats pounce at it; `-a`: `-r --food --mice`, two cats unless `--count` |
 | `marks` | a highlighter: one tint per match of each pattern (`-e` regex, `-i`), in frame coordinates and on remembered lines too (`find(known=True)`), so the driver scrolls them with the text; searches of a look in one batch; topic `draw`; a display of the counts placed by the driver |
 | `rain` | a native effect from a draw extension that sees the text: drops fall behind it and splash on the top of its lines, on the cursor and on the floor; less rain on columns that changed in the last 10 s (the heat, given to the effect) |
-| `snow` | a native effect that sees cells and heat: flakes fall behind the text; with `--cover`, snow lies over the lines of text (`--max-depth` rows deep, 3; 0: no limit, the pane fills), a cell away from the words of its own row, and on the floor, in smooth piles up to three rows deep; it melts where the screen changed lately and around the cursor; it lies on frame rows, so it scrolls with the text; the wind is tuned in place (`Sprite.tune(wind=...)`), the effect keeps its state |
+| `snow` | a native effect that sees cells and heat: flakes fall behind the text; with `--cover`, snow lies over the lines of text (`--max-depth` rows deep, 3; 0: no limit, the pane fills), a cell away from the words of its own row, and on the floor, in smooth piles up to three rows deep; it melts where the screen changed lately and around the cursor; `--hover`: the host mouse takes the snow it is over, the snow above falls in, the piles beside slide in; `-a`: `--cover`, `--hover`, no limit; it lies on frame rows, so it scrolls with the text; the wind is tuned in place (`Sprite.tune(wind=...)`), the effect keeps its state |
 
 `ptyrc manage` starts, stops, pauses and restarts them on a session; in
 a `ptyrc run`, ctrl+t typed twice opens its menu. `ptyrc-app --catalog`
@@ -129,6 +129,10 @@ What to know:
   are the app's own work between two events (`snow.py`).
 - **An effect tuned**: `Sprite.tune(wind=2)` gives a running effect
   new parameters; it keeps its state (`snow.py`).
+- **An effect told the pointer**: `_cli.follow(..., hover=True)`
+  (`_cli.Nozzle`): a hover is told on a sprite, not on an effect, so a
+  sprite of blanks lies under the effect; each move is a
+  `Sprite.tune(hover=[x, y])` (`snow.py`).
 - **A score**: `_arcade.Board`, one sprite in view cells with opaque
   blanks, sent when it changes.
 - **What**: `rows` (a space is transparent), `cells` (styled runs),
