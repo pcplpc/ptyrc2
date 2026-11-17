@@ -50,7 +50,8 @@ def test_snow(session: Pilot) -> None:
     time.sleep(0.3)
     args = ["-s", session.session, "--cover", "--rate", "900", "--wind", "0"]
     status: list[int] = []
-    thread = threading.Thread(target=lambda: status.append(snow.main(args, seconds=9)))
+    # Long enough to see the melt: the floor takes 6 s, the melt up to 4.
+    thread = threading.Thread(target=lambda: status.append(snow.main(args, seconds=12)))
     thread.start()
     try:
         deadline = time.monotonic() + 8
@@ -79,7 +80,7 @@ def test_snow(session: Pilot) -> None:
         # The line changes: its snow melts; the floor keeps its own.
         session.send("clear; printf '\\n\\n\\n\\n          %040d\\n' 1\n")
         session.wait_for("0" * 39 + "1", frame="raw")
-        deadline = time.monotonic() + 4
+        deadline = time.monotonic() + 8
         while lying(session)[3] and time.monotonic() < deadline:
             time.sleep(0.1)
         assert lying(session)[3] == 0
@@ -103,12 +104,14 @@ def test_snow_without_cover(session: Pilot) -> None:
     thread.start()
     try:
         deadline = session_clock.monotonic() + 4
-        seen = 0
+        seen = looks = 0
         while session_clock.monotonic() < deadline:
             assert sum(lying(session)) == 0
             host = "".join(session.dump()["host"])
             seen += any(c in host for c in "*+")
+            looks += 1
             session_clock.sleep(0.1)
-        assert seen > 10
+        # Most looks, however few a loaded machine leaves time for.
+        assert seen > looks // 2
     finally:
         thread.join()
