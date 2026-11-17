@@ -2,15 +2,17 @@
 
 # `ptyrc2` - the pty remote controller
 
-This wraps your favorite CLI apps in a terminal driver, on which you can attach
-client apps that add confetti to the output:
+Wrap your favorite tools in a terminal driver, which accepts client apps that
+add confetti to what you see:
 
 ![main-demo](doc/main.gif)
 
 This started as [`ptyrc`](https://github.com/pcplpc/ptyrc), a wrapper around
 [`pty`](https://docs.python.org/3/library/pty.html) made by hand with love.
+Now rebuild with the machine.
 
-Now rebuild with the machine, beware new it has its own legs and can bite.
+The driver understands panes, scrollable surfaces, sprites, widgets, layers,
+transparency, and a work-in-progress plugin system.
 
 See [`GALLERY.md`](GALLERY.md) for more examples.
 

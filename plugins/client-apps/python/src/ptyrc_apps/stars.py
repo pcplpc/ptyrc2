@@ -13,13 +13,15 @@ in a breeze along the bottom.
 The sky is a map: a star has a place in it, `(u, v)` in [0, 1), and
 the map is laid over the pane, whatever its size. The moon, the faint
 stars and the grass are braille, 2 by 4 dots a cell: the moon moves
-half a cell at a time, a blade leans by one dot.
+half a cell at a time, a blade leans by one dot. The grass grows with
+the pane: twice as tall on 50 rows as on 15 (`growth`).
 
 What it shows:
 
 - A scene that is a function of the time: `Sky.picture`, `moon`,
-  `Grass.picture` take the seconds since the start and keep no state;
-  the app only asks what the scene is now, and sends what changed.
+  `Grass.picture` take the seconds since the start and keep no state
+  but where the pointer has been; the app only asks what the scene is
+  now, and sends what changed.
 - Two sprites in view cells, behind the text: the sky, looked at
   twice a second, and the grass over it, 6 times a second. The moon
   rises and sets behind the grass. `--no-grass`: the sky alone, down
@@ -29,6 +31,9 @@ What it shows:
   on an arc in `--night` seconds, then stays down for a fifth of that.
 - The breeze (`breeze`): a wave that travels along the grass, a gust
   now and then, a flutter of each blade.
+- The pointer in the grass (`Hand`, from the `hover` events): the
+  blades it is on part, and lean the way it goes; let go, they swing
+  back, a tall one slower.
 - `-m`, `-b`: sprites the driver plays. A meteor is one request, a
   finite animation with a `motion`; a firefly a looped animation,
   moved by the client when it changes cell.
@@ -47,7 +52,7 @@ import sys
 from collections.abc import Sequence
 from typing import Any, NamedTuple
 
-from ptyrc import Pilot, Sprite, clock
+from ptyrc import Pilot, PtyrcError, Sprite, clock
 
 from . import _cli
 from .life import DOTS
@@ -57,10 +62,13 @@ __all__ = [
     "FIGURES",
     "Bug",
     "Grass",
+    "Hand",
     "Sky",
     "Star",
+    "Touch",
     "breeze",
     "clear",
+    "growth",
     "main",
     "meteor",
     "moon",
@@ -73,8 +81,9 @@ __all__ = [
 Grid = list[dict[int, tuple[str, int]]]
 """A picture: per row, column to glyph and colour."""
 
-PERIOD = 1 / 6  # seconds a tick: the grass
-SKY = 3  # ticks between two looks at the sky
+PERIOD = 1 / 12  # seconds a tick: the grass that swings
+BEAT_OF = 2  # ticks between two looks at the grass in the breeze
+SKY = 6  # ticks between two looks at the sky
 AREA = 80 * 24  # cells `--stars` counts over
 
 GLYPHS = ("", "·", "⋆", "✦")  # by level; level 0 is a braille dot
@@ -84,7 +93,7 @@ TINTS = ((67, 110, 153, 195), (137, 180, 223, 230), (131, 174, 217, 224))
 HAZE = (146, 103, 60, 239)  # the milky way, from its middle out
 LINE = 238  # the lines of a constellation
 MOON = 230
-GREENS = ((22, 28, 28, 34), (28, 34, 64, 70), (64, 70, 106, 70))  # by row, bottom up
+GREENS = ((22, 28, 28, 34), (28, 34, 64, 70), (64, 70, 106, 70))  # by third, bottom up
 PETALS = (213, 226, 231, 208, 141)
 GLOW = (58, 148, 190)
 
@@ -93,6 +102,14 @@ TURN = 4.0  # nights a turn of the sky takes, with `-r`
 DOWN = 0.2  # share of a night the moon stays down
 RISEN = 0.2  # share of its way the moon has made at the start
 METEOR = (4.0, 15.0)  # seconds between two meteors
+GROWN = ((15, 1.0), (50, 2.0))  # rows of a view, how tall its grass
+TALLEST = 3.0  # how tall the grass gets, of its height on 15 rows
+TOUCH = 1.6  # how far the pointer leans a blade 4 dots high, in dots
+SPAN = 2.5  # dot columns from the pointer its touch falls to 1/e
+NEAR = 6  # dot columns from its cell a touch ends
+GRACE = 3  # dots over its tip a blade feels the pointer
+DAMP = 0.8  # seconds the swing of a blade let go falls to 1/e
+LIFE = 5 * DAMP  # seconds a touch is kept once let go
 SYNODIC = 29.530588853  # days from a new moon to the next
 NEW_MOON = datetime.datetime(2000, 1, 6, 18, 14, tzinfo=datetime.UTC)
 
@@ -372,52 +389,153 @@ def breeze(x: float, t: float, wind: float = 1.0) -> float:
     return wind * (0.25 + 0.45 * wave + 0.9 * gust)
 
 
+def growth(h: int) -> float:
+    """How tall the grass is in a view of `h` rows, of its height on
+    15 rows or less: 2 on 50 rows, `TALLEST` at most."""
+    (h0, s0), (h1, s1) = GROWN
+    return max(s0, min(TALLEST, s0 + (h - h0) * (s1 - s0) / (h1 - h0)))
+
+
+class Touch(NamedTuple):
+    """The pointer on a cell of the grass. `x`: its column; `up`: its
+    row, 0 the last one of the view; `way`: where it came from, 1 from
+    the left, -1 from the right, 0 from elsewhere; `until`: when it
+    left, `math.inf` while it is there."""
+
+    x: int
+    up: int
+    way: int
+    until: float
+
+
+class Hand:
+    """The pointer in the grass: the cell it is on, and those it left
+    in the last `LIFE` seconds. `move` and `leave` are the handlers of
+    a hover."""
+
+    def __init__(self) -> None:
+        self.touches: list[Touch] = []
+
+    def move(self, x: int, up: int, t: float) -> None:
+        """The pointer is on the column `x`, `up` rows over the last
+        one, at `t` seconds."""
+        last = self.touches[-1] if self.touches else None
+        way = 0
+        if last is not None and last.until == math.inf:
+            if (last.x, last.up) == (x, up):
+                return
+            self.leave(t)
+            way = (x > last.x) - (x < last.x)
+        self.touches.append(Touch(x, up, way, math.inf))
+
+    def leave(self, t: float) -> None:
+        """The pointer is off the grass at `t` seconds."""
+        if self.touches and self.touches[-1].until == math.inf:
+            self.touches[-1] = self.touches[-1]._replace(until=t)
+
+    def at(self, t: float) -> list[Touch]:
+        """The touches the grass still shows at `t` seconds."""
+        self.touches = [one for one in self.touches if t - one.until < LIFE]
+        return self.touches
+
+
 class Grass:
     """Grass along the bottom: a blade a dot column, up to 7 dots
     high, on 2 rows of cells. `wild`: a meadow, up to 11 dots on 3
-    rows, a flower on some of the tallest."""
+    rows, a flower on some of the tallest. `scale`, where asked: how
+    tall it is, of that (`growth`)."""
 
     def __init__(self, rng: random.Random, wild: bool = False) -> None:
         self.rng = random.Random(rng.getrandbits(32))
         self.wild = wild
-        self.rows = 3 if wild else 2
-        #: Per dot column: height, phase of its flutter, petal or 0.
-        self.blades: list[tuple[int, float, int]] = []
+        #: Per dot column: height at scale 1, less its floor; phase of
+        #: its flutter; petal or 0.
+        self.blades: list[tuple[float, float, int]] = []
 
-    def _blade(self) -> tuple[int, float, int]:
+    def rows(self, scale: float = 1.0) -> int:
+        """The rows of cells the tallest blade is on."""
+        top = 12 if self.wild else 8  # no blade is as tall, at scale 1
+        return math.ceil(top * scale - 1) + 3 >> 2
+
+    def _blade(self) -> tuple[float, float, int]:
         rng = self.rng
         if rng.random() < 0.08:
-            return (0, 0.0, 0)
+            return (0.0, 0.0, 0)
         if self.wild:
-            height = 2 + int(rng.random() ** 1.4 * 10)
+            tall = 2 + rng.random() ** 1.4 * 10
         else:
-            height = 1 + int(rng.random() ** 1.6 * 7)
-        petal = rng.choice(PETALS) if height >= 9 and rng.random() < 0.3 else 0
-        return (height, rng.uniform(0.0, math.tau), petal)
+            tall = 1 + rng.random() ** 1.6 * 7
+        petal = rng.choice(PETALS) if tall >= 9 and rng.random() < 0.3 else 0
+        return (tall, rng.uniform(0.0, math.tau), petal)
 
-    def picture(self, w: int, t: float = 0.0, wind: float = 1.0) -> Grid:
-        """The grass over `w` cells at `t` seconds, `rows` rows; a
-        blade bends more towards its tip."""
-        rows = self.rows
+    @staticmethod
+    def pushes(
+        heights: Sequence[int], t: float, touches: Sequence[Touch]
+    ) -> list[float]:
+        """How far the pointer leans a blade 4 dots high, in dots, per
+        dot column, at `t` seconds; `heights`: of the blades.
+
+        A touch parts the blades about its cell, about the edge it
+        came by when it came from a side: those of the cell lean the
+        way it goes. It falls off with the distance, and holds a blade
+        by as much of it as is in the cell, its tip from `GRACE` dots
+        under. Let go, a blade swings back and dies down; a tall one
+        swings slower."""
+        out = [0.0] * len(heights)
+        for x, up, way, until in touches:
+            age = t - until
+            for i in range(max(0, 2 * x - NEAR), min(len(heights), 2 * x + 2 + NEAR)):
+                height = heights[i]
+                grip = min(1.0, (height - 4 * up + GRACE) / 4)
+                if not height or grip <= 0:
+                    continue
+                off = i - 2 * x - 0.5
+                much = TOUCH * grip * math.exp(-((off / SPAN) ** 2))
+                if age > 0:
+                    swing = 0.7 + 0.05 * height  # seconds
+                    much *= math.exp(-age / DAMP) * math.cos(math.tau * age / swing)
+                out[i] += much if off + way > 0 else -much
+        return [max(-1.5 * TOUCH, min(1.5 * TOUCH, push)) for push in out]
+
+    def picture(
+        self,
+        w: int,
+        t: float = 0.0,
+        wind: float = 1.0,
+        scale: float = 1.0,
+        touches: Sequence[Touch] = (),
+    ) -> Grid:
+        """The grass over `w` cells at `t` seconds, `rows(scale)` rows.
+        A blade bends more towards its tip, and keeps its length: it
+        is lower when it leans. `touches`: of the pointer (`Hand`)."""
+        rows = self.rows(scale)
         grid: Grid = [{} for _ in range(rows)]
         while len(self.blades) < 2 * w:
             self.blades.append(self._blade())
+        blades = self.blades[: 2 * w]
+        heights = [int(tall * scale) for tall, _, _ in blades]
+        pushes = self.pushes(heights, t, touches)
         dots = _Dots(w, rows)
         heads: list[tuple[int, int, int]] = []
-        for i, (height, phase, petal) in enumerate(self.blades[: 2 * w]):
+        for i, (_, phase, petal) in enumerate(blades):
+            height = heights[i]
             if not height:
                 continue
-            lean = breeze(i, t, wind) * height / 4
+            lean = (breeze(i, t, wind) + pushes[i]) * height / 4
             if wind:
                 lean += 0.3 * math.sin(2.1 * t + phase)
-            for j in range(height):
-                px = i + round(lean * (j / height) ** 1.5)
-                py = 4 * rows - 1 - j
+            # A dot a dot of its length: `y` is how high that one is.
+            px = py = 0
+            y = 0.0
+            for _ in range(height):
+                px = i + round(lean * (y / height) ** 1.5)
+                py = 4 * rows - 1 - round(y)
                 dots.dot(px, py, 0)
-                if petal and j == height - 1 and 0 <= px < 2 * w:
-                    heads.append((px >> 1, py >> 2, petal))
+                y += 1 / math.hypot(1.0, 1.5 * lean / height * math.sqrt(y / height))
+            if petal and 0 <= px < 2 * w:
+                heads.append((px >> 1, py >> 2, petal))
         for (x, y), (bits, _) in dots.cells.items():
-            greens = GREENS[rows - 1 - y]
+            greens = GREENS[3 * (rows - 1 - y) // rows]
             grid[y][x] = (chr(0x2800 + bits), greens[int(4 * noise(x, y))])
         for x, y, petal in heads:
             grid[y][x] = ("*•°"[int(3 * noise(x, petal))], petal)
@@ -507,10 +625,15 @@ class Night:
         self.args = args
         self.sky = Sky(rng, args.stars, args.galaxy, args.constellations)
         self.grass = Grass(rng, args.wild)
-        self.rows = 0 if args.no_grass else self.grass.rows  # of grass
         self.phase = args.phase
         if self.phase is None:
             self.phase = phase_of(datetime.datetime.now(datetime.UTC))
+
+    def rows(self, h: int) -> int:
+        """The rows of grass in a view of `h` rows."""
+        if self.args.no_grass:
+            return 0
+        return min(h, self.grass.rows(growth(h)))
 
     def above(self, w: int, h: int, t: float) -> Grid:
         """The sky and the moon, `h` rows."""
@@ -518,7 +641,7 @@ class Night:
         night = args.night
         turn = t / (TURN * night) if args.turn else 0.0
         # No star in the last row when it is grass.
-        low = min(1, self.rows)
+        low = min(1, self.rows(h))
         grid = self.sky.picture(w, h - low, t, args.twinkle, turn)
         grid.extend({} for _ in range(low))
         f = (t / night + RISEN) % (1.0 + DOWN)
@@ -526,9 +649,13 @@ class Night:
             moon(grid, *moon_at(w, h, args.moon, f), args.moon, self.phase)
         return grid
 
-    def below(self, w: int, t: float) -> Grid:
-        """The grass, `rows` rows."""
-        return self.grass.picture(w, t, self.args.wind) if self.rows else []
+    def below(self, w: int, h: int, t: float, touches: Sequence[Touch] = ()) -> Grid:
+        """The grass of a view of `h` rows, `rows(h)` rows."""
+        rows = self.rows(h)
+        if not rows:
+            return []
+        grid = self.grass.picture(w, t, self.args.wind, growth(h), touches)
+        return grid[-rows:]
 
 
 def show(args: argparse.Namespace) -> int:
@@ -536,8 +663,8 @@ def show(args: argparse.Namespace) -> int:
     w, h = args.print
     night = Night(args, random.Random(args.seed))
     grid = night.above(w, h, 0.0)
-    low = night.below(w, 0.0)
-    for row, grass in zip(grid[max(0, h - len(low)) :], low[-h:], strict=False):
+    low = night.below(w, h, 0.0)
+    for row, grass in zip(grid[h - len(low) :], low, strict=True):
         row.update(grass)
     for line in runs(grid, w):
         text = "".join(
@@ -546,6 +673,14 @@ def show(args: argparse.Namespace) -> int:
         )
         sys.stdout.write(text + "\n")
     return 0
+
+
+def _boxed(cells: list[list[dict[str, Any]]], w: int) -> list[list[dict[str, Any]]]:
+    """`cells`, its first row `w` cells wide: the sprite is as wide as
+    the view, and a hover is told anywhere on it."""
+    if cells and (short := w - sum(len(run["t"]) for run in cells[0])) > 0:
+        cells[0].append({"t": " " * short})
+    return cells
 
 
 def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) -> None:
@@ -560,21 +695,50 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     grass: Sprite | None = None
     sent: list[Any] = [None, None]  # the cells of the two, as sent
     bugs: list[Bug] = []
+    hand = Hand()
+    if not args.no_grass:
+        try:
+            pilot.subscribe("hover")
+        except PtyrcError as err:  # a driver without the topic
+            if err.code != "bad-params":
+                raise
     start = clock.monotonic()
     shot = fx.uniform(1.0, METEOR[0])  # when the next meteor goes
+    lag = 0.0  # seconds since the last beat
     for tick, dt in enumerate(_cli.ticks(PERIOD, seconds)):
         if not sight.look():
             continue
         w, h = frame.size
         t = clock.monotonic() - start
-        rows = min(night.rows, h)
+        rows = night.rows(h)
         sized = (w, h) != size
+        beat = tick % BEAT_OF == 0
+        lag = min(lag + dt, 4 * BEAT_OF * PERIOD)
+        touched = False
+        for topic, data in sight.others:
+            if topic != "hover":
+                continue
+            # On the sky, on the grass, or on a firefly over them.
+            cell, on = data.get("at"), data.get("sprite")
+            if cell is not None and grass is not None and on == grass.id:
+                cell = (cell[0], cell[1] + size[1] - len(sent[1]))
+            elif cell is not None and (sky is None or on != sky.id):
+                over = [bug.cell for bug in bugs if bug.sprite and bug.sprite.id == on]
+                cell = over[0] if over else None
+            # The row over the grass too: the tips feel it.
+            if cell is not None and 0 <= h - 1 - cell[1] <= rows:
+                hand.move(cell[0], h - 1 - cell[1], t)
+            else:
+                hand.leave(t)
+            touched = True
+        touches = hand.at(t)
+        swings = touched or any(one.until <= t for one in touches)
         if sized or sight.changed:
             size = (w, h)
             shown = clear(sight.rows, w, h)
         with sight.drawing(), pilot.batch():
             if sized or sight.changed or tick % SKY == 0:
-                cells = runs(night.above(w, h, t), w, shown)
+                cells = _boxed(runs(night.above(w, h, t), w, shown), w)
                 if sky is None:
                     sky = pilot.draw(
                         cells=cells, frame=frame.id, at=(0, 0), space="view", z=0
@@ -582,8 +746,9 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
                 elif cells != sent[0]:
                     sky.update(content={"cells": cells})
                 sent[0] = cells
-            if rows:
-                cells = runs(night.below(w, t)[-rows:], w, shown[h - rows :])
+            if rows and (sized or sight.changed or beat or swings):
+                low = night.below(w, h, t, touches)
+                cells = _boxed(runs(low, w, shown[h - rows :]), w)
                 if grass is None:
                     grass = pilot.draw(
                         cells=cells, frame=frame.id, at=(0, h - rows), space="view", z=2
@@ -596,6 +761,9 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
                 elif cells != sent[1]:
                     grass.update(content={"cells": cells})
                 sent[1] = cells
+            if not beat:
+                continue
+            dt, lag = lag, 0.0
             if args.meteors and t >= shot:
                 shot = t + fx.uniform(*METEOR)
                 pilot.draw(frame=frame.id, **meteor(fx, w, h))
