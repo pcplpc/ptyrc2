@@ -74,8 +74,9 @@ def test_snow(session: Pilot) -> None:
     args = ["-s", session.session, "--cover", "--rate", "900", "--wind", "0"]
     args += ["--max-depth", "2"]
     status: list[int] = []
-    # Long enough to see the melt: the floor takes 6 s, the melt up to 4.
-    thread = threading.Thread(target=lambda: status.append(snow.main(args, seconds=12)))
+    # Long enough to see the melt: the line is cold 10 s after it is
+    # written, the air clear 3 s later, the snow melted in 2 more.
+    thread = threading.Thread(target=lambda: status.append(snow.main(args, seconds=20)))
     thread.start()
     try:
         deadline = time.monotonic() + 8
@@ -92,22 +93,38 @@ def test_snow(session: Pilot) -> None:
         assert rows[4] <= 2 and rows[10] == 0, rows
         host = session.dump()["host"]
         assert "0" * 40 in host[4]
-        assert all(c not in DRIFT for c in host[3][:10]), host[3]
+        # (Column 0 is over the prompt: its stack may reach this row.)
+        assert all(c not in DRIFT for c in host[3][1:10]), host[3]
         # The effect is tuned in place: the snow stays; a bad value is
         # refused by the effect, with its words.
+        # (Once the line is cold: written lately, it is hot, and its snow
+        # lasts only as long as more falls.)
+        deadline = time.monotonic() + 8
+        while "h" in session.frame("raw").heat_classes()[4]:
+            assert time.monotonic() < deadline
+            time.sleep(0.1)
         (sprite,) = session.sprites()
         flakes = Sprite(session, sprite["id"])
         flakes.tune(rate=0)
         assert lying(session)[3] >= 20
         with pytest.raises(PtyrcError, match="wind is out of range"):
             flakes.tune(wind=99)
-        # The line changes: its snow melts; the floor keeps its own.
-        session.send("clear; printf '\\n\\n\\n\\n          %040d\\n' 1\n")
-        session.wait_for("0" * 39 + "1", frame="raw")
-        deadline = time.monotonic() + 8
-        while lying(session)[3] and time.monotonic() < deadline:
+        # The last flakes land: the snow of a line that is still stays.
+        deadline = time.monotonic() + 6
+        while "".join(session.dump()["host"][:2]).strip():
+            assert time.monotonic() < deadline
             time.sleep(0.1)
-        assert lying(session)[3] == 0
+        assert lying(session)[3] >= 20
+        # The line changes, every cell of it (one written again the same
+        # is not hot): its snow melts; the floor keeps its own. Seen
+        # while the app runs: its end takes all the snow.
+        session.send("clear; printf '\\n\\n\\n\\n          %040d\\n' 0 | tr 0 1\n")
+        session.wait_for("1" * 40, frame="raw")
+        deadline = time.monotonic() + 5
+        while (rows := lying(session))[3] and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert thread.is_alive()
+        assert rows[3] == 0 and rows[23] >= 40, rows
     finally:
         thread.join()
     assert status == [0]
