@@ -15,7 +15,8 @@ focus (ctrl+t twice). The front is the widget.
 Keys are named as the driver names them: a printable character is
 itself, then `space`, `enter`, `tab`, `shift+tab`, `backspace`, `up`,
 `ctrl+a`, `alt+enter`... `ctrl+j` is the line feed. The escape key of
-the widget never comes: the driver takes it and drops the focus.
+the widget never comes: the driver takes it and drops the focus. Nor
+its close key (ctrl+x): the driver hides the widget, a dismissal.
 
 Pieces for other models: `Editor` (a line and its cursor), `Listing` (a
 bar on a list that scrolls), `foot`, `fit`, `cut`, `wrap`, `cells`; `Keys` (the `input` events of a
@@ -137,6 +138,13 @@ def wrap(text: str, w: int, n: int) -> list[str]:
     if words and lines:
         lines[-1] += " " + " ".join(words)
     return [cut(line, w) for line in lines]
+
+
+def _caret(key: str) -> str:
+    """A key as a foot shows it: `ctrl+x` is `^X`."""
+    if key.startswith("ctrl+") and len(key) == 6:
+        return "^" + key[5:].upper()
+    return key
 
 
 def foot(keys: Sequence[Key], w: int) -> str:
@@ -367,6 +375,8 @@ class Model:
     mark: str = ""
     #: The key that gives the keyboard back, for the foot; None: none.
     escape: str | None = "esc"
+    #: The key that closes the widget, for the foot; None: none.
+    close: str | None = "ctrl+x"
     #: The foot of a widget not focused.
     hint: Sequence[Key] = (("ctrl+t ctrl+t", 0), ("to answer", 1))
     #: Keys added to the foot (a form's way back).
@@ -393,6 +403,8 @@ class Model:
         out: list[Key] = [("enter ok", 1), *self.more, ("^C dismiss", 3)]
         if self.escape:
             out.append((f"{self.escape} later", 0))
+        if self.close:
+            out.append((f"{_caret(self.close)} close", 4))
         return out
 
     def note(self, h: int) -> str:
@@ -663,6 +675,7 @@ class Form(Model):
         step.mark = f"{self.at + 1}/{len(self.steps)}" if len(self.steps) > 1 else ""
         step.more = [("shift+tab back", 2)] if self.at else []
         step.escape = self.escape
+        step.close = self.close
         step.hint = self.hint
         return step
 
@@ -708,10 +721,11 @@ class Dialog:
 
     It declares the tag (`sizes`: inner sizes, else `model.sizes()`),
     shows it (`title`, and `show` as for `Pilot.widget`; `fill` 1 when
-    not given) and asks (`quiet`, `escape` as for `Widget.ask`). It
-    subscribes to `widgets`. `take` gives it each event of the pilot:
-    those of its widget are its own. The model over, the widget is
-    released and hidden."""
+    not given) and asks (`quiet`, `escape`, `close` as for
+    `Widget.ask`). It subscribes to `widgets`. `take` gives it each
+    event of the pilot: those of its widget are its own. The model
+    over, the widget is released and hidden; closed by its close key,
+    the dialog is dismissed."""
 
     def __init__(
         self,
@@ -723,6 +737,7 @@ class Dialog:
         title: str | None = None,
         quiet: bool = False,
         escape: str | bool | None = None,
+        close: str | bool | None = None,
         **show: Any,
     ) -> None:
         self.pilot = pilot
@@ -731,6 +746,8 @@ class Dialog:
         self.result: Any = None
         if escape is not None:
             model.escape = escape or None
+        if close is not None:
+            model.close = close or None
         self._keys = Keys()
         self._drawn: tuple[Any, ...] | None = None
         show.setdefault("fill", 1.0)
@@ -742,7 +759,7 @@ class Dialog:
             content=lambda w, h: model.render(w, h, False),
             **show,
         )
-        self.widget.ask(quiet=quiet, escape=escape)
+        self.widget.ask(quiet=quiet, escape=escape, close=close)
 
     def draw(self) -> None:
         """Set the variant shown, when what it shows changed."""
@@ -751,7 +768,12 @@ class Dialog:
             return
         rows = self.model.render(*size, self.widget.focused)
         if self._drawn != (self.widget.variant, rows):
-            self.widget.set(rows)
+            try:
+                self.widget.set(rows)
+            except PtyrcError as exc:
+                # Closed by its key meanwhile: told next.
+                if exc.code != "no-sprite":
+                    raise
             self._drawn = (self.widget.variant, rows)
 
     def take(self, event: tuple[str, Any] | None) -> bool:
@@ -768,6 +790,13 @@ class Dialog:
             elif not self.widget.focused:
                 self._keys.reset()
         elif topic == "input" and data.get("widget") == self.widget.id:
+            if data.get("released") == "close":
+                # Hidden by the driver: dismissed.
+                self._keys.reset()
+                gone = {"state": "gone", "asks": None, "focused": False}
+                self.widget.info = {**self.widget.info, **gone}
+                self.done, self.result = True, None
+                return True
             if "released" in data:
                 self._keys.reset()
                 self.widget.info = {**self.widget.info, "focused": False}
@@ -808,7 +837,8 @@ def ask(
     pilot: Pilot, model: Model, *, timeout: float | None = None, **options: Any
 ) -> Any:
     """Show `model` (`options` as for `Dialog`) and wait for the user:
-    `model.result`; None when dismissed, after `timeout` seconds
+    `model.result`; None when dismissed (ctrl+c, the close key), after
+    `timeout` seconds
     (session time), or when the session ends."""
     pilot.subscribe("exit")
     dialog = Dialog(pilot, model, **options)

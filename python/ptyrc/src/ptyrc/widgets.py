@@ -89,7 +89,12 @@ class Widget:
         """The keys of the host keyboard are its own."""
         return bool(self.info.get("focused"))
 
-    def ask(self, quiet: bool = False, escape: str | bool | None = None) -> None:
+    def ask(
+        self,
+        quiet: bool = False,
+        escape: str | bool | None = None,
+        close: str | bool | None = None,
+    ) -> None:
         """Ask for the keyboard: the user gives it (ctrl+t twice), the
         app never takes it. Focused, each key is an `input` event
         `{"key", "bytes", "widget": id}` of this connection; the focus
@@ -97,12 +102,15 @@ class Widget:
 
         `quiet`: it waits for no answer: unmarked, after the loud ones.
         `escape`: the key that gives the keyboard back (`esc`); False:
-        none, every key is the widget's."""
+        none, every key is the widget's. `close`: the key that hides it
+        (`ctrl+x`), released `close`; False: none."""
         params: dict[str, Any] = {"id": self.id}
         if quiet:
             params["quiet"] = True
         if escape is not None:
             params["escape"] = escape
+        if close is not None:
+            params["close"] = close
         self._pilot._request(
             "widget.ask", params, lambda res: setattr(self, "info", res["widget"])
         )

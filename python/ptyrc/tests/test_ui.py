@@ -506,3 +506,49 @@ def test_driver_release(shell: Pilot) -> None:
     widget.release()  # twice: fine
     widget.hide()
     widget.release()  # gone: fine
+
+
+def test_dialog_closed() -> None:
+    pilot = Script()
+    model = Choice("Deploy?", ["yes", "no"])
+    dialog = Dialog(pilot, model)  # type: ignore[arg-type]
+    assert pilot.named("widget.ask") == [{"id": 7}] and model.close == "ctrl+x"
+    assert "^X close" in text(model.render(60, 6, True))[5]
+    # The driver hid it: dismissed, nothing to release.
+    assert dialog.take(("input", {"widget": 7, "released": "close"}))
+    assert dialog.done and dialog.result is None
+    gone = {"id": 7, "state": "gone", "variant": None, "size": None}
+    dialog.take(("widgets", gone))
+    dialog.close()
+    assert pilot.named("widget.release") == pilot.named("widget.hide") == []
+
+    pilot = Script()
+    model = Line("Name?")
+    Dialog(pilot, model, sizes=[(40, 6)], close="f10")  # type: ignore[arg-type]
+    assert pilot.named("widget.ask") == [{"id": 7, "close": "f10"}]
+    pilot.queue = []
+    model.close = None
+    assert "close" not in " ".join(text(model.render(40, 6, True)))
+    form = ui.Form([Line("a"), Line("b")])
+    form.close = "ctrl+q"
+    assert "^Q close" in text(form.render(60, 6, True))[5]
+    # Short: dropped first.
+    assert "close" not in text(Line("?").render(24, 3, True))[2]
+
+    pilot = Script()
+    pilot.queue = [key("b"), ("input", {"widget": 7, "released": "close"})]
+    assert ui.ask(pilot, Line("Name?")) is None  # type: ignore[arg-type]
+    assert pilot.named("widget.hide") == []
+
+
+def test_driver_close(shell: Pilot) -> None:
+    dialog = asking(shell, Line("Name?"))
+    widget = dialog.widget
+    until(lambda: widget.refresh().placed)
+    shell.focus(widget)
+    pump(shell, dialog, lambda: widget.focused)
+    bytes_ = base64.b64encode(b"a\x18").decode()
+    shell.call("input.send", bytes=bytes_, host=True)
+    pump(shell, dialog, lambda: dialog.done)
+    assert dialog.result is None and shell.call("session.info")["focus"] is None
+    until(lambda: shell.widgets() == [])

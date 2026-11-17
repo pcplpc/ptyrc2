@@ -77,8 +77,9 @@ for topic, data in pilot.events("widgets"):  # placed, moved, another size
 
 An interactive widget takes keys of the host keyboard. It asks; the
 user gives it the focus (ctrl+t twice; again: the next one, then the
-menu); its escape key (`esc`) gives the keyboard back. An app never
-takes the focus: `pilot.focus()` is for a key binding, a test.
+menu); its escape key (`esc`) gives the keyboard back, its close key
+(`ctrl+x`) hides it (`released: "close"`). An app never takes the
+focus: `pilot.focus()` is for a key binding, a test.
 
 ```python
 note = pilot.widget("note", [(30, 6)])
@@ -120,8 +121,8 @@ a page key held with modifiers, which the driver does not name, is
 named from its bytes (`shift+up`, `ctrl+left`; `Keys.name(raw)`);
 `reset()` when the focus is lost.
 
-`enter` validates, `ctrl+c` dismisses, the escape key leaves the
-question there. A model of your own subclasses `ui.Model`: `body(w, h,
+`enter` validates, `ctrl+c` or the close key (`ctrl+x`) dismisses,
+the escape key leaves the question there. A model of your own subclasses `ui.Model`: `body(w, h,
 focused)`, `key`, `natural()`, `keys()` (the foot), on `ui.Editor` (a
 line and its cursor), `ui.Listing` (a bar on a list that scrolls).
 
