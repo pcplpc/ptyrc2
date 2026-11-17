@@ -121,7 +121,7 @@ a page key held with modifiers, which the driver does not name, is
 named from its bytes (`shift+up`, `ctrl+left`; `Keys.name(raw)`);
 `reset()` when the focus is lost.
 
-`enter` validates, `ctrl+c` or the close key (`ctrl+x`) dismisses,
+`enter` validates, the close key (`ctrl+x`) dismisses,
 the escape key leaves the question there. A model of your own subclasses `ui.Model`: `body(w, h,
 focused)`, `key`, `natural()`, `keys()` (the foot), on `ui.Editor` (a
 line and its cursor), `ui.Listing` (a bar on a list that scrolls).

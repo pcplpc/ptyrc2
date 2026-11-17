@@ -384,8 +384,9 @@ class Model:
 
     def key(self, name: str) -> str | None:
         """Take a key. None: go on; `DONE`: validated; `CANCEL`:
-        dismissed."""
-        return CANCEL if name == "ctrl+c" else None
+        dismissed (no key of the models does: the close key is the
+        driver's)."""
+        return None
 
     def paste(self, text: str) -> None:
         """Take a pasted text, its lines parted by `\\n`."""
@@ -400,7 +401,7 @@ class Model:
 
     def keys(self) -> list[Key]:
         """The foot of the focused widget."""
-        out: list[Key] = [("enter ok", 1), *self.more, ("^C dismiss", 3)]
+        out: list[Key] = [("enter ok", 1), *self.more]
         if self.escape:
             out.append((f"{self.escape} later", 0))
         if self.close:
@@ -837,7 +838,7 @@ def ask(
     pilot: Pilot, model: Model, *, timeout: float | None = None, **options: Any
 ) -> Any:
     """Show `model` (`options` as for `Dialog`) and wait for the user:
-    `model.result`; None when dismissed (ctrl+c, the close key), after
+    `model.result`; None when dismissed (the close key), after
     `timeout` seconds
     (session time), or when the session ends."""
     pilot.subscribe("exit")

@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 from ptyrc import Pilot, PtyrcError, ui
-from ptyrc.ui import CANCEL, DONE, Choice, Dialog, Editor, Form, Line, Listing, Text
+from ptyrc.ui import DONE, Choice, Dialog, Editor, Form, Line, Listing, Text
 from ptyrc.widgets import Widgets
 from tests_support import until
 
@@ -54,8 +54,8 @@ def test_cells() -> None:
 
 
 def test_foot() -> None:
-    all_ = [("↑↓ move", 2), ("enter ok", 1), ("^C dismiss", 3), ("esc later", 0)]
-    assert ui.foot(all_, 60) == "↑↓ move  enter ok  ^C dismiss  esc later"
+    all_ = [("↑↓ move", 2), ("enter ok", 1), ("^X close", 3), ("esc later", 0)]
+    assert ui.foot(all_, 60) == "↑↓ move  enter ok  ^X close  esc later"
     assert ui.foot(all_, 30) == "↑↓ move  enter ok  esc later"
     assert ui.foot(all_, 20) == "enter ok  esc later"
     assert ui.foot(all_, 10) == "esc later"
@@ -175,13 +175,13 @@ def test_choice() -> None:
         "ctrl+t ctrl+t       ",
     ]
     rows = model.render(44, 5, True)
-    assert text(rows)[4].rstrip() == "↑↓ move  enter ok  ^C dismiss  esc later"
+    assert text(rows)[4].rstrip() == "↑↓ move  enter ok  esc later  ^X close"
     assert all(run.get("inverse") for run in rows[1])
     assert not any(run.get("inverse") for run in rows[2])
     assert keys(model, "down", "j", "j", "k") is None and model.listing.sel == 1
     assert keys(model, "3") is None and model.result is None
     assert keys(model, "enter") == DONE and model.result == "later"
-    assert Choice("?", ["a"]).key("ctrl+c") == CANCEL
+    assert keys(model, "ctrl+c") is None and model.result == "later"  # not a dismissal
     # One row: the bar when focused, else the question.
     assert text(model.render(9, 1, True)) == ["3 later ↑"]
     assert text(model.render(9, 1, False)) == ["Deploy?  "]
@@ -234,7 +234,7 @@ def test_line() -> None:
     model.paste("ice\n")
     row = model.render(10, 3, True)[1]
     assert text([row]) == ["alice     "] and row[1] == {"t": " ", "inverse": True}
-    assert model.key("ctrl+c") == CANCEL and model.result is None
+    assert model.key("ctrl+c") is None and model.editor.text == "alice"  # ignored
     assert model.key("enter") == DONE and model.result == "alice"
 
 
@@ -266,7 +266,7 @@ def test_form() -> None:
     assert keys(form, "enter", "o", "k") is None and form.at == 2
     assert text(form.render(20, 4, False))[0] == "Why?             3/3"
     assert form.key("enter") == DONE and form.result == ["y", "blue", "ok"]
-    assert Form([Line()]).key("ctrl+c") == CANCEL
+    assert Form([Line()]).key("ctrl+c") is None
     with pytest.raises(ValueError):
         Form([])
 
@@ -372,10 +372,12 @@ def test_dialog_options_and_cancel() -> None:
     assert pilot.named("widget.show")[0] == {"tag": "ask", "fill": 0.5}
     assert model.escape is None and dialog.widget.asks == "quiet"
     dialog.take(key("a"))
-    assert "later" not in pilot.shown()[5] and "^C dismiss" in pilot.shown()[5]
-    dialog.take(key("ctrl+c"))
+    assert "later" not in pilot.shown()[5] and "^X close" in pilot.shown()[5]
+    assert dialog.take(key("ctrl+c")) and not dialog.done  # not a dismissal
+    assert model.editor.text == "a"
+    dialog.take(("input", {"widget": 7, "released": "close"}))
     assert dialog.done and dialog.result is None and model.result is None
-    assert pilot.named("widget.release") == [{"id": 7}]
+    assert pilot.named("widget.release") == []  # the driver released it
 
 
 def test_dialog_paste() -> None:
