@@ -220,3 +220,164 @@ fn focus_by_request() {
             .is_none()
     );
 }
+
+/// Type on the host keyboard of a headless session.
+fn host(client: &mut Client, bytes: &[u8]) {
+    let bytes = ptyrc_server::keys::base64_encode(bytes);
+    let params = json!({"bytes": bytes, "host": true});
+    client.call("input.send", params).unwrap();
+}
+
+fn screen(client: &mut Client) -> String {
+    let text = client.call("screen.text", json!({})).unwrap();
+    text.to_string()
+}
+
+fn focus_on(client: &mut Client, id: u64) {
+    client.call("widget.focus", json!({"id": id})).unwrap();
+}
+
+#[test]
+fn keys_typed_as_on_the_host() {
+    let sb = Sandbox::new("focus-host");
+    let _driver = sb.headless("k", "60x16", &["cat"]);
+    let mut app = sb.client("k");
+    let mut other = sb.client("k");
+    let first = asking(&mut app, "first", json!({"escape": "f12"}));
+    let second = asking(&mut app, "second", json!({}));
+
+    // Without `host`, never the widget's.
+    focus_on(&mut other, first);
+    other.call("input.send", json!({"text": "plain"})).unwrap();
+    wait_for(|| screen(&mut other).contains("plain"), "the app's text");
+
+    // Several pairs in a read, each in its turn: the keys between go
+    // to who has the keyboard then.
+    other.call("widget.blur", json!({})).unwrap();
+    assert_eq!(next_input(&mut app)["released"], json!("blur"));
+    host(&mut other, b"\x14\x14x\x14\x14y");
+    let data = next_input(&mut app);
+    assert_eq!(
+        (&data["key"], &data["widget"]),
+        (&json!("x"), &json!(first))
+    );
+    let data = next_input(&mut app);
+    assert_eq!(data, json!({"widget": first, "released": "hotkey"}));
+    let data = next_input(&mut app);
+    assert_eq!(
+        (&data["key"], &data["widget"]),
+        (&json!("y"), &json!(second))
+    );
+
+    // A paste is no key: neither the escape key nor the pair in it;
+    // one event a read, the markers left out.
+    host(&mut other, b"\x1b[200~ab\x1b\x14\x14c\xc3\xa9\x1b[201~z");
+    let data = next_input(&mut app);
+    assert_eq!(
+        data,
+        json!({"widget": second, "paste": "ab\u{1b}\u{14}\u{14}c\u{e9}"})
+    );
+    assert_eq!(next_input(&mut app)["key"], json!("z"));
+    // Over several reads, a marker and a character cut.
+    host(&mut other, b"\x1b[200~he\xc3");
+    host(&mut other, b"\xa9llo\x1b[20");
+    host(&mut other, b"1~");
+    assert_eq!(next_input(&mut app)["paste"], json!("he"));
+    assert_eq!(next_input(&mut app)["paste"], json!("\u{e9}llo"));
+    assert_eq!(focus(&mut other), json!(second));
+
+    // A key cut by a read is whole: not the escape key and a tail.
+    host(&mut other, b"\x1b");
+    host(&mut other, b"[A");
+    assert_eq!(next_input(&mut app)["key"], json!("up"));
+    host(&mut other, b"\x1b[1;");
+    host(&mut other, b"2A\x1b\x1b");
+    assert_eq!(next_input(&mut app)["key"], json!("shift+up"));
+    assert_eq!(next_input(&mut app)["key"], json!("alt+esc"));
+    assert_eq!(focus(&mut other), json!(second));
+    // Reports of the mouse and of the host's window are no keys.
+    host(&mut other, b"\x1b[<0;3;4M\x1b[<0;3;4m\x1b[I\x1b[Ok");
+    assert_eq!(next_input(&mut app)["key"], json!("k"));
+    // Alone, late: the escape key; its release reaches nobody.
+    assert!(other.call("input.grab", json!({})).is_err());
+    host(&mut other, b"\x1b");
+    let data = next_input(&mut app);
+    assert_eq!(data, json!({"widget": second, "released": "escape"}));
+    host(&mut other, b"\x1b[27;1:3u");
+    other.call("input.grab", json!({})).unwrap();
+    other.call("input.release", json!({})).unwrap();
+
+    // What follows the escape key in the read is the app's.
+    focus_on(&mut other, first);
+    host(&mut other, b"q\x1b[24~after");
+    assert_eq!(next_input(&mut app)["key"], json!("q"));
+    assert_eq!(next_input(&mut app)["released"], json!("escape"));
+    wait_for(
+        || screen(&mut other).contains("after"),
+        "the rest of the read",
+    );
+    let shown = screen(&mut other);
+    assert!(!shown.contains("27;1") && !shown.contains('q'), "{shown}");
+
+    // An escape key is matched by name: application cursor keys.
+    app.call("widget.ask", json!({"id": first, "escape": "up"}))
+        .unwrap();
+    focus_on(&mut other, first);
+    host(&mut other, b"\x1bOA");
+    assert_eq!(next_input(&mut app)["released"], json!("escape"));
+
+    // Its sprite removed by another: told; by itself: no word.
+    let sprite = |client: &mut Client, id: u64| -> Value {
+        let list = client.call("widget.list", json!({})).unwrap();
+        let list = list["widgets"].as_array().unwrap().clone();
+        let found = list.into_iter().find(|w| w["id"] == json!(id));
+        found.map_or(Value::Null, |w| w["sprite"].clone())
+    };
+    focus_on(&mut other, first);
+    wait_for(|| sprite(&mut other, first).is_u64(), "the widget drawn");
+    let id = sprite(&mut other, first);
+    other.call("draw.remove", json!({"id": id})).unwrap();
+    let data = next_input(&mut app);
+    assert_eq!(data, json!({"widget": first, "released": "hidden"}));
+    focus_on(&mut other, second);
+    wait_for(|| sprite(&mut other, second).is_u64(), "the widget drawn");
+    let id = sprite(&mut other, second);
+    app.call("draw.remove", json!({"id": id})).unwrap();
+    wait_for(|| focus(&mut other).is_null(), "the focus dropped");
+    app.subscribe(&["exit"]).unwrap();
+    let quiet = std::time::Duration::from_millis(200);
+    assert!(app.next_event(Some(quiet)).unwrap().is_none());
+}
+
+#[test]
+fn the_verb_says_what_happened_and_no_hotkey() {
+    let sb = Sandbox::new("focus-verb");
+    let _driver = sb.spawn(
+        "v",
+        &["run", "--name", "v", "--headless", "--no-hotkey", "cat"],
+    );
+    let mut app = sb.client("v");
+    // No hotkey: a focus without an escape key could not be left.
+    let decl = json!({"widgets": [{"tag": "7", "size": [8, 1]}]});
+    app.call("widget.declare", decl).unwrap();
+    let shown = app.call("widget.show", json!({"tag": "7"})).unwrap();
+    let id = shown["widget"]["id"].as_u64().unwrap();
+    let err = app
+        .call("widget.ask", json!({"id": id, "escape": false}))
+        .unwrap_err();
+    assert!(err.to_string().contains("no hotkey"), "{err}");
+    app.call("widget.ask", json!({"id": id})).unwrap();
+
+    let stderr = |out: &std::process::Output| String::from_utf8_lossy(&out.stderr).into_owned();
+    // A number that is no id is a tag.
+    let out = sb.run(&["-s", "v", "focus", "7"]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    // Past the last, then with none focused and none left.
+    let out = sb.run(&["-s", "v", "focus"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr(&out).contains("past the last"), "{out:?}");
+    app.call("widget.release", json!({"id": id})).unwrap();
+    let out = sb.run(&["-s", "v", "focus"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr(&out).contains("no widget asks"), "{out:?}");
+}

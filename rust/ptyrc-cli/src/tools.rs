@@ -113,7 +113,10 @@ pub fn attach(common: &Common, args: Attach) -> Done {
             let typed = &typed[..at.unwrap_or(n)];
             if !typed.is_empty() {
                 let bytes = keys::base64_encode(typed);
-                if typist.call("input.send", json!({"bytes": bytes})).is_err() {
+                if typist
+                    .call("input.send", json!({"bytes": bytes, "host": true}))
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -245,7 +248,10 @@ pub struct Focus {
 
 /// The widget `name` tells: an id, or the tag of one widget that asks.
 fn asking(list: &[Value], name: &str) -> Result<u64, Fail> {
-    if let Ok(id) = name.parse::<u64>() {
+    // A number: an id first, then a tag.
+    if let Ok(id) = name.parse::<u64>()
+        && list.iter().any(|w| w["id"].as_u64() == Some(id))
+    {
         return Ok(id);
     }
     let ids = |asks: bool| -> Vec<u64> {
@@ -285,6 +291,7 @@ pub fn focus(common: &Common, args: Focus) -> Done {
         client.call("widget.blur", json!({}))?;
         return Ok(ExitCode::SUCCESS);
     }
+    let was = client.call("session.info", json!({}))?["focus"].clone();
     let id = match &args.widget {
         Some(name) => {
             let list = client.call("widget.list", json!({}))?;
@@ -300,7 +307,10 @@ pub fn focus(common: &Common, args: Focus) -> Done {
     let widget = &result["widget"];
     if widget.is_null() {
         if !common.json {
-            eprintln!("ptyrc: no widget asks for the keyboard");
+            match was.is_null() {
+                true => eprintln!("ptyrc: no widget asks for the keyboard"),
+                false => eprintln!("ptyrc: past the last widget that asks: no focus"),
+            }
         }
         return Ok(ExitCode::from(1));
     }
