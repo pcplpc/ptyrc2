@@ -468,6 +468,9 @@ class Pond:
         self.kisses: list[Ripple] = []
         self._walls: Walls | None = None
         self._shadows: dict[int, tuple[list[float], list[float]] | None] = {}
+        # What does not change with the time, by size: worked out once.
+        self._glints: tuple[Any, list[tuple[float, float, float]]] = (None, [])
+        self._adrift: tuple[Any, list[tuple[Any, ...]]] = (None, [])
 
     # The pointer.
 
@@ -656,12 +659,24 @@ class Pond:
         """Light on the swell: dashes adrift on the current, that show
         where two waves meet."""
         fx, fy = self.flow
-        for i in range(int(90 * w * h / AREA)):
-            x = int((noise(self.seed, 2 * i + 100000) * 2 * w + fx * t) % (2 * w))
-            y = int((noise(self.seed, 2 * i + 100001) * 4 * h + fy * t) % (4 * h))
+        if self._glints[0] != (w, h):
+            self._glints = (
+                (w, h),
+                [
+                    (
+                        noise(self.seed, 2 * i + 100000) * 2 * w,
+                        noise(self.seed, 2 * i + 100001) * 4 * h,
+                        0.2 * noise(i, 5),
+                    )
+                    for i in range(int(90 * w * h / AREA))
+                ],
+            )
+        for x0, y0, dull in self._glints[1]:
+            x = int((x0 + fx * t) % (2 * w))
+            y = int((y0 + fy * t) % (4 * h))
             wave = math.sin(0.07 * x + 0.045 * y - 0.5 * t)
             wave += math.sin(-0.035 * x + 0.09 * y - 0.37 * t + 1.7)
-            level = int((wave - 1.15 - 0.2 * noise(i, 5)) / 0.25)
+            level = int((wave - 1.15 - dull) / 0.25)
             if level < 0:
                 continue
             level = min(level, len(SHEEN) - 1)
@@ -704,18 +719,33 @@ class Pond:
     def _drift(self, water: _Water, w: int, h: int, t: float) -> None:
         colours, size, density = ADRIFT[self.season]
         across, down = 2 * w, 4 * h
-        for i in range(int(density * w * h / AREA)):
-            key = int(noise(self.seed, 5000 + i) * 2**32)
-            pace = 0.8 + 0.8 * noise(key, 1)
-            sway = math.tau * noise(key, 2)
-            x = noise(key, 3) * across + pace * t * self.flow[0]
-            y = noise(key, 4) * down + pace * t * self.flow[1]
+        if self._adrift[0] != (w, h, self.season):
+            keys = [
+                int(noise(self.seed, 5000 + i) * 2**32)
+                for i in range(int(density * w * h / AREA))
+            ]
+            self._adrift = (
+                (w, h, self.season),
+                [
+                    (
+                        0.8 + 0.8 * noise(key, 1),
+                        math.tau * noise(key, 2),
+                        noise(key, 3) * across,
+                        noise(key, 4) * down,
+                        colours[key % len(colours)],
+                        4 * noise(key, 5),
+                    )
+                    for key in keys
+                ],
+            )
+        for pace, sway, x, y, colour, turn in self._adrift[1]:
+            x += pace * t * self.flow[0]
+            y += pace * t * self.flow[1]
             x += 3.0 * math.sin(0.17 * t + sway)
             y += 2.0 * math.cos(0.13 * t + sway)
             px, py = math.floor(x % across), math.floor(y % down)
-            colour = colours[key % len(colours)]
             # It turns as it goes.
-            spin = int(0.12 * t + 4 * noise(key, 5)) % 4
+            spin = int(0.12 * t + turn) % 4
             dx, dy = ((1, 0), (1, 1), (0, 1), (-1, 1))[spin]
             for k in range(size):
                 water.dot(px + k * dx, py + k * dy, colour)
