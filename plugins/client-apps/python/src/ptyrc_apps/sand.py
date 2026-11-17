@@ -6,7 +6,7 @@
     ptyrc-app sand -f active --cursor --now
     ptyrc-app sand --hover         # the mouse takes the sand it is over
     ptyrc-app sand --bomb          # a click on the pile blows it up
-    ptyrc-app sand -a              # --hover and --bomb
+    ptyrc-app sand -a              # --cursor, --hover, --bomb, --now
 
 What it shows:
 
@@ -121,13 +121,18 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
         help="a click on the pile blows it up, the longer held the stronger "
         "(1.5 s at most); the clicks on the pane do not reach its program",
     )
-    out.add_argument("-a", "--all", action="store_true", help="--hover and --bomb")
+    out.add_argument(
+        "-a",
+        "--all",
+        action="store_true",
+        help="--cursor, --hover, --bomb and --now",
+    )
     out.add_argument(
         "--now", action="store_true", help="do not wait for the pane to be idle"
     )
     args = _cli.parse(out, argv)
     if args.all:
-        args.hover = args.bomb = True
+        args.cursor = args.hover = args.bomb = args.now = True
     return _cli.run(lambda pilot, args: app(pilot, args, seconds), args)
 
 

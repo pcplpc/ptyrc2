@@ -117,19 +117,23 @@ def test_bomb(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_all(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`-a`: `--hover` and `--bomb`."""
-    seen: list[tuple[bool, bool]] = []
+    """`-a`: `--cursor`, `--hover`, `--bomb` and `--now`."""
+    seen: list[tuple[bool, ...]] = []
     monkeypatch.setattr(
-        sand._cli, "run", lambda app, args: seen.append((args.hover, args.bomb)) or 0
+        sand._cli,
+        "run",
+        lambda app, args: (
+            seen.append((args.cursor, args.hover, args.bomb, args.now)) or 0
+        ),
     )
     for argv in (["-a"], ["--all", "--hover"], [], ["--bomb"], ["--hover"]):
         assert sand.main(argv) == 0
     assert seen == [
-        (True, True),
-        (True, True),
-        (False, False),
-        (False, True),
-        (True, False),
+        (True, True, True, True),
+        (True, True, True, True),
+        (False, False, False, False),
+        (False, False, True, False),
+        (False, True, False, False),
     ]
 
 
