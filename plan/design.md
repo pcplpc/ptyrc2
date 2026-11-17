@@ -1582,9 +1582,13 @@ name (`run --name auto`: status 2).
   whatever the user types next. A choice among several is told on
   stderr when it is a terminal: `ptyrc: session b (auto: typed in 3s
   ago)`.
-- Not done: `auto` as the default of `ptyrc app` alone (a verb that
-  types, `send` or `keys`, keeps a name); the focus of the host window
-  (1004) as a date; `ptyrc attach` as the user.
+- `ptyrc app NAME`, no session chosen (`-s`, `PTYRC_SESSION`,
+  `PTYRC_SOCKET`, tmux) and several live: `auto`, told the same
+  (`apps::typed_in`). Typed in by none: `ptyrc-app` fails as before. No
+  other verb: one that reads or types (`text`, `send`, `keys`) keeps to
+  a name, `ptyrc python` and `ptyrc-app` run by hand too.
+- Not done: the focus of the host window (1004) as a date; `ptyrc
+  attach` as the user.
 
 Trust, as tmux: one boundary, the user. Whoever reaches the socket has
 the whole session.

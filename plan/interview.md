@@ -232,3 +232,4 @@ Supersedes `--spawn --rate` above.
 - A choice among several is said on stderr.
 - `ptyrc attach` as the user, the focus of the host window (1004):
   later; something simple first.
+- The default, the same day: in the safest place only, `ptyrc app`.

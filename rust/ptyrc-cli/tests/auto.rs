@@ -115,22 +115,40 @@ fn an_app_keeps_the_session_chosen() {
     let (mut a, _da) = HostPty::spawn(&sb, &[BIN, "run", "--name", "a", "cat"]);
     let _h = sb.headless("h", "40x10", &["cat"]);
     wait_for(|| sb.socket("a").exists(), "the session");
-    type_in(&sb, &mut a, "a", b"x");
 
     // A stand-in for `ptyrc-app`: it tells its session.
     let bin = sb.dir.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     let app = bin.join("ptyrc-app");
-    std::fs::write(&app, "#!/bin/sh\necho \"$PTYRC_SESSION $*\"\n").unwrap();
+    std::fs::write(&app, "#!/bin/sh\necho \"${PTYRC_SESSION-none} $*\"\n").unwrap();
     std::fs::set_permissions(&app, std::fs::Permissions::from_mode(0o755)).unwrap();
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
-    let out = sb
-        .ptyrc()
-        .env("PATH", path)
-        .args(["app", "-s", "auto", "bricks"])
-        .output()
-        .unwrap();
-    assert_eq!(String::from_utf8_lossy(&out.stdout), "a bricks\n");
+    let told = |args: &[&str], env: &[(&str, &str)]| {
+        let mut ptyrc = sb.ptyrc();
+        ptyrc.env("PATH", &path).args(args);
+        ptyrc.envs(env.iter().copied());
+        String::from_utf8_lossy(&ptyrc.output().unwrap().stdout).into_owned()
+    };
+
+    // Typed in by nobody: the program chooses, as before.
+    assert_eq!(told(&["app", "bricks"], &[]), "none bricks\n");
+    type_in(&sb, &mut a, "a", b"x");
+    assert_eq!(told(&["app", "-s", "auto", "bricks"], &[]), "a bricks\n");
+    // No session chosen, several: an app goes where the user typed.
+    assert_eq!(told(&["app", "bricks", "-x"], &[]), "a bricks -x\n");
+    // A choice stands; no app named: nothing is chosen.
+    assert_eq!(told(&["app", "-s", "h", "bricks"], &[]), "h bricks\n");
+    let env = [("PTYRC_SESSION", "h")];
+    assert_eq!(told(&["app", "bricks"], &env), "h bricks\n");
+    let env = [("PTYRC_SOCKET", "/nowhere")];
+    assert_eq!(told(&["app", "bricks"], &env), "none bricks\n");
+    assert_eq!(told(&["app"], &[]), "none \n");
+    assert_eq!(told(&["app", "--help"], &[]), "none --help\n");
+
+    // The other verbs keep to a name.
+    let out = sb.run(&["text"]);
+    assert_eq!(out.status.code(), Some(3));
+    assert!(stderr(&out).contains("2 sessions, none chosen"));
 }
 
 #[test]

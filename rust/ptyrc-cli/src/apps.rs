@@ -75,23 +75,40 @@ pub fn not_found(name: &str) -> impl FnOnce() -> Fail {
     }
 }
 
-/// Replace this process with `ptyrc-app ARGS...`.
+/// Replace this process with `ptyrc-app ARGS...`. An app named, no
+/// session chosen and several live: the one the user typed in last.
 pub fn app(common: &Common, args: App) -> Result<ExitCode, Fail> {
-    exec(APP, common, &args.args)
+    let session = common.session.clone().or_else(|| typed_in(&args.args));
+    exec(APP, session.as_deref(), &args.args)
 }
 
 /// Replace this process with `ptyrc-python ARGS...`.
 pub fn python(common: &Common, args: Python) -> Result<ExitCode, Fail> {
-    exec(PYTHON, common, &args.args)
+    exec(PYTHON, common.session.as_deref(), &args.args)
 }
 
-/// Replace this process with `name ARGS...`; `-s` becomes `$PTYRC_SESSION`,
-/// and drops `$PTYRC_SOCKET`, which would win over it.
-fn exec(name: &str, common: &Common, args: &[String]) -> Result<ExitCode, Fail> {
+/// The session of an app when none is chosen and `session::select`
+/// has several to choose from: `session::auto`. `None`: the program
+/// chooses, and fails, as before. `$PTYRC_SOCKET` is a choice.
+fn typed_in(args: &[String]) -> Option<String> {
+    let named = args.first().is_some_and(|a| !a.starts_with('-'));
+    let socket = std::env::var_os(session::ENV_SOCKET).is_some_and(|s| !s.is_empty());
+    if !named || socket {
+        return None;
+    }
+    match session::select(None) {
+        Err(session::SelectError::Ambiguous(_)) => session::auto().ok().map(crate::tell_auto),
+        _ => None,
+    }
+}
+
+/// Replace this process with `name ARGS...`; the session becomes
+/// `$PTYRC_SESSION`, and drops `$PTYRC_SOCKET`, which would win over it.
+fn exec(name: &str, session: Option<&str>, args: &[String]) -> Result<ExitCode, Fail> {
     let program = find(name).ok_or_else(not_found(name))?;
     let mut command = Command::new(&program);
     command.args(args);
-    if let Some(session) = &common.session {
+    if let Some(session) = session {
         command.env(session::ENV_SESSION, session);
         command.env_remove(session::ENV_SOCKET);
     }

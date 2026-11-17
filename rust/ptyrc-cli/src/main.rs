@@ -331,6 +331,13 @@ fn resolve_auto(common: &mut Common) -> Result<(), Fail> {
         return Ok(());
     }
     let auto = session::auto().map_err(ClientError::Select)?;
+    common.session = Some(tell_auto(auto));
+    Ok(())
+}
+
+/// The name of what `auto` chose; a choice among several is told on a
+/// terminal.
+pub fn tell_auto(auto: session::Auto) -> String {
     if auto.among > 1 && std::io::stderr().is_terminal() {
         let age = auto.active_at.map(|at| ago(unix_ms().saturating_sub(at)));
         eprintln!(
@@ -339,8 +346,7 @@ fn resolve_auto(common: &mut Common) -> Result<(), Fail> {
             age.as_deref().unwrap_or("?")
         );
     }
-    common.session = Some(auto.session.name);
-    Ok(())
+    auto.session.name
 }
 
 fn run(cli: Cli) -> Result<ExitCode, Fail> {
