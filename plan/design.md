@@ -946,6 +946,94 @@ another:
   blackout is pressed, and evicted after `evict_ms`.
 - Info: `"modal": true`, `"over"`: put over the text.
 
+### Asking and focus
+
+Decided with the owner, 2026-11-17 (`plan/interview.md`). An
+**interactive** widget takes keys of the host keyboard. The app says
+its widget asks; the user gives it the keyboard; the driver routes the
+keys. An app never takes the focus by itself.
+
+- **Asks**: `widget.ask {id, quiet, escape}`. The widget is one the
+  user can focus. `quiet` (false): it does not wait for an answer (a
+  note that can be edited); else it is **loud**: a question. Asked
+  again: the options change, its place in the order is kept. Kept when
+  the widget is shown again; over with `widget.release {id}`,
+  `widget.hide`, the connection. Answers: `{"widget": info}`, `{}`.
+- **Focused**: one widget of the session at most. Every key of the
+  host keyboard is an `input` event for its connection alone,
+  subscribed or not: `{"key","bytes","widget":id}`, named as under
+  `input.grab`; nothing reaches the app. A bracketed paste is
+  `{"widget":id,"paste":TEXT}`, one a read, the marks left out: no
+  escape key, no pair in it. Mouse reports and focus reports (1004)
+  are no keys: they go where they went. An unfinished end of a read
+  (a lone ESC, an open sequence) waits 25 ms for its rest. Keys typed
+  by `input.send {host: true}` are the host's (`ptyrc attach` sends
+  so): a widget is answered from afar, and in tests.
+- **Order**: the loud ones, then the quiet ones, each by the time
+  they first asked. A widget that cannot be drawn is not in it: its
+  owner is paused, its frame is not usable (the raw frame always
+  counts as usable here: a widget on it can be focused from the
+  start, and is drawn when the screen settles). One hidden for want
+  of a room is; one not yet looked at too.
+- **The hotkey** (ctrl+t twice): not focused, the first widget of the
+  order is; focused, the next one after it; past the last (or none
+  asks) the focus is dropped and the pair is the manager's, as before:
+  w1, w2, the menu, out. The pair while the manager runs and nothing
+  is focused ends the manager. The hotkey is armed while a widget is
+  focused, not under an `input.grab`. A lone ctrl+t goes to the
+  widget, late. Keys before the pair in the same read go to who had
+  the keyboard, those after to who has it then.
+- **Escape**: `escape` at `widget.ask`, a named key that is not text
+  (`esc`), matched by name, or false: none, every key is the
+  widget's (`not-usable` with no hotkey: no way out). It drops the
+  focus and reaches nobody; what follows it in the same read goes to
+  the app. The widget still asks.
+- `widget.focus {id}`: the focus, by a request (any connection: a
+  key binding of the user, a test); `id` absent: the next of the
+  order, as the pair, null past the last (the manager is not
+  started). `{"widget": info | null}`. A widget that does not ask or
+  cannot be drawn, or a key grab held: `not-usable`. `widget.blur {}`:
+  dropped. `input.grab` while a widget is focused: `not-usable`.
+- The focus is lost on: the escape key (`escape`), the pair
+  (`hotkey`), `widget.blur` or a focus given to another (`blur`), the
+  owner paused (`pause`), the frame forgotten, the sprite removed by
+  another connection, a replay rewound (`hidden`). The connection is sent `input`
+  `{"widget": id, "released": REASON}`; a paused one reads the state
+  in the snapshot at `app.resume`. None when it ends it itself
+  (`widget.release`, `widget.hide`, its own `draw.remove`). While
+  the frame is only not usable the focus is kept: the keys go on, the
+  widget is hidden with its frame and comes back with it.
+- `widget.ask`, `widget.release` on a widget of another connection:
+  `no-sprite`. `ptyrc manage --overlay` run by hand while a widget is
+  focused is refused its grab.
+- **Look**, by the driver, the same for every app. Loud, not
+  focused: the style of the border is `{fg: bright cyan}`, not dim,
+  the title in its own style, bold. Focused, loud or quiet: bright cyan, bold, the title
+  too, and a bright white chase (`len` 6, `ms` 50, `runs` 2) in place
+  of the border's own. Quiet, not focused: its own border. The glyphs
+  of the border are kept; a border `none` shows nothing.
+- **Focused is modal**: while focused the widget is laid out as a
+  modal one (layer `hud` unless one was given; never pressed, evicted,
+  grown nor shrunk). Placed: it stays where it is. Hidden for want of
+  a room: put over the text, at once. The focus lost: its own rules
+  again; one put over the text is laid out again as a new one.
+- Info: `"asks": null | "loud" | "quiet"`, `"focused": bool`; an
+  event `widgets` when either changes. `session.info`: `"focus": id |
+  null`.
+
+Core: `Widgets::ask`, `release`, `focus`, `blur`, `focused`, `order`,
+`next` (no keys there: the escape key and the routing are the driver's,
+`ptyrc-server/src/focus.rs`, on the sorter of `grab.rs`).
+
+CLI: `ptyrc focus [ID | TAG]` (none: the next; status 1 when none
+asks, 4 for a tag that does not ask, 2 for a tag of several),
+`ptyrc focus --none`. `ptyrc widgets`: a column `ASKS` (`loud`,
+`quiet`, `focus`, `-`).
+
+Python (`ptyrc`): `Widget.ask(quiet=False, escape=None)`,
+`Widget.release()`, `Widget.asks`, `Widget.focused`, `Pilot.focus(id)`,
+`Pilot.blur()`. The toolkit on top: see Python, `ptyrc.ui`.
+
 ### Hidden owners
 
 `Widgets::hide_owner(owner, hidden)` (`app.pause`): the widgets of
@@ -1514,7 +1602,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `screen.find` | `pattern`, `regex`, `ignore_case`, `frame`, `known` | `{"matches":[{"frame","x","y","len","text","screen":[c,r]\|null}]}` |
 | `screen.cursor` | `trail` | `{"x","y","visible","frame","pos":[x,y],"trail":[[ms,x,y],...]}`; `frame`: the innermost frame showing it, `pos`: its cell there |
 | `screen.wait` | `pattern` or `stable_ms` or `idle` (or `gone`), `timeout_ms`, `frame` | `{"matched":bool,"match":...}`; with `idle`: `{"matched":true,"match":null,"frame":id,"idle":{"score","idle","free"}}`, the frame name resolved at each look |
-| `input.send` | `text` or `keys` or `bytes` (base64), `paste` | `{}` |
+| `input.send` | `text` or `keys` or `bytes` (base64), `paste`, `host` (typed as on the host keyboard: hotkey, focus, grab) | `{}` |
 | `input.click` | `x`, `y` (screen cell), `button`: `left`, `middle`, `right`, `wheel-up`, `wheel-down`, `wheel-left`, `wheel-right`; `mods`: `shift`, `alt`, `ctrl`; `count` (1 to 3); `to`: `[x, y]` | `{}` |
 | `input.grab` | `keys`: names (absent: all), `escape` (`ctrl+t`) | `{"escape":name}` |
 | `input.release` | | `{}` |
@@ -1542,6 +1630,10 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `widget.show` | `tag`, `frame`, `prefer`, `fill`, `title`, `border`, `layer` | `{"widget":info}` |
 | `widget.set` | `id`, `variant`, `content`, `title` | `{}` |
 | `widget.hide` | `id` | `{}` |
+| `widget.ask` | `id`, `quiet`, `escape` | `{"widget":info}`; see Asking and focus |
+| `widget.release` | `id` | `{}` |
+| `widget.focus` | `id` (absent: the next) | `{"widget":info \| null}` |
+| `widget.blur` | | `{}` |
 | `widget.list` | | `{"widgets":[info,...]}`, every connection's |
 | `widget.borders` | | `{"borders":[name,...]}` |
 | `app.list`, `app.start`, `app.stop`, `app.pause`, `app.resume`, `app.restart`, `app.forget`, `app.move` | | see Apps and the manager, Methods |
@@ -1979,6 +2071,67 @@ exists: the stems hung, one a line, best first, `#` a comment;
 buffer. `scripts/demo-frames.sh [--check]`: a tmux session of two
 windows under the driver, one drawing per pane, sand in the idle one.
 `--check` runs detached and asserts what is drawn.
+
+### `ptyrc.ui`
+
+The toolkit of the interactive widgets (Widgets, Asking and focus):
+what the menu of `ptyrc manage` is in Rust, for any client. Stdlib
+only. Three parts, as there: models, a runner, the front is a widget.
+
+- **Model**: keys in, rows of styled runs out, for a given size; no
+  clock, no I/O. `key(name) -> None | "done" | "cancel"`;
+  `paste(text)`; `render(w, h, focused) -> rows` (exactly `h` rows of
+  `w` cells); `result`. Every screen as the menu's: the question, the
+  rows (the selected one an inverse bar; a list too long scrolls and
+  says `3/12`), a foot line of keys that drops the least useful first.
+  Not focused, the foot says how to answer (`ctrl+t ctrl+t`).
+  - `Choice(question, options, *, multi=False, other=False)`: arrows,
+    `jk`, `tab`, digits (the bar goes to that row); `space` ticks
+    with `multi`; `other`: a last row typed in place. `result`: the
+    option, or the list. The bar shows when focused only.
+  - `Line(question, *, default="", placeholder="")`: one line, a
+    cursor; arrows, `home`, `end`, `backspace`, `delete`, `ctrl+a`,
+    `ctrl+e`, `ctrl+u`, `ctrl+k`, `ctrl+w`. Scrolls sideways.
+  - `Text(question, *, default="")`: several lines; `enter` validates,
+    `alt+enter` or `ctrl+j` is a new line; a paste keeps its lines.
+  - `Form(steps)`: models one after another, `2/3` in the title;
+    `result`: the list of theirs. `esc`-free: the way back is
+    `shift+tab`.
+  - Keys of all: `enter` validates (`done`), `ctrl+c` dismisses
+    (`cancel`). The escape key never comes: the driver takes it, the
+    question stays.
+  - Building blocks, public: `Editor` (a line and its cursor),
+    `Listing` (a bar, a scroll), `foot`, `fit`, `wrap`, `cells`,
+    `cut`, `run`. Variants are 24 cells wide at least.
+- `Keys`: the `input` events of a focused widget as `("key", name)`
+  or `("paste", text)`; `feed(data)`, `reset()`.
+- **Runner**: `Dialog(pilot, model, *, tag="ask", sizes=, title=, quiet=,
+  **show)` declares, shows and asks. `take(event) -> bool` gives it an
+  event of the pilot (`widgets`, `input`), for an app with its own
+  loop; `done`, `result` (None: dismissed), `close()`. `ask(pilot,
+  model, **options)`: the loop itself, until done; the result.
+- `_widgets.Deck.interact(widget, key, *, quiet=True, escape=None,
+  paste=None)`: a widget of a deck asks; `key(name)`, `paste(text)`
+  while focused, the widget drawn again after, unless False is
+  returned; its `render` reads `widget.focused`. `Deck.handle(event)`
+  takes any event of the deck's.
+
+Apps on it:
+
+- `ask`: a question from a shell. `ptyrc-app ask QUESTION [OPTION...]`
+  a choice; `--multi`, `--other`; no option: a line; `--text`:
+  several lines; `--default`, `--title`, `--timeout SECONDS`,
+  `--json`. The answer on stdout, status 0; dismissed or timed out:
+  status 1, nothing; no session, a refusal: 3. `--default` with
+  options: the bar there. Never drawn by `random app`.
+- `note -i`, `--interactive`: the notes are quiet interactive widgets.
+  Focused: a bar on the items; `space` or `enter` ticks a box, `a`
+  adds one under the bar, `e` edits its words (a `Line` in the note),
+  `d` then `y` deletes, `shift+↑↓` or `JK` moves it (two lines
+  swapped). The file is written at each change, by a rename; the
+  lines `parse` does not show are kept as they are; a file changed
+  meanwhile is read again, the key lost. An item is one row there.
+  `--merged`: the turn stands still while focused. Not in `-a`.
 
 ## Tests
 

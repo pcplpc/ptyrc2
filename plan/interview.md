@@ -201,3 +201,21 @@ Supersedes `--spawn --rate` above.
   own. Flags: a checklist from the app's options, and a free line.
 - Apps are moved between frames from the menu; a list of the frames
   with the apps on each, and a preview.
+
+## Interactive widgets (2026-11-17)
+
+- Interactive flows on a ptyrc app: a widget pops on screen with a
+  choice (A, B or C) or a free input. ctrl+t ctrl+t focuses the next
+  widget that waits for input; none: the menu, as always; the pair
+  again cycles between those that wait; esc gives the control back.
+- In the focused widget (a border animation as the menu's, in another
+  colour) the keys are its own: answers, typed text; what happens
+  there is the app's. enter validates: the widget may give the
+  control back and go.
+- A new kind of widget, with a whole TUI flow for itself: the manager
+  menu made reusable. First example: the note app rebuilt on it.
+- Taken by the pilot agent, to be confirmed: the menu is the last
+  stop of the cycle (never out of reach); two kinds, loud (a
+  question; marked on screen) and quiet (a note; unmarked, after the
+  loud ones); an app cannot take the focus by itself; focused, a
+  widget is modal.
