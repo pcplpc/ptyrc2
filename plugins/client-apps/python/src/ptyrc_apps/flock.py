@@ -27,8 +27,10 @@ What it shows:
   and gathers again.
 - Three sprites in view cells, behind the text: the sky (the glow of
   the sun, strokes of light the thicker the lower; clouds, stars),
-  looked at once a second; the sun and the birds, 10 times a second; the
+  looked at once a second; the sun and the birds, 30 times a second; the
   land over them, 5 times. A bird before the sun is a dot off in its disc.
+- A flight stepped 10 times a second, drawn 30 times: between two
+  steps a bird is on a smooth curve through its last places (`_glide`).
 - The screen read as a map (`_cli.Sight`): nothing is drawn in the
   cell on each side of a glyph; with `-o` the tops of the lines of
   text are perches.
@@ -72,12 +74,12 @@ Dot = tuple[float, float]
 Vec = tuple[float, float, float]
 Scare = tuple[float, float, float]  # a dot, and how much: 0 to 1
 
-PERIOD = 1 / 10  # seconds a tick: the birds
-DT = PERIOD  # seconds a step of the birds
+PERIOD = 1 / 30  # seconds a tick: the birds are drawn
+DT = 1 / 10  # seconds a step of the birds
 WARM = 10  # steps a flock just made has flown
 LEAP = 50  # steps at most from a call to the next
-SKY = 10  # ticks between two looks at the sky
-LAND = 2  # and at the land
+SKY = 30  # ticks between two looks at the sky
+LAND = 6  # and at the land
 
 SET = 0.8  # share of a dusk at which the sun is down
 REST = 0.1  # the night, in dusks
@@ -140,6 +142,15 @@ def _wave(x: float, seed: int) -> float:
     return noise(i, seed) + (noise(i + 1, seed) - noise(i, seed)) * _ease(x - i)
 
 
+def _glide(a: float, b: float, c: float, s: float) -> float:
+    """Between the places `a`, `b`, `c` of three steps in a row, the
+    share `s` of a step on: a quadratic B-spline, from the middle of
+    `a` and `b` to the middle of `b` and `c`. From a step to the next
+    the place and the speed are continuous."""
+    r = 1.0 - s
+    return 0.5 * (r * r * a + (1.0 + 2.0 * s * r) * b + s * s * c)
+
+
 def stage(t: float, dusk: float, start: float = START) -> float:
     """Where in the dusk `t` seconds are: 0 the sun over the view,
     `SET` it is down, 1 the night, to `1 + REST`."""
@@ -176,15 +187,21 @@ def sun_at(w: int, top: float, r: float, f: float) -> Dot:
 def _disc(cx: float, cy: float, r: float, land: Land, h: int) -> dict[Any, int]:
     """The dots of the sun over the land, as bits by cell."""
     out: dict[tuple[int, int], int] = {}
+    tops: dict[int, int] = {}
     for py in range(max(0, math.floor(cy - r)), min(4 * h, math.ceil(cy + r) + 1)):
         y = py + 0.5 - cy
         if abs(y) >= r:
             continue
         half = math.sqrt(r * r - y * y)
+        row = DOTS[py & 3]
         for px in range(max(0, math.floor(cx - half)), math.ceil(cx + half) + 1):
-            if abs(px + 0.5 - cx) <= half and py < land.top(px, h):
+            if abs(px + 0.5 - cx) > half:
+                continue
+            if (top := tops.get(px)) is None:
+                top = tops[px] = land.top(px, h)
+            if py < top:
                 cell = (px >> 1, py >> 2)
-                out[cell] = out.get(cell, 0) | DOTS[py & 3][px & 1]
+                out[cell] = out.get(cell, 0) | row[px & 1]
     return out
 
 
@@ -369,12 +386,17 @@ class Flock:
     `fly(air, t)` steps to `t`. A time before the last one, or more
     than `LEAP` steps after: the flock starts again `WARM` steps
     before, about its leads; so a flock just made is a function of `t`.
+
+    What is drawn is not the last step: a curve through the last
+    three (`_glide`), at the share of a step `t` is past the last. A
+    bird is seen half a step to a step and a half late, and smoothly
+    at any rate of frames.
     """
 
     def __init__(
         self,
         rng: random.Random,
-        birds: float = 130.0,
+        birds: float = 120.0,
         second: float = 0.0,
         join: bool = False,
         hawk: bool = False,
@@ -396,6 +418,12 @@ class Flock:
         self.vx: list[float] = []
         self.vy: list[float] = []
         self.vz: list[float] = []
+        #: Where it was a step ago, and two.
+        self.px: list[float] = []
+        self.py: list[float] = []
+        self.qx: list[float] = []
+        self.qy: list[float] = []
+        self.part = 0.0  # share of a step the last `fly` was past `k`
         self.state: list[int] = []  # DOWN, UP, IN
         self.tribe: list[int] = []  # the lead it follows now
         self.up: list[float] = []  # the stage it takes off at
@@ -407,6 +435,7 @@ class Flock:
         #: The hawk: x, y, heading, its aim, 0 in a stoop, born, passes
         #: left, since when.
         self.hawk: list[float] | None = None
+        self.trail: list[Dot] = []  # where it was two steps ago, and one
 
     def count(self, w: int, h: int) -> int:
         return int(self.density * w * h / AREA)
@@ -462,10 +491,17 @@ class Flock:
             self.y = [y * ky for y in self.y]
             self.z = [z * kx for z in self.z]
             self.site = [x * kx for x in self.site]
+            self.px = [x * kx for x in self.px]
+            self.qx = [x * kx for x in self.qx]
+            self.py = [y * ky for y in self.py]
+            self.qy = [y * ky for y in self.qy]
         self.size = size
         while len(self.birds) < n:
             self.birds.append(self._bird())
-        for row in (self.x, self.y, self.z, self.vx, self.vy, self.vz):
+        for row in (
+            self.x, self.y, self.z, self.vx, self.vy, self.vz,
+            self.px, self.py, self.qx, self.qy,
+        ):  # fmt: skip
             row[n:] = []
             row += [0.0] * (n - len(row))
         for i in range(len(self.state), n):
@@ -486,6 +522,8 @@ class Flock:
         """All anew at the step `k`: in the air about their leads, or
         down."""
         for row in (self.x, self.state, self.tribe, self.up, self.down, self.site):
+            row.clear()
+        for row in (self.y, self.px, self.py, self.qx, self.qy):
             row.clear()
         self.stray.clear()
         self._fit(air)
@@ -540,6 +578,8 @@ class Flock:
         self.state[i] = UP
         self.tribe[i] = bird.tribe
         self.x[i], self.y[i], self.z[i] = x, y, (noise(i, 14) - 0.5) * 0.8 * u
+        self.px[i] = self.qx[i] = x
+        self.py[i] = self.qy[i] = y
         self.vx[i], self.vy[i], self.vz[i] = vx, vy, 0.0
 
     def _deal(self, air: Air) -> None:
@@ -602,6 +642,9 @@ class Flock:
             again = 2.0 if noise(slot, seed + 8) < 0.35 else 1.0
             way = math.atan2(thick[1] - y, thick[0] - x)
             self.hawk = [x, y, way, thick[0], thick[1], 0.0, t, again, t]
+            # As if it came along its way.
+            bx, by = 2.2 * v * DT * math.cos(way), 2.2 * v * DT * math.sin(way)
+            self.trail = [(x - 2 * bx, y - 2 * by), (x - bx, y - by)]
             return
         x, y, way, ax, ay, away, born, passes, since = hawk
         if thick is not None:
@@ -616,6 +659,7 @@ class Flock:
             rate, speed = (3.0 if y > 0.8 * down else 1.1), 1.7 * v
             if passes > 0 and t - since > 1.6:
                 away, since = 0.0, t
+        self.trail = [self.trail[1], (x, y)]
         turn = (want - way + math.pi) % math.tau - math.pi
         way += max(-rate * DT, min(rate * DT, turn))
         x += speed * math.cos(way) * DT
@@ -637,6 +681,8 @@ class Flock:
             return
         u = self.reach(across, down)
         v0 = PACE * u
+        self.qx[:], self.qy[:] = self.px, self.py
+        self.px[:], self.py[:] = self.x, self.y
         # A rank follows where the lead was: a tribe trails along its way.
         leads = [
             [self.lead(j, across, down, t - LAGS[1] * rank) for rank in range(LAGS[0])]
@@ -858,6 +904,7 @@ class Flock:
         air, or on their perch. `scare`: what they flee, a dot and how
         much, 0 to 1."""
         k = math.floor(t / DT + 1e-6)
+        self.part = s = min(1.0, max(0.0, t / DT - k))
         if self.k is None or not 0 <= k - self.k <= LEAP:
             self._start(k - WARM, air)
         else:
@@ -867,12 +914,26 @@ class Flock:
         out = []
         perched = len(air.roosts)
         night = self.f >= ROOST[0]
-        for i, s in enumerate(self.state):
-            if s != DOWN:
-                out.append((self.x[i], self.y[i]))
+        X, Y, PX, PY, QX, QY = self.x, self.y, self.px, self.py, self.qx, self.qy
+        # The weights of `_glide`.
+        r = 1.0 - s
+        a, b, c = 0.5 * r * r, 0.5 + s * r, 0.5 * s * s
+        for i, state in enumerate(self.state):
+            x, y = X[i], Y[i]
+            # In the air, or just down: the curve ends on its roost.
+            if state != DOWN or QX[i] != x or QY[i] != y:
+                out.append((a * QX[i] + b * PX[i] + c * x, a * QY[i] + b * PY[i] + c * y))  # fmt: skip
             elif i < perched and (night or not (self.join and self.birds[i].group)):
                 out.append(self.spot(i, air))
         return out
+
+    def hunter(self) -> Dot | None:
+        """The hawk to draw, in dots, at the time of the last `fly`."""
+        if (hawk := self.hawk) is None:
+            return None
+        (qx, qy), (px, py) = self.trail
+        s = self.part
+        return _glide(qx, px, hawk[0], s), _glide(qy, py, hawk[1], s)
 
 
 def perches(rows: Sequence[str], w: int, h: int) -> list[tuple[int, int]]:
@@ -1085,8 +1146,8 @@ class Scene:
         over = max(1, h - self.rows(h))
         air = Air(w, over, self.stage, self.args.dusk, lambda px: self.land.top(px, h), roosts)  # fmt: skip
         flown = self.flock.fly(air, t, scare)
-        hawk = self.flock.hawk
-        return flown, [(hawk[0], hawk[1])] if hawk is not None else []
+        hawk = self.flock.hunter()
+        return flown, [hawk] if hawk is not None else []
 
     def fore(
         self,
@@ -1229,7 +1290,8 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
             # The whole view is its box: a hover is told anywhere on it.
             cells[0].append({"t": " " * (w - sum(len(run["t"]) for run in cells[0]))})
             put(1, cells, 0, False)
-            if sized or sight.changed or tick % LAND == 0:
+            # Never on the tick of the sky: no long tick.
+            if sized or sight.changed or tick % LAND == LAND // 2:
                 low = scene.below(w, h, t)[-rows:]
                 put(2, runs(low, w, shown[h - rows :]), h - rows, sized)
 
@@ -1254,9 +1316,9 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
     out.add_argument(
         "--birds",
         type=float,
-        default=130.0,
+        default=120.0,
         metavar="N",
-        help="birds over 80 by 24 cells [default: 130]",
+        help="birds over 80 by 24 cells [default: 120]",
     )
     out.add_argument(
         "--dusk",
