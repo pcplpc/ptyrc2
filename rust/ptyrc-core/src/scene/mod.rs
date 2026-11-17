@@ -1182,12 +1182,12 @@ impl Scene {
 
 /// Call `f` with every glyph of `sprite` that is inside its view, at its
 /// screen cell.
-fn each_glyph(
-    sprite: &Sprite,
+fn each_glyph<'a>(
+    sprite: &'a Sprite,
     base: &Grid,
     surfaces: &dyn Surfaces,
     cursor: (u16, u16),
-    mut f: impl FnMut(u16, u16, &raster::Glyph),
+    mut f: impl FnMut(u16, u16, &'a raster::Glyph),
 ) {
     if sprite.hidden.is_some() {
         return;
@@ -1233,9 +1233,9 @@ fn each_glyph(
 
 /// What the back layers put in one cell.
 #[derive(Clone, Default)]
-struct BackCell {
-    /// Text and width of the glyph; `None`: a colour only.
-    glyph: Option<Cell>,
+struct BackCell<'a> {
+    /// Text and width of the glyph, in its sprite; `None`: a colour only.
+    glyph: Option<&'a Cell>,
     /// Right half of the wide glyph before it.
     spacer: bool,
     fg: Option<Color>,
@@ -1251,7 +1251,7 @@ struct BackCell {
     attrs: Attrs,
 }
 
-impl BackCell {
+impl BackCell<'_> {
     /// Lay the colour `bg` at opacity `alpha` over what is there.
     fn lay(&mut self, bg: Color, alpha: f32, cover: bool, host: &HostColors) {
         if alpha >= 1.0 {
@@ -1278,15 +1278,15 @@ impl BackCell {
 }
 
 /// The back layers, flattened. Allocated at the first glyph.
-struct Back {
+struct Back<'a> {
     cols: u16,
     rows: u16,
-    cells: Vec<Option<BackCell>>,
+    cells: Vec<Option<BackCell<'a>>>,
     host: HostColors,
 }
 
-impl Back {
-    fn new(base: &Grid, host: HostColors) -> Back {
+impl<'a> Back<'a> {
+    fn new(base: &Grid, host: HostColors) -> Back<'a> {
         Back {
             cols: base.cols(),
             rows: base.rows(),
@@ -1295,7 +1295,7 @@ impl Back {
         }
     }
 
-    fn at(&mut self, x: u16, y: u16) -> &mut BackCell {
+    fn at(&mut self, x: u16, y: u16) -> &mut BackCell<'a> {
         if self.cells.is_empty() {
             self.cells = vec![None; self.cols as usize * self.rows as usize];
         }
@@ -1305,10 +1305,15 @@ impl Back {
     /// Take the glyph out of `(x, y)` and out of its other half; the
     /// colour stays.
     fn cut(&mut self, x: u16, y: u16) {
+        let i = y as usize * self.cols as usize + x as usize;
+        if self.cells.get(i).is_none_or(|cell| cell.is_none()) {
+            // Nothing was laid here.
+            return;
+        }
         let cell = self.at(x, y);
         let other = if cell.spacer && x > 0 {
             Some(x - 1)
-        } else if cell.glyph.as_ref().is_some_and(|g| g.width == 2) && x + 1 < self.cols {
+        } else if cell.glyph.is_some_and(|g| g.width == 2) && x + 1 < self.cols {
             Some(x + 1)
         } else {
             None
@@ -1327,7 +1332,7 @@ impl Back {
         &mut self,
         x: u16,
         y: u16,
-        glyph: &raster::Glyph,
+        glyph: &'a raster::Glyph,
         tint: bool,
         alpha: f32,
         cover: bool,
@@ -1337,7 +1342,7 @@ impl Back {
         if !tint {
             self.cut(x, y);
             let cell = self.at(x, y);
-            cell.glyph = Some(glyph.cell.clone());
+            cell.glyph = Some(&glyph.cell);
             cell.fg = glyph.fg;
             cell.fade = (alpha < 1.0).then_some(alpha);
             cell.attrs = glyph.attrs;
@@ -1427,7 +1432,7 @@ impl Back {
                 };
                 // A wide glyph needs two cells without ink, and one
                 // style: both halves on the same backdrop.
-                let glyph = back.glyph.as_ref().filter(|g| {
+                let glyph = back.glyph.filter(|g| {
                     no_ink(x, y)
                         && (g.width != 2
                             || (x + 1 < self.cols
