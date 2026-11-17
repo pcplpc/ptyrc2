@@ -40,6 +40,7 @@ import random
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from functools import cached_property
 
 from ptyrc import Frame, Match, Pilot, Sprite, clock
 
@@ -100,7 +101,7 @@ class Shape:
     def root(self) -> int:
         return self.sway[1][-1].index("|")
 
-    @property
+    @cached_property
     def mask(self) -> frozenset[tuple[int, int]]:
         """Cells with a glyph in some step, from the top left."""
         return frozenset(
