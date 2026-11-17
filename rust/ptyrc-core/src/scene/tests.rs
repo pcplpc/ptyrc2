@@ -2773,3 +2773,96 @@ fn front_alpha_veils_a_wide_glyph_whole() {
         assert!(bytes.is_empty(), "{sprite}: repaired again: {bytes:?}");
     }
 }
+
+/// Whatever the sprites, a wide glyph composed has one style on its two
+/// halves, a spacer follows a head, and the host is repaired at once.
+#[test]
+fn composed_wide_pairs_are_whole() {
+    use ptyrc_vt::{Vt, repair};
+    let mock = Mock::new();
+    let mut rng = Rng::new(11);
+    let mut pick = |n: u64| (rng.next_u64() % n) as usize;
+    let colours = [Color::Default, Color::Indexed(1), Color::Rgb(9, 9, 9)];
+    for round in 0..300 {
+        let mut grid = base();
+        for y in 0..6 {
+            for x in 0..20 {
+                let mut style = Style {
+                    fg: colours[pick(3)],
+                    bg: colours[pick(3)],
+                    ..Style::default()
+                };
+                if pick(8) == 0 {
+                    style.attrs.insert(Attrs::INVERSE);
+                }
+                match pick(5) {
+                    0 => {
+                        grid.put(x, y, Cell::narrow("t", style));
+                    }
+                    1 | 2 if x < 19 => {
+                        grid.put(x, y, Cell::wide("世", style));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut scene = Scene::new();
+        for _ in 0..4 {
+            let rows: Vec<String> = (0..3)
+                .map(|_| (0..8).map(|_| ["#", " ", "界", "~"][pick(4)]).collect())
+                .collect();
+            let mut style = json!({});
+            if pick(2) == 0 {
+                style["fg"] = json!("green");
+            }
+            if pick(2) == 0 {
+                style["bg"] = json!("yellow");
+            }
+            let frame = [RAW, PANE][pick(2)];
+            let at = [pick(22) as i64 - 3, pick(7) as i64 - 2];
+            let layer = [-2, -1, 1, 2][pick(4)];
+            let blend = ["normal", "tint"][pick(2)];
+            let opaque = pick(2) == 0;
+            let mut v = json!({
+                "frame": frame,
+                "anchor": {"at": at, "space": "view"},
+                "content": {"rows": rows, "style": style, "opaque": opaque},
+                "layer": layer,
+                "blend": blend,
+            });
+            if pick(2) == 0 {
+                let alpha = [0.0, 0.3, 0.5, 1.0][pick(4)];
+                v["alpha"] = json!(alpha);
+            }
+            scene.add(1, spec(v), ms(0)).unwrap();
+        }
+        scene.tick_on(ms(0), &grid, &mock);
+        let out = scene.compose(&grid, &mock);
+        for y in 0..6 {
+            for x in 0..20 {
+                let cell = out.cell(x, y);
+                match cell.width {
+                    2 => {
+                        assert!(x < 19, "round {round}: a head on the last column");
+                        let next = out.cell(x + 1, y);
+                        assert_eq!(next.width, 0, "round {round} ({x}, {y}): no spacer");
+                        assert_eq!(next.style, cell.style, "round {round} ({x}, {y}): halves");
+                    }
+                    0 => assert!(
+                        x > 0 && out.cell(x - 1, y).width == 2,
+                        "round {round} ({x}, {y}): a spacer alone"
+                    ),
+                    _ => {}
+                }
+            }
+        }
+        let mut host = Vt::new(20, 6);
+        host.set_grid(&grid);
+        let mut bytes = Vec::new();
+        repair(&mut host, &out, &mut bytes);
+        assert!(host.grid() == &out, "round {round}: host not repaired");
+        bytes.clear();
+        repair(&mut host, &out, &mut bytes);
+        assert!(bytes.is_empty(), "round {round}: repaired twice");
+    }
+}
