@@ -1,13 +1,18 @@
 > This file was written by a human. The project uses generative coding.
 
-# ptyrc2
+# `ptyrc2` - the pty remote controller
 
-This started as [`ptyrc`](https://github.com/pcplpc/ptyrc) a work done by hand
-with the love of a human, now rebuild by the machine.
+This wraps your favorite CLI apps in a terminal driver, on which you can attach
+client apps that add confetti to the output:
 
 ![main-demo](doc/main.gif)
 
-See the [`GALLERY.md`](GALLERY.md) if you want to see all the pictures.
+This started as [`ptyrc`](https://github.com/pcplpc/ptyrc), a wrapper around
+[`pty`](https://docs.python.org/3/library/pty.html) made by hand with love.
+
+Now rebuild with the machine, beware new it has its own legs and can bite.
+
+See [`GALLERY.md`](GALLERY.md) for more examples.
 
 ## Usage
 
@@ -23,15 +28,13 @@ Then attach an application to it:
 ptyrc app bricks
 ```
 
-You can also wrap an existing `tmux` session using `ptyrc tmux attach`.
-
-Use then `ctrl+t ctrl+t` to manage the running driver:
+Wrap a `tmux` session with `ptyrc tmux attach`, then use `ctrl+t ctrl+t` to
+manage the running driver from the inside:
 
 ![tutorial](doc/tutorial.gif)
 
-You can also use `ptyrc python` to [pilot](doc/interact.gif) your session.
-
-Running `ptyrc python script.py` runs a client script with `pilot` exposed.
+You can also use `ptyrc python` to [pilot](doc/interact.gif) your terminal by
+hand.
 
 ## Install from source
 
@@ -84,9 +87,10 @@ just test           # cargo test --workspace && uv run pytest
 just lint           # clippy, rustfmt, ruff
 ```
 
-Honestly, the codebase is full of slop, it needs way more work.
+Honestly, the codebase is full of slop,
+contribute only *if you are fine with AI-generated code.*
 
-You can still point your agent at it to write custom apps.
+You can still point your agent at it to write your own custom apps.
 
 ## License
 
