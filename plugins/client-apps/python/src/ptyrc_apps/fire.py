@@ -33,6 +33,7 @@ Hover (`Poke`): the flames rise and sparks fly for a few seconds.
 from __future__ import annotations
 
 import argparse
+import functools
 import math
 import random
 import sys
@@ -107,6 +108,7 @@ class Look:
     burn: float = BURN
 
 
+@functools.lru_cache(maxsize=1 << 12)  # a point of the lattice serves many cells
 def _hash(seed: int, x: int, y: int) -> float:
     n = (x * 374761393 + y * 668265263 + seed * 2246822519) & 0xFFFFFFFF
     n = ((n ^ (n >> 13)) * 1274126177) & 0xFFFFFFFF
@@ -169,7 +171,16 @@ def heat(
         rise = top * (0.7 + 0.3 * f) * (0.9 + 0.2 * _noise(seed, 3.0, t * 4.0))
         v = y / (rise * (1 - abs(u) ** 1.6))
         return max(0.0, min(1.0, (1 - v) * 2.4)) if v < 1 else 0.0
-    u = (x - cx) / (half * spread)
+    rise = _rise(x, t, w, top, f, seed, spread)
+    return _flame(x, y, t, rise, _lean(y, t, seed), seed) if rise else 0.0
+
+
+def _rise(
+    x: float, t: float, w: int, top: float, f: float, seed: int, spread: float
+) -> float:
+    """How high the flame of column `x` stands, in half rows; 0: none.
+    The same for every row."""
+    u = (x - (w - 1) / 2) / (w / 2 * spread)
     if abs(u) >= 1:
         return 0.0
     # Tongues: the height wanders along the bed and in time.
@@ -177,12 +188,19 @@ def heat(
     wide = _noise(seed + 3, x * 0.13, t * 0.5)
     rise = top * f * (1 - u * u) ** 0.7 * (0.2 + 0.72 * lick**1.3 + 0.36 * wide)
     rise = min(rise, top * 1.05)
-    if rise <= 0.05:
-        return 0.0
+    return rise if rise > 0.05 else 0.0
+
+
+def _lean(y: float, t: float, seed: int) -> float:
+    """How far the flames lean at half row `y`. The same for every column."""
+    return (_noise(seed + 5, y * 0.1, t * 0.7) - 0.5) * 2.5
+
+
+def _flame(x: float, y: float, t: float, rise: float, lean: float, seed: int) -> float:
+    """Heat at `(x, y)` in a flame `rise` half rows high."""
     v = y / rise
     if v >= 1:
         return 0.0
-    lean = (_noise(seed + 5, y * 0.1, t * 0.7) - 0.5) * 2.5
     churn = _noise(seed + 1, x * 0.5 + lean, y * 0.33 - t * 3.2)
     fine = _noise(seed + 2, x * 1.3, y * 0.9 - t * 5.5)
     value = (1 - v) ** 0.8 * (0.62 + 0.6 * churn) + 0.18 * (fine - 0.5)
@@ -372,9 +390,20 @@ def scene(
 
     spread = 0.82 if look.logs and w > 12 else 0.94  # as wide as the logs
 
+    # A column has one height, a row one lean: worked out once.
+    rises = [_rise(x, t, w, top, f, seed, spread) for x in range(w)] if w > 5 else []
+    leans: dict[float, float] = {}
+
     def at(x: int, y: float) -> float:
-        """Heat at half row `y` from the bed."""
-        value = heat(x, y, t, w, top, f, seed, spread)
+        """Heat at half row `y` from the bed: `heat`."""
+        if w <= 5:
+            value = heat(x, y, t, w, top, f, seed, spread)
+        elif y < rises[x]:
+            if (lean := leans.get(y)) is None:
+                lean = leans[y] = _lean(y, t, seed)
+            value = _flame(x, y, t, rises[x], lean, seed)
+        else:
+            value = 0.0
         if y < 1.0 and w > 5:
             value = max(value, 0.45 * _embers(x, t, w, seed))
         return value
