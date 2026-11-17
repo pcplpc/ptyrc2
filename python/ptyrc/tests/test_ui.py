@@ -428,12 +428,12 @@ def test_driver_asks_focus_answer(shell: Pilot) -> None:
     until(lambda: widget.refresh().placed)
     dialog.draw()
     assert any("Deploy?" in row for row in shell.shown())
-    assert shell.info["focus"] is None
+    assert shell.call("session.info")["focus"] is None
 
     info = shell.focus()
     assert info is not None and info["id"] == widget.id and info["focused"]
     pump(shell, dialog, lambda: widget.focused)
-    assert shell.info["focus"] == widget.id
+    assert shell.call("session.info")["focus"] == widget.id
     assert any("enter ok" in row for row in shell.shown())
     assert shell.focus() is None  # past the last: dropped
     pump(shell, dialog, lambda: not widget.focused)
@@ -456,10 +456,10 @@ def test_driver_release(shell: Pilot) -> None:
     widget = dialog.widget
     assert widget.asks == "quiet"
     shell.focus(widget)
-    assert shell.info["focus"] == widget.id
+    assert shell.call("session.info")["focus"] == widget.id
     widget.release()
     assert widget.refresh().asks is None and not widget.focused
-    assert shell.info["focus"] is None
+    assert shell.call("session.info")["focus"] is None
     with pytest.raises(PtyrcError) as err:
         shell.focus(widget)
     assert err.value.code == "not-usable"

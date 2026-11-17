@@ -334,7 +334,7 @@ class Model:
     def sizes(self) -> list[Size]:
         """Inner sizes for the variants of the widget, the best first."""
         w, h = self.natural()
-        w = max(w, cells(self.question), 16) + 1
+        w = max(w, cells(self.question) + 1, 24)
         w, h = min(w, 78), min(h, 20)
         out = [(w, h + 2), (max(w * 2 // 3, 16), min(h, 4) + 2), (min(w, 24), 3)]
         out.append((min(w, 18), 1))
