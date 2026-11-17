@@ -697,3 +697,44 @@ fn the_spans_hold_the_grains() {
     run(&mut sand, 50, 10, 24_000, 26_000);
     agrees(&sand);
 }
+
+#[test]
+fn the_pointer_takes_the_grains_and_the_pile_falls_in() {
+    let mut sand = make(json!({"rate": 400}));
+    run(&mut sand, 20, 6, 0, 4000);
+    // The cell of the floor with the most grains: under the spout.
+    let x = (1..19).max_by_key(|&x| count(&sand, 5, x, x + 1)).unwrap();
+    assert!(count(&sand, 5, x - 1, x + 2) > 12 && count(&sand, 4, x - 1, x + 2) > 0);
+    let grains = sand.grains();
+    // Told: the nozzle is empty at once, three cells of one row.
+    sand.tune(&json!({"hover": [x, 5], "rate": 0})).unwrap();
+    assert_eq!(count(&sand, 5, x - 1, x + 2), 0);
+    let left = sand.grains();
+    assert!(left < grains - 12 && count(&sand, 4, x - 1, x + 2) > 0);
+    // The pile over it falls in, the slopes slide in: gone as well.
+    run(&mut sand, 20, 6, 4048, 6000);
+    assert_eq!(
+        count(&sand, 5, x - 1, x + 2) + count(&sand, 4, x - 1, x + 2),
+        0
+    );
+    assert!(sand.grains() < left);
+    // Another tune keeps the pointer. Not told for `LINGER_MS`: the
+    // sand lies there again.
+    sand.tune(&json!({"rate": 400})).unwrap();
+    assert_eq!(sand.params.hover, Some((x as i32, 5)));
+    run(&mut sand, 20, 6, 6048, 6000 + LINGER_MS + 6000);
+    assert!(count(&sand, 5, x - 1, x + 2) > 12);
+    // Out of the canvas: nothing; null: no pointer.
+    let grains = sand.grains();
+    sand.tune(&json!({"hover": [i32::MAX, 5], "rate": 0}))
+        .unwrap();
+    sand.tune(&json!({"hover": [i32::MIN, -1]})).unwrap();
+    sand.tune(&json!({"hover": [3, 99]})).unwrap();
+    sand.tune(&json!({"hover": null})).unwrap();
+    assert_eq!(sand.grains(), grains);
+    assert!(sand.tune(&json!({"hover": 3})).is_err());
+    // Before the first render: kept for it.
+    let mut sand = make(json!({"rate": 400}));
+    sand.tune(&json!({"hover": [2, 2]})).unwrap();
+    run(&mut sand, 20, 6, 0, 100);
+}

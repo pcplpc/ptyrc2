@@ -470,6 +470,7 @@ fn the_pointer_takes_the_snow_and_what_falls_into_it() {
     run(&mut snow, 8, 92_050, 92_500);
     assert_eq!(row(&snow, 5, 19, 22), 0.0);
     snow.tune(&json!({"hover": [-4, 99]})).unwrap();
+    snow.tune(&json!({"hover": [i32::MIN, i32::MAX]})).unwrap();
     // Not told for `LINGER_MS`: it snows in again.
     snow.tune(&json!({"hover": [20, 5], "rate": 900, "wind": 0}))
         .unwrap();

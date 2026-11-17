@@ -11,6 +11,8 @@
 //! - `colors`: strata; the stream goes from one to the next and around
 //!   (default: sand tones).
 //! - `color_ms`: time from one colour to the next (default 20000).
+//! - `hover`: `[x, y]`, the canvas cell under the pointer, or null
+//!   (default): none.
 //! - `walls`: rows of text standing for the app's, until the app is seen.
 //! - `duration_ms`: life of the effect. Absent: until removed.
 //! - `seed`.
@@ -34,6 +36,13 @@
 //! first row not remembered is a floor. Further rows are frozen.
 //!
 //! Heat: a column with cells that changed lately is a worse spout.
+//!
+//! The pointer: the cell `hover` and `NOZZLE` on each side are a
+//! nozzle. Their grains are gone, when `hover` is tuned and at each
+//! step, for `LINGER_MS` after it was last told (a pointer that left
+//! the window tells nothing); the grains around wake. The rest is the
+//! step: the pile over the hole falls in, the slopes beside it
+//! avalanche.
 //!
 //! Spout: the topmost free cell of a column. Chosen near the middle,
 //! over text, away from the ends of the run it lands on; kept while it
@@ -72,6 +81,10 @@ const STEP_MS: u64 = 12;
 const FRAME_MS: u64 = 48;
 /// Steps run by one render at most: a late render does not freeze.
 const CATCH_UP: u64 = 16;
+/// Cells on each side of the pointer that take the grains.
+const NOZZLE: i64 = 1;
+/// The pointer takes grains this long after it was last told.
+const LINGER_MS: u64 = 3000;
 /// Canvas cells at most.
 const MAX_CELLS: usize = 1 << 18;
 /// Dots of a cell.
@@ -104,6 +117,7 @@ struct Params {
     cursor: bool,
     colors: Vec<ColorSpec>,
     color_ms: u64,
+    hover: Option<(i32, i32)>,
     duration_ms: Option<u64>,
     seed: u64,
 }
@@ -123,6 +137,7 @@ impl Default for Params {
             .map(rgb)
             .collect(),
             color_ms: 20_000,
+            hover: None,
             duration_ms: None,
             seed: 1,
         }
@@ -275,6 +290,8 @@ pub struct Sand {
     steps: u64,
     /// Grains owed by the rate, fractional.
     owed: f64,
+    /// The first step since `hover` was told; `None`: none yet.
+    told: Option<u64>,
 }
 
 impl Sand {
@@ -324,6 +341,7 @@ impl Sand {
             choked: 0,
             steps: 0,
             owed: 0.0,
+            told: None,
         }
     }
 
@@ -640,7 +658,43 @@ impl Sand {
         }
     }
 
+    /// The grains in the nozzle are gone; those around it wake.
+    fn suck(&mut self) {
+        let Some((px, py)) = self.params.hover else {
+            return;
+        };
+        let told = *self.told.get_or_insert(self.steps);
+        if (self.steps - told) * STEP_MS > LINGER_MS || py < 0 || py as usize >= self.ch {
+            return;
+        }
+        let (w, h) = (self.w * DW, self.h * DH);
+        let cell = |x: i64| x.clamp(0, self.w as i64) as usize * DW;
+        let (x0, x1) = (cell(px as i64 - NOZZLE), cell(px as i64 + NOZZLE + 1));
+        let y0 = (py as usize + self.top) * DH;
+        let y1 = (y0 + DH).min(h);
+        let mut taken = false;
+        for y in y0..y1 {
+            for x in x0..x1 {
+                if self.spans[y].n > 0 && matches!(self.at(x, y), Dot::Grain(..)) {
+                    self.set(x, y, Dot::Free);
+                    taken = true;
+                }
+            }
+        }
+        if !taken {
+            return;
+        }
+        for y in y0.saturating_sub(1)..(y1 + 1).min(h) {
+            for x in x0.saturating_sub(1)..(x1 + 1).min(w) {
+                if let Dot::Grain(shade, false) = self.at(x, y) {
+                    self.set(x, y, Dot::Grain(shade, true));
+                }
+            }
+        }
+    }
+
     fn step(&mut self) {
+        self.suck();
         let (w, h) = (self.w * DW, self.h * DH);
         let held = |sand: &Sand, x: usize, y: usize| x >= w || !sand.free(x, y);
         let per_step = self.params.rate * STEP_MS as f64 / 1000.0;
@@ -693,6 +747,7 @@ impl Sand {
             }
         }
         self.pour();
+        self.suck();
         self.steps += 1;
     }
 
@@ -903,6 +958,14 @@ impl Effect for Sand {
             seed: self.params.seed,
             ..params
         };
+        if new.contains_key("hover") {
+            // Now, not at the next step: a pointer that runs tells more
+            // than one cell between two renders.
+            self.told = None;
+            if !self.dots.is_empty() {
+                self.suck();
+            }
+        }
         self.aim();
         Ok(())
     }
@@ -915,6 +978,7 @@ struct Shown {
     cursor: bool,
     colors: Vec<ColorSpec>,
     color_ms: u64,
+    hover: Option<(i32, i32)>,
     duration_ms: Option<u64>,
 }
 
@@ -925,6 +989,7 @@ impl Shown {
             cursor: p.cursor,
             colors: p.colors.clone(),
             color_ms: p.color_ms,
+            hover: p.hover,
             duration_ms: p.duration_ms,
         }
     }

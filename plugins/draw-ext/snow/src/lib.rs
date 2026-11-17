@@ -135,7 +135,7 @@ struct Params {
     wind: f64,
     cover: bool,
     max_depth: usize,
-    hover: Option<(i64, i64)>,
+    hover: Option<(i32, i32)>,
     duration_ms: Option<u64>,
     seed: u64,
 }
@@ -372,9 +372,9 @@ impl Snow {
             (Some(told), Some(last)) => last.saturating_sub(told) <= LINGER_MS,
             _ => true,
         };
-        self.params
-            .hover
-            .is_some_and(|(px, py)| fresh && py == y as i64 && (px - x as i64).abs() <= NOZZLE)
+        self.params.hover.is_some_and(|(px, py)| {
+            fresh && py as i64 == y as i64 && (px as i64 - x as i64).abs() <= NOZZLE
+        })
     }
 
     /// The snow in the nozzle is gone.
@@ -382,6 +382,7 @@ impl Snow {
         let Some((px, py)) = self.params.hover else {
             return;
         };
+        let (px, py) = (px as i64, py as i64);
         if py < 0 || py >= self.h as i64 {
             return;
         }

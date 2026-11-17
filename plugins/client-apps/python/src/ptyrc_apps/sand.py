@@ -4,6 +4,7 @@
     ptyrc-app sand                 # the most idle pane, once it is idle
     ptyrc-app sand -f 3 --rate 300 --now
     ptyrc-app sand -f active --cursor --now
+    ptyrc-app sand --hover         # the mouse takes the sand it is over
 
 What it shows:
 
@@ -18,6 +19,9 @@ What it shows:
   place of its grains; a resize cuts off what no longer fits; the pile
   scrolls with the text.
 - `--cursor`: the stream falls on the cursor's column.
+- `--hover`: an effect told the pointer (`_cli.Nozzle`): the grains
+  under the host mouse are taken, three cells of its row; the pile
+  over the hole falls in, the slopes beside it avalanche.
 - A frame replaced: of two panes with little text, resized together,
   the driver cannot tell which is which and allocates new frames. The
   app is told by the topic `frames` and moves its sprite to the pane
@@ -83,7 +87,8 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
         if args.now or frame is not None:
             clock.sleep(POLL)  # a layout still settling
     sand = pour(pilot, frame, args.rate, args.cursor)
-    follow(pilot, frame, sand, None if end is None else end - clock.monotonic())
+    left = None if end is None else end - clock.monotonic()
+    follow(pilot, frame, sand, left, hover=args.hover)
 
 
 def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> int:
@@ -97,6 +102,11 @@ def main(argv: Sequence[str] | None = None, *, seconds: float | None = None) -> 
         action="store_true",
         help="pour over the cursor's column; from the middle while the "
         "cursor is out of the pane or on its first column",
+    )
+    out.add_argument(
+        "--hover",
+        action="store_true",
+        help="the host mouse takes the sand it is over; the pile falls in",
     )
     out.add_argument(
         "--now", action="store_true", help="do not wait for the pane to be idle"

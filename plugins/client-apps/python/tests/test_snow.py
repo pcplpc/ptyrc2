@@ -183,7 +183,8 @@ def test_hover(hosted: tuple[Host, Pilot]) -> None:
         while any(c in DRIFT for c in floor()[39:42]):
             assert time.monotonic() < deadline, floor()
             time.sleep(0.05)
-        assert floor()[36:39] == floor()[42:45] == "███", floor()
+        # Beside it the snow stays, less what slides in.
+        assert all(c in DRIFT for c in floor()[36:39] + floor()[42:45]), floor()
         # The pointer rests: after a while it snows there again.
         deadline = time.monotonic() + 9
         while floor()[39:42] != "███":
