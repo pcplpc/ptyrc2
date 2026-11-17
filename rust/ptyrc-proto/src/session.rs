@@ -3,16 +3,20 @@
 
 use std::fmt;
 use std::fs;
-use std::io;
+use std::io::{self, BufRead, BufReader};
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 /// Environment variable naming the session; set by the driver for the app.
 pub const ENV_SESSION: &str = "PTYRC_SESSION";
 /// Environment variable holding the socket path; set by the driver.
 pub const ENV_SOCKET: &str = "PTYRC_SOCKET";
+
+/// In place of a session name: the session the user typed in last.
+pub const AUTO: &str = "auto";
 
 const SUFFIX: &str = ".sock";
 
@@ -112,9 +116,11 @@ pub fn connect(path: &Path) -> io::Result<UnixStream> {
     Ok(stream)
 }
 
-/// A session name: `[A-Za-z0-9._-]+`, not starting with a dot.
+/// A session name: `[A-Za-z0-9._-]+`, not starting with a dot, not
+/// `auto`.
 pub fn valid_name(name: &str) -> bool {
     !name.is_empty()
+        && name != AUTO
         && !name.starts_with('.')
         && name.len() <= 64
         && name
@@ -178,6 +184,8 @@ pub enum SelectError {
     Dead(String),
     /// Several live sessions and none named.
     Ambiguous(Vec<String>),
+    /// `auto`, several live sessions, and the user typed in none.
+    Untouched(Vec<String>),
     /// The socket directory is not ours, or open to others: why.
     Unsafe(String),
 }
@@ -205,6 +213,9 @@ impl SelectError {
                 "pick one with -s NAME or {ENV_SESSION}: {}",
                 names.join(", ")
             ),
+            SelectError::Untouched(names) => {
+                format!("pick one with -s NAME: {}", names.join(", "))
+            }
             SelectError::Unsafe(_) => {
                 "the socket directory must be yours, mode 0700; remove it, or set XDG_RUNTIME_DIR"
                     .into()
@@ -224,6 +235,11 @@ impl fmt::Display for SelectError {
                 "session {name} is dead: its driver is gone, the stale socket was removed"
             ),
             SelectError::Ambiguous(names) => write!(f, "{} sessions, none chosen", names.len()),
+            SelectError::Untouched(names) => write!(
+                f,
+                "{} sessions, the user typed in none: auto has no choice",
+                names.len()
+            ),
             SelectError::Unsafe(why) => write!(f, "socket directory {why}"),
         }
     }
@@ -253,14 +269,73 @@ fn of_tmux() -> Option<String> {
     (output.status.success() && valid_name(&name)).then_some(name)
 }
 
+/// When the user last typed on the host keyboard of the session at
+/// `path`: `active_at` of its `hello`, milliseconds since the epoch.
+fn active_at(path: &Path) -> Option<u64> {
+    let stream = connect(path).ok()?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .ok()?;
+    let mut line = String::new();
+    BufReader::new(stream).read_line(&mut line).ok()?;
+    let hello: serde_json::Value = serde_json::from_str(&line).ok()?;
+    hello["data"]["active_at"].as_u64()
+}
+
+/// What `auto` chose.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Auto {
+    pub session: Session,
+    /// The live sessions it chose among.
+    pub among: usize,
+    /// When the user typed there last, milliseconds since the epoch;
+    /// `None`: never, the session is the only one.
+    pub active_at: Option<u64>,
+}
+
+/// The session the user typed in last, on its host keyboard; the only
+/// live one, typed in or not. Sessions without a host (headless, a
+/// replay) are typed in by nobody. The same date: the last by name.
+pub fn auto() -> Result<Auto, SelectError> {
+    if let Err(e) = trusted_dir() {
+        return Err(SelectError::Unsafe(e.to_string()));
+    }
+    let mut live = list();
+    let among = live.len();
+    let dates: Vec<Option<u64>> = live.iter().map(|s| active_at(&s.path)).collect();
+    let best = (0..among)
+        .filter(|i| dates[*i].is_some())
+        .max_by_key(|i| dates[*i]);
+    match (best, among) {
+        (_, 0) => Err(SelectError::None),
+        (Some(i), _) => Ok(Auto {
+            session: live.swap_remove(i),
+            among,
+            active_at: dates[i],
+        }),
+        (None, 1) => Ok(Auto {
+            session: live.remove(0),
+            among,
+            active_at: None,
+        }),
+        (None, _) => Err(SelectError::Untouched(
+            live.into_iter().map(|s| s.name).collect(),
+        )),
+    }
+}
+
 /// The session to talk to: `explicit`, else `PTYRC_SESSION`, else the one
 /// over the tmux session this process is in, else the only live one.
+/// The name `auto`: `auto()`.
 pub fn select(explicit: Option<&str>) -> Result<Session, SelectError> {
     if let Err(e) = trusted_dir() {
         return Err(SelectError::Unsafe(e.to_string()));
     }
     let env = std::env::var(ENV_SESSION).ok().filter(|s| !s.is_empty());
     if let Some(name) = explicit.map(str::to_string).or(env) {
+        if name == AUTO {
+            return auto().map(|auto| auto.session);
+        }
         if !valid_name(&name) {
             return Err(SelectError::BadName(name));
         }
@@ -305,6 +380,7 @@ mod tests {
         assert!(!valid_name(".hidden"));
         assert!(!valid_name("a/b"));
         assert!(!valid_name("a b"));
+        assert!(!valid_name(AUTO));
     }
 
     #[test]

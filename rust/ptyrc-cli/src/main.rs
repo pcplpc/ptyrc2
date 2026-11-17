@@ -12,8 +12,10 @@ mod verbs;
 use clap::{Args, Parser, Subcommand};
 use ptyrc_proto::{Client, ClientError, TOPICS, session};
 use serde_json::{Value, json};
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Parser)]
 #[command(name = "ptyrc", version, about = "The pty remote controller")]
@@ -26,7 +28,8 @@ struct Cli {
 
 #[derive(Args)]
 pub struct Common {
-    /// Session to talk to [default: $PTYRC_SESSION, else the only one]
+    /// Session to talk to; `auto`: the one typed in last [default:
+    /// $PTYRC_SESSION, else the only one]
     #[arg(short, long, global = true)]
     pub session: Option<String>,
     /// Machine-readable output
@@ -304,8 +307,47 @@ fn main() -> ExitCode {
     }
 }
 
+/// Milliseconds since the epoch.
+fn unix_ms() -> u64 {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH);
+    now.map_or(0, |d| d.as_millis() as u64)
+}
+
+/// A time gone, in its largest unit: `3s`, `12m`, `5h`, `2d`.
+fn ago(ms: u64) -> String {
+    match ms / 1000 {
+        s @ 0..60 => format!("{s}s"),
+        s @ 60..3600 => format!("{}m", s / 60),
+        s @ 3600..86400 => format!("{}h", s / 3600),
+        s => format!("{}d", s / 86400),
+    }
+}
+
+/// `-s auto` is resolved once, here: the verb, and the program it
+/// executes, keep the session whatever the user types next. A choice
+/// among several is told on a terminal.
+fn resolve_auto(common: &mut Common) -> Result<(), Fail> {
+    if common.session.as_deref() != Some(session::AUTO) {
+        return Ok(());
+    }
+    let auto = session::auto().map_err(ClientError::Select)?;
+    if auto.among > 1 && std::io::stderr().is_terminal() {
+        let age = auto.active_at.map(|at| ago(unix_ms().saturating_sub(at)));
+        eprintln!(
+            "ptyrc: session {} (auto: typed in {} ago)",
+            auto.session.name,
+            age.as_deref().unwrap_or("?")
+        );
+    }
+    common.session = Some(auto.session.name);
+    Ok(())
+}
+
 fn run(cli: Cli) -> Result<ExitCode, Fail> {
-    let common = cli.common;
+    let mut common = cli.common;
+    if !matches!(cli.verb, Verb::Run(_) | Verb::Replay(_) | Verb::Ls) {
+        resolve_auto(&mut common)?;
+    }
     match cli.verb {
         Verb::Run(args) => verb_run(args),
         Verb::Ls => verb_ls(&common),
@@ -471,9 +513,20 @@ fn verb_ls(common: &Common) -> Result<ExitCode, Fail> {
     if rows.is_empty() {
         eprintln!("ptyrc: no session\n  start one: ptyrc run -- CMD");
     } else {
-        println!("{:width$}  {:>7}  {:>7}  COMMAND", "SESSION", "PID", "SIZE");
+        println!(
+            "  {:width$}  {:>7}  {:>7}  {:>6}  COMMAND",
+            "SESSION", "PID", "SIZE", "ACTIVE"
+        );
     }
-    for row in rows {
+    // The one `-s auto` takes: typed in last; the only one.
+    let dates = || rows.iter().map(|r| r["active_at"].as_u64());
+    let last = dates().flatten().max();
+    let auto = match rows.len() {
+        1 => Some(0),
+        _ => dates().rposition(|at| at.is_some() && at == last),
+    };
+    let now = unix_ms();
+    for (i, row) in rows.iter().enumerate() {
         let size = format!("{}x{}", row["size"][0], row["size"][1]);
         let argv: Vec<&str> = row["argv"]
             .as_array()
@@ -481,11 +534,14 @@ fn verb_ls(common: &Common) -> Result<ExitCode, Fail> {
             .flatten()
             .filter_map(Value::as_str)
             .collect();
+        let active = row["active_at"].as_u64();
         println!(
-            "{:width$}  {:>7}  {:>7}  {}",
+            "{} {:width$}  {:>7}  {:>7}  {:>6}  {}",
+            if auto == Some(i) { '*' } else { ' ' },
             row["session"].as_str().unwrap_or("?"),
             row["pid"],
             size,
+            active.map_or("-".into(), |at| ago(now.saturating_sub(at))),
             argv.join(" ")
         );
     }
