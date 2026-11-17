@@ -134,6 +134,25 @@ def route(start: Cell, goal: Cell, free) -> Cell | None:
     return None
 
 
+def _way(start: Cell, goal: Cell, box: Box, taken: set[Cell]) -> Cell | None:
+    """`route` over the cells of `box` out of `taken`: the same step."""
+    x0, y0, x1, y1 = box
+    first: dict[Cell, Cell | None] = {start: None}
+    queue = deque([start])
+    while queue:
+        x, y = here = queue.popleft()
+        step = first[here]
+        for there in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            if there in first:
+                continue
+            if there == goal:
+                return step or there
+            if x0 <= there[0] < x1 and y0 <= there[1] < y1 and there not in taken:
+                first[there] = step or there
+                queue.append(there)
+    return None
+
+
 def room(box: Box, walls: set[Cell], start: Cell | None, need: int) -> list[Cell]:
     """Cells of `box` free of `walls`, in the region of `start` (the
     largest region if None), out of the dead ends; `start` left out.
@@ -148,14 +167,16 @@ def room(box: Box, walls: set[Cell], start: Cell | None, need: int) -> list[Cell
     def free(c: Cell) -> bool:
         return x0 <= c[0] < x1 and y0 <= c[1] < y1 and c not in walls
 
-    def near(c: Cell) -> list[Cell]:
-        return [n for n in ((c[0] + dx, c[1] + dy) for dx, dy in STEPS) if free(n)]
-
     def region(c: Cell) -> list[Cell]:
         out, seen = [c], {c}
-        for here in out:
-            for there in near(here):
-                if there not in seen:
+        for x, y in out:
+            for there in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if (
+                    there not in seen
+                    and x0 <= there[0] < x1
+                    and y0 <= there[1] < y1
+                    and there not in walls
+                ):
                     seen.add(there)
                     out.append(there)
         return out
@@ -170,11 +191,18 @@ def room(box: Box, walls: set[Cell], start: Cell | None, need: int) -> list[Cell
                 seen.update(one)
                 cells = max(cells, one, key=len)
     # Off the hanging trees: what is left has a cycle through each cell.
-    degree = {c: len(near(c)) for c in cells}
+    among = set(cells)
+    near = {
+        (x, y): [
+            n for n in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)) if n in among
+        ]
+        for x, y in cells
+    }
+    degree = {c: len(near[c]) for c in cells}
     leaves = [c for c in cells if degree[c] < 2]
     gone = set(leaves)
     for c in leaves:
-        for n in near(c):
+        for n in near[c]:
             degree[n] -= 1
             if degree[n] < 2 and n not in gone:
                 gone.add(n)
@@ -186,7 +214,7 @@ def room(box: Box, walls: set[Cell], start: Cell | None, need: int) -> list[Cell
     kept = set(core)
 
     def inner(c: Cell):
-        return (n for n in near(c) if n in kept)
+        return iter([n for n in near[c] if n in kept])
 
     # Bridges, depth first without recursion (Tarjan). Cells are
     # numbered in preorder: a subtree is an interval of numbers.
@@ -371,15 +399,6 @@ class Game:
         firing = {c for b in self.beams if b.firing for c in b.cells}
         taken = walls | foes | warned if foes or warned else walls
 
-        def clear(c: Cell) -> bool:
-            return inside(c) and c not in walls and c not in self.body and c not in foes
-
-        def free(c: Cell) -> bool:
-            return clear(c) and c not in warned
-
-        def bold(c: Cell) -> bool:
-            return clear(c) and c not in firing
-
         if not self.body:
             start = self.spot(box, walls, taken)
             self.body = deque([start] if start else [])
@@ -391,14 +410,14 @@ class Game:
             if self.apple is None or not inside(self.apple) or self.apple in walls:
                 self._plant(box, walls, taken)
             return
-        elif self.apple is not None and self.map != (box, walls):
+        elif (
+            self.apple is not None
+            and self.map != (box, walls)
+            and _way(self.body[0], self.apple, box, walls) is None
+        ):
             # The text moved or changed: an apple cut off from the head
             # goes elsewhere.
-            def bare(c: Cell) -> bool:
-                return inside(c) and c not in walls
-
-            if route(self.body[0], self.apple, bare) is None:
-                self.apple = None
+            self.apple = None
         self.map = (box, walls)
         if self.apple is None or not inside(self.apple) or self.apple in walls:
             self._plant(box, walls, taken)
@@ -409,13 +428,15 @@ class Game:
             self._steer(head, inside, walls | foes)
             return
         around = [(head[0] + dx, head[1] + dy) for dx, dy in STEPS]
+        solid = walls | foes
+        solid.update(self.body)
         to = None
         # Through an announced beam only when there is no other way.
-        for ok in (free, bold) if warned else (free,):
-            to = route(head, self.apple, ok) if self.apple else None
+        for shut in (solid | warned, solid | firing) if warned else (solid,):
+            to = _way(head, self.apple, box, shut) if self.apple else None
             if to is None:
                 # No way to the apple: any free neighbour, to stay alive.
-                near = [c for c in around if ok(c)]
+                near = [c for c in around if inside(c) and c not in shut]
                 to = self.rng.choice(near) if near else None
             if to is not None:
                 break
@@ -508,18 +529,18 @@ class Game:
         if self.steps % 2:
             return
         for foe in list(self.foes):
-            taken = {f.at for f in self.foes if f is not foe} | {self.apple}
+            taken = walls | {f.at for f in self.foes if f is not foe} | {self.apple}
             taken.update(self.body)
-
-            def free(c: Cell, taken: set = taken) -> bool:
-                return inside(c) and c not in walls and c not in taken
-
             big = len(self.body) >= 4 and not self.ghost
             goal = self.body[len(self.body) // 2] if big else None
-            to = route(foe.at, goal, free) if goal else None
+            to = _way(foe.at, goal, box, taken) if goal else None
             if to is None:
                 x, y = foe.at
-                near = [c for c in ((x + dx, y + dy) for dx, dy in STEPS) if free(c)]
+                near = [
+                    c
+                    for c in ((x + dx, y + dy) for dx, dy in STEPS)
+                    if inside(c) and c not in taken
+                ]
                 to = rng.choice(near) if near else foe.at
             if to == goal:
                 self._cut(self.body.index(to))
