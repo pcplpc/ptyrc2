@@ -3012,6 +3012,88 @@ fn cost_effect_tick_300x80() {
 /// Sprites with a `motion` move together, 30 times a second, however
 /// often the scene is ticked: a tick between two steps repaints nothing.
 #[test]
+fn what_moves_changes_at_the_steps_only() {
+    let mock = Mock::new();
+    let mut scene = Scene::new();
+    // Particles: frames and lifetimes of their own, out of phase.
+    for (i, at) in [0u64, 7, 19, 23].into_iter().enumerate() {
+        let sprite = json!({
+            "frames": [{"rows": ["o"], "ms": 40 + 9 * i}, {"rows": ["."], "ms": 31}],
+            "loop": true, "ttl_ms": 500 + 77 * i,
+            "motion": {"vx": 1.0 + i as f64, "ay": 9.0},
+        });
+        scene.add(1, spec(sprite), ms(at)).unwrap();
+    }
+    scene.tick(ms(23), &mock);
+    scene.take_dirty();
+    let (mut now, mut ticks, mut repaints) = (ms(23), 0, 0);
+    while let Some(wake) = scene.next_wake() {
+        assert!(wake > now, "{wake:?} at {now:?}");
+        now = wake;
+        scene.tick(now, &mock);
+        ticks += 1;
+        repaints += scene.take_dirty() as u32;
+    }
+    // All gone, each at the first step past its end.
+    assert!(scene.is_empty());
+    assert!(now >= ms(23 + 500 + 77 * 3) && now < ms(23 + 500 + 77 * 3) + MOTION_STEP);
+    assert!((22..=24).contains(&ticks), "{ticks} ticks");
+    assert!(repaints <= ticks);
+    // At rest a sprite keeps its own times.
+    let sprite = json!({
+        "frames": [{"rows": ["o"], "ms": 40}, {"rows": ["."], "ms": 31}],
+        "motion": {"vx": 0.0},
+    });
+    scene.add(1, spec(sprite), now).unwrap();
+    scene.tick(now, &mock);
+    assert_eq!(scene.next_wake(), Some(now + ms(40)));
+}
+
+#[test]
+fn animations_at_rest_end_their_frames_together() {
+    let mock = Mock::new();
+    let mut scene = Scene::new();
+    // Alone, an animation is woken at the end of each frame.
+    let frames = json!([{"rows": ["o"], "ms": 40}, {"rows": ["."], "ms": 31}]);
+    scene
+        .add(1, spec(json!({"frames": frames, "loop": true})), ms(0))
+        .unwrap();
+    scene.tick(ms(0), &mock);
+    for end in [40, 71, 111, 142] {
+        assert_eq!(scene.next_wake(), Some(ms(end)));
+        scene.tick(ms(end), &mock);
+        assert!(scene.take_dirty());
+    }
+    // Many, out of phase: a wake half a step after the last at the soonest.
+    for i in 0..40u64 {
+        let now = ms(142 + i);
+        scene
+            .add(
+                1,
+                spec(json!({"frames": frames, "loop": true, "ttl_ms": 900 + i})),
+                now,
+            )
+            .unwrap();
+        scene.tick(now, &mock);
+    }
+    let (mut now, mut ticks) = (ms(181), 0);
+    while now < ms(1181) {
+        let wake = scene.next_wake().unwrap();
+        assert!(wake > now, "{wake:?} at {now:?}");
+        now = wake;
+        scene.tick(now, &mock);
+        ticks += 1;
+    }
+    assert!((50..=61).contains(&ticks), "{ticks} ticks in a second");
+    assert_eq!(scene.list().len(), 1);
+    // A tick that comes sooner ends what is due.
+    let brief = json!({"content": {"rows": ["x"]}, "ttl_ms": 3});
+    scene.add(1, spec(brief), now).unwrap();
+    scene.tick(now + ms(3), &mock);
+    assert_eq!(scene.list().len(), 1);
+}
+
+#[test]
 fn motions_share_one_clock() {
     let mock = Mock::new();
     let mut scene = Scene::new();

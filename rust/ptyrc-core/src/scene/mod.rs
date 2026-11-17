@@ -32,6 +32,10 @@ const REPLACE_AFTER: Duration = Duration::from_millis(2000);
 const HEAT_EVERY: Duration = Duration::from_millis(200);
 /// Step of a moving sprite.
 const MOTION_STEP: Duration = Duration::from_millis(33);
+/// The frames of animations and the lifetimes that end less than this
+/// after others wait for it (`next_wake`), and end together: half a step
+/// of motion. A tick that comes sooner ends what is due.
+const LOOK_STEP: Duration = Duration::from_micros(16_500);
 /// A text anchor keeps its match when one is found this close (rows).
 const TEXT_STICKY_ROWS: i64 = 3;
 
@@ -88,6 +92,12 @@ struct Mover {
     vel: (f64, f64),
     off: (f64, f64),
     last: Duration,
+}
+
+impl Mover {
+    fn moving(&self) -> bool {
+        self.vel != (0.0, 0.0) || self.motion.ax != 0.0 || self.motion.ay != 0.0
+    }
 }
 
 struct Sprite {
@@ -237,6 +247,9 @@ pub struct Scene {
     /// When the sprites with a `motion` last moved: all at once, a
     /// `MOTION_STEP` apart, however often the scene is ticked.
     moved: Duration,
+    /// When a frame of an animation or a lifetime last ended: the next
+    /// asks for a tick `LOOK_STEP` later at the soonest.
+    looked: Duration,
     host: HostColors,
     /// Layer names declared by clients.
     layers: BTreeMap<String, i32>,
@@ -260,6 +273,7 @@ impl Scene {
             dirty: false,
             last_tick: Duration::ZERO,
             moved: Duration::ZERO,
+            looked: Duration::ZERO,
             host: HostColors::default(),
             layers: BTreeMap::new(),
             hidden: BTreeSet::new(),
@@ -875,6 +889,8 @@ impl Scene {
         }
         let cursor = surfaces.cursor();
         let mut dirty = false;
+        // A frame of an animation or a lifetime ended.
+        let mut looked = false;
         let mut dead: Vec<SpriteId> = Vec::new();
 
         // Spots held by auto sprites, for `taken`.
@@ -893,8 +909,12 @@ impl Scene {
             if sprite.hidden.is_some() {
                 continue;
             }
-            if sprite.expires.is_some_and(|at| now >= at) {
+            // A sprite that moves changes at the steps of the motion only:
+            // the frames of its animation and its end wait for the next.
+            let held = !step && sprite.mover.as_ref().is_some_and(Mover::moving);
+            if !held && sprite.expires.is_some_and(|at| now >= at) {
                 dead.push(sprite.id);
+                looked = true;
                 continue;
             }
             if sprite.frame.is_none() {
@@ -925,7 +945,7 @@ impl Scene {
             };
 
             match &mut sprite.body {
-                Body::Anim(anim) if anim.timed => {
+                Body::Anim(anim) if anim.timed && !held => {
                     let mut ended = false;
                     loop {
                         let end = anim.since + Duration::from_millis(anim.ms[anim.cur]);
@@ -947,8 +967,10 @@ impl Scene {
                         }
                         anim.since = end;
                         dirty = true;
+                        looked = true;
                     }
                     if ended {
+                        looked = true;
                         dead.push(sprite.id);
                         continue;
                     }
@@ -1134,6 +1156,9 @@ impl Scene {
             dirty = true;
         }
         self.dirty |= dirty;
+        if looked {
+            self.looked = now;
+        }
     }
 
     /// When `tick` is next due; `None`: nothing changes by itself.
@@ -1141,20 +1166,23 @@ impl Scene {
         let mut wake: Option<Duration> = None;
         let mut at = |t: Duration| wake = Some(wake.map_or(t, |w| w.min(t)));
         for s in self.sprites.iter().filter(|s| s.hidden.is_none()) {
-            if let Some(t) = s.expires {
-                at(t);
+            // What moves is looked at again at the next step, no sooner.
+            let moving = s.mover.as_ref().is_some_and(Mover::moving);
+            if moving {
+                at(self.moved + MOTION_STEP);
+            }
+            let look = self.looked + LOOK_STEP;
+            if let Some(t) = s.expires
+                && !moving
+            {
+                at(t.max(look));
             }
             match &s.body {
-                Body::Anim(a) if a.timed && s.shown => {
-                    at(a.since + Duration::from_millis(a.ms[a.cur]))
+                Body::Anim(a) if a.timed && s.shown && !moving => {
+                    at((a.since + Duration::from_millis(a.ms[a.cur])).max(look))
                 }
                 Body::Anim(_) => {}
                 Body::Fx(f) => at(f.next),
-            }
-            if let Some(m) = &s.mover
-                && (m.vel != (0.0, 0.0) || m.motion.ax != 0.0 || m.motion.ay != 0.0)
-            {
-                at(self.moved + MOTION_STEP);
             }
             if matches!(s.anchor, Anchor::Auto { .. }) {
                 at(s.auto.next_check.max(self.last_tick));

@@ -556,8 +556,13 @@ Sprite, as JSON (the wire form; serde on the core types):
 - `size: [w, h]`: canvas of an effect; default the frame's view.
 - `motion`: cells a second (`vx`, `vy`) and a second squared (`ax`, `ay`).
   The sprites that move do so together, 30 times a second, whatever else
-  ticks the scene. An effect that draws the picture it drew, and a tick
-  between two steps of motion, leave the scene clean (`Scene::dirty`).
+  ticks the scene. A sprite that moves changes at those steps only: the
+  frames of its animation and its end (`ttl_ms`, the last play) wait for
+  the next. At rest, a frame or a lifetime that ends less than 16.5 ms
+  after another waits for that long and ends with those then due: many
+  animations out of phase ask for 60 ticks a second at most. An effect
+  that draws the picture it drew, and a tick between two steps of motion,
+  leave the scene clean (`Scene::dirty`).
 - `frame`: an id, or `"raw"`, `"active"` (pane holding the cursor),
   `"largest"`, `"quietest"` (least mean activity), `"idle"` (highest idle
   score, then most free, then largest). A name is resolved when the sprite is added.
