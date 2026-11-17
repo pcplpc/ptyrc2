@@ -29,7 +29,7 @@ canvas is ignored.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from functools import cache
+from functools import cache, lru_cache
 from typing import Any
 
 __all__ = ["RGB", "Braille", "Half", "Rows", "ansi", "hexa", "mix", "rgb", "xterm"]
@@ -79,6 +79,7 @@ def xterm(c: RGB) -> int:
     return min(range(16, 256), key=far)
 
 
+@lru_cache(maxsize=4096)
 def hexa(c: RGB) -> str:
     return f"#{c[0]:02x}{c[1]:02x}{c[2]:02x}"
 
@@ -214,12 +215,14 @@ class Half:
     def rows(self, deep: bool = False) -> Rows:
         """Rows of runs; cells alike are one run."""
         name: Any = hexa if deep else xterm
+        over = self.over
         out: Rows = []
         for cy in range(self.h):
             top, low = self.px[2 * cy], self.px[2 * cy + 1]
             row: list[Run] = []
             for cx in range(self.w):
-                glyph = self.over.get((cx, cy))
+                a, b = name(top[cx]), name(low[cx])
+                glyph = over.get((cx, cy)) if over else None
                 # Ink on two pixels alike that the 256 tell apart: the
                 # glyph would take them for one, and what is behind
                 # would move with it.
@@ -228,7 +231,7 @@ class Half:
                     and not deep
                     and glyph[2] is not None
                     and "\u2800" < glyph[0] < "\u2900"
-                    and xterm(top[cx]) != xterm(low[cx])
+                    and a != b
                 ):
                     glyph = None
                 if glyph is not None:
@@ -236,10 +239,10 @@ class Half:
                     run = {"t": text, "bg": name(bg or mix(top[cx], low[cx], 0.5))}
                     if fg is not None:
                         run["fg"] = name(fg)
-                elif name(top[cx]) == name(low[cx]):
-                    run = {"t": " ", "bg": name(low[cx])}
+                elif a == b:
+                    run = {"t": " ", "bg": b}
                 else:
-                    run = {"t": "▀", "fg": name(top[cx]), "bg": name(low[cx])}
+                    run = {"t": "▀", "fg": a, "bg": b}
                 last = row[-1] if row else None
                 if last and (last.get("fg"), last["bg"]) == (run.get("fg"), run["bg"]):
                     last["t"] += run["t"]
