@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Note: a file as a sticky note. Read only.
+"""Note: a file as a sticky note; with `-i`, one to write on.
 
     ptyrc-app note                     # TODO.md of the working directory
     ptyrc-app note TODO.md ideas.md    # a widget a file
     ptyrc-app note -a --prefer top-right
     ptyrc-app note a.md b.md --merged  # one widget, the files in turn
+    ptyrc-app note -i                  # ctrl+t twice: tick, add, edit
     ptyrc-app note --print [WxH]       # no driver: every variant
 
 Markdown reduced to what a note needs (`parse`): `- [ ]` and `- [x]`
@@ -18,8 +19,17 @@ then cut, with `…`.
 `-x`: what is done dimmed; `-o`: what is done left out; `-p`: a
 yellow ground and the border `POSTIT`; `-a`: `-c -x -p`.
 
+`-i`: the notes are quiet interactive widgets (`Deck.interact`).
+Focused, a note is a list, an item a row, with a bar (`Desk`): `space`
+or `enter` ticks a box, `a` adds one under the bar, `e` edits the
+words, `d` then `y` deletes, `shift+↑↓` (`K`, `J`) moves the item.
+Each change is one of a line of the file (`change`), written at once
+by a rename (`edit`); the other lines are kept as they are. A file
+that changed since it was read is read again, the key is lost. With
+`--merged` the turn stands still while the note is focused.
+
 A file is read again when its mtime changes, looked at each second.
-`render(note, w, h, look)` is pure: rows of styled runs.
+`render(note, w, h, look, desk)` is pure: rows of styled runs.
 """
 
 from __future__ import annotations
@@ -28,12 +38,13 @@ import argparse
 import os
 import re
 import sys
+import tempfile
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ptyrc import Pilot, clock
+from ptyrc import Pilot, clock, ui
 
 from . import _cli, _widgets
 from .monitor import BORDERS, DIM, _seconds, _size, bar, clip, sgr, width
@@ -43,10 +54,14 @@ __all__ = [
     "PLAIN",
     "POSTIT",
     "SIZES",
+    "Desk",
     "Item",
     "Look",
     "Note",
     "box",
+    "change",
+    "edit",
+    "listed",
     "live",
     "main",
     "named",
@@ -88,11 +103,14 @@ BOX, TICKED, BULLET = "☐", "☑", "•"
 @dataclass(frozen=True)
 class Item:
     """A line of a note. `kind`: `head`, `open`, `done`, `bullet`,
-    `text` or `blank`; `indent`: its depth in a list."""
+    `text` or `blank`; `indent`: its depth in a list. `line`: its
+    line in the file, from 0; `raw`: its words as written there."""
 
     kind: str
     text: str = ""
     indent: int = 0
+    line: int = field(default=-1, compare=False)
+    raw: str = field(default="", compare=False)
 
 
 @dataclass(frozen=True)
@@ -132,19 +150,20 @@ def parse(text: str) -> list[Item]:
     """The lines of a note; runs of blank lines are one, none at the
     ends."""
     out: list[Item] = []
-    for line in text.expandtabs(4).splitlines():
+    for n, line in enumerate(text.expandtabs(4).splitlines()):
         if not line.strip():
             if out and out[-1].kind != "blank":
-                out.append(Item("blank"))
+                out.append(Item("blank", line=n))
         elif m := _BOX.match(line):
             kind = "open" if m[2] == " " else "done"
-            out.append(Item(kind, _plain(m[3]), len(m[1]) // 2))
+            out.append(Item(kind, _plain(m[3]), len(m[1]) // 2, n, m[3]))
         elif m := _BULLET.match(line):
-            out.append(Item("bullet", _plain(m[2]), len(m[1]) // 2))
+            out.append(Item("bullet", _plain(m[2]), len(m[1]) // 2, n, m[2]))
         elif m := _HEAD.match(line):
-            out.append(Item("head", _plain(m[1])))
+            out.append(Item("head", _plain(m[1]), 0, n, m[1]))
         else:
-            out.append(Item("text", _plain(line.lstrip().removeprefix(">"))))
+            words = line.lstrip().removeprefix(">")
+            out.append(Item("text", _plain(words), 0, n, words.strip()))
     while out and out[-1].kind == "blank":
         out.pop()
     return out
@@ -225,7 +244,156 @@ def _ground(rows: Rows, w: int, look: Look) -> Rows:
     return out
 
 
-def render(note: Note, w: int, h: int, look: Look = PLAIN) -> Rows:
+def listed(note: Note, look: Look = PLAIN) -> list[Item]:
+    """The items a focused note lists: no blank, and with `look.open`
+    nothing done."""
+    out = [i for i in note.items if i.kind != "blank"]
+    return [i for i in out if not (look.open and i.kind == "done")]
+
+
+#: A key of a move, and its step among the items.
+_MOVES = {"shift+up": -1, "K": -1, "shift+down": 1, "J": 1}
+
+
+class Desk:
+    """The keys of a focused note. Pure: `key` answers the change to
+    make to the file, `change` makes it.
+
+    `sel`: the item under the bar, among `listed`. `mode`: None,
+    `add`, `edit` (the line typed is `editor`) or `delete` (asked:
+    `y` does it, any other key keeps)."""
+
+    def __init__(self) -> None:
+        self.sel = 0
+        self.mode: str | None = None
+        self.editor = ui.Editor()
+        self._list = ui.Listing()
+        self._view = ui.Listing()
+
+    def rest(self) -> bool:
+        """Leave what was under way (the focus was lost); whether
+        something was."""
+        mode, self.mode = self.mode, None
+        return mode is not None
+
+    def key(self, items: Sequence[Item], name: str) -> tuple[Any, ...] | None:
+        """Take a key; `items`: those listed. None, or a change:
+        `("tick", line)`, `("add", line, words)` (under that line; -1:
+        at the end), `("words", line, words)`, `("delete", line)`,
+        `("swap", line, line)`."""
+        self.sel = max(0, min(len(items) - 1, self.sel))
+        item = items[self.sel] if items else None
+        if self.mode in ("add", "edit"):
+            mode, words = self.mode, self.editor.text.strip()
+            if name == "ctrl+c":
+                self.mode = None
+            elif name == "enter":
+                self.mode = None
+                if words and mode == "add":
+                    self.sel += 1 if item else 0
+                    return ("add", item.line if item else -1, words)
+                if words and item and words != item.raw:
+                    return ("words", item.line, words)
+            else:
+                self.editor.key(name)
+            return None
+        if self.mode == "delete":
+            self.mode = None
+            return ("delete", item.line) if name == "y" and item else None
+        self._list.count, self._list.sel = len(items), self.sel
+        if self._list.key(name):
+            self.sel = self._list.sel
+        elif name == "a":
+            self.mode, self.editor = "add", ui.Editor()
+        elif item is None:
+            pass
+        elif name in ("space", "enter") and item.kind in ("open", "done"):
+            return ("tick", item.line)
+        elif name == "e":
+            self.mode, self.editor = "edit", ui.Editor(item.raw)
+        elif name == "d":
+            self.mode = "delete"
+        elif name in _MOVES and 0 <= self.sel + _MOVES[name] < len(items):
+            self.sel += _MOVES[name]
+            return ("swap", item.line, items[self.sel].line)
+        return None
+
+    def paste(self, text: str) -> None:
+        if self.mode in ("add", "edit"):
+            self.editor.insert(" ".join(text.split("\n")).strip())
+
+    def keys(self) -> list[tuple[str, int]]:
+        """The foot: the keys of the mode, the least useful ranked
+        highest."""
+        if self.mode in ("add", "edit"):
+            return [("enter ok", 0), ("^C cancel", 1)]
+        if self.mode == "delete":
+            return [("y delete", 0), ("any key keeps", 1)]
+        return [
+            ("space tick", 1),
+            ("a add", 2),
+            ("e edit", 3),
+            ("d delete", 4),
+            ("⇧↑↓ move", 5),
+            ("esc leave", 0),
+        ]
+
+
+def _desk(note: Note, w: int, h: int, look: Look, desk: Desk) -> Rows:
+    """A focused note: an item a row, cut; the bar; under it the line
+    being added; a foot of keys from 3 rows."""
+    base = _style("text", look)
+    faded = _style("faded", look)
+    items = listed(note, look)
+    desk.sel = max(0, min(len(items) - 1, desk.sel))
+    # What each row is: an item, or None for the line added.
+    entries: list[Item | None] = list(items)
+    at = desk.sel
+    if desk.mode == "add":
+        at = desk.sel + 1 if items else 0
+        entries.insert(at, None)
+    feet = 1 if h >= 3 else 0
+    view = desk._view
+    view.count, view.sel = len(entries), at
+    rows: Rows = []
+    for n in view.window(h - feet):
+        entry = entries[n]
+        on = n == at
+        near = entry or (items[desk.sel] if items else Item("open"))
+        kind = "open" if entry is None else entry.kind
+        mark = {"open": BOX, "done": TICKED, "bullet": BULLET}.get(kind, "")
+        lead = "  " * min(near.indent, 2) + (mark + " " if mark else "")
+        style = _style(kind, look)
+        if on and desk.mode in ("add", "edit"):
+            room = max(1, w - len(lead))
+            row = [{"t": lead} | style, *desk.editor.render(room, True, **base)]
+        else:
+            text = ui.cut(lead + (entry.text if entry else ""), w)
+            row = [{"t": text + " " * (w - ui.cells(text))} | style]
+            if on:
+                row = [row[0] | {"inverse": True}]
+                if desk.mode == "delete":
+                    row = [row[0] | {"bold": True}]
+        rows.append(row)
+    if not entries:
+        rows.append([{"t": ui.cut("empty", w)} | faded])
+    rows += [[] for _ in range(h - feet - len(rows))]
+    if feet:
+        rows.append([{"t": ui.foot(desk.keys(), w)} | faded])
+    out = []
+    for row in rows:
+        row = [base | r if look.postit else r for r in ui.fit(row, w)]
+        out.append(row)
+    return out
+
+
+def render(
+    note: Note, w: int, h: int, look: Look = PLAIN, desk: Desk | None = None
+) -> Rows:
+    """`desk`: the note is focused, shown as the list the keys act
+    on."""
+    if desk is not None:
+        return _desk(note, w, h, look, desk)
     base = _style("text", look)
     faded = _style("faded", look)
     if note.missing:
@@ -279,12 +447,16 @@ def render(note: Note, w: int, h: int, look: Look = PLAIN) -> Rows:
     return _ground([*top, *rows], w, look)
 
 
-def trimmed(note: Note, look: Look = PLAIN) -> list[tuple[int, int]]:
+def trimmed(
+    note: Note, look: Look = PLAIN, foot: bool = False
+) -> list[tuple[int, int]]:
     """`SIZES` cut to the rows the note fills: one a size, two may be
-    equal."""
+    equal. `foot`: a row more from two rows on, for the keys of a
+    focused note."""
     out = []
     for w, h in SIZES:
-        out.append((w, max(1, min(h, len(render(note, w, h, look))))))
+        rows = max(1, min(h, len(render(note, w, h, look))))
+        out.append((w, rows + (1 if foot and h > 1 else 0)))
     return out
 
 
@@ -355,6 +527,86 @@ def show(args: argparse.Namespace) -> int:
     return 0
 
 
+# Written
+
+
+def _parts(line: str) -> tuple[str, str]:
+    """A line of the file: what is written, its end."""
+    body = line.rstrip("\r\n")
+    return body, line[len(body) :]
+
+
+def _lead(body: str) -> tuple[str, str]:
+    """A line as what stands before its words, and them."""
+    for pattern, group in ((_BOX, 3), (_BULLET, 2), (_HEAD, 1)):
+        if m := pattern.match(body):
+            return body[: m.start(group)], m[group]
+    words = body.lstrip()
+    if words.startswith(">"):
+        words = words[1:].lstrip()
+    return body[: len(body) - len(words)], words
+
+
+def change(text: str, what: Sequence[Any]) -> str:
+    """`text` after a change of `Desk.key`. Lines are those of
+    `str.splitlines`; each keeps its end, its indent, its mark. A line
+    added takes the indent and the list mark of the line it is under,
+    as an open box."""
+    lines = text.splitlines(keepends=True)
+    op, at = what[0], what[1]
+    body, end = _parts(lines[at]) if 0 <= at < len(lines) else ("", "\n")
+    if op == "tick":
+        m = _BOX.match(body)
+        if m:
+            mark = "x" if m[2] == " " else " "
+            lines[at] = body[: m.start(2)] + mark + body[m.end(2) :] + end
+    elif op == "words":
+        lines[at] = _lead(body)[0] + what[2] + end
+    elif op == "delete":
+        del lines[at : at + 1]
+    elif op == "swap":
+        other, other_end = _parts(lines[what[2]])
+        lines[at], lines[what[2]] = other + end, body + other_end
+    elif op == "add":
+        m = _BOX.match(body) or _BULLET.match(body)
+        lead = body[: body.index(" ", len(m[1])) + 1] if m else "- "
+        if not 0 <= at < len(lines):
+            at = len(lines) - 1
+            if lines and not _parts(lines[at])[1]:
+                lines[at] += "\n"
+        elif not end:
+            lines[at], end = body + "\n", "\n"
+        lines.insert(at + 1, f"{lead}[ ] {what[2]}{end or chr(10)}")
+    return "".join(lines)
+
+
+def edit(path: Path, note: Note, what: Sequence[Any]) -> bool:
+    """Make a change of `Desk.key` in the file, by a rename. False,
+    and nothing written: the file is not as `note` was read (the lines
+    named differ), or cannot be written."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        text = ""
+    except OSError:
+        return False
+    was = {i.line: i for i in note.items}
+    now = {i.line: i for i in parse(text)}
+    named = [n for n in what[1:] if isinstance(n, int) and n >= 0]
+    if any(n not in now or now[n] != was.get(n) for n in named):
+        return False
+    try:
+        fd, temp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as out:
+            out.write(change(text, what))
+        if path.exists():
+            os.chmod(temp, path.stat().st_mode & 0o7777)
+        os.replace(temp, path)
+    except OSError:
+        return False
+    return True
+
+
 # Live
 
 
@@ -375,17 +627,24 @@ def live(pilot: Pilot, args: argparse.Namespace, seconds: float | None) -> None:
     deck = _widgets.Deck(pilot, args)
     extra = {"border": POSTIT} if look.postit else {}
     turn, since = 0, clock.monotonic()
+    hands: bool = getattr(args, "interactive", False)
+    widgets: list[_widgets.Widget] = []
+    desks: list[Desk] = []
 
     def which(n: int) -> int:
         return turn % len(files) if args.merged else n
 
     def draw(n: int) -> _widgets.Render:
-        return lambda w, h: render(notes[which(n)], w, h, look)
+        def rows(w: int, h: int) -> Rows:
+            desk = desks[n] if n < len(desks) and widgets[n].focused else None
+            return render(notes[which(n)], w, h, look, desk)
+
+        return rows
 
     def sizes(n: int) -> list[tuple[int, int]]:
         if not args.merged:
-            return trimmed(notes[n], look)
-        every = [trimmed(note, look) for note in notes]
+            return trimmed(notes[n], look, hands)
+        every = [trimmed(note, look, hands) for note in notes]
         return [
             (
                 max(s[min(r, len(s) - 1)][0] for s in every),
@@ -400,7 +659,7 @@ def live(pilot: Pilot, args: argparse.Namespace, seconds: float | None) -> None:
         else ["note" if n == 0 else f"note-{n + 1}" for n in range(len(files))]
     )
     declared = [sizes(n) for n in range(len(tags))]
-    widgets = [
+    widgets += [
         deck.add(
             tag,
             named(declared[n]),
@@ -410,6 +669,26 @@ def live(pilot: Pilot, args: argparse.Namespace, seconds: float | None) -> None:
         )
         for n, tag in enumerate(tags)
     ]
+
+    def again(m: int) -> None:
+        """The file `m` as it is now; its widgets as it asks."""
+        stamps[m], notes[m] = _mtime(files[m]), read(files[m])
+        sync()
+
+    def key(n: int) -> _widgets.Key:
+        def take(name: str) -> None:
+            m = which(n)
+            what = desks[n].key(listed(notes[m], look), name)
+            if what is not None:
+                edit(files[m], notes[m], what)
+                again(m)
+
+        return take
+
+    if hands:
+        desks += [Desk() for _ in widgets]
+        for n, widget in enumerate(widgets):
+            deck.interact(widget, key(n), paste=desks[n].paste)
 
     def sync() -> None:
         for n, widget in enumerate(widgets):
@@ -427,6 +706,9 @@ def live(pilot: Pilot, args: argparse.Namespace, seconds: float | None) -> None:
         if now >= due:
             due = now + 1.0
             changed = args.merged and len(files) > 1 and now - since >= args.cycle
+            if changed and any(w.focused for w in widgets):
+                # A focused note stays: the keys are for the one shown.
+                changed, since = False, now
             if changed:
                 turn, since = turn + 1, now
             for n, path in enumerate(files):
@@ -441,17 +723,16 @@ def live(pilot: Pilot, args: argparse.Namespace, seconds: float | None) -> None:
             continue
         if event[0] == "exit":
             return
-        if event[0] == "move":
-            deck.move(event[1]["frame"])
-        elif event[0] == "widgets":
-            before = {id(w): w.variant for w, _ in deck.widgets}
-            widget = deck.take(event[1])
-            if widget is not None and widget.variant != before[id(widget)]:
-                deck.draw(widget)
+        was = [w.focused for w in widgets]
+        deck.handle(event)
+        for n, desk in enumerate(desks):
+            # The focus lost: what was typed is dropped.
+            if was[n] and not widgets[n].focused and desk.rest():
+                deck.draw(widgets[n])
 
 
 def options(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    out = _cli.parser("note", "A file as a sticky note; read only.")
+    out = _cli.parser("note", "A file as a sticky note; -i: one to write on.")
     out.add_argument(
         "files",
         nargs="*",
@@ -469,6 +750,12 @@ def options(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "-p", "--postit", action="store_true", help="a yellow ground, a folded corner"
     )
     out.add_argument("-a", "--all", action="store_true", help="-c -x -p")
+    out.add_argument(
+        "-i",
+        "--interactive",
+        action="store_true",
+        help="ctrl+t twice: tick, add, edit, delete, move",
+    )
     out.add_argument(
         "--merged", action="store_true", help="one widget, the notes in turn"
     )

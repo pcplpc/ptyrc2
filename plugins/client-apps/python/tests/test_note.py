@@ -9,10 +9,14 @@ import threading
 import time
 import unicodedata
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from ptyrc import Pilot, clock
 from ptyrc_apps import note
+
+if TYPE_CHECKING:
+    from conftest import Host
 
 TEXT = """# Groceries
 
@@ -281,3 +285,266 @@ def test_live_merged(session: Pilot, tmp_path: Path) -> None:
         time.sleep(0.02)
     thread.join()
     assert seen == {"status": 0} and titles == {"a.md", "b.md"} and tags == {"note"}
+
+
+# -i
+
+
+def desk_keys(desk: note.Desk, source: str, *names: str) -> list[object]:
+    """Feed keys; the changes asked, each made in `source` at once."""
+    out: list[object] = []
+    for name in names:
+        what = desk.key(note.listed(made(source)), name)
+        if what is not None:
+            out.append(what)
+    return out
+
+
+def test_items_know_their_line() -> None:
+    items = note.parse(TEXT)
+    assert [(i.line, i.raw) for i in items if i.kind != "blank"] == [
+        (0, "Groceries"),
+        (2, "bread"),
+        (5, "milk, the **whole** one, from the [shop](http://x) at the corner"),
+        (6, "eggs"),
+        (7, "coffee"),
+        (8, "filters"),
+        (10, "Later"),
+        (12, "call the `plumber`"),
+        (13, "quoted"),
+        (14, "plain text"),
+    ]
+    # Where it is written is not what it is.
+    assert note.Item("open", "a", 0, 3, "a") == note.Item("open", "a")
+    assert [i.text for i in note.listed(made(), note.Look(open=True))][:3] == [
+        "Groceries",
+        "milk, the whole one, from the shop at the corner",
+        "coffee",
+    ]
+
+
+SMALL = (
+    "# List\n\n- [x] bread\n* [ ] milk, the **whole** one\n  1. [ ] filters\nplain\n"
+)
+
+
+def test_change() -> None:
+    lines = SMALL.splitlines()
+
+    def changed(*what: object, source: str = SMALL) -> list[str]:
+        return note.change(source, what).splitlines()
+
+    assert changed("tick", 2)[2] == "- [ ] bread"
+    assert changed("tick", 3)[3] == "* [x] milk, the **whole** one"
+    assert changed("tick", 5) == lines  # no box there
+    assert changed("words", 3, "cream")[3] == "* [ ] cream"
+    assert changed("words", 0, "Food")[0] == "# Food"
+    assert changed("words", 4, "paper")[4] == "  1. [ ] paper"
+    assert changed("words", 5, "bare")[5] == "bare"
+    assert changed("delete", 4) == lines[:4] + lines[5:]
+    assert changed("swap", 2, 3)[2:4] == [
+        "* [ ] milk, the **whole** one",
+        "- [x] bread",
+    ]
+    # Added: the indent and the mark of the line above, an open box.
+    assert changed("add", 2, "jam")[2:4] == ["- [x] bread", "- [ ] jam"]
+    assert changed("add", 3, "jam")[4] == "* [ ] jam"
+    assert changed("add", 4, "jam")[5] == "  1. [ ] jam"
+    assert changed("add", 0, "jam")[1] == "- [ ] jam"
+    assert changed("add", -1, "jam") == [*lines, "- [ ] jam"]
+    # The ends of the lines are kept; a last line without one gets one.
+    assert note.change("- a\r\n- b", ("add", 1, "c")) == "- a\r\n- b\n- [ ] c\n"
+    assert note.change("- a\r\n- b\r\n", ("add", 0, "c")) == "- a\r\n- [ ] c\r\n- b\r\n"
+    assert note.change("- a\r\n- b", ("swap", 0, 1)) == "- b\r\n- a"
+    assert note.change("", ("add", -1, "c")) == "- [ ] c\n"
+    assert note.change("x", ("add", -1, "c")) == "x\n- [ ] c\n"
+    assert note.change("> said\n", ("words", 0, "told")) == "> told\n"
+
+
+def test_desk() -> None:
+    desk = note.Desk()
+    assert desk_keys(desk, SMALL, "down", "space") == [("tick", 2)]
+    assert desk_keys(desk, SMALL, "j", "enter", "end", "space") == [("tick", 3)]
+    assert desk.sel == 4
+    # A move: the bar follows its item.
+    assert desk_keys(desk, SMALL, "shift+up", "K") == [("swap", 5, 4), ("swap", 4, 3)]
+    assert desk.sel == 2
+    assert desk_keys(desk, SMALL, "home", "shift+up", "J") == [("swap", 0, 2)]
+    assert desk.sel == 1
+    # Added under the bar; the bar goes on it. Nothing typed: nothing.
+    assert desk_keys(desk, SMALL, "a", "j", "a", "space", "m", "enter") == [
+        ("add", 2, "ja m")
+    ]
+    assert desk.sel == 2 and desk.mode is None
+    assert desk_keys(desk, SMALL, "a", "enter", "a", "x", "ctrl+c") == []
+    assert desk.sel == 2 and desk.mode is None
+    # Edited: the words as written; the same words: nothing.
+    assert desk_keys(desk, SMALL, "e", "enter") == []
+    assert desk_keys(desk, SMALL, "e", "ctrl+u", "o", "k", "enter") == [
+        ("words", 3, "ok")
+    ]
+    desk.key(note.listed(made(SMALL)), "e")
+    assert desk.editor.text == "milk, the **whole** one"
+    desk.paste("more\nof it")
+    assert desk.editor.text.endswith("onemore of it")
+    # The focus lost: dropped.
+    assert desk.rest() and desk.mode is None and not desk.rest()
+    # Deleted when `y` follows; any other key keeps.
+    assert desk_keys(desk, SMALL, "d", "n", "d", "y") == [("delete", 3)]
+    # An empty note: a line can be added, nothing else.
+    desk = note.Desk()
+    assert desk_keys(desk, "", "space", "e", "d", "y", "J", "a", "x", "enter") == [
+        ("add", -1, "x")
+    ]
+
+
+@pytest.mark.parametrize("look", [note.PLAIN, note.Look(True, True, True, True)])
+def test_desk_every_size(look: note.Look) -> None:
+    for source in (SMALL, TEXT, ""):
+        for mode in (None, "add", "edit", "delete"):
+            desk = note.Desk()
+            desk.sel, desk.mode = 2, mode
+            for w, h in [*note.SIZES, (1, 1), (3, 2), (4, 3), (60, 20)]:
+                rows = note.render(made(source), w, h, look, desk)
+                assert len(rows) == h
+                assert all(sum(map(cells, text([row]))) == w for row in rows), (w, h)
+                if look.postit:
+                    assert all(r["bg"] == note.PAPER for row in rows for r in row)
+
+
+def cells(line: str) -> int:
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in line)
+
+
+def test_desk_render() -> None:
+    desk = note.Desk()
+    desk.sel = 1
+    rows = note.render(made(SMALL), 30, 7, note.PLAIN, desk)
+    assert text(rows) == [
+        "List".ljust(30),
+        "☑ bread".ljust(30),
+        "☐ milk, the whole one".ljust(30),
+        "  ☐ filters".ljust(30),
+        "plain".ljust(30),
+        " " * 30,
+        "space tick  a add  esc leave".ljust(30),
+    ]
+    assert [bool(row[0].get("inverse")) for row in rows] == [False, True] + [False] * 5
+    # Adding: the line typed is under the bar, with a cursor.
+    for name in ("a", "j"):
+        desk.key(note.listed(made(SMALL)), name)
+    rows = note.render(made(SMALL), 30, 7, note.PLAIN, desk)
+    assert text(rows)[2] == "☐ j".ljust(30) and text(rows)[3].startswith("☐ milk")
+    assert any(run.get("inverse") for run in rows[2])
+    assert text(rows)[-1].startswith("enter ok  ^C cancel")
+    desk.rest()
+    # Too long for the rows: it scrolls with the bar; two rows: no foot.
+    desk.sel = 4
+    assert text(note.render(made(SMALL), 12, 2, note.PLAIN, desk)) == [
+        "  ☐ filters ",
+        "plain".ljust(12),
+    ]
+    desk.key(note.listed(made(SMALL)), "d")
+    assert text(note.render(made(SMALL), 20, 3, note.PLAIN, desk))[-1].startswith(
+        "y delete"
+    )
+    # A row more for the foot, from two rows on.
+    plain, foot = note.trimmed(made(SMALL)), note.trimmed(made(SMALL), foot=True)
+    assert [(w, h + (h > 1 or n > 1)) for n, (w, h) in enumerate(plain)] == foot
+
+
+def test_edit(tmp_path: Path) -> None:
+    path = tmp_path / "TODO.md"
+    path.write_text(SMALL)
+    path.chmod(0o640)
+    read = note.read(path)
+    assert note.edit(path, read, ("tick", 3))
+    assert path.read_text().splitlines()[3] == "* [x] milk, the **whole** one"
+    assert path.stat().st_mode & 0o777 == 0o640
+    assert os.listdir(tmp_path) == ["TODO.md"]
+    # The file is no longer as it was read: nothing is written.
+    assert not note.edit(path, read, ("tick", 3))
+    assert not note.edit(path, read, ("swap", 2, 3))
+    assert note.edit(path, read, ("tick", 2))  # that line stands
+    path.write_text("- [ ] one\n")
+    assert not note.edit(path, read, ("delete", 4))
+    assert path.read_text() == "- [ ] one\n"
+    # A file that is not there is made by a line added.
+    new = tmp_path / "new.md"
+    assert note.edit(new, note.read(new), ("add", -1, "first"))
+    assert new.read_text() == "- [ ] first\n"
+    assert not note.edit(tmp_path / "no" / "x.md", note.Note("x"), ("add", -1, "a"))
+
+
+def test_live_interactive(
+    hosted: tuple[Host, Pilot], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Focused, the keys of the host keyboard write the file."""
+    host, pilot = hosted
+    monkeypatch.setattr(note, "clock", skip := Skip())
+    path = tmp_path / "TODO.md"
+    path.write_text("# List\n\n- [ ] first\n- [x] second\n")
+    seen: dict[str, object] = {}
+    argv = ["-s", pilot.session, "-i", "-c", str(path)]
+    thread = threading.Thread(
+        target=lambda: seen.update(status=note.main(argv, seconds=600))
+    )
+    thread.start()
+
+    def until(what: str, test: object) -> None:
+        deadline = time.monotonic() + 8
+        while not test():  # type: ignore[operator]
+            assert time.monotonic() < deadline and thread.is_alive(), what
+            time.sleep(0.03)
+
+    def info() -> dict[str, object]:
+        return next(iter(w for w in pilot.widgets() if w["tag"] == "note"), {})
+
+    def shown() -> str:
+        return "\n".join(pilot.dump()["host"])
+
+    def typed(keys: bytes, what: str, lines: list[str]) -> None:
+        os.write(host.master, keys)
+        until(what, lambda: path.read_text().splitlines() == lines)
+
+    try:
+        until("asks", lambda: info().get("asks") == "quiet" and "first" in shown())
+        assert "space tick" not in shown()
+        pilot.focus(info()["id"])  # type: ignore[arg-type]
+        until("focused", lambda: "space tick" in shown())
+        typed(b"j ", "ticked", ["# List", "", "- [x] first", "- [x] second"])
+        until("counted", lambda: info()["title"] == "TODO.md 2/2")
+        typed(
+            b"athird\r",
+            "added",
+            ["# List", "", "- [x] first", "- [ ] third", "- [x] second"],
+        )
+        typed(
+            b"\x1b[1;2A",
+            "moved",
+            ["# List", "", "- [ ] third", "- [x] first", "- [x] second"],
+        )
+        typed(
+            b"e\x15\x1b[200~3rd\r\x1b[201~\r",
+            "edited",
+            ["# List", "", "- [ ] 3rd", "- [x] first", "- [x] second"],
+        )
+        typed(b"jdy", "deleted", ["# List", "", "- [ ] 3rd", "- [x] second"])
+        # Escape while a line is typed: dropped, the keys are the shell's.
+        os.write(host.master, b"alost")
+        until("typing", lambda: "lost" in shown())
+        os.write(host.master, b"\x1b")
+        until("left", lambda: not info()["focused"] and "lost" not in shown())
+        assert "space tick" not in shown()
+        os.write(host.master, b"echo h$((1+1))\r")
+        pilot.wait_for("h2")
+    finally:
+        skip.end()
+        thread.join()
+    assert seen == {"status": 0}
+    assert path.read_text() == "# List\n\n- [ ] 3rd\n- [x] second\n"
+
+
+def test_interactive_is_not_in_all() -> None:
+    assert not note.options(["-a"]).interactive
+    assert note.options(["-i"]).interactive and not note.options(["-i"]).look.count
