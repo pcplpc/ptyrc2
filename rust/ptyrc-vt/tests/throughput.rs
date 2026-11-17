@@ -108,6 +108,42 @@ fn throughput() {
         std::hint::black_box(vt.grid() == other.grid());
     });
     cost("scroll a line 200x60", 2000, || vt.feed(b"\x1b[60;1H\n"));
+    // A full-view sprite of braille runs redrawn: every other cell
+    // differs, a colour a run.
+    let frame = |k: u32| {
+        let mut vt = Vt::new(200, 60);
+        for row in 0..60u32 {
+            let mut line = format!("\x1b[{};1H", row + 1);
+            let mut col = 0;
+            while col < 200 {
+                let v = row * 31 + col * 7 + k * 13;
+                let n = (1 + v % 8).min(200 - col);
+                line += &format!("\x1b[38;5;{}m", 16 + v % 216);
+                line.extend((0..n).filter_map(|i| char::from_u32(0x2801 + (v + i) % 255)));
+                col += n;
+                let gap = (v % 11).min(200 - col);
+                line += &format!("\x1b[{}C", gap.max(1));
+                col += gap;
+            }
+            vt.feed(line.as_bytes());
+        }
+        vt.grid().clone()
+    };
+    let frames = [frame(0), frame(1)];
+    let mut host = Vt::new(200, 60);
+    let (mut k, mut sent) = (0, 0);
+    cost("repair a sprite frame 200x60", 100, || {
+        k += 1;
+        let mut out = Vec::new();
+        ptyrc_vt::repair(&mut host, &frames[k % 2], &mut out);
+        sent = out.len();
+    });
+    println!("  {sent} B sent");
+    cost("repair nothing 200x60", 100, || {
+        let mut out = Vec::new();
+        ptyrc_vt::repair(&mut host, &frames[k % 2], &mut out);
+        assert!(out.is_empty());
+    });
     rate(
         "vim replay",
         60,

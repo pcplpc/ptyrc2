@@ -404,3 +404,26 @@ fn repair_then_rep_and_combining() {
         assert_eq!(host.grid().row(0), app.grid().row(0), "{tail:?}");
     }
 }
+
+/// A run of cells that differ by a colour alone: only that colour is sent.
+#[test]
+fn colour_changes_alone_are_sent_alone() {
+    let mut host = Vt::new(10, 2);
+    let mut want = Vt::new(10, 2);
+    want.feed(
+        b"\x1b[1;38;5;196;48;2;1;2;3ma\x1b[38;5;46mb\x1b[48;5;17mc\x1b[39;49md\x1b[32;44me\x1b[0;32mf",
+    );
+    let mut out = Vec::new();
+    repair(&mut host, want.grid(), &mut out);
+    assert_eq!(host.grid(), want.grid());
+    assert_eq!(host.pen(), Style::default());
+    let text = String::from_utf8(out).unwrap();
+    let body = text
+        .strip_prefix("\x1b[?2026h")
+        .and_then(|t| t.strip_suffix("\x1b[?2026l"))
+        .unwrap();
+    assert_eq!(
+        body,
+        "\x1b[0;1;38;5;196;48;2;1;2;3ma\x1b[38;5;46mb\x1b[48;5;17mc\x1b[39;49md\x1b[32;44me\x1b[0;32mf\x1b[1;1H\x1b[39m"
+    );
+}

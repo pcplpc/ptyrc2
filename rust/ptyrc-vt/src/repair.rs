@@ -3,7 +3,7 @@
 //! desired grid, leaving the terminal state as found.
 
 use crate::grid::{Cell, Grid, Style};
-use crate::sgr::write_sgr;
+use crate::sgr::{push_num, write_sgr, write_sgr_from};
 use crate::vt::{Charset, Vt};
 use std::io::Write;
 use unicode_width::UnicodeWidthChar;
@@ -60,13 +60,21 @@ impl Painter<'_> {
             Some((c, r)) if c == col && r == row => {}
             Some((c, r)) if r == row && col == c + 1 => self.buf.extend_from_slice(b"\x1b[C"),
             Some((c, r)) if r == row && col > c => {
-                let _ = write!(self.buf, "\x1b[{}C", col - c);
+                self.buf.extend_from_slice(b"\x1b[");
+                push_num(&mut self.buf, col - c);
+                self.buf.push(b'C');
             }
             Some((_, r)) if r == row => {
-                let _ = write!(self.buf, "\x1b[{}G", col + 1);
+                self.buf.extend_from_slice(b"\x1b[");
+                push_num(&mut self.buf, col + 1);
+                self.buf.push(b'G');
             }
             _ => {
-                let _ = write!(self.buf, "\x1b[{};{}H", row + 1, col + 1);
+                self.buf.extend_from_slice(b"\x1b[");
+                push_num(&mut self.buf, row + 1);
+                self.buf.push(b';');
+                push_num(&mut self.buf, col + 1);
+                self.buf.push(b'H');
             }
         }
         self.at = Some((col, row));
@@ -82,7 +90,7 @@ impl Painter<'_> {
                 ..self.pen
             })
         {
-            write_sgr(&mut self.buf, &style);
+            write_sgr_from(&mut self.buf, &self.pen, &style);
         }
         self.pen = style;
     }

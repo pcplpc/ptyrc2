@@ -150,17 +150,75 @@ fn color(out: &mut Vec<u8>, base: u16, c: Color) {
     match c {
         Color::Default => {}
         Color::Indexed(n) if n < 8 => {
-            let _ = write!(out, ";{}", base + n as u16);
+            out.push(b';');
+            push_num(out, base + n as u16);
         }
         Color::Indexed(n) if n < 16 => {
-            let _ = write!(out, ";{}", base + 60 + (n - 8) as u16);
+            out.push(b';');
+            push_num(out, base + 60 + (n - 8) as u16);
         }
         Color::Indexed(n) => {
-            let _ = write!(out, ";{};5;{}", base + 8, n);
+            out.push(b';');
+            push_num(out, base + 8);
+            out.extend_from_slice(b";5;");
+            push_num(out, n as u16);
         }
         Color::Rgb(r, g, b) => {
-            let _ = write!(out, ";{};2;{};{};{}", base + 8, r, g, b);
+            out.push(b';');
+            push_num(out, base + 8);
+            out.extend_from_slice(b";2");
+            for v in [r, g, b] {
+                out.push(b';');
+                push_num(out, v as u16);
+            }
         }
+    }
+}
+
+/// `n` in decimal. A sequence is written a cell or a run: no formatter.
+pub(crate) fn push_num(out: &mut Vec<u8>, n: u16) {
+    let mut buf = [0u8; 5];
+    let mut i = buf.len();
+    let mut n = n;
+    loop {
+        i -= 1;
+        buf[i] = b'0' + (n % 10) as u8;
+        n /= 10;
+        if n == 0 {
+            break;
+        }
+    }
+    out.extend_from_slice(&buf[i..]);
+}
+
+/// The SGR sequence that turns the rendition `from` into `to`, not the
+/// same: the colours that differ when nothing else does, `write_sgr`
+/// otherwise.
+pub(crate) fn write_sgr_from(out: &mut Vec<u8>, from: &Style, to: &Style) {
+    if from.attrs != to.attrs || from.ul != to.ul {
+        write_sgr(out, to);
+        return;
+    }
+    out.extend_from_slice(b"\x1b[");
+    let start = out.len();
+    for (base, old, new) in [(30, from.fg, to.fg), (40, from.bg, to.bg)] {
+        if old == new {
+            continue;
+        }
+        if new == Color::Default {
+            out.push(b';');
+            push_num(out, base + 9);
+        } else {
+            color(out, base, new);
+        }
+    }
+    if out.len() == start {
+        out.push(b'm');
+    } else {
+        // The separator before the first parameter.
+        out[start..].rotate_left(1);
+        out.pop();
+        out.push(b'm');
     }
 }
 
