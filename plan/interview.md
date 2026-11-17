@@ -214,7 +214,8 @@ Supersedes `--spawn --rate` above.
   control back and go.
 - A new kind of widget, with a whole TUI flow for itself: the manager
   menu made reusable. First example: the note app rebuilt on it.
-- Taken by the pilot agent, to be confirmed: the menu is the last
+- Taken by the pilot agent; the first three confirmed by the owner
+  the same day, answered in a widget: the menu is the last
   stop of the cycle (never out of reach); two kinds, loud (a
   question; marked on screen) and quiet (a note; unmarked, after the
   loud ones); an app cannot take the focus by itself; focused, a
