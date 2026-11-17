@@ -220,3 +220,15 @@ Supersedes `--spawn --rate` above.
   question; marked on screen) and quiet (a note; unmarked, after the
   loud ones); an app cannot take the focus by itself; focused, a
   widget is modal.
+
+## `-s auto` (2026-11-17)
+
+- With several drivers, a client finds where the user is: `-s auto` is
+  the session typed in last (`ptyrc app -s auto bricks`). `auto` is a
+  reserved name.
+- First the name, used as such; then the default. The default is for
+  the apps only: a verb that is advanced or risky (`send`, `keys`)
+  keeps an explicit name.
+- A choice among several is said on stderr.
+- `ptyrc attach` as the user, the focus of the host window (1004):
+  later; something simple first.

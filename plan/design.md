@@ -1561,6 +1561,31 @@ socket 0600), `/tmp/ptyrc-<uid>/` without `XDG_RUNTIME_DIR`. `<session>` is
 `PTYRC_SESSION`, else the live session its tmux session names (`@ptyrc`,
 see `ptyrc tmux`), else the only live session, else fails with the list.
 
+`auto`, in place of a session name (`-s auto`, `PTYRC_SESSION=auto`,
+`Pilot("auto")`): the session the user typed in last. No session has the
+name (`run --name auto`: status 2).
+
+- `active_at`, in the `hello`: when the user last typed on the host
+  keyboard of the driver, or used its mouse there; real time,
+  milliseconds since the epoch; null: never. A key, a paste, a mouse
+  report. Not an answer of the terminal (the focus of its window, the
+  cursor position, the device attributes, a mode, a colour, any string:
+  `hands.rs`), not `input.send`, with `host` or not: a client is not the
+  user, `ptyrc attach` neither. A headless session and a replay have no
+  host: null for ever.
+- The choice (`session::auto`, `_wire._auto`): the live session with the
+  latest date; the same date, the last by name. One live session: it,
+  typed in or not. Several, typed in by none: no choice (status 3, the
+  list; Python: `bad-request`).
+- `ptyrc` resolves `-s auto` once, at its start: the verb, and the
+  program it executes (`ptyrc app`, `ptyrc python`), keep the session
+  whatever the user types next. A choice among several is told on
+  stderr when it is a terminal: `ptyrc: session b (auto: typed in 3s
+  ago)`.
+- Not done: `auto` as the default of `ptyrc app` alone (a verb that
+  types, `send` or `keys`, keeps a name); the focus of the host window
+  (1004) as a date; `ptyrc attach` as the user.
+
 Trust, as tmux: one boundary, the user. Whoever reaches the socket has
 the whole session.
 
@@ -1610,7 +1635,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 
 | method | params | result |
 |---|---|---|
-| `session.info` | | hello data, `alt_screen`, `title`, `driver_pid`, `headless`, `grabbed`, `handoff` (a successor waits), `tape` (a replay), `"modes":{"app_cursor","bracketed_paste","mouse":[1000,...],"mouse_sgr"}`, `"host_colors":{"fg","bg","from":{"fg","bg"}}` (`from`: `host`, `option`, `client`, `default`) |
+| `session.info` | | hello data (`active_at` with it), `alt_screen`, `title`, `driver_pid`, `headless`, `grabbed`, `handoff` (a successor waits), `tape` (a replay), `"modes":{"app_cursor","bracketed_paste","mouse":[1000,...],"mouse_sgr"}`, `"host_colors":{"fg","bg","from":{"fg","bg"}}` (`from`: `host`, `option`, `client`, `default`) |
 | `session.resize` | `size`: `[c, r]` | `{}`; headless only |
 | `session.colors` | `fg`, `bg`, `ask` | `host_colors`, and `asked`; see Rendering |
 | `session.handoff` | `hangup` (true) | `{}`; the end of the app is a handoff: the driver ends as ever, then its caller puts a successor on the host terminal. `hangup`: SIGHUP to the app, SIGKILL after 1 s; false: the client makes the app leave. `bad-request` without a successor (`ptyrc run`) |
@@ -1706,7 +1731,8 @@ sprite. Sent to every listener, whoever owns the sprite.
 
 ## CLI
 
-`ptyrc <verb>`; `-s/--session` on every client verb; `--json` where a human
+`ptyrc <verb>`; `-s/--session` on every client verb (`auto`: the session
+typed in last, see Protocol); `--json` where a human
 form exists.
 
 ```
@@ -1719,7 +1745,8 @@ ptyrc replay FILE [--name N] [--speed X] [--until T] [--step] [--hold]
           [--no-presets | --presets] [--snap | --check SNAPS] [--at T,...]
 ptyrc tape [status | step [N] | seek T | play [SPEED] | pause | quit]
 ptyrc snap                        what is shown and the frames, JSON
-ptyrc ls                          sessions
+ptyrc ls                          sessions; ACTIVE: the time since the
+      user typed there; `*`: the one `-s auto` takes
 ptyrc text [-f FRAME] [--ansi]    screen as plain text
 ptyrc find [-E] [-i] PATTERN      matches with coordinates
 ptyrc cursor
@@ -1845,7 +1872,7 @@ Exit status:
 | 0 | done |
 | 1 | a negative answer: `find` without a match (silent), `wait` timed out (says what was waited for), `click --text` without a match, `replay --check` with a difference (names each) |
 | 2 | usage, or a request that is wrong: a bad key, colour, anchor, position, JSON, method, topic, session name for `run` |
-| 3 | no session to talk to: none, not found, several and none chosen, dead (stale socket, removed), bad name; `run`: the name is taken, no socket directory |
+| 3 | no session to talk to: none, not found, several and none chosen, `auto` and none typed in, dead (stale socket, removed), bad name; `run`: the name is taken, no socket directory |
 | 4 | the request names what is not there or not usable: frame, sprite, widget, app |
 | 5 | the connection or the system: closed by the driver, I/O |
 | 126 | `run`: the command is there and cannot run: a directory, not executable, no interpreter |
