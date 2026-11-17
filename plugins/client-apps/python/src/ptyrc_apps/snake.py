@@ -163,76 +163,79 @@ def room(box: Box, walls: set[Cell], start: Cell | None, need: int) -> list[Cell
     than `need` cells, the other side `need` or more. All the region
     but `start` when nothing is left."""
     x0, y0, x1, y1 = box
+    # The box as a grid of numbers, a border of walls around it: the
+    # cell (x, y) is `(y - y0 + 1) * across + x - x0 + 1`.
+    across = max(0, x1 - x0) + 2
+    down = max(0, y1 - y0) + 2
+    open_ = bytearray(across * down)
+    for row in range(across, across * (down - 1), across):
+        open_[row + 1 : row + across - 1] = b"\1" * (across - 2)
+    for x, y in walls:
+        if x0 <= x < x1 and y0 <= y < y1:
+            open_[(y - y0 + 1) * across + x - x0 + 1] = 0
 
-    def free(c: Cell) -> bool:
-        return x0 <= c[0] < x1 and y0 <= c[1] < y1 and c not in walls
+    def cell(i: int) -> Cell:
+        return (i % across + x0 - 1, i // across + y0 - 1)
 
-    def region(c: Cell) -> list[Cell]:
-        out, seen = [c], {c}
-        for x, y in out:
-            for there in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
-                if (
-                    there not in seen
-                    and x0 <= there[0] < x1
-                    and y0 <= there[1] < y1
-                    and there not in walls
-                ):
-                    seen.add(there)
+    def region(i: int) -> list[int]:
+        """The cells joined to `i`, the nearest first; shut behind."""
+        out = [i]
+        open_[i] = 0
+        for here in out:
+            for there in (here + 1, here - 1, here + across, here - across):
+                if open_[there]:
+                    open_[there] = 0
                     out.append(there)
         return out
 
-    if start is not None:
-        cells = region(start) if free(start) else []
-    else:
-        cells, seen = [], set()
-        for c in ((x, y) for y in range(y0, y1) for x in range(x0, x1)):
-            if c not in seen and free(c):
-                one = region(c)
-                seen.update(one)
-                cells = max(cells, one, key=len)
+    cells: list[int] = []
+    if start is None:
+        # The first of the largest, from the top left.
+        for i in range(across, across * (down - 1)):
+            if open_[i] and len(one := region(i)) > len(cells):
+                cells = one
+    elif x0 <= start[0] < x1 and y0 <= start[1] < y1:
+        i = (start[1] - y0 + 1) * across + start[0] - x0 + 1
+        cells = region(i) if open_[i] else []
+    for i in cells:
+        open_[i] = 1
     # Off the hanging trees: what is left has a cycle through each cell.
-    among = set(cells)
     near = {
-        (x, y): [
-            n for n in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)) if n in among
-        ]
-        for x, y in cells
+        i: [n for n in (i + 1, i - 1, i + across, i - across) if open_[n]]
+        for i in cells
     }
-    degree = {c: len(near[c]) for c in cells}
-    leaves = [c for c in cells if degree[c] < 2]
-    gone = set(leaves)
-    for c in leaves:
-        for n in near[c]:
+    degree = {i: len(near[i]) for i in cells}
+    leaves = [i for i in cells if degree[i] < 2]
+    for i in leaves:
+        open_[i] = 0
+    for i in leaves:
+        for n in near[i]:
             degree[n] -= 1
-            if degree[n] < 2 and n not in gone:
-                gone.add(n)
+            if degree[n] < 2 and open_[n]:
+                open_[n] = 0
                 leaves.append(n)
-    core = [c for c in cells if c not in gone]
-    fallback = [c for c in cells if c != start]
+    core = [i for i in cells if open_[i]]  # the cells of `near` still open
     if not core:
-        return fallback
-    kept = set(core)
-
-    def inner(c: Cell):
-        return iter([n for n in near[c] if n in kept])
-
+        return [c for c in map(cell, cells) if c != start]
     # Bridges, depth first without recursion (Tarjan). Cells are
     # numbered in preorder: a subtree is an interval of numbers.
     root = core[0]
     disc = {root: 0}
     low = {root: 0}
     order = [root]
-    parent: dict[Cell, Cell] = {}
+    parent: dict[int, int] = {}
     cuts: list[tuple[int, int]] = []  # far side of a bridge: first, size
-    stack = [(root, inner(root))]
+    stack = [(root, iter(near[root]))]
     while stack:
         here, todo = stack[-1]
         for there in todo:
+            if not open_[there]:
+                continue
             if there not in disc:
                 disc[there] = low[there] = len(order)
                 order.append(there)
                 parent[there] = here
-                stack.append((there, inner(there)))
+                stack.append((there, iter(near[there])))
                 break
             if there != parent.get(here):
                 low[here] = min(low[here], disc[there])
@@ -255,11 +258,11 @@ def room(box: Box, walls: set[Cell], start: Cell | None, need: int) -> list[Cell
             marks[first + size] += 1
             marks[n] -= 1
     out, depth = [], 0
-    for i, c in enumerate(order):
-        depth += marks[i]
-        if depth == 0 and c != start:
+    for k, i in enumerate(order):
+        depth += marks[k]
+        if depth == 0 and (c := cell(i)) != start:
             out.append(c)
-    return out or fallback
+    return out or [c for c in map(cell, cells) if c != start]
 
 
 @dataclass(eq=False)
