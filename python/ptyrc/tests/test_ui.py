@@ -62,6 +62,39 @@ def test_foot() -> None:
     assert ui.foot(all_, 5) == "esc …"
 
 
+# -- keys -------------------------------------------------------------------
+
+
+def test_keys() -> None:
+    name = ui.Keys.name
+    assert name(b"\x1b[1;2A") == "shift+up" and name(b"\x1b[1;2D") == "shift+left"
+    assert name(b"\x1b[1;5C") == "ctrl+right" and name(b"\x1b[1;3B") == "alt+down"
+    assert name(b"\x1b[1;8F") == "ctrl+alt+shift+end" and name(b"\x1b[1;6H")
+    assert name(b"\x1b[3;5~") == "ctrl+delete" and name(b"\x1b[5;2~") == "shift+pageup"
+    for raw in (b"\x1b[A", b"\x1b[1;1A", b"\x1b[2;2A", b"\x1b[9;2~", b"a", b""):
+        assert name(raw) is None, raw
+    assert name(b"\x1b[<35;1;1M") is None and name(b"\x1b[200~") is None
+
+    keys = ui.Keys()
+
+    def feed(named: str | None, raw: bytes = b"") -> Any:
+        data = {"key": named, "bytes": base64.b64encode(raw).decode(), "widget": 7}
+        return keys.feed(data)
+
+    assert feed("a", b"a") == ("key", "a") and feed("up") == ("key", "up")
+    assert feed(None, b"\x1b[1;2A") == ("key", "shift+up")
+    assert feed("f1", b"\x1b[1;2A") == ("key", "f1")  # the driver's name first
+    assert feed(None, b"\x1b[<35;1;1M") is None and keys.feed({"key": None}) is None
+    assert feed(None, b"\x1b[200~") is None
+    assert feed("a", b"a") is None and feed("enter", b"\r") is None
+    assert feed(None, "é".encode()) is None and feed(None, b"\x1b[1;2A") is None
+    assert feed("b", b"\r\nb") is None
+    assert feed(None, b"\x1b[201~") == ("paste", "a\né\x1b[1;2A\nb")
+    assert feed(None, b"\x1b[200~") is None and feed("x", b"x") is None
+    keys.reset()  # the focus lost: the paste is dropped
+    assert feed("y", b"y") == ("key", "y")
+
+
 # -- pieces -----------------------------------------------------------------
 
 

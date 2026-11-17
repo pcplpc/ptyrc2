@@ -37,7 +37,7 @@ with Pilot.spawn(["vim", "notes.md"], size=(100, 30)) as pilot:
 | frames | `frames`, `panes`, `frame`, `frame_at`; `Frame.text`, `known`, `find`, `heat`, `heat_classes`, `idle`, `check_idle`, `is_idle`, `to_screen`, `to_frame`, `draw` |
 | draw | `draw`, `put`, `effect`, `ext`, `sprites`, `clear`; `Sprite.set`, `ext`, `move`, `update`, `tune`, `info`, `remove` |
 | widgets | `widget`, `widgets`, `borders`, `focus`, `blur`; `Widget.set`, `hide`, `refresh`, `update`, `variant`, `size`, `rect`, `placed`, `ask`, `release`, `asks`, `focused` |
-| ui | `ui.ask`, `ui.Dialog`; `ui.Choice`, `Line`, `Text`, `Form`, `Model`; `ui.Editor`, `Listing`, `foot`, `fit`, `cut`, `wrap`, `cells`, `run` |
+| ui | `ui.ask`, `ui.Dialog`; `ui.Choice`, `Line`, `Text`, `Form`, `Model`; `ui.Keys`, `Editor`, `Listing`, `foot`, `fit`, `cut`, `wrap`, `cells`, `run` |
 | other | `batch`, `events`, `event`, `subscribe`, `resize`, `debug_overlay`, `dump`, `call`, `show`, `attach` |
 | tools | `locator`, `Frame.locator`, `click`, `grab`, `release`, `shown`, `snapshot`; `spawn(record=)`, `Pilot.replay`, `tape` |
 
@@ -111,6 +111,13 @@ while not dialog.done:  # an app with its own loop
         ...  # the app's own events
 dialog.result
 ```
+
+`ui.Keys()` reads the `input` events of a focused widget, for an app
+without a `Dialog`: `feed(data)` is `("key", name)`, `("paste", text)`
+(a bracketed paste whole) or None; an arrow, `home`, `end`, `delete` or
+a page key held with modifiers, which the driver does not name, is
+named from its bytes (`shift+up`, `ctrl+left`; `Keys.name(raw)`);
+`reset()` when the focus is lost.
 
 `enter` validates, `ctrl+c` dismisses, the escape key leaves the
 question there. A model of your own subclasses `ui.Model`: `body(w, h,

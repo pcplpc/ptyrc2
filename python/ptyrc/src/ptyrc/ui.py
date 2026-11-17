@@ -18,12 +18,14 @@ itself, then `space`, `enter`, `tab`, `shift+tab`, `backspace`, `up`,
 the widget never comes: the driver takes it and drops the focus.
 
 Pieces for other models: `Editor` (a line and its cursor), `Listing` (a
-bar on a list that scrolls), `foot`, `fit`, `cut`, `wrap`, `cells`.
+bar on a list that scrolls), `foot`, `fit`, `cut`, `wrap`, `cells`; `Keys` (the `input` events of a
+focused widget as keys and pastes).
 """
 
 from __future__ import annotations
 
 import base64
+import re
 import unicodedata
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
@@ -42,6 +44,7 @@ __all__ = [
     "Dialog",
     "Editor",
     "Form",
+    "Keys",
     "Line",
     "Listing",
     "Model",
@@ -64,8 +67,6 @@ type Key = tuple[str, int]
 
 #: What `Model.key` answers when the model is over.
 DONE, CANCEL = "done", "cancel"
-
-_PASTE, _PASTED = b"\x1b[200~", b"\x1b[201~"
 
 
 # -- cells ------------------------------------------------------------------
@@ -149,6 +150,69 @@ def foot(keys: Sequence[Key], w: int) -> str:
             return cut(line, w)
         at = max(i for i, (_, rank) in enumerate(kept) if rank == worst)
         del kept[at]
+
+
+# -- keys -------------------------------------------------------------------
+
+_MODIFIED = re.compile(rb"\x1b\[(\d+);([2-8])([A-DFH~])")
+_LETTERS = {
+    b"A": "up",
+    b"B": "down",
+    b"C": "right",
+    b"D": "left",
+    b"H": "home",
+    b"F": "end",
+}
+_TILDES = {2: "insert", 3: "delete", 5: "pageup", 6: "pagedown"}
+
+
+class Keys:
+    """The `input` events of a focused widget, as keys and pastes.
+
+    `feed(data)`, `data` that of an event with `key` and `bytes`:
+    `("key", name)`, `("paste", text)` (a bracketed paste whole, its
+    lines parted by `\\n`), or None: nothing yet, or a key without a
+    name. `reset()`: the focus was lost, a paste under way is dropped.
+    Pure: one instance a widget."""
+
+    START, END = b"\x1b[200~", b"\x1b[201~"
+
+    def __init__(self) -> None:
+        self._paste: bytearray | None = None
+
+    @staticmethod
+    def name(raw: bytes) -> str | None:
+        """The name of a key the driver does not name: an arrow,
+        `home`, `end`, `insert`, `delete` or a page key held with
+        modifiers (`CSI 1;m A`, `CSI n;m ~`): `shift+up`, `ctrl+left`,
+        `ctrl+alt+shift+end`. None for any other bytes."""
+        m = _MODIFIED.fullmatch(raw)
+        if m is None:
+            return None
+        code, mods, last = int(m[1]), int(m[2]) - 1, m[3]
+        key = _TILDES.get(code) if last == b"~" else _LETTERS[last]
+        if key is None or (last != b"~" and code != 1):
+            return None
+        held = [n for bit, n in ((4, "ctrl"), (2, "alt"), (1, "shift")) if mods & bit]
+        return "+".join([*held, key])
+
+    def reset(self) -> None:
+        self._paste = None
+
+    def feed(self, data: dict[str, Any]) -> tuple[str, str] | None:
+        raw = base64.b64decode(data.get("bytes") or "")
+        if self._paste is not None:
+            if raw != self.END:
+                self._paste += raw
+                return None
+            text = self._paste.decode("utf-8", "replace")
+            self._paste = None
+            return ("paste", text.replace("\r\n", "\n").replace("\r", "\n"))
+        if raw == self.START:
+            self._paste = bytearray()
+            return None
+        name = data.get("key") or self.name(raw)
+        return None if name is None else ("key", name)
 
 
 # -- pieces -----------------------------------------------------------------
@@ -663,7 +727,7 @@ class Dialog:
         self.result: Any = None
         if escape is not None:
             model.escape = escape or None
-        self._paste: bytearray | None = None
+        self._keys = Keys()
         self._drawn: tuple[Any, ...] | None = None
         show.setdefault("fill", 1.0)
         pilot.subscribe("widgets")
@@ -698,32 +762,22 @@ class Dialog:
             if data.get("state") == "gone":
                 self.done = True
             elif not self.widget.focused:
-                self._paste = None
+                self._keys.reset()
         elif topic == "input" and data.get("widget") == self.widget.id:
             if "released" in data:
-                self._paste = None
+                self._keys.reset()
                 self.widget.info = {**self.widget.info, "focused": False}
             else:
                 self.widget.info = {**self.widget.info, "focused": True}
-                self._key(data.get("key"), data.get("bytes") or "")
+                match self._keys.feed(data):
+                    case ("paste", text):
+                        self.model.paste(text)
+                    case ("key", name):
+                        self.finish(self.model.key(name))
         else:
             return False
         self.draw()
         return True
-
-    def _key(self, name: str | None, encoded: str) -> None:
-        raw = base64.b64decode(encoded)
-        if self._paste is not None:
-            if raw == _PASTED:
-                text = self._paste.decode("utf-8", "replace")
-                self._paste = None
-                self.model.paste(text.replace("\r\n", "\n").replace("\r", "\n"))
-            else:
-                self._paste += raw
-        elif raw == _PASTE:
-            self._paste = bytearray()
-        elif name is not None:
-            self.finish(self.model.key(name))
 
     def finish(self, flow: str | None) -> None:
         """What a `Model.key` answered: `DONE`, `CANCEL` end the

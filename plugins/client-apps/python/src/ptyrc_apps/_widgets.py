@@ -4,12 +4,12 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import time
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, ClassVar
+from typing import Any
 
 from ptyrc import Pilot, PtyrcError, Widget, clock
+from ptyrc.ui import Keys
 
 from . import _cli
 
@@ -50,46 +50,6 @@ def options(
         f"bottom, bottom-right, any [default: {prefer}]",
     )
     out.add_argument("--front", action="store_true", help=FRONT)
-
-
-class Keys:
-    """The `input` events of a focused widget, as keys and pastes.
-
-    `feed(data)`: `("key", name)`, `("paste", text)` (a bracketed
-    paste whole, its lines parted by `\\n`), or None: nothing yet, or
-    a key without a name. The arrows with shift, which the driver does
-    not name, are `shift+up`, `shift+down`, `shift+left`,
-    `shift+right`."""
-
-    START, END = b"\x1b[200~", b"\x1b[201~"
-    SHIFTED: ClassVar[dict[bytes, str]] = {
-        b"\x1b[1;2A": "shift+up",
-        b"\x1b[1;2B": "shift+down",
-        b"\x1b[1;2C": "shift+right",
-        b"\x1b[1;2D": "shift+left",
-    }
-
-    def __init__(self) -> None:
-        self._paste: bytearray | None = None
-
-    def reset(self) -> None:
-        """The focus was lost: a paste under way is dropped."""
-        self._paste = None
-
-    def feed(self, data: dict[str, Any]) -> tuple[str, str] | None:
-        raw = base64.b64decode(data.get("bytes") or "")
-        if self._paste is not None:
-            if raw != self.END:
-                self._paste += raw
-                return None
-            text = self._paste.decode("utf-8", "replace")
-            self._paste = None
-            return ("paste", text.replace("\r\n", "\n").replace("\r", "\n"))
-        if raw == self.START:
-            self._paste = bytearray()
-            return None
-        name = data.get("key") or self.SHIFTED.get(raw)
-        return None if name is None else ("key", name)
 
 
 class Deck:
@@ -258,7 +218,7 @@ class Deck:
         (`Widget.ask`): the user focuses it with ctrl+t twice.
 
         `key(name)`: each key while it is focused, named as the driver
-        names them (and `Keys.SHIFTED`); `paste(text)`: a bracketed
+        names them (and `Keys.name`: `shift+up`...); `paste(text)`: a bracketed
         paste, dropped without a handler. After either the widget is
         drawn again, unless the handler returned False; and when the
         focus comes or goes: its `render` reads `widget.focused`.
