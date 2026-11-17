@@ -79,6 +79,43 @@ class Widget:
         """A modal put over the text, for want of a room."""
         return bool(self.info.get("over"))
 
+    @property
+    def asks(self) -> str | None:
+        """`loud` (a question), `quiet`, or None: it does not ask."""
+        return self.info.get("asks")
+
+    @property
+    def focused(self) -> bool:
+        """The keys of the host keyboard are its own."""
+        return bool(self.info.get("focused"))
+
+    def ask(self, quiet: bool = False, escape: str | bool | None = None) -> None:
+        """Ask for the keyboard: the user gives it (ctrl+t twice), the
+        app never takes it. Focused, each key is an `input` event
+        `{"key", "bytes", "widget": id}` of this connection; the focus
+        lost, `{"widget": id, "released": reason}`.
+
+        `quiet`: it waits for no answer: unmarked, after the loud ones.
+        `escape`: the key that gives the keyboard back (`esc`); False:
+        none, every key is the widget's."""
+        params: dict[str, Any] = {"id": self.id}
+        if quiet:
+            params["quiet"] = True
+        if escape is not None:
+            params["escape"] = escape
+        self._pilot._request(
+            "widget.ask", params, lambda res: setattr(self, "info", res["widget"])
+        )
+
+    def release(self) -> None:
+        """Ask no more; the focus goes with it. Fine if it is gone."""
+        try:
+            self._pilot.call("widget.release", id=self.id)
+        except PtyrcError as exc:
+            if exc.code not in ("no-sprite", "gone"):
+                raise
+        self.info = {**self.info, "asks": None, "focused": False}
+
     def update(self, info: dict[str, Any]) -> bool:
         """Take the data of a `widgets` event; False when it tells of
         another widget."""
@@ -189,6 +226,22 @@ class Widgets:
         out: list[dict[str, Any]] = []
         self._request("widget.list", {}, lambda res: out.extend(res["widgets"]))
         return out
+
+    def focus(self, widget: Widget | int | None = None) -> dict[str, Any] | None:
+        """Give the keyboard to a widget that asks, as the hotkey does:
+        `widget`, or the next of the order. Its info; None past the
+        last. For a key binding of the user, a test: an app does not
+        take the focus for itself."""
+        ident = widget.id if isinstance(widget, Widget) else widget
+        params = {} if ident is None else {"id": ident}
+        info = self.call("widget.focus", **params)["widget"]
+        if info is not None and isinstance(widget, Widget):
+            widget.info = info
+        return info
+
+    def blur(self) -> None:
+        """Drop the focus: the keys are the app's again."""
+        self.call("widget.blur")
 
     def borders(self) -> list[str]:
         """Names of the border presets."""

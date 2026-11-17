@@ -102,7 +102,9 @@ answer = ui.ask(pilot, ui.Choice("Deploy?", ["yes", "no", "later"]))  # None: di
 name = ui.ask(pilot, ui.Line("Name?", placeholder="you"), timeout=60)
 who, why = ui.ask(pilot, ui.Form([ui.Line("Who?"), ui.Text("Why?")])) or ("", "")
 
-dialog = ui.Dialog(pilot, ui.Choice("Which?", options, multi=True, other=True), tag="which")
+dialog = ui.Dialog(
+    pilot, ui.Choice("Which?", options, multi=True, other=True), tag="which"
+)
 while not dialog.done:  # an app with its own loop
     event = pilot.event(timeout=1.0)
     if not dialog.take(event):

@@ -10,7 +10,7 @@ with Pilot() as pilot:
 
 from __future__ import annotations
 
-from . import clock
+from . import clock, ui
 from ._wire import PtyrcError, live_sessions, runtime_dir, socket_path
 from .pilot import Cursor, Frame, Match, Pilot, Sprite, find_binary, sprite_spec
 from .tools import Locator, Tape
@@ -32,5 +32,6 @@ __all__ = [
     "runtime_dir",
     "socket_path",
     "sprite_spec",
+    "ui",
     "widget_content",
 ]
