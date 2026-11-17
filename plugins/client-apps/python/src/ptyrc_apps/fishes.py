@@ -294,7 +294,9 @@ def lure(
         fish.home = None
         return None
     n = fish.length
-    safe = [s for s in spots if cursor is None or reach(*s, cursor, n) >= NEAR_MOVING]
+    safe = spots
+    if cursor is not None:
+        safe = [s for s in spots if reach(*s, cursor, n) >= NEAR_MOVING]
     if fish.home not in safe:
         fish.home = None
     elif fish.cell[:2] == fish.home:
@@ -379,6 +381,7 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
     before = None
     rows: list[str] = []
     spots: dict[int, list[tuple[int, int]]] = {}  # hideouts, by length
+    safe: dict[int, list[tuple[int, int]]] = {}  # those the cursor does not reach
     surveyed: Box | None = None  # the view at the last look at the reef
     settle: float | None = None  # time of a second look, the view still
     reef = Reef()
@@ -392,6 +395,8 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
         box = view(frame)
         cursor = sight.cursor
         moving, before = cursor != before, cursor
+        if moving:
+            safe = {}
         cells = [fish.cell[:2] for fish in school]
         now = clock.monotonic()
         due, going = tide(cells, due, box, now, rng, [f.length for f in school])
@@ -404,7 +409,7 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
                 surveyed = box
                 if sight.changed:
                     rows = pad(sight.rows, box[2] - box[0])
-                    spots = {}
+                    spots, safe = {}, {}
                 with pilot.batch():
                     reef.prune(rows, box)
                     if args.decorate:
@@ -432,9 +437,18 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
                 for fish in school:
                     # Out of view, it waits; unless it is on its way out.
                     if inside(fish.cell[:2], box, fish.length) or fish.leaving:
-                        if fish.shy and fish.length not in spots:
-                            spots[fish.length] = hideouts(rows, box, fish.length)
-                        lure(fish, spots.get(fish.length, ()), cursor, dt, rng)
+                        n = fish.length
+                        if fish.shy and n not in safe:
+                            # Looked for when the text or the cursor
+                            # changed, not a fish a tick.
+                            if n not in spots:
+                                spots[n] = hideouts(rows, box, n)
+                            safe[n] = [
+                                s
+                                for s in spots[n]
+                                if cursor is None or reach(*s, cursor, n) >= NEAR_MOVING
+                            ]
+                        lure(fish, safe.get(n, ()), None, dt, rng)
                         swim(fish, dt, box, *menace(fish, cursor, moving, threats), rng)
                     x, y, glyph = fish.cell
                     if fish.sprite is None:

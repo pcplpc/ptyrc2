@@ -203,6 +203,30 @@ def test_species_swim() -> None:
     assert fish.x > 80 and fishes.lure(fish, [(1, 1)], None, 0.1, rng) is None
 
 
+def test_lure_takes_spots_looked_for_once() -> None:
+    """The app keeps the spots the cursor does not reach, and hands
+    them with no cursor: the same fish, the same way."""
+    spots = [(x, y) for y in range(0, 24, 3) for x in range(0, 70, 5)]
+    cursor = (30, 12)
+    safe = [s for s in spots if fishes.reach(*s, cursor) >= fishes.NEAR_MOVING]
+    assert 0 < len(safe) < len(spots)
+    one = fishes.Fish(x=31.0, y=12.0, vx=3.0, color="cyan", shy=True)
+    two = fishes.Fish(x=31.0, y=12.0, vx=3.0, color="cyan", shy=True)
+    rng1, rng2 = random.Random(7), random.Random(7)
+    box = (0, 0, 80, 24)
+    homes = set()
+    for _ in range(600):
+        a = fishes.lure(one, spots, cursor, 0.1, rng1)
+        b = fishes.lure(two, safe, None, 0.1, rng2)
+        assert a == b and a in safe
+        homes.add(a)
+        fishes.swim(one, 0.1, box, None, False, rng1)
+        fishes.swim(two, 0.1, box, None, False, rng2)
+        assert (one.x, one.y, one.stay) == (two.x, two.y, two.stay)
+    assert len(homes) > 1  # it stayed, and went to another
+    assert safe == [s for s in spots if s in safe]  # not written to
+
+
 def test_menace_and_depart() -> None:
     rng = random.Random(5)
     box = (0, 0, 80, 24)
