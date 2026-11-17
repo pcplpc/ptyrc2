@@ -728,13 +728,7 @@ impl Vt {
             let fill = self.fill();
             self.grid_mut().insert_cells(col, row, w, &fill);
         }
-        let mut buf = [0u8; 4];
-        let text = SmolStr::new_inline(c.encode_utf8(&mut buf));
-        let cell = Cell {
-            text,
-            width: w as u8,
-            style: self.pen,
-        };
+        let cell = Cell::glyph(c, w as u8, self.pen);
         self.grid_mut().put(col, row, cell);
         self.advance(w);
         self.last_char = Some(c);

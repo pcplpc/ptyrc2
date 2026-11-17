@@ -67,6 +67,70 @@ pub struct Cell {
     pub style: Style,
 }
 
+/// Characters below this one have their text in `GLYPHS`.
+const GLYPHS_END: usize = 0x3000;
+const GLYPHS_LEN: usize = 0x80 + 0x780 * 2 + (GLYPHS_END - 0x800) * 3;
+
+/// Every character below `GLYPHS_END` in UTF-8, in order.
+static GLYPH_BYTES: [u8; GLYPHS_LEN] = {
+    let mut out = [0u8; GLYPHS_LEN];
+    let (mut c, mut i) = (0, 0);
+    while c < GLYPHS_END {
+        if c < 0x80 {
+            out[i] = c as u8;
+            i += 1;
+        } else if c < 0x800 {
+            out[i] = 0xc0 | (c >> 6) as u8;
+            out[i + 1] = 0x80 | (c & 0x3f) as u8;
+            i += 2;
+        } else {
+            out[i] = 0xe0 | (c >> 12) as u8;
+            out[i + 1] = 0x80 | ((c >> 6) & 0x3f) as u8;
+            out[i + 2] = 0x80 | (c & 0x3f) as u8;
+            i += 3;
+        }
+        c += 1;
+    }
+    out
+};
+
+static GLYPHS: &str = match std::str::from_utf8(&GLYPH_BYTES) {
+    Ok(text) => text,
+    Err(_) => panic!("glyph table"),
+};
+
+/// The text of a cell that holds `c` alone. A slice of a static table
+/// for the common characters: several times cheaper to build than an
+/// inline string.
+fn glyph_text(c: char) -> SmolStr {
+    let n = c as usize;
+    let (at, len) = if n < 0x80 {
+        (n, 1)
+    } else if n < 0x800 {
+        (0x80 + (n - 0x80) * 2, 2)
+    } else if n < GLYPHS_END {
+        (0x80 + 0x780 * 2 + (n - 0x800) * 3, 3)
+    } else {
+        let mut buf = [0u8; 4];
+        return SmolStr::new_inline(c.encode_utf8(&mut buf));
+    };
+    SmolStr::new_static(&GLYPHS[at..at + len])
+}
+
+/// Overwrite `cells` with copies of `fill`.
+fn fill_cells(cells: &mut [Cell], fill: &Cell) {
+    if fill.width == 1 && fill.text == " " {
+        // A blank, the usual fill: built in place, cheaper than a clone.
+        for cell in cells {
+            *cell = Cell::blank(fill.style);
+        }
+    } else {
+        for cell in cells {
+            cell.clone_from(fill);
+        }
+    }
+}
+
 impl Default for Cell {
     fn default() -> Cell {
         Cell::blank(Style::default())
@@ -97,6 +161,15 @@ impl Cell {
         Cell {
             text: SmolStr::new(text),
             width: 2,
+            style,
+        }
+    }
+
+    /// The glyph `c` alone, of `width` 1 or 2.
+    pub fn glyph(c: char, width: u8, style: Style) -> Cell {
+        Cell {
+            text: glyph_text(c),
+            width,
             style,
         }
     }
@@ -279,8 +352,7 @@ impl Grid {
         let mut grid = Grid::new(cols, lines.len() as u16);
         for (row, line) in lines.iter().enumerate() {
             for (col, ch) in line.chars().take(cols as usize).enumerate() {
-                let mut buf = [0u8; 4];
-                let cell = Cell::narrow(ch.encode_utf8(&mut buf), Style::default());
+                let cell = Cell::glyph(ch, 1, Style::default());
                 grid.put(col as u16, row as u16, cell);
             }
         }
@@ -383,8 +455,7 @@ impl Grid {
         self.touch(row);
         let start = self.index(col, row);
         for (cell, b) in self.cells[start..start + n].iter_mut().zip(bytes) {
-            let ch = [*b];
-            cell.text = SmolStr::new_inline(std::str::from_utf8(&ch).unwrap_or(" "));
+            cell.text = glyph_text(*b as char);
             cell.width = 1;
             cell.style = style;
         }
@@ -392,9 +463,7 @@ impl Grid {
 
     /// Fill a row with copies of `fill`.
     pub fn clear_row(&mut self, row: u16, fill: &Cell) {
-        for cell in self.row_mut(row) {
-            cell.clone_from(fill);
-        }
+        fill_cells(self.row_mut(row), fill);
     }
 
     /// Fill columns `c0..c1` of a row with `fill` (narrow); wide glyphs cut
@@ -408,9 +477,7 @@ impl Grid {
         self.orphan(c1 - 1, row);
         self.touch(row);
         let start = self.index(c0, row);
-        for cell in &mut self.cells[start..start + (c1 - c0) as usize] {
-            cell.clone_from(fill);
-        }
+        fill_cells(&mut self.cells[start..start + (c1 - c0) as usize], fill);
     }
 
     /// Move rows `top..bottom` up by `n`; the freed rows take `fill`.
@@ -457,9 +524,7 @@ impl Grid {
         let end = self.index(0, row) + self.cols as usize;
         let tail = &mut self.cells[start..end];
         tail.rotate_right(n as usize);
-        for cell in &mut tail[..n as usize] {
-            cell.clone_from(fill);
-        }
+        fill_cells(&mut tail[..n as usize], fill);
         let last = self.cell_mut(self.cols - 1, row);
         if last.width == 2 {
             *last = Cell::blank(last.style);
@@ -482,9 +547,7 @@ impl Grid {
         let tail = &mut self.cells[start..end];
         tail.rotate_left(n as usize);
         let len = tail.len();
-        for cell in &mut tail[len - n as usize..] {
-            cell.clone_from(fill);
-        }
+        fill_cells(&mut tail[len - n as usize..], fill);
         let first = self.cell_mut(col, row);
         if first.width == 0 {
             *first = Cell::blank(first.style);
@@ -530,6 +593,19 @@ impl Grid {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn glyph_texts() {
+        for c in (0..0x3100)
+            .chain([0xd7ff, 0xe000, 0x1f33c])
+            .filter_map(char::from_u32)
+        {
+            assert_eq!(glyph_text(c), c.to_string().as_str(), "{c:?}");
+        }
+        let cell = Cell::glyph('世', 2, Style::default());
+        assert_eq!(cell, Cell::wide("世", Style::default()));
+        assert_eq!(Cell::glyph(' ', 1, Style::default()), Cell::default());
+    }
 
     #[test]
     fn put_cuts_wide_pairs() {

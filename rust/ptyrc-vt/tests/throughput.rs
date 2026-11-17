@@ -1,20 +1,63 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Throughput of `feed`. `cargo test --release -p ptyrc-vt --test
+//! Throughput of `feed`, cost of a clone and of a scroll. `cargo test --release -p ptyrc-vt --test
 //! throughput -- --ignored --nocapture`.
 
 use ptyrc_vt::Vt;
 use std::time::Instant;
 
+/// Best of five rounds.
 fn rate(name: &str, cols: u16, rows: u16, data: &[u8], rounds: usize) {
     let mut vt = Vt::new(cols, rows);
-    let start = Instant::now();
-    for _ in 0..rounds {
-        vt.feed(data);
-        vt.take_events();
+    let mut best = f64::MAX;
+    for _ in 0..5 {
+        let start = Instant::now();
+        for _ in 0..rounds {
+            vt.feed(data);
+            vt.take_events();
+        }
+        best = best.min(start.elapsed().as_secs_f64());
     }
-    let secs = start.elapsed().as_secs_f64();
     let mb = (data.len() * rounds) as f64 / 1e6;
-    println!("{name}: {:.0} MB/s", mb / secs);
+    println!("{name}: {:.0} MB/s", mb / best);
+}
+
+/// A full-screen program redrawing every row in place, as htop does:
+/// cursor addressing, a few renditions a row, erase to the end of line.
+fn redraw(cols: u16, rows: u16, frames: usize) -> Vec<u8> {
+    let mut out = Vec::new();
+    for f in 0..frames {
+        for row in 0..rows {
+            let pid = 1000 + (row as usize * 37 + f * 11) % 9000;
+            let cpu = (row as usize * 13 + f * 7) % 1000;
+            let line = format!(
+                "\x1b[{};1H\x1b[m{pid:5} user  20   0 \x1b[36m{:6}K\x1b[m \x1b[1;32m{:3}.{}\x1b[m \x1b[38;5;{}m{}\x1b[m\x1b[K",
+                row + 1,
+                pid * 3,
+                cpu / 10,
+                cpu % 10,
+                16 + (row as usize + f) % 216,
+                "/usr/bin/program --with some --arguments "
+                    .repeat(cols as usize / 41 + 1)
+                    .get(..cols as usize - 34)
+                    .unwrap_or(""),
+            );
+            out.extend_from_slice(line.as_bytes());
+        }
+    }
+    out
+}
+
+/// Cost of one call, in microseconds: best of five rounds.
+fn cost(name: &str, rounds: usize, mut f: impl FnMut()) {
+    let mut best = f64::MAX;
+    for _ in 0..5 {
+        let start = Instant::now();
+        for _ in 0..rounds {
+            f();
+        }
+        best = best.min(start.elapsed().as_secs_f64());
+    }
+    println!("{name}: {:.1} us", best * 1e6 / rounds as f64);
 }
 
 #[test]
@@ -35,6 +78,36 @@ fn throughput() {
         })
         .collect();
     rate("colour 80x24", 80, 24, &colour, 200);
+    let sgr: Vec<u8> = (0..2000)
+        .flat_map(|i| {
+            (0..40)
+                .flat_map(|j| {
+                    format!(
+                        "\x1b[38;2;{};{};{};48;5;{}m\u{2580}",
+                        i % 256,
+                        j * 6,
+                        255 - j,
+                        j
+                    )
+                    .into_bytes()
+                })
+                .chain(*b"\x1b[m\r\n")
+                .collect::<Vec<u8>>()
+        })
+        .collect();
+    rate("sgr a cell 80x24", 80, 24, &sgr, 50);
+    rate("redraw 200x60", 200, 60, &redraw(200, 60, 20), 50);
+    let mut vt = Vt::new(200, 60);
+    vt.feed(&redraw(200, 60, 1));
+    cost("clone 200x60", 200, || {
+        std::hint::black_box(vt.clone());
+    });
+    let mut other = vt.clone();
+    cost("clone_from 200x60", 200, || other.clone_from(&vt));
+    cost("grid eq 200x60", 200, || {
+        std::hint::black_box(vt.grid() == other.grid());
+    });
+    cost("scroll a line 200x60", 2000, || vt.feed(b"\x1b[60;1H\n"));
     rate(
         "vim replay",
         60,
