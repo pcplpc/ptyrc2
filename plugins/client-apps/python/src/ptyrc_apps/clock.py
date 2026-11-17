@@ -21,6 +21,7 @@ What it shows:
 from __future__ import annotations
 
 import argparse
+import functools
 import math
 import sys
 from collections.abc import Callable, Sequence
@@ -177,9 +178,10 @@ def _fit(groups: Sequence[Rows], w: int, h: int) -> Rows:
 def _clip(row: list[Run], w: int) -> list[Run]:
     out: list[Run] = []
     for run in row:
-        text = str(run["t"])[: w - _width(out)]
+        text = str(run["t"])[:w]
         if text:
             out.append({**run, "t": text})
+            w -= len(text)
     return out
 
 
@@ -263,26 +265,41 @@ def _snap(v: float) -> float:
     return -k if v < -1e-9 else k
 
 
-def _dial(now: datetime, w: int, h: int, seconds: bool) -> Rows:
+Dots = dict[tuple[int, int], int]  # dot: rank, the foremost highest
+
+
+def _ray(
+    dots: Dots, w: int, h: int, turn: float, start: float, end: float, rank: int
+) -> None:
+    """The dots of a ray from the centre, `start` to `end` dots away."""
     cx, cy = w - 0.5, 2 * h - 0.5  # the centre, in dots: between four
-    r = min(cx, cy)
-    dots: dict[tuple[int, int], int] = {}  # dot: rank, the foremost highest
+    n = max(1, int(4 * (end - start)))
+    for i in range(n + 1):
+        d = start + (end - start) * i / n
+        x = int(cx + _snap(d * math.sin(2 * math.pi * turn)))
+        y = int(cy + _snap(-d * math.cos(2 * math.pi * turn)))
+        if 0 <= x < 2 * w and 0 <= y < 4 * h:
+            dots[x, y] = max(dots.get((x, y), 0), rank)
 
-    def ray(turn: float, start: float, end: float, rank: int) -> None:
-        n = max(1, int(4 * (end - start)))
-        for i in range(n + 1):
-            d = start + (end - start) * i / n
-            x = int(cx + _snap(d * math.sin(2 * math.pi * turn)))
-            y = int(cy + _snap(-d * math.cos(2 * math.pi * turn)))
-            if 0 <= x < 2 * w and 0 <= y < 4 * h:
-                dots[x, y] = max(dots.get((x, y), 0), rank)
 
+@functools.cache
+def _rim(w: int, h: int) -> Dots:
+    """The rim and the hour marks: what no hand moves."""
+    r = min(w - 0.5, 2 * h - 0.5)
+    dots: Dots = {}
     for i in range(400):
-        ray(i / 400, r, r, 1)
+        _ray(dots, w, h, i / 400, r, r, 1)
     for hour in range(12):
         # Either side of the turn: a mark on an axis is two dots thick.
         for turn in (hour / 12 - 1e-6, hour / 12 + 1e-6):
-            ray(turn, r - (4 if hour % 3 == 0 else 2.5), r - 2.5, 1)
+            _ray(dots, w, h, turn, r - (4 if hour % 3 == 0 else 2.5), r - 2.5, 1)
+    return dots
+
+
+def _dial(now: datetime, w: int, h: int, seconds: bool) -> Rows:
+    r = min(w - 0.5, 2 * h - 0.5)
+    dots = dict(_rim(w, h))
+    ray = partial(_ray, dots, w, h)
     minute = now.minute + (now.second / 60 if seconds else 0)
     ray((now.hour % 12 + minute / 60) / 12, 0, 0.5 * r, 3)
     ray(minute / 60, 0, 0.8 * r, 2)
