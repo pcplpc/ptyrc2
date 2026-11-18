@@ -8,6 +8,7 @@ from ptyrc import Pilot
 
 with Pilot() as pilot:  # the session of $PTYRC_SESSION, or the only one
     print("\n".join(pilot.text()))  # what is on screen
+    shape = pilot.shape(words=["flower"])  # ink as `#`, the word as shown
     for m in pilot.find("flower"):  # where: frame and screen coordinates
         print(m.x, m.y, m.screen)
     pilot.keys("esc", ":w", "enter")  # type
