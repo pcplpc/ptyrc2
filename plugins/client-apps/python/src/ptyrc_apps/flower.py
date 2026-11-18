@@ -8,8 +8,12 @@
     ptyrc-app flower -a --count 0          # anywhere: 10 to 30 words
 
 The driver tells when the text of the view changed or scrolled (topic
-`text`, `_cli.Sight`): the client then looks for the matches of `--word`
-again (`Frame.find`), and not before. Twice a second it tends the
+`text`, `_cli.Sight`): the client then reads the view again, and not
+before. It reads its shape with `--word` as the one word shown
+(`Frame.shape`): a match is a whole word, case ignored. A `--word`
+that breaks the rules of a word of the shape (`_cli.is_word`: 3 to 32
+letters or digits) is looked for in the text instead (`Frame.find`,
+literal, case ignored, anywhere in a word). Twice a second it tends the
 garden: a match without a flower gets one, while there are fewer than
 `--count`, where the heat classes (`Frame.heat_classes`) allow. It is
 planted at the nearest spot (`place`) where its root is 3 to 10 columns
@@ -29,7 +33,7 @@ view (`pool`): words of 4 letters or more, matched whole, a flower for
 each. A word leaves the pool when it leaves the view or no flower fits
 next to it, and every `SWAP` seconds the oldest one leaves; another is
 drawn. `--count 0`: the size is drawn from `CROWD` every `RECOUNT`
-seconds. No bold.
+seconds. No bold. It reads the text of the view.
 """
 
 from __future__ import annotations
@@ -293,6 +297,17 @@ class Flower:
     cells: set[tuple[int, int]] = field(default_factory=set)
 
 
+def shown(frame: Frame, rows: Sequence[str], words: Sequence[str]) -> list[Match]:
+    """The matches of `words` in `rows`, the shape of the view of `frame`."""
+    ox, oy = frame.origin
+    return [
+        Match(
+            frame.id, ox + x, oy + y, len(text), text, frame.to_screen(ox + x, oy + y)
+        )
+        for x, y, text in _cli.found(rows, words)
+    ]
+
+
 def word_view(m: Match, origin: tuple[int, int]) -> tuple[int, int, int]:
     return m.x - origin[0], m.y - origin[1], m.len
 
@@ -435,7 +450,11 @@ def app(pilot: Pilot, args: argparse.Namespace, seconds: float | None = None) ->
         args.count = POOL if args.anywhere else 1
     frame = _cli.pick(pilot, args.frame)
     garden = Garden(size=args.count, swap=clock.monotonic() + SWAP)
-    sight = _cli.Sight(pilot, frame)
+    # The shape, `--word` its word; the text for -a or a word it refuses.
+    shape = not args.anywhere and _cli.is_word(args.word)
+    sight = _cli.Sight(
+        pilot, frame, words=(args.word,) if shape else (), text=not shape
+    )
     scanned = -math.inf
     for _ in _cli.ticks(0.05, seconds):
         now = clock.monotonic()
@@ -484,7 +503,10 @@ def scan(
         sought = (args.word, False)
     if sight.changed or sought != garden.sought:
         garden.sought = None  # void, should the frame leave meanwhile
-        garden.found = frame.find(sought[0], regex=sought[1], ignore_case=True)
+        if sight.text:
+            garden.found = frame.find(sought[0], regex=sought[1], ignore_case=True)
+        else:
+            garden.found = shown(frame, rows, sight.words)
         garden.sought = sought
     matches = [m for m in garden.found if m.screen]
     by_key = {(m.x, m.y, m.text): m for m in matches}
