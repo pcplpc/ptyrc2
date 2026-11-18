@@ -42,6 +42,19 @@ def test_catalog(capsys: pytest.CaptureFixture[str]) -> None:
     widgets = {name for name, app in by_name.items() if app["widgets"]}
     assert {"clock", "monitor", "timer", "train", "window"} <= widgets
     assert not widgets & {"bricks", "cat", "fishes", "snake"}
+    # What each reads of the screen.
+    assert by_name["clock"]["reads"] == {
+        "degree": "none",
+        "words": [],
+        "options": {},
+        "user_words": [],
+    }
+    assert by_name["snake"]["reads"]["degree"] == "shape"
+    cat = by_name["cat"]["reads"]
+    assert (cat["degree"], cat["words"]) == ("words", ["food", "fish", "toy"])
+    flower = by_name["flower"]["reads"]
+    assert flower["options"] == {"-a": "text"} and flower["user_words"] == ["--word"]
+    assert by_name["pace"]["reads"]["degree"] == "text"
     (patterns,) = by_name["marks"]["positionals"]
     assert patterns["nargs"] == "+" and patterns["name"]
 
