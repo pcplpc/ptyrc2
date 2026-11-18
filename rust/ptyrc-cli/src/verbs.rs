@@ -34,14 +34,29 @@ pub struct Text {
     /// Keep colours and attributes
     #[arg(long)]
     ansi: bool,
+    /// Ink only: `#` an inked cell, a space a blank one (screen.shape)
+    #[arg(long, conflicts_with = "ansi")]
+    shape: bool,
+    /// With --shape: show this word where it stands whole (repeatable)
+    #[arg(long = "word", value_name = "W", requires = "shape")]
+    words: Vec<String>,
 }
 
 pub fn text(common: &Common, args: Text) -> Done {
-    let result = call(
-        common,
-        "screen.text",
-        json!({"frame": frame_value(&args.frame), "ansi": args.ansi}),
-    )?;
+    let frame = frame_value(&args.frame);
+    let result = if args.shape {
+        call(
+            common,
+            "screen.shape",
+            json!({"frame": frame, "words": args.words}),
+        )?
+    } else {
+        call(
+            common,
+            "screen.text",
+            json!({"frame": frame, "ansi": args.ansi}),
+        )?
+    };
     if common.json {
         print_json(&result, false);
     } else {

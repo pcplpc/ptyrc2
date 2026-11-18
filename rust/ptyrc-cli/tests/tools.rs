@@ -446,6 +446,48 @@ fn pictures_of_the_screen() {
 }
 
 #[test]
+fn text_shape_shows_ink_and_words() {
+    let sb = Sandbox::new("shape");
+    let script = "printf '\\033[31mfish_food\\033[0m fishing toys\\r\\nToy'; sleep 30";
+    let _driver = sb.headless("s", "24x3", &["sh", "-c", script]);
+    let mut client = sb.client("s");
+    client
+        .call("screen.wait", json!({"pattern": "Toy", "timeout_ms": 5000}))
+        .unwrap();
+    let text = |args: &[&str]| {
+        let mut all = vec!["-s", "s", "text"];
+        all.extend(args);
+        sb.run(&all)
+    };
+    let stdout = |args: &[&str]| {
+        let out = text(args);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).unwrap()
+    };
+    assert_eq!(stdout(&["--shape"]), "######### ####### ####\n###\n\n");
+    assert_eq!(
+        stdout(&["--shape", "--word", "fish", "--word", "TOY", "-f", "raw"]),
+        "fish##### ####### ####\nToy\n\n"
+    );
+    // Refused before any call.
+    for args in [&["--word", "fish"][..], &["--shape", "--ansi"]] {
+        assert_eq!(text(args).status.code(), Some(2), "{args:?}");
+    }
+    // Refused by the server: bad-params.
+    let out = text(&["--shape", "--word", "fi"]);
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("word \"fi\": 2 characters, at least 3") && stderr.contains("3 to 32"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn attach_mirrors_and_types() {
     let sb = Sandbox::new("attach");
     let _driver = sb.headless("a", "40x6", &["cat"]);
