@@ -100,8 +100,8 @@ ARROWS = {"left": (-1, 0), "right": (1, 0), "up": (0, -1), "down": (0, 1)}
 
 
 def walls_of(rows: Sequence[str], x0: int = 0, y0: int = 0) -> set[Cell]:
-    """Cells holding a glyph, `rows` being the text from `(x0, y0)`. A
-    wide glyph takes two columns."""
+    """Cells holding a glyph, `rows` being the shape or the text from
+    `(x0, y0)`. A wide glyph of the text takes two columns."""
     out = set()
     for y, row in enumerate(rows, y0):
         x = x0

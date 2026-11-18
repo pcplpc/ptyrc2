@@ -1709,7 +1709,7 @@ def test_sand_follows_two_panes_resized() -> None:
 
 
 def test_sight(session: Pilot) -> None:
-    """`_cli.Sight`: the text is read when the driver tells, the cursor
+    """`_cli.Sight`: the shape is read when the driver tells, the cursor
     is told, and nothing is asked on a quiet screen."""
     page(session, "one")
     asked: list[str] = []
@@ -1721,7 +1721,7 @@ def test_sight(session: Pilot) -> None:
             asked.append(method) or request(method, *a, **kw)
         )
         assert sight.look() and sight.changed
-        assert sight.rows[0] == "one" and asked[-1] == "screen.text"
+        assert sight.rows[0] == "###" and asked[-1] == "screen.shape"
         asked.clear()
         # Quiet: the looks cost nothing.
         time.sleep(0.3)
@@ -1731,8 +1731,8 @@ def test_sight(session: Pilot) -> None:
         session.send("echo t''wo\n")
         session.wait_for("two")
         assert until(lambda: sight.look() and sight.changed, 2)
-        assert "two" in sight.rows[2] and sight.cursor == (2, 3)
-        assert set(asked) == {"screen.text"} and len(asked) <= 3
+        assert sight.rows[2] == "###" and sight.cursor == (2, 3)
+        assert set(asked) == {"screen.shape"} and len(asked) <= 3
         # A resize: the frame settles; the sight asks while it waits,
         # then reads.
         session.resize(60, 20)
@@ -1741,6 +1741,23 @@ def test_sight(session: Pilot) -> None:
         with sight.drawing():
             pilot.draw(["x"], frame=frame.id)
         assert sight.look()
+
+
+def test_sight_words_and_text(session: Pilot) -> None:
+    page(session, "one fish, a FISH_tank")
+    with Pilot(session.session) as pilot:
+        frame = pilot.frame("raw")
+        sight = _cli.Sight(pilot, frame, words=["fish"])
+        assert sight.look() and sight.rows[0] == "### fish# # FISH#####"
+        assert _cli.found(sight.rows, ["fish"]) == [(4, 0, "fish"), (12, 0, "FISH")]
+        sight = _cli.Sight(pilot, frame, text=True)
+        assert sight.look() and sight.rows[0] == "one fish, a FISH_tank"
+
+
+def test_is_word() -> None:
+    assert _cli.is_word("toy") and _cli.is_word("Été2") and _cli.is_word("x" * 32)
+    for word in ("ab", "x" * 33, "a-b", "of a", "日本語", "İxx"):
+        assert not _cli.is_word(word), word
 
 
 def test_options_between_the_words() -> None:

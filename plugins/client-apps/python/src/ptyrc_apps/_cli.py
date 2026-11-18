@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import re
 import sys
+import unicodedata
 from collections.abc import Callable, Iterator, Sequence
 from typing import Any
 
@@ -15,10 +17,12 @@ __all__ = [
     "Nozzle",
     "Sight",
     "follow",
+    "found",
     "frame_arg",
     "heir",
     "hold",
     "in_sight",
+    "is_word",
     "movable",
     "on_screen",
     "parse",
@@ -353,6 +357,34 @@ def in_sight() -> Iterator[None]:
             raise
 
 
+def is_word(word: str) -> bool:
+    """`word` keeps the rules of the words of `Frame.shape`: 3 to 32
+    letters or digits, each one cell wide, its lower case as long."""
+    return (
+        3 <= len(word) <= 32
+        and all(
+            ch.isalnum() and unicodedata.east_asian_width(ch) not in "WF" for ch in word
+        )
+        and len(word.lower()) == len(word)
+    )
+
+
+_SHOWN = re.compile(r"[^\s#]+")
+
+
+def found(rows: Sequence[str], words: Sequence[str]) -> list[tuple[int, int, str]]:
+    """The matches of `words` in `rows`, a shape: `(x, y, text)` in its
+    cells, in reading order. A shape shows letters only where a word
+    matched."""
+    wanted = {w.lower() for w in words}
+    return [
+        (m.start(), y, m[0])
+        for y, row in enumerate(rows)
+        for m in _SHOWN.finditer(row)
+        if m[0].lower() in wanted
+    ]
+
+
 class Sight:
     """What an app that plays on a frame knows of it, told by the
     driver: nothing is asked on a period.
@@ -361,8 +393,13 @@ class Sight:
     the frame is on screen, and where), `text` (rows of its view
     changed, or the view moved), `cursor` when wanted. A tick starts
     with `look()`, which takes the events that came since the last one;
-    the text is read again only when told. The events of the topics
+    the view is read again only when told. The events of the topics
     the app subscribed to itself are in `others`, for that look.
+
+    `rows` is the shape of the view (`Frame.shape`): one character a
+    cell, `#` inked, space blank; the cells of a whole-word match of
+    one of `words` as shown. `text`: its text instead (`Frame.text`, one
+    character a glyph), for an app that needs the characters.
 
         sight = Sight(pilot, frame)
         for _ in ticks(period):
@@ -376,10 +413,20 @@ class Sight:
     `frame` is kept up to date in place: `origin`, `rect`, `usable`.
     """
 
-    def __init__(self, pilot: Pilot, frame: Frame, cursor: bool = False) -> None:
+    def __init__(
+        self,
+        pilot: Pilot,
+        frame: Frame,
+        cursor: bool = False,
+        *,
+        words: Sequence[str] = (),
+        text: bool = False,
+    ) -> None:
         self.pilot = pilot
         self.frame = frame
-        self.rows: list[str] = []  # the text of the view
+        self.words = tuple(words)
+        self.text = text
+        self.rows: list[str] = []  # the shape of the view, or its text
         self.changed = False  # `rows` was read by the last `look()`
         self.cursor: tuple[int, int] | None = None  # in frame cells; None: hidden
         #: The events of other topics the last `look()` took, in order.
@@ -420,7 +467,7 @@ class Sight:
             self._stale = True
         if self._stale:
             with self.drawing():
-                self.rows = frame.text()
+                self.rows = frame.text() if self.text else frame.shape(self.words)
                 self.changed, self._stale = True, False
         at = self._at
         if at is None or not at.visible:
