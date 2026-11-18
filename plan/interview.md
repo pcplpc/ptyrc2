@@ -233,3 +233,17 @@ Supersedes `--spawn --rate` above.
 - `ptyrc attach` as the user, the focus of the host window (1004):
   later; something simple first.
 - The default, the same day: in the safest place only, `ptyrc app`.
+
+## `screen.shape` (2026-11-18)
+
+- An app that needs where the text is, not what it says, reads the
+  shape: `screen.shape`, one `#` per inked cell, a wide glyph `##`.
+  Preparatory for the degrees `shape` and `words` of
+  `plan/store-model.md`; no permission checked yet.
+- Words: the exceptions, shown as on screen. Whole, literal, case
+  ignored; 3 to 32 letters or digits; 32 words at most.
+- Box-drawing is ink.
+- The list rides on the request until the manifest exists; each app
+  declares in the catalog what it reads of the screen.
+- `Sight` reads the shape by default; an app that needs the text asks
+  for it.
