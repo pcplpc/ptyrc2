@@ -31,8 +31,9 @@ A place to stand is a `ledge`: a row with text under a box of free
 cells, three rows by eleven columns (`ledges`). The bottom of the
 view is one when it is free.
 
-`--count N` cats share a `Home`: one read of the text for all, and no
-two on the same cells. Each has its own `Coat` (colours); `--random`
+`--count N` cats share a `Home`: one read of the view for all, and no
+two on the same cells. The view is read as a shape (`Frame.shape`):
+where there is ink, and the words of `WORDS` as shown. Each has its own `Coat` (colours); `--random`
 draws the coats and a `Skin` (ears, eyes, nose) for each.
 
 The word `food` on screen gets a plate next to it, on its line: right
@@ -103,6 +104,7 @@ __all__ = [
     "PW",
     "REACH",
     "TICK",
+    "WORDS",
     "Cat",
     "Coat",
     "Fish",
@@ -325,7 +327,9 @@ FISH_INK = {"": 117, "<>": 75, "+": 252, ".,'": 244}
 YARNS = (203, 213, 81, 220, 120, 141)  # colours of a ball
 
 _FACE = re.compile(r"\((\s?)(\S)(\S)(\S)(\s?)\)")
-_WORD = re.compile(r"\b(?:food|fish|toy)\b", re.IGNORECASE)
+#: The words it reads on the screen (`Frame.shape`): the rest is ink.
+WORDS = ("food", "fish", "toy")
+_WORD = re.compile(rf"\b(?:{'|'.join(WORDS)})\b", re.IGNORECASE)
 
 
 def dress(rows: Sequence[str], skin: Skin) -> tuple[str, ...]:
@@ -1560,7 +1564,7 @@ class Home:
         self.layer = "front" if front else "back"
         self.idle = False
         self.cursor: tuple[int, int] | None = None
-        self.rows: list[str] = []  # the text of the view, when read
+        self.rows: list[str] = []  # the shape of the view, when read
         self.walls: list[list[bool]] = []  # `mass` of each row
         self.view = (0, 0, 0, 0)  # and its box
         self.spots: list[Ledge] = []
@@ -1605,7 +1609,7 @@ class Home:
         with _cli.in_sight():
             box = self.box()
             width, height = box[2] - box[0], box[3] - box[1]
-            rows = pad([*self.frame.text(), *[""] * height][:height], width)
+            rows = pad([*self.frame.shape(WORDS), *[""] * height][:height], width)
             self.rows, self.view = rows, box
             self.walls = [mass(row) for row in rows]
             self.spots = ledges(rows, box)
