@@ -44,7 +44,9 @@ Permissions per app, held by the driver, checked at each request.
 
 Open: whether `screen` belongs in the default (a screen holds secrets
 too; nearly every shipped app reads it). `app.list` and one's own entry
-need nothing.
+need nothing. `screen` split by degree (none, `layout`, `shape`,
+`words`, `text`): `plan/store-model.md`; `screen.shape` answers the
+`shape` and `words` degrees.
 
 Outside the protocol, for the day apps are sandboxed (declared now,
 enforced then): `files` (paths), `proc`, `exec` (programs), `network`.
