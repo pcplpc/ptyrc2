@@ -6,6 +6,7 @@ use crate::engine::{ConnId, Ctx, Reply, Token};
 use crate::screen::{DEBUG_OWNER, Overlay, ScreenEngine, Wait};
 use ptyrc_core::frames::{HeatClass, IDLE_SECS};
 use ptyrc_core::scene::{ColorSpec, SpritePatch, SpriteSpec};
+use ptyrc_core::shape::{Words, shape};
 use ptyrc_core::widgets::{Declare, Set, Show, WidgetError, WidgetId};
 use ptyrc_core::{FrameId, FrameKind, FrameSel, FrameState, RAW, Surfaces, TextMatch, TextQuery};
 use ptyrc_proto::{ErrorCode, RpcError};
@@ -177,6 +178,25 @@ fn screen_text(engine: &ScreenEngine, params: Value) -> Res {
     } else {
         rect_text(&grid, rect)
     };
+    Ok(json!({"lines": lines, "size": [rect.w, rect.h], "rect": [rect.x, rect.y, rect.w, rect.h]}))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ShapeParams {
+    frame: Option<FrameSel>,
+    rect: Option<[u16; 4]>,
+    #[serde(default)]
+    words: Vec<String>,
+}
+
+/// The app's cells only: no sprites, no style.
+fn screen_shape(engine: &ScreenEngine, params: Value) -> Res {
+    let p: ShapeParams = parse(params)?;
+    let words = Words::new(&p.words).map_err(crate::hints::words)?;
+    let id = frame_of(engine, &p.frame)?;
+    let rect = view_rect(engine, id, p.rect)?;
+    let lines = shape(engine.app.grid(), rect, &words);
     Ok(json!({"lines": lines, "size": [rect.w, rect.h], "rect": [rect.x, rect.y, rect.w, rect.h]}))
 }
 
@@ -765,6 +785,7 @@ pub(crate) fn handle(
     let now = ctx.now();
     let result = match method {
         "screen.text" => screen_text(engine, params),
+        "screen.shape" => screen_shape(engine, params),
         "screen.cells" => screen_cells(engine, params),
         "screen.find" => screen_find(engine, params),
         "screen.cursor" => screen_cursor(engine, params),

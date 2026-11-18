@@ -6,15 +6,17 @@
 
 use crate::screen::ScreenEngine;
 use ptyrc_core::OwnerId;
+use ptyrc_core::shape::{MAX_WORDS, WORD_LEN, WordError};
 use ptyrc_core::widgets::WidgetId;
 use ptyrc_proto::{ErrorCode, RpcError, suggest};
 
 /// Every method of the protocol, for the nearest-name hint.
-const METHODS: [&str; 55] = [
+const METHODS: [&str; 56] = [
     "session.info",
     "session.resize",
     "session.colors",
     "screen.text",
+    "screen.shape",
     "screen.cells",
     "screen.find",
     "screen.cursor",
@@ -211,6 +213,15 @@ fn bad_params(engine: &ScreenEngine, error: &mut RpcError) -> Option<String> {
         return Some("without `regex` (-E) the pattern is searched as it is written".into());
     }
     None
+}
+
+/// A word list refused by `screen.shape`.
+pub(crate) fn words(error: WordError) -> RpcError {
+    RpcError::bad_params(error.to_string()).with_hint(format!(
+        "a word: {} to {} letters or digits, each one cell wide, as many in lowercase; \
+         at most {MAX_WORDS} words",
+        WORD_LEN.0, WORD_LEN.1
+    ))
 }
 
 /// The hint of an error of a `widget.*` method of `owner`; `id`: the

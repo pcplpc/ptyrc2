@@ -1172,3 +1172,76 @@ fn a_resize_lays_widgets_out_again() {
     let [x, _, w, _] = [0, 1, 2, 3].map(|i| info["rect"][i].as_u64().unwrap());
     assert!(x + w <= 30);
 }
+
+#[test]
+fn shape_masks_the_apps_cells_and_keeps_the_words() {
+    let mut rig = Rig::new(30, 4);
+    rig.burst("fish_food fishing\r\n\x1b[31mToy\x1b[0m 世 toys".as_bytes());
+    rig.put(text_at(20, 0, "SPRITE"));
+    let words = json!({"words": ["fish", "food", "toy"]});
+    let shape = rig.call("screen.shape", words.clone());
+    assert_eq!(
+        shape,
+        json!({"lines": ["fish#food #######", "Toy ## ####", "", ""],
+               "size": [30, 4], "rect": [0, 0, 30, 4]})
+    );
+    // The sprite is on screen, not in the shape.
+    assert!(
+        rig.call("screen.text", json!({"sprites": true}))["lines"][0]
+            .as_str()
+            .unwrap()
+            .contains("SPRITE")
+    );
+    let cut = rig.call(
+        "screen.shape",
+        json!({"frame": "raw", "rect": [2, 0, 6, 2], "words": ["fish", "toy"]}),
+    );
+    assert_eq!(cut["lines"], json!(["sh####", "y ## #"]));
+    assert_eq!(cut["rect"], json!([2, 0, 6, 2]));
+    assert_eq!(
+        rig.call("screen.shape", json!(null))["lines"][1],
+        "### ## ####"
+    );
+
+    for param in ["sprites", "ansi"] {
+        let e = rig.fail(7, "screen.shape", json!({param: true}));
+        assert_eq!(e.code, ptyrc_proto::ErrorCode::BadParams);
+        assert!(
+            e.message.starts_with(&format!("unknown field `{param}`")),
+            "{}",
+            e.message
+        );
+    }
+    let rules = "a word: 3 to 32 letters or digits, each one cell wide, as many in lowercase; \
+                 at most 32 words";
+    for (list, message) in [
+        (
+            json!(["ok", "fish"]),
+            "word \"ok\": 2 characters, at least 3",
+        ),
+        (
+            json!(["fish-food"]),
+            "word \"fish-food\": '-' is not a letter or a digit",
+        ),
+        (
+            json!(["世界地"]),
+            "word \"世界地\": '世' is not one cell wide",
+        ),
+        (
+            json!(["İzmir"]),
+            "word \"İzmir\": 'İ' changes length in lowercase",
+        ),
+        (json!(vec!["fish"; 33]), "words: 33, at most 32"),
+    ] {
+        let e = rig.fail(7, "screen.shape", json!({"words": list}));
+        assert_eq!(e.code, ptyrc_proto::ErrorCode::BadParams);
+        assert_eq!(
+            (e.message.as_str(), e.hint.as_deref()),
+            (message, Some(rules))
+        );
+    }
+    let e = rig.fail(7, "screen.shape", json!({"frame": "activ"}));
+    assert!(e.hint.unwrap().starts_with("did you mean active?"));
+    let e = rig.fail(7, "screen.shap", json!({}));
+    assert!(e.hint.unwrap().starts_with("did you mean screen.shape?"));
+}
