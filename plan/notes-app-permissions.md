@@ -1,7 +1,9 @@
 # Notes: app permissions
 
-Not done. Notes for a later design, taken with the owner on 2026-11-15.
-Sandboxing is another topic, after this one.
+Not done. First notes, taken with the owner on 2026-11-15; aligned on
+`plan/store-model.md` (Permissions) on 2026-11-18. Where the two
+differ, that plan holds: the mechanism, the list, the tasks are there.
+Kept here: the problem, what the shipped apps ask, who is asking.
 
 ## Problem
 
@@ -19,62 +21,65 @@ An app written by someone else is given all of it.
 ## Idea
 
 Permissions per app, held by the driver, checked at each request.
+Decided since (`plan/store-model.md`, Mechanism):
 
-- **Default profile**: what an app has without asking. Enough for most
-  of the shipped apps.
-- **Extra permissions**: an app declares what it needs beyond the
-  profile. The first time it runs, the driver asks the user in a pop-up:
-  the app, what it asks, yes or no.
-- **Remembered**: the answer is written to a plain configuration file
-  in ptyrc's configuration directory, and not asked again.
+- **Default profile**: what an app has without asking: drawing on its
+  own layer, its own widgets and sprites, the size of its surface.
+  Reading the screen is not in it.
+- **Declared**: an app declares what it needs beyond the profile. The
+  first time it runs, the driver shows a screen: the app, one checkbox
+  per permission, yes or no.
+- **Remembered**: the answers, the noes too, are written to a plain
+  file in ptyrc's configuration directory, and not asked again.
+- **A no lowers**: the app calls the same methods and is answered
+  less (a blank screen, the shape in place of the text, no event);
+  an act with no lesser form fails `denied`.
 
-## Permissions (draft)
+## Permissions
 
-| name | covers | in the default profile |
-|---|---|---|
-| `draw` | `draw.*`, `layer.*`, `widget.*`; topics `draw`, `widgets`, `move`, `size`, `colors`, `exit` | yes |
-| `screen` | `screen.*`, `frame.*`; topics `screen`, `text`, `cursor`, `frames`, `idle` | yes |
-| `pointer` | topics `mouse`, `hover`, on its own sprites | yes |
-| `keys-read` | topic `input` | no |
-| `keys-grab` | `input.grab`, the keys named | no |
-| `type` | `input.send`, `input.click` | no |
-| `apps` | `app.start`, `app.stop`, `app.pause`, `app.restart`, `app.move` of others | no |
-| `session` | `session.resize`, `session.colors`, `session.handoff`, `tape.*` | no |
-| `debug` | `debug.*` | no |
+The names of the first draft, and what became of them
+(`plan/store-model.md`, The list):
 
-Open: whether `screen` belongs in the default (a screen holds secrets
-too; nearly every shipped app reads it). `app.list` and one's own entry
-need nothing. `screen` split by degree (none, `layout`, `shape`,
-`words`, `text`): `plan/store-model.md`; `screen.shape` answers the
-`shape` and `words` degrees.
+| first draft | now |
+|---|---|
+| `draw` | the default profile, behind; in front: `front-widget`, `front` |
+| `screen` | split by degree: none, `layout`, `shape`, `words`, `text`; none is the default. `screen.shape` answers `shape` and `words` |
+| `pointer` | on its own things: the default; anywhere: `pointer`, `clicks`, `clicks-grab` |
+| `keys-read` | `keys-read` |
+| `keys-grab` | `keys-arrows` (named keys that are not text), `keys-grab` |
+| `type`, `apps`, `session`, `debug` | never granted to a store app; the user's hand and the driver's |
+| `files`, `proc`, `exec`, `network` | `files` (a file the user named); `proc` and `exec` become probes (`probe-git`, `probe-system`); the network: never |
 
-Outside the protocol, for the day apps are sandboxed (declared now,
-enforced then): `files` (paths), `proc`, `exec` (programs), `network`.
-Default: none.
+`app.list` and one's own entry need nothing.
 
-What the shipped apps would declare, as they are today:
+What the shipped apps would declare, as they are today, beside what
+they read of the screen (`plan/store-model.md`, the table of degrees):
 
 | app | extra |
 |---|---|
-| `snake --grab`, `bricks --grab` | `keys-grab` (the arrows) |
+| `snake --grab`, `bricks --grab` | `keys-arrows` |
 | `pace` | `keys-read`; `files` for `--words`, `--save` |
-| `git` | `exec` (`git`), `proc` (`/proc/<pid>/cwd`), `files` (the repository) |
-| `monitor` | `proc`, `files` (`/sys`, utmp, the systemd sessions) |
-| `note`, `gallery` | `files` (those named) |
-| `manage` | `apps`, `keys-grab`: the driver's own, never asked |
+| `flock`, `life`, `shore`, `pond`, `stars`, `cat --hunt` | `pointer`, unless a primitive serves |
+| `git` | `probe-git` (today: runs `git`, reads `/proc/<pid>/cwd` and the repository) |
+| `monitor` | `probe-system` (today: `/proc`, `/sys`, utmp, the systemd sessions) |
+| `note`, `gallery`, `minimap` | `files` (those named) |
+| `clock`, `timer`, `stars`, `pond`, `train`, `window` | `clock` |
+| `manage` | the apps, a grab: the driver's own, never asked |
 | the others | nothing |
 
 `git` runs `git status` where the wrapped program stands: a repository
 that is not the user's work can run code through its configuration
-(filters, submodules). To settle with `exec`.
+(filters, submodules). To settle in the probe.
 
 ## Declaring
 
-In the catalog (`ptyrc-app --catalog`, `_catalog.py`): one more member
-per app, `permissions`, a list; an option may add its own (`--grab`).
-The menu shows it before the app is started. A test holds each app to
-what it declares (requests made; imports of `os`, `subprocess`,
-`socket`, `pathlib`).
+In the catalog (`ptyrc-app --catalog`, `_catalog.py`), per app; an
+option may add its own (`--grab`, `flower -a`). Done for reading the
+screen: the member `reads` (the degree, the words, the options that
+raise it), held by `tests/test_reads.py` (the requests made). To add
+in the same form: the keys, the pointer, the rest; the imports of
+`os`, `subprocess`, `socket`, `pathlib`. The launcher hands the
+declaration to `app.start`. A store app declares in its manifest.
 
 ## Who is asking
 
@@ -85,30 +90,33 @@ A connection must be tied to an app in a way the app cannot choose.
   pid can be used again. Sturdier: a secret per child in its
   environment (`PTYRC_TOKEN`), sent as the first request.
 - A client the driver did not start (`ptyrc text`, a script, `ptyrc
-  python`): it is the user's own hand. Either full rights (as tmux), or
-  the default profile unless started with a flag. To decide. If full,
-  an app escapes by connecting from a process outside its group: this
-  holds only with the token, and fully only with a sandbox.
-- The identity that is remembered: the app's name and where it comes
-  from (the path of `ptyrc-app`, or of the program), so that another
-  program of the same name is asked again. A hash of the file is
-  dearer and breaks at each upgrade.
+  python`): the user's own hand, full rights, as tmux. Decided. An app
+  then escapes by connecting without its token: the token holds a
+  careless app; only the sandbox holds a hostile one.
+- The identity that is remembered: a store app, its origin; a native
+  app, `native/NAME`.
 
 ## Asking
 
-- A modal widget of the driver (`widget.show {modal: true}`, border
-  `alert`), keys taken as by a grab: `y`, `n`, escape is no. Drawn by
-  the driver, not by a client: an app must not be able to draw a
+- A modal of the driver, the keys taken as by a grab. Drawn by the
+  driver, not by a client: an app must not be able to draw a
   look-alike over it, nor answer it (`input.send` does not reach a
   grab; keep it so).
-- It names the app, its origin, each permission in plain words.
-- Answers: once, always, no, never.
-- Headless, or no terminal: no pop-up; refused, unless granted in the
-  file or on the command line (`run --app NAME --allow keys-grab`).
-- Refused: the request fails with a new code (`denied`), the hint
-  naming the permission and how to grant it. An app must go on without.
-- Asked at start for what is declared; a request beyond what was
-  declared is refused without a pop-up.
+- It names the app, its origin, each permission declared in plain
+  words: one checkbox each. Plain ones ticked, red ones ticked by
+  hand. `space`, `enter` (start), escape (not started, nothing
+  written).
+- Answers: yes or no, per permission, remembered. No "once", no
+  "never".
+- Asked at start for what is declared and has no answer; an option or
+  an update that declares more: the difference alone. A request
+  beyond what was declared is never asked.
+- Changed later from `ptyrc manage`: the same screen.
+- Headless, or no terminal: no screen. The app starts with what it
+  declares; when the file holds answers for it, with those.
+- A no: the answer is lowered, with the mark `degree`; an act with no
+  lesser form fails `denied`, the hint naming the permission. An app
+  must go on without.
 
 ## The file
 
@@ -118,29 +126,18 @@ by the driver alone (a new file, moved in place). Read at each start
 of an app. Plain enough to edit by hand:
 
 ```toml
-[default]
-allow = ["draw", "screen", "pointer"]
+[app."native/cat"]
+allow = ["shape", "words"]
 
-[app.snake]
-origin = "/home/me/.local/bin/ptyrc-app"
-allow = ["keys-grab"]
-
-[app.pace]
-origin = "/home/me/.local/bin/ptyrc-app"
-allow = ["keys-read"]
-deny = ["files"]
+[app."native/pace"]
+allow = ["shape"]
+deny = ["text", "keys-read"]
 ```
 
-An app must not be able to write it: true only once apps are
+A native app must not be able to write it: true only once apps are
 sandboxed. Until then it guards against a careless app, not a hostile
 one. Say so in the README.
 
 ## Order
 
-1. The permission names, the check in `rpc.rs`, the code `denied`;
-   everything allowed: no change of behaviour.
-2. `permissions` in the catalog; the test.
-3. The token; the default profile enforced for children.
-4. The file, `--allow`.
-5. The pop-up.
-6. The sandbox (another topic).
+`plan/store-model.md`, Permissions, Tasks.
