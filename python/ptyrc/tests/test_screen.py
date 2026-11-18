@@ -32,7 +32,7 @@ def test_send_text_find(shell: Pilot) -> None:
 
 
 def test_shape_ink_and_words(shell: Pilot) -> None:
-    shell.send("echo 'Fish_food, fishing toys 日x'\n")
+    shell.send("echo 'Fish''_food, fishing toys 日x'\n")
     match = shell.wait_for("Fish_food")
     lines = shell.shape()
     assert len(lines) == 24
