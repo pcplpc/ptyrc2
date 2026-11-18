@@ -1654,6 +1654,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `screen.text` | `frame`, `rect`, `ansi`, `sprites` | `{"lines":[...],"size":[c,r],"rect":[x,y,w,h]}` |
 | `screen.cells` | `frame`, `rect`, `sprites` | `{"rows":[[run,...],...],"size":[c,r],"rect":[x,y,w,h]}` |
 | `screen.find` | `pattern`, `regex`, `ignore_case`, `frame`, `known` | `{"matches":[{"frame","x","y","len","text","screen":[c,r]\|null}]}` |
+| `screen.shape` | `frame`, `rect`, `words` | as `screen.text`: where there is ink, and the words named; see below |
 | `screen.cursor` | `trail` | `{"x","y","visible","frame","pos":[x,y],"trail":[[ms,x,y],...]}`; `frame`: the innermost frame showing it, `pos`: its cell there |
 | `screen.wait` | `pattern` or `stable_ms` or `idle` (or `gone`), `timeout_ms`, `frame` | `{"matched":bool,"match":...}`; with `idle`: `{"matched":true,"match":null,"frame":id,"idle":{"score","idle","free"}}`, the frame name resolved at each look |
 | `input.send` | `text` or `keys` or `bytes` (base64), `paste`, `host` (typed as on the host keyboard: hotkey, focus, grab) | `{}` |
@@ -1700,6 +1701,32 @@ Frame info: `{"id","kind":"raw"|"pane"|"chrome","state":"candidate"|
 "stable"|"inactive","usable","rect":[x,y,w,h],"origin":[x,y],
 "extent":[y_min,y_max],"key","support":"vim"|null,"idle":0..1,
 "is_idle":bool}`.
+
+`screen.shape`: the shape of the text, without the text (the degrees
+`shape` and `words` of `plan/store-model.md`; no permission is checked
+yet).
+
+- The wrapped program's cells, never the composed picture: no
+  `sprites`, no `ansi`. The view only; no twin of `frame.text`.
+- One character per cell of the rect: string index is column. A blank
+  cell is a space, an inked one `#`; a wide glyph is `##` (its spacer
+  is inked too). `screen.text` gives one character per glyph. Trailing
+  spaces are trimmed.
+- Inked: the cell's text is not blank (not empty, not whitespace).
+  Style and colour are not looked at, nor answered (not
+  `Cell::has_ink`). Box-drawing is ink.
+- `words`: the exceptions. A cell of a match is answered as on screen,
+  case kept. Each word: letters and digits (Unicode alphanumeric), 3
+  to 32 characters, each one cell wide; 32 words at most. A list that
+  breaks a rule: `bad-params`, the hint naming the word and the rule.
+- Matching: literal, case ignored (simple lowercase, per character; a
+  word whose lowercase changes its length is refused), whole words:
+  the cells before and after are not alphanumeric (a blank,
+  punctuation, `_`, the edge of the row). `fish_food` shows `fish` and
+  `food`; `fishing`, `toys` show nothing. A match lies in one row; its
+  bounds are judged on the full row, not the rect: a rect that cuts a
+  word shows the cells of the match inside it. Wide cells never match.
+- The mask and the matching: a pure function of `ptyrc-core`.
 
 Keys for `input.send`: `enter`, `tab`, `esc`, `space`, `backspace`,
 `delete`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`,
@@ -1760,6 +1787,8 @@ ptyrc snap                        what is shown and the frames, JSON
 ptyrc ls                          sessions; ACTIVE: the time since the
       user typed there; `*`: the one `-s auto` takes
 ptyrc text [-f FRAME] [--ansi]    screen as plain text
+ptyrc text [-f FRAME] --shape [--word W]...   the shape: `#` per inked
+      cell, the words W as shown (`screen.shape`)
 ptyrc find [-E] [-i] PATTERN      matches with coordinates
 ptyrc cursor
 ptyrc send TEXT                   type text
@@ -1900,7 +1929,9 @@ killed). The Python pilot raises `PtyrcError` with the same `code`,
 events), `Frame`, `Sprite` handles; mirrors the protocol one to one, plus
 `wait_for`, context managers and `Pilot.spawn(argv, headless=True)` for
 tests. `Frame.check_idle()` is the idle score, `Frame.is_idle` the
-boolean; both ask the driver when read. `Pilot.wait_idle(frame, timeout)`
+boolean; both ask the driver when read. `Pilot.shape(frame=None,
+rect=None, words=())` and `Frame.shape(words=())`: `screen.shape`, the
+lines. `Pilot.wait_idle(frame, timeout)`
 and `Frame.wait_idle(timeout)`: one `screen.wait {idle}`, no polling.
 `Sprite.visible`. `Sprite.tune(**params)`: `draw.update {id, effect}`
 under the name of the sprite's running effect, known from the call that
@@ -1908,7 +1939,7 @@ started it, else asked once (`draw.list`). `Pilot.host_colors`; `spawn(host_fg=,
 `alpha=` in `sprite_spec` and `draw`. `subscribe(*topics, snapshot=)`;
 `events(*topics, timeout=)` ends on silence, `event(timeout)` returns
 None on silence; both raise `PtyrcError` (`gone`) on a closed
-connection. Inside `batch()`, `text`, `find`, `sprites` and
+connection. Inside `batch()`, `text`, `shape`, `find`, `sprites` and
 `Sprite.info` return a container filled when the batch is sent.
 `Cursor.pos`. Widgets: `Pilot.widget(tag, sizes, *, border=, title=,
 frame=, prefer=, fill=, margin=, layer=, modal=)` declares the tag and shows it: `sizes`
@@ -1953,8 +1984,9 @@ Shared by the apps (`_cli.py`, `_arcade.py`):
   cells (`pos` when the event names the frame, else `to_frame`); an
   event of another topic, subscribed by the app, is kept for that look
   in `others`. The
-  text of the view is read (`screen.text`, into `rows`; `changed` true
-  for that look) only when stale. `look()` is false while the frame is
+  view is read (`screen.shape` by default, with the app's words;
+  `screen.text` for an app that asks for it; into `rows`; `changed`
+  true for that look) only when stale. `look()` is false while the frame is
   not usable; it then asks `frame.get` at each look (a raw frame alone
   settles with no event). `drawing()`: a context that drops a step
   refused with `not-usable` and marks the frame so. A quiet screen
