@@ -123,3 +123,9 @@ def test_frame_errors_carry_the_hint(vim: Pilot) -> None:
     with pytest.raises(PtyrcError) as err:
         pane.refresh()
     assert err.value.code == "no-frame" and err.value.hint
+
+
+def test_frame_shape(vim: Pilot) -> None:
+    pane = wait_pane(vim)
+    assert pane.shape()[0] == "#### ### ## ### ####"
+    assert pane.shape(words=["line", "file"])[0] == "line ### ## ### file"

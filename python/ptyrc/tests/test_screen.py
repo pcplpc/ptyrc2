@@ -31,6 +31,30 @@ def test_send_text_find(shell: Pilot) -> None:
     assert len(shell.find("HELLO", ignore_case=True)) == 1
 
 
+def test_shape_ink_and_words(shell: Pilot) -> None:
+    shell.send("echo 'Fish_food, fishing toys 日x'\n")
+    match = shell.wait_for("Fish_food")
+    lines = shell.shape()
+    assert len(lines) == 24
+    # Punctuation is ink; a wide glyph is two cells.
+    assert lines[match.y] == "########## ####### #### ###"
+    assert lines[0].startswith("# ")
+    shown = shell.shape(words=["fish", "FOOD", "toy"])[match.y]
+    assert shown == "Fish#food# ####### #### ###"
+    # A rect that cuts a match shows the part inside it.
+    assert shell.shape(rect=(2, match.y, 6, 1), words=["food"]) == ["###foo"]
+
+
+def test_shape_refuses_bad_words(shell: Pilot) -> None:
+    for words in (["ab"], ["fish!"], ["x" * 33], [f"w{i:03}" for i in range(33)]):
+        with pytest.raises(PtyrcError) as err:
+            shell.shape(words=words)
+        assert err.value.code == "bad-params"
+    with pytest.raises(PtyrcError) as err:
+        shell.call("screen.shape", sprites=True)
+    assert err.value.code == "bad-params"
+
+
 def test_cells_carry_style(shell: Pilot) -> None:
     shell.send("printf '\\033[1;31mred\\033[0m plain\\n'\n")
     match = shell.wait_for("red plain")

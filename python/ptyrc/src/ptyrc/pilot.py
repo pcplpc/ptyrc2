@@ -367,6 +367,10 @@ class Frame:
         """What the view shows."""
         return self._pilot.text(frame=self.id)
 
+    def shape(self, words: Sequence[str] = ()) -> list[str]:
+        """Where the view has ink: `Pilot.shape`."""
+        return self._pilot.shape(frame=self.id, words=words)
+
     def known(self, y0: int | None = None, y1: int | None = None) -> list[str]:
         """Remembered lines `y0 <= y < y1` (default: the whole extent)."""
         params: dict[str, Any] = {"frame": self.id}
@@ -604,6 +608,23 @@ class Pilot(Tools, Widgets):
         out: list[str] = []
         params = _opt(frame=frame, rect=rect)
         self._request("screen.text", params, lambda res: out.extend(res["lines"]))
+        return out
+
+    def shape(
+        self,
+        frame: int | str | None = None,
+        rect: Sequence[int] | None = None,
+        words: Sequence[str] = (),
+    ) -> list[str]:
+        """Where the program's cells have ink, one string per row, one
+        character per cell: `#` inked, space blank. Cells of a whole-word,
+        case-blind match of one of `words` are answered as shown. Words:
+        3 to 32 letters or digits, at most 32."""
+        out: list[str] = []
+        params = _opt(frame=frame, rect=rect)
+        if words:
+            params["words"] = list(words)
+        self._request("screen.shape", params, lambda res: out.extend(res["lines"]))
         return out
 
     def cells(
