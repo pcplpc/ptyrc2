@@ -402,13 +402,21 @@ class Tools:
         return self.call("app.list")["apps"]
 
     def app_start(
-        self, argv: Sequence[str], *, name: str | None = None
+        self,
+        argv: Sequence[str],
+        *,
+        name: str | None = None,
+        declares: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Start `argv` as a child of the driver; its info. `name`: the
-        file name of `argv[0]` when absent."""
+        file name of `argv[0]` when absent. `declares`: what it asks,
+        `{"permissions": {NAME: REASON}, "words": [WORD]}`, as
+        `ptyrc-app --declares` prints it; absent: the whole session."""
         params: dict[str, Any] = {"argv": list(argv)}
         if name is not None:
             params["name"] = name
+        if declares is not None:
+            params["declares"] = declares
         return self.call("app.start", **params)["app"]
 
     def app_stop(self, app: int) -> dict[str, Any]:
@@ -429,15 +437,19 @@ class Tools:
         *,
         argv: Sequence[str] | None = None,
         name: str | None = None,
+        declares: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Stop a child and start it again when it has ended, under the
         same id; `argv`, `name`: as before when absent. The info, at
-        once."""
+        once. `declares`: as `app_start`; with `argv` and without it,
+        the whole session."""
         params: dict[str, Any] = {"app": app}
         if argv is not None:
             params["argv"] = list(argv)
         if name is not None:
             params["name"] = name
+        if declares is not None:
+            params["declares"] = declares
         return self.call("app.restart", **params)["app"]
 
     def app_forget(self, app: int) -> None:

@@ -274,14 +274,22 @@ fn purge_grants() {
     let b = Origin::parse("example.org/b/dog").unwrap();
     assert!(!install::purge_grants(&dirs, &a).unwrap());
     std::fs::create_dir_all(dirs.permissions().parent().unwrap()).unwrap();
+    // As the driver writes it.
+    let dog = "[app.\"example.org/b/dog\"]\nallow = [\"shape\"]\ndeny = []\n";
     std::fs::write(
         dirs.permissions(),
-        "[\"example.org/a/cat\"]\nshape = true\n\n[\"example.org/b/dog\"]\nshape = false\n",
+        format!(
+            "# Written by the ptyrc driver.\n\n[app.\"example.org/a/cat\"]\n\
+             allow = [\"shape\"]\ndeny = [\"text\"]\n\n{dog}"
+        ),
     )
     .unwrap();
+    // A key that is not of the table `app` is not the origin's.
+    assert!(!install::purge_grants(&dirs, &Origin::parse("example.org/c/x").unwrap()).unwrap());
     assert!(install::purge_grants(&dirs, &a).unwrap());
     assert!(!install::purge_grants(&dirs, &a).unwrap());
     let text = std::fs::read_to_string(dirs.permissions()).unwrap();
-    assert!(!text.contains("a/cat") && text.contains(&b.id()), "{text}");
+    assert_eq!(text, format!("# Written by the ptyrc driver.\n\n{dog}"));
+    assert!(text.contains(&b.id()));
     assert_eq!(mode(&dirs.permissions()), 0o600);
 }

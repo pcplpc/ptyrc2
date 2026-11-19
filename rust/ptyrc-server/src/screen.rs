@@ -132,6 +132,8 @@ pub struct ScreenEngine {
     pub(crate) paints: u64,
     /// Time spent in `on_burst`, for `debug.dump`.
     pub(crate) burst_time: Duration,
+    /// The driver's box: over the app grid alone, the scene hidden.
+    modal: Option<crate::engine::Modal>,
 }
 
 impl ScreenEngine {
@@ -174,6 +176,7 @@ impl ScreenEngine {
             ticks: 0,
             paints: 0,
             burst_time: Duration::ZERO,
+            modal: None,
         }
     }
 
@@ -270,7 +273,7 @@ impl ScreenEngine {
         self.tick_widgets(now, ctx);
         self.scene.tick_on(now, self.app.grid(), &self.frames);
         self.unpainted |= self.scene.take_dirty();
-        if self.scene.is_empty() && !self.painted {
+        if self.scene.is_empty() && self.modal.is_none() && !self.painted {
             return;
         }
         if !self.unpainted && !self.host_stale {
@@ -282,7 +285,20 @@ impl ScreenEngine {
             return;
         }
         let before = out.len();
-        if self.scene.is_empty() {
+        if let Some(modal) = &self.modal {
+            // Above every layer; nothing a client drew is shown with it.
+            let mut desired = self.app.grid().clone();
+            for y in 0..modal.grid.rows() {
+                for x in 0..modal.grid.cols() {
+                    let cell = modal.grid.cell(x, y);
+                    if cell.width > 0 {
+                        desired.put(modal.at.0 + x, modal.at.1 + y, cell.clone());
+                    }
+                }
+            }
+            repair(&mut self.host, &desired, out);
+            self.painted = true;
+        } else if self.scene.is_empty() {
             repair(&mut self.host, self.app.grid(), out);
             self.painted = false;
         } else {
@@ -547,7 +563,7 @@ impl Engine for ScreenEngine {
         self.bursts += 1;
         self.unpainted = true;
         let started = std::time::Instant::now();
-        let sprites = self.painted || !self.scene.is_empty();
+        let sprites = self.painted || !self.scene.is_empty() || self.modal.is_some();
         if sprites {
             self.fresh_host();
         } else {
@@ -893,6 +909,11 @@ impl Engine for ScreenEngine {
 
     fn focus_close(&mut self, ctx: &mut Ctx) {
         self.close_focused(ctx);
+    }
+
+    fn modal(&mut self, modal: Option<crate::engine::Modal>) {
+        self.modal = modal;
+        self.unpainted = true;
     }
 
     fn session_extras(&self) -> Value {

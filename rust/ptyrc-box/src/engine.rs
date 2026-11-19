@@ -7,8 +7,8 @@
 use crate::abi::MODULE;
 use crate::core::{Core, Host};
 use crate::error::Error;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::hash::{Hash, Hasher};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use wasmtime::{
     Caller, Config, Engine, Extern, Linker, Memory, Module, ResourceLimiter, Store, Trap, TypedFunc,
@@ -61,27 +61,53 @@ impl<H: Host> ResourceLimiter for Ctx<H> {
     }
 }
 
-/// Stops the epoch thread when dropped.
-struct Ticker(Arc<AtomicBool>);
-
-impl Ticker {
-    fn start(engine: &Engine) -> Ticker {
-        let stop = Arc::new(AtomicBool::new(false));
-        let (flag, engine) = (stop.clone(), engine.clone());
-        std::thread::spawn(move || {
-            while !flag.load(Ordering::Relaxed) {
-                std::thread::sleep(EPOCH);
-                engine.increment_epoch();
-            }
-        });
-        Ticker(stop)
-    }
+/// The engine of the process, its epoch advanced by one thread for
+/// ever.
+fn shared() -> Result<&'static Engine, Error> {
+    static ENGINE: OnceLock<Result<Engine, String>> = OnceLock::new();
+    ENGINE
+        .get_or_init(|| {
+            let mut config = Config::new();
+            config.epoch_interruption(true);
+            config.max_wasm_stack(STACK);
+            let engine = Engine::new(&config).map_err(|e| format!("{e:#}"))?;
+            let ticking = engine.clone();
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(EPOCH);
+                    ticking.increment_epoch();
+                }
+            });
+            Ok(engine)
+        })
+        .as_ref()
+        .map_err(|e| Error::Module(e.clone()))
 }
 
-impl Drop for Ticker {
-    fn drop(&mut self) {
-        self.0.store(true, Ordering::Relaxed);
+/// Compile, or take the module compiled before from the same bytes:
+/// the interpreter of script apps is large and the same for all.
+fn compile(engine: &Engine, wasm: &[u8]) -> Result<Module, Error> {
+    const KEPT: usize = 4;
+    const LARGE: usize = 256 << 10;
+    static CACHE: Mutex<Vec<(u64, usize, Module)>> = Mutex::new(Vec::new());
+    let module_err = |e: wasmtime::Error| Error::Module(format!("{e:#}"));
+    if wasm.len() < LARGE {
+        return Module::new(engine, wasm).map_err(module_err);
     }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    wasm.hash(&mut hasher);
+    let key = (hasher.finish(), wasm.len());
+    // Held while compiling: a second start of the same module waits.
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, _, module)) = cache.iter().find(|(h, l, _)| (*h, *l) == key) {
+        return Ok(module.clone());
+    }
+    let module = Module::new(engine, wasm).map_err(module_err)?;
+    if cache.len() == KEPT {
+        cache.remove(0);
+    }
+    cache.push((key.0, key.1, module.clone()));
+    Ok(module)
 }
 
 /// A loaded guest.
@@ -94,7 +120,6 @@ pub struct Guest<H: Host> {
     tick: TypedFunc<i64, ()>,
     event: TypedFunc<(i32, i32, i32, i32), ()>,
     stop: Option<TypedFunc<(), ()>>,
-    _ticker: Ticker,
 }
 
 fn fault<H: Host>(caller: &mut Caller<'_, Ctx<H>>, e: Error) -> wasmtime::Error {
@@ -294,12 +319,9 @@ impl<H: Host> Guest<H> {
     /// Compile and instantiate. Nothing of the guest has run when this
     /// returns (a module with a start function is refused).
     pub fn load(wasm: &[u8], core: Core<H>) -> Result<Guest<H>, Error> {
-        let mut config = Config::new();
-        config.epoch_interruption(true);
-        config.max_wasm_stack(STACK);
         let module_err = |e: wasmtime::Error| Error::Module(format!("{e:#}"));
-        let engine = Engine::new(&config).map_err(module_err)?;
-        let module = Module::new(&engine, wasm).map_err(module_err)?;
+        let engine = shared()?;
+        let module = compile(engine, wasm)?;
         for import in module.imports() {
             let known = import.module() == MODULE
                 && IMPORTS.contains(&import.name())
@@ -315,14 +337,13 @@ impl<H: Host> Guest<H> {
         if module.exports().any(|e| e.name() == "_start") {
             return Err(Error::Export("_start: not an export of ABI 1".into()));
         }
-        let mut linker = Linker::new(&engine);
+        let mut linker = Linker::new(engine);
         link(&mut linker).map_err(module_err)?;
-        let mut store = Store::new(&engine, Ctx { core, fault: None });
+        let mut store = Store::new(engine, Ctx { core, fault: None });
         store.limiter(|ctx| ctx);
         store.epoch_deadline_trap();
         let init_bound = store.data().core.limits.init;
         store.set_epoch_deadline(epochs(init_bound));
-        let ticker = Ticker::start(&engine);
         let instance = linker.instantiate(&mut store, &module).map_err(|e| {
             if store.data().core.met().contains(&"memory") {
                 Error::Memory
@@ -356,7 +377,6 @@ impl<H: Host> Guest<H> {
             stop,
             memory,
             store,
-            _ticker: ticker,
         })
     }
 

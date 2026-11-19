@@ -476,8 +476,10 @@ pub fn purge_storage(dirs: &Dirs, origin: &Origin) -> Result<bool> {
     }
 }
 
-/// Removes the grants of `origin` from [`Dirs::permissions`]: the
-/// top-level table named by [`Origin::id`]. False when there was none.
+/// Removes the answers of `origin` from [`Dirs::permissions`]: the
+/// table `[app."<id>"]`, [`Origin::id`] being the key the driver writes
+/// (`Identity::key`). The other lines are kept as they are. False when
+/// there was none.
 pub fn purge_grants(dirs: &Dirs, origin: &Origin) -> Result<bool> {
     let p = dirs.permissions();
     let src = match std::fs::read_to_string(&p) {
@@ -485,18 +487,37 @@ pub fn purge_grants(dirs: &Dirs, origin: &Origin) -> Result<bool> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(e) => return Err(Error::io(p.display(), e)),
     };
-    let mut table: toml::Table = src.parse().map_err(|e: toml::de::Error| {
+    let table: toml::Table = src.parse().map_err(|e: toml::de::Error| {
         Error::new(
             ErrorKind::Install,
             format!("{}: {}", p.display(), e.message()),
         )
         .with_hint("written by ptyrc alone; fix or remove it")
     })?;
-    if table.remove(&origin.id()).is_none() {
+    let id = origin.id();
+    let apps = table.get("app").and_then(toml::Value::as_table);
+    if !apps.is_some_and(|apps| apps.contains_key(&id)) {
         return Ok(false);
     }
-    let text = toml::to_string(&table)
-        .map_err(|e| Error::new(ErrorKind::Install, format!("permissions.toml: {e}")))?;
+    // A header names the table of `id` when it parses to it alone.
+    let names_it = |line: &str| {
+        let header: Option<toml::Table> = format!("{line}\n").parse().ok();
+        let app = header
+            .as_ref()
+            .and_then(|h| h.get("app")?.as_table().cloned());
+        app.is_some_and(|app| app.len() == 1 && app.contains_key(&id))
+    };
+    let mut text = String::new();
+    let mut inside = false;
+    for line in src.lines() {
+        if line.trim_start().starts_with('[') {
+            inside = names_it(line.trim());
+        }
+        if !inside {
+            text.push_str(line);
+            text.push('\n');
+        }
+    }
     write_private(&p, text.as_bytes())?;
     Ok(true)
 }

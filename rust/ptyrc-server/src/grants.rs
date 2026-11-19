@@ -143,6 +143,12 @@ impl Grants {
         self.whole || self.held.contains(&permission)
     }
 
+    /// The degree its answers are cut to: None when nothing is cut,
+    /// the whole session or `text`.
+    pub fn cut(&self) -> Option<Degree> {
+        Some(self.degree()).filter(|d| !self.whole && *d < Degree::Text)
+    }
+
     /// The highest degree held.
     pub fn degree(&self) -> Degree {
         if self.whole {
@@ -249,6 +255,7 @@ pub(crate) const METHODS: &[(&str, Gate)] = &[
     ("app.restart", Never),
     ("app.forget", Never),
     ("app.move", Never),
+    ("app.permissions", Never),
     ("debug.overlay", Never),
     ("debug.dump", Never),
 ];

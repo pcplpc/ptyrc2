@@ -346,9 +346,10 @@ class Deck:
                     tick()
                 self.draw(every=every)
                 now, period = clock.monotonic(), each()
-                # The wall clock is real time: one of its seconds is `rate()` here.
-                wall = (period - time.time() % period) * clock.rate()
-                due = now + (wall if align else period)
+                due = now + period
+                if align:
+                    # The wall clock is real time: one of its seconds is `rate()` here.
+                    due = now + (period - time.time() % period) * clock.rate()
             if self._over_until is not None and now >= self._over_until:
                 self.leave()
             wake = min(t for t in (due, end, self._over_until) if t is not None)

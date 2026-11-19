@@ -29,6 +29,8 @@ pub trait Backend {
     fn resume(&mut self, id: u64) -> Result<(), Fail>;
     fn restart(&mut self, id: u64, argv: Option<&[String]>) -> Result<(), Fail>;
     fn forget(&mut self, id: u64) -> Result<(), Fail>;
+    /// `app.permissions`: the driver's screen, answered by the user.
+    fn permissions(&mut self, id: u64) -> Result<(), Fail>;
     /// `app.move`: the app moves what it drew.
     fn move_to(&mut self, id: u64, frame: &str) -> Result<(), Fail>;
     /// The last lines an app wrote on stderr.
@@ -126,6 +128,7 @@ impl<B: Backend> Runner<B> {
                 Action::Pause(id) => self.backend.pause(*id).map(|()| None),
                 Action::Resume(id) => self.backend.resume(*id).map(|()| None),
                 Action::Forget(id) => self.backend.forget(*id).map(|()| None),
+                Action::Permissions(id) => self.backend.permissions(*id).map(|()| None),
                 Action::Move { id, frame } => self.backend.move_to(*id, frame).map(|()| None),
             };
             match done {
@@ -260,7 +263,7 @@ impl Backend for Session {
         let mut words = vec![name.to_string()];
         words.extend_from_slice(args);
         let (argv, name) = super::app_argv(&words)?;
-        let started = self.call("app.start", json!({"argv": argv, "name": name}))?;
+        let started = self.call("app.start", super::start_params(&argv, &name))?;
         started["app"]["id"]
             .as_u64()
             .ok_or_else(|| "app.start: no id".into())
@@ -280,7 +283,10 @@ impl Backend for Session {
 
     fn restart(&mut self, id: u64, argv: Option<&[String]>) -> Result<(), Fail> {
         let params = match argv {
-            Some(argv) => json!({"app": id, "argv": argv}),
+            Some(argv) => match super::declares(argv) {
+                Some(declares) => json!({"app": id, "argv": argv, "declares": declares}),
+                None => json!({"app": id, "argv": argv}),
+            },
             None => json!({"app": id}),
         };
         self.call("app.restart", params).map(|_| ())
@@ -288,6 +294,10 @@ impl Backend for Session {
 
     fn forget(&mut self, id: u64) -> Result<(), Fail> {
         self.on("app.forget", id)
+    }
+
+    fn permissions(&mut self, id: u64) -> Result<(), Fail> {
+        self.on("app.permissions", id)
     }
 
     fn move_to(&mut self, id: u64, frame: &str) -> Result<(), Fail> {

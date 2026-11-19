@@ -395,7 +395,12 @@ fn wrap(args: Wrap) -> Result<ExitCode, Fail> {
         argv: plain.clone(),
         name: Some(name.clone()),
         hotkey: Some(crate::hotkey_command()),
-        apps: args.app.iter().map(command).collect(),
+        apps: (args.app.iter().map(command))
+            .map(|argv| {
+                let declares = crate::manage::declares(&argv);
+                (argv, declares)
+            })
+            .collect(),
         handoff: true,
         ..Default::default()
     };

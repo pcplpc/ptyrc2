@@ -153,6 +153,8 @@ pub struct AppInfo {
     pub frames: Vec<u64>,
     /// It changes frame while it runs (topic `move`).
     pub moves: bool,
+    /// It declared what it asks: its permissions can be changed.
+    pub declares: bool,
     /// As `manage::label`, `manage::options` (how many), `manage::is_manager`.
     label: String,
     options: usize,
@@ -186,6 +188,7 @@ impl AppInfo {
                 .filter_map(Value::as_u64)
                 .collect(),
             moves: value["moves"].as_bool().unwrap_or(false),
+            declares: value["declares"].as_bool().unwrap_or(false),
             label: super::label(value),
             options: super::options(value).len(),
             manager: super::is_manager(value),
@@ -271,6 +274,8 @@ pub enum Action {
         argv: Option<Vec<String>>,
     },
     Forget(u64),
+    /// The driver's screen of its permissions (`app.permissions`).
+    Permissions(u64),
     /// `app.move`: it changes frame as it runs.
     Move {
         id: u64,
@@ -705,6 +710,7 @@ enum Act {
     Stop,
     Forget,
     Log,
+    Permissions,
 }
 
 impl Act {
@@ -720,6 +726,7 @@ impl Act {
             Act::Stop => "stop",
             Act::Forget => "forget",
             Act::Log => "log",
+            Act::Permissions => "permissions…",
         }
     }
 
@@ -731,6 +738,7 @@ impl Act {
             Act::Move => "m",
             Act::Stop | Act::Forget => "x",
             Act::Log => "l",
+            Act::Permissions => "g",
         }
     }
 }
@@ -1000,6 +1008,7 @@ impl Menu {
             return Vec::new();
         };
         let log = app.log.is_some().then_some(Act::Log);
+        let asks = (app.declares && app.state != State::Gone).then_some(Act::Permissions);
         let mut acts = match (app.state, app.child) {
             (State::Running, true) => {
                 vec![Act::Pause, Act::Restart, Act::Options, Act::Move, Act::Stop]
@@ -1017,6 +1026,7 @@ impl Menu {
             (_, true) => vec![Act::Restart, Act::Options, Act::Move, Act::Forget],
             (_, false) => Vec::new(),
         };
+        acts.extend(asks);
         acts.extend(log);
         acts
     }
@@ -1066,6 +1076,7 @@ impl Menu {
                 }
                 (Act::Move, _) => "it does not move, and was not started here",
                 (Act::Log, _) => "it has no log",
+                (Act::Permissions, _) => "it declares nothing: it holds the whole session",
                 (Act::Pause | Act::Resume, _) => "it has ended",
                 _ => "not for this one",
             };
@@ -1080,6 +1091,7 @@ impl Menu {
             Act::Stop => vec![Action::Stop(id)],
             Act::Forget => vec![Action::Forget(id)],
             Act::Log => vec![Action::Log(id)],
+            Act::Permissions => vec![Action::Permissions(id)],
             Act::Move => {
                 // The picker opens on the frame the app is on.
                 let rows = self.choices(true);
@@ -1246,6 +1258,7 @@ impl Menu {
                     "e" => on_app(Act::Options),
                     "x" | "delete" => on_app(Act::Stop),
                     "l" => on_app(Act::Log),
+                    "g" => on_app(Act::Permissions),
                     "m" => on_app(Act::Move),
                     "f" => {
                         self.stack.push(Screen::Frames { sel: 0, pick: None });

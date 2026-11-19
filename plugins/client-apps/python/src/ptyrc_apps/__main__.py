@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 from collections.abc import Sequence
 
@@ -18,6 +19,7 @@ def usage() -> str:
     lines += [f"  {name:{width}}  {doc}" for name, doc in APPS.items()]
     lines += ["", "`ptyrc app <name> --help` lists the options of an app."]
     lines += ["`ptyrc-app --catalog` prints them all, as JSON."]
+    lines += ["`ptyrc-app --declares <name> [options]`: what it asks, as JSON."]
     return "\n".join(lines)
 
 
@@ -31,6 +33,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         from . import _catalog
 
         print(_catalog.dump())
+        return 0
+    if name == "--declares":
+        from . import _catalog
+
+        app = rest[0] if rest else ""
+        print(json.dumps(_catalog.declares(app, rest[1:]), ensure_ascii=False))
         return 0
     if name not in APPS:
         print(f"ptyrc app: no app named {name}\n\n{usage()}", file=sys.stderr)

@@ -48,6 +48,10 @@ def test_catalog(capsys: pytest.CaptureFixture[str]) -> None:
         "words": [],
         "options": {},
         "user_words": [],
+        "why": "",
+    }
+    assert by_name["clock"]["asks"]["always"] == {
+        "clock": "the time of day, in its zone"
     }
     assert by_name["snake"]["reads"]["degree"] == "shape"
     cat = by_name["cat"]["reads"]

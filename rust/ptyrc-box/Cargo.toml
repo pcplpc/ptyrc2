@@ -10,11 +10,12 @@ name = "ptyrc-box"
 path = "src/main.rs"
 
 [dependencies]
+ptyrc-core.workspace = true
 ptyrc-proto.workspace = true
 ptyrc-vt.workspace = true
 serde_json.workspace = true
 signal-hook = "0.4"
-wasmtime = { version = "49", default-features = false, features = ["cranelift", "runtime", "std"] }
+wasmtime = { version = "49", default-features = false, features = ["cranelift", "parallel-compilation", "runtime", "std"] }
 
 [dev-dependencies]
 wat = "1"

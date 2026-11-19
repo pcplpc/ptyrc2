@@ -215,8 +215,9 @@ pub fn check_all(tree: &dyn Tree) -> std::result::Result<Checked, Vec<Error>> {
     }
 }
 
-/// A plain directory (`ptyrc dev check DIR`). A `.git` at its root is
-/// skipped.
+/// A plain directory (`ptyrc dev check DIR`). Skipped at its root: `.git`,
+/// and a cache directory (one holding `CACHEDIR.TAG`, as cargo's
+/// `target/`): neither is committed.
 #[derive(Debug, Clone)]
 pub struct DirTree {
     root: PathBuf,
@@ -238,7 +239,7 @@ impl DirTree {
                     "file names in UTF-8",
                 ));
             };
-            if rel.is_empty() && name == ".git" {
+            if rel.is_empty() && (name == ".git" || ent.path().join("CACHEDIR.TAG").is_file()) {
                 continue;
             }
             let path = format!("{rel}{name}");

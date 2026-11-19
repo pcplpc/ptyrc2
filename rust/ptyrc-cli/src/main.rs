@@ -455,10 +455,12 @@ fn verb_run(args: Run) -> Result<ExitCode, Fail> {
             ));
         }
         let program = apps::program(apps::APP).ok_or_else(apps::not_found(apps::APP))?;
+        // Each with what it declares: `app.start` asks for it.
         let words = |app: &String| {
             let mut argv = vec![program.clone()];
             argv.extend(app.split_whitespace().map(str::to_string));
-            argv
+            let declares = manage::declares(&argv);
+            (argv, declares)
         };
         args.app.iter().map(words).collect()
     };

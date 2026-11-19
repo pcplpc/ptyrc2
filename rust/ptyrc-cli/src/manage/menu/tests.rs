@@ -638,6 +638,25 @@ fn random_app() {
 }
 
 #[test]
+fn the_permissions_of_an_app_that_declares() {
+    let mut m = menu();
+    let mut cat = info(6, "cat", "running");
+    cat.declares = true;
+    m.apps(vec![info(1, "bricks -a", "running"), cat]);
+    // One that declared nothing holds the whole session: no screen.
+    assert_eq!(keys(&mut m, "g"), []);
+    assert!(shown(&m, 78, 22).contains("it declares nothing"));
+    assert_eq!(keys(&mut m, "down g"), [Action::Permissions(6)]);
+    // In the list of its acts too.
+    keys(&mut m, "enter");
+    let screen = shown(&m, 78, 22);
+    assert!(
+        screen.contains(" permissions…                      g "),
+        "{screen}"
+    );
+}
+
+#[test]
 fn the_log() {
     let mut m = menu();
     assert_eq!(keys(&mut m, "down down l"), [Action::Log(3)]);

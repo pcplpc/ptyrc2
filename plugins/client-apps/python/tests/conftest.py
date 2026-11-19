@@ -58,7 +58,11 @@ def _driver_env() -> Iterator[None]:
             ["cargo", "build", "-q", "-p", "ptyrc-cli"], cwd=ROOT, check=True
         )
     runtime = tempfile.mkdtemp(prefix="ptyrc-a")
-    saved = {k: os.environ.get(k) for k in ("XDG_RUNTIME_DIR", "PTYRC_BIN")}
+    # The drivers read `permissions.toml` there, not the user's.
+    config = tempfile.mkdtemp(prefix="ptyrc-c")
+    names = ("XDG_RUNTIME_DIR", "PTYRC_BIN", "XDG_CONFIG_HOME")
+    saved = {k: os.environ.get(k) for k in names}
+    os.environ["XDG_CONFIG_HOME"] = config
     os.environ.update(XDG_RUNTIME_DIR=runtime, PTYRC_BIN=str(binary))
     for name in ("PTYRC_SESSION", "PTYRC_SOCKET"):
         os.environ.pop(name, None)
@@ -69,6 +73,7 @@ def _driver_env() -> Iterator[None]:
         else:
             os.environ[key] = value
     shutil.rmtree(runtime, ignore_errors=True)
+    shutil.rmtree(config, ignore_errors=True)
 
 
 @pytest.fixture

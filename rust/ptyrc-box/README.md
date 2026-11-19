@@ -5,6 +5,8 @@ canvases. `plan/store-model.md` is the plan; this file is the ABI.
 
 ```
 ptyrc-box MODULE [ARGS]
+
+ptyrc-box --script APP.js [ARGS]
 ```
 
 Runs `MODULE` (a binary module) in the session of `PTYRC_SOCKET`,
@@ -123,6 +125,22 @@ How an app ends (`Error::name`): `bad-module`, `bad-import`,
 `bad-export`, `memory`, `time`, `bad-pointer` (a pointer or a length
 outside the memory), `stack`, `trap`, `exit`, `gone`.
 
+## Script apps
+
+`--script`: the guest is the interpreter of `sdk/js` (`PTYRC_JS`; else
+`ptyrc-js.wasm` beside the program; else `../share/ptyrc/` from
+there). The ABI is the same. The scripts of the directory of `APP.js`
+(`.js`, `.mjs`; 1 MiB, 512 files) ride in the JSON of `init`, under
+two reserved members the runner sets, whatever `ARGS` holds:
+
+```json
+{"ptyrc:sources": {"app.js": "...", "lib/util.js": "..."},
+ "ptyrc:main": "app.js"}
+```
+
+`script::sources(dir)`, `script::init_args(main, sources, args)`,
+`script::interpreter()`. See `sdk/js/README.md`.
+
 ## Library
 
 ```rust
@@ -141,7 +159,9 @@ print!("{report}");
   `PTYRC_CLOCK_RATE`.
 - `Runner<H: Host>`: `load`, `init`, `tick`, `event`, `stop`; `Host` is
   the outside (`call`, `size`, `log`, `random`).
-- `engine.rs` alone names wasmtime.
+- `engine.rs` alone names wasmtime. One engine a process, its epoch
+  advanced by one thread; a module of 256 KiB and more is compiled
+  once a process (the last four are kept).
 
 ## Speed
 
@@ -162,6 +182,8 @@ rows patched alone. Nothing changes for the guest.
 - `tests/abi.rs`: the ABI against small guests.
 - `tests/hostile/`: guests that must end contained.
 - `tests/live.rs`: above.
+- `tests/script.rs`: script apps and hostile scripts; needs the
+  interpreter built, else each test says `skipped` and passes.
 
 Guests are text modules (`tests/common`: the imports, a bump
 allocator).

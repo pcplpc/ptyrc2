@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 import pytest
 from ptyrc import Pilot, PtyrcError
@@ -13,6 +14,7 @@ from tests_support import until
 #: A client app: one sprite, then it waits; `move` when asked.
 APP = """
 import sys
+from pathlib import Path
 from ptyrc import Pilot
 pilot = Pilot()
 pilot.draw(["HELLO"], at=(2, 2), space="view", layer="front")
@@ -113,3 +115,48 @@ def test_a_child_presents_its_token(shell: Pilot) -> None:
     (result,) = shell.call("batch", calls=calls)["results"]
     assert result["error"]["code"] == "bad-request"
     assert shell.text()
+
+
+#: A child that asks for the arrows, says what it got, and goes on.
+STEER = """
+from ptyrc import Pilot, PtyrcError
+pilot = Pilot()
+try:
+    pilot.grab("up", "down")
+    said = "GRABBED"
+except PtyrcError as err:
+    said = "GRAB %s %s" % (err.code, err.hint)
+pilot.draw([said[:76]], at=(1, 2), space="view", layer="front")
+pilot.draw(["STILL HERE"], at=(1, 3), space="view", layer="front")
+for _ in pilot.events(timeout=None):
+    pass
+"""
+
+
+def test_a_no_in_the_file_is_denied(shell: Pilot) -> None:
+    config = Path(os.environ["XDG_CONFIG_HOME"]) / "ptyrc"
+    config.mkdir(parents=True, exist_ok=True)
+    answers = config / "permissions.toml"
+    answers.write_text('[app."native/steer"]\nallow = []\ndeny = ["keys-arrows"]\n')
+    try:
+        declares = {"permissions": {"keys-arrows": "the arrows steer it"}}
+        argv = [sys.executable, "-c", STEER]
+        app = shell.app_start(argv, name="steer", declares=declares)
+        until(lambda: "STILL HERE" in "\n".join(shell.shown()))
+        shown = "\n".join(shell.shown())
+        assert "GRAB denied the app does not hold `keys-arrows`" in shown
+        assert by_id(shell, app["id"])["state"] == "running"
+        shell.app_stop(app["id"])
+        until(lambda: "STILL HERE" not in "\n".join(shell.shown()))
+
+        # No answer, headless: granted as declared; nothing written.
+        other = shell.app_start(argv, name="steer-too", declares=declares)
+        until(lambda: "GRABBED" in "\n".join(shell.shown()))
+        shell.app_stop(other["id"])
+        assert "steer-too" not in answers.read_text()
+    finally:
+        answers.unlink()
+
+    with pytest.raises(PtyrcError) as err:
+        shell.app_start(argv, declares={"permissions": {"type": "x"}})
+    assert err.value.code == "bad-params" and "keys-arrows" in err.value.hint

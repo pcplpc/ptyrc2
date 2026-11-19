@@ -40,6 +40,8 @@ pub enum ErrorCode {
     Timeout,
     Gone,
     Denied,
+    /// The user said no: `esc` on the driver's pop-up.
+    Cancelled,
     Internal,
 }
 
@@ -55,6 +57,7 @@ impl ErrorCode {
             ErrorCode::Timeout => "timeout",
             ErrorCode::Gone => "gone",
             ErrorCode::Denied => "denied",
+            ErrorCode::Cancelled => "cancelled",
             ErrorCode::Internal => "internal",
         }
     }
@@ -199,6 +202,7 @@ mod tests {
             ErrorCode::Timeout,
             ErrorCode::Gone,
             ErrorCode::Denied,
+            ErrorCode::Cancelled,
             ErrorCode::Internal,
         ] {
             assert_eq!(serde_json::to_value(code).unwrap(), json!(code.as_str()));

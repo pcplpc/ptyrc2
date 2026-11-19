@@ -1139,11 +1139,11 @@ not kept, nor the child of the hotkey once it has ended.
 | method | params | result |
 |---|---|---|
 | `app.list` | | `{"apps":[info,...]}`, by id |
-| `app.start` | `argv`: `[program, arg...]`, `name` | `{"app":info}`; `bad-params` with the reason when it does not start |
+| `app.start` | `argv`: `[program, arg...]`, `name`, `declares` (Permissions) | `{"app":info}`, once the pop-up is answered when it asks; `bad-params` with the reason when it does not start; `cancelled` |
 | `app.stop` | `app`: id | `{"app":info}`; SIGTERM, SIGCONT when paused, SIGKILL after 2 s. A child: its group; a client: its pid. An exited child: nothing |
 | `app.pause` | `app` | `{"app":info}`; see Pause |
 | `app.resume` | `app` | `{"app":info}` |
-| `app.restart` | `app`, `argv`, `name` (both optional: as before) | `{"app":info}`, at once; stopped as by `app.stop`, started again when it has ended, under the same id; an exited one at once (`bad-params` when it does not start: it stays exited, status 127, the reason in its log). A client: `not-usable` |
+| `app.restart` | `app`, `argv`, `name` (both optional: as before), `declares` (with `argv` and without it: the whole session) | `{"app":info}`, at once; stopped as by `app.stop`, started again when it has ended, under the same id; an exited one at once (`bad-params` when it does not start: it stays exited, status 127, the reason in its log). A client: `not-usable` |
 | `app.forget` | `app` | `{}`; an exited child leaves the table; another state: `not-usable` |
 | `app.move` | `app`, `frame`: an id or a name, resolved at the call | `{"app":info,"frame":id}`; see Move |
 
@@ -1278,7 +1278,8 @@ are named as `input.grab` names them, on both.
   app…`, `random app`, `frames…`. A manager is not listed. enter: the
   actions of the row. Keys: `s` start, `p` pause or resume, `r`
   restart, `e` restart with other options, `m` move, `x` or `delete`
-  stop (an exited one: forget), `l` log, `f` frames. The selection
+  stop (an exited one: forget), `g` permissions (an app that
+  declared: `app.permissions`), `l` log, `f` frames. The selection
   follows its app, and goes to an app just started.
 - Start: the apps of the catalog with their line of help; enter: the
   form. Letters typed filter it, any case, in the title: names that
@@ -1339,11 +1340,18 @@ from the argparse parser of each app; `-h`, `-s` are left out.
 `random`: the argument lists `random app` draws from (was
 `demo.VARIANTS`); empty: never drawn. `widgets`: the app is made of
 widgets (`_widgets.options` on its parser, not on a group of it).
-`reads`: `{"degree","words","options","user_words"}`, what the app
-reads of the screen (`_catalog.READS`; none named: `none`): a degree
-of `none`, `shape`, `words`, `text`; the words it declares; per option
-the degree it reads with it; the options whose values are the user's
-words. `tests/test_reads.py` holds each app to it. No `ptyrc-app`: the menu has no `start an app…`.
+`reads`: `{"degree","words","options","user_words","why"}`, what the
+app reads of the screen (`_catalog.READS`; none named: `none`): a
+degree of `none`, `layout`, `shape`, `words`, `text`; the words it
+declares; per option the degree it reads with it; the options whose
+values are the user's words; the reason. `asks`: `{"always","options"}`,
+what else it needs (`_catalog.ASKS`): permissions to reasons, always
+and per option. `ptyrc-app --declares NAME ARGS...` prints the
+`declares` of `app.start` for those arguments (`_catalog.declares`;
+`null`: the whole session); `ptyrc manage` hands it over at a start and
+a restart (2 s at most, else none). `tests/test_reads.py` holds each
+app to both: its requests, files, programs and wall clock, observed in
+process; started by the driver with its declaration, nothing refused. No `ptyrc-app`: the menu has no `start an app…`.
 
 ## Plugins
 
@@ -1623,9 +1631,9 @@ the whole session.
 
 ### Permissions
 
-`plan/store-model.md`, Permissions. Done: who asks, and the check;
-every app holds everything. Not done: the file, the pop-up, the
-answers cut to a degree, `app.start {store}`.
+`plan/store-model.md`, Permissions. Done: who asks, the check, the
+declaration, the file, the headless rule, the answers cut to a degree,
+the pop-up. Not done: `app.start {store}`.
 
 - **The token.** The driver makes one per run of a child app: 128 bits
   of `/dev/urandom`, hex, in `PTYRC_TOKEN`. A restart makes another; an
@@ -1655,9 +1663,83 @@ answers cut to a degree, `app.start {store}`.
   connection, the calls of a `batch` one by one, before anything else
   looks at it. It answers allow, lower (a degree), or `denied`.
 - **Grants** (`grants::Grants`, on the app's entry): the permissions
-  held, or the whole session. Every child holds the whole session until
-  the file is read: nothing is lowered or denied yet. Read at each
-  request: a change holds from the next one on.
+  held, or the whole session. Read at each request: a change holds from
+  the next one on.
+- **`declares`** (`app.start`, `app.restart`): `{"permissions":
+  {NAME: REASON}, "words": [WORD]}`, what the child asks, kept on its
+  entry (`permissions::Declared`). A name not known: `bad-params`.
+  Absent: the child holds the whole session, as before.
+- **`permissions.toml`**, in `$XDG_CONFIG_HOME/ptyrc/`, else
+  `~/.config/ptyrc/`: the answers, one table per identity. Written by
+  the driver alone (`permissions::remember`): mode 0600, the directory
+  0700, a file of its own renamed over it. Read at each start that
+  declares; what is not understood (a line, a member, a name) is
+  ignored, said in the child's log.
+
+  ```toml
+  [app."native/flower"]
+  allow = ["shape", "words"]
+  deny = ["text"]
+  ```
+
+- **At a start** (`permissions::resolve`): a declared permission
+  allowed is held; denied, not held, not asked again; neither:
+  `missing`. What is not declared is never held. A degree is held only
+  with every declared degree below it. Headless (`--headless`): what
+  is missing is held, nothing written; so too without a host keyboard
+  to answer (stdin closed). Else the pop-up asks for what is missing.
+- **The pop-up** (`popup.rs`, `driver/asks.rs`): the driver's own
+  screen, between `app.start` (or `app.restart {declares}`) and the
+  start. Every start that declares goes through it: the menu, `ptyrc
+  manage start`, `run --app` and `Config::apps` (each with `ptyrc-app
+  --declares`), a client's `app.start`.
+
+  ```
+  ╔═ cat ─ native ═══════════════════════════════╗
+  ║ native/cat                                   ║
+  ║ This app asks to:                            ║
+  ║                                              ║
+  ║ [x] see where the text is, not what it says  ║
+  ║     it sits on the lines                     ║
+  ║ [x] see these words: food, fish, toy         ║
+  ║                                              ║
+  ║ ↑↓ move  space tick  enter start  esc cancel ║
+  ╚══════════════════════════════════════ ptyrc ═╝
+  ```
+
+  - The name, `─`, tier and commit (`native`); the key of the file;
+    each permission missing, in the order of the names, in plain words
+    (`popup::told`), its reason below, dim. The difference alone: what
+    the file answers is not shown.
+  - Plain: ticked. Red (`text`, `keys-grab`, `keys-read`, `clicks`,
+    `clicks-grab`, `files-write`) and amber (`front`, `screen-wide`,
+    bright yellow): unticked, ticked by hand.
+  - Keys: `↑↓` or `jk`, `home`, `end`; space ticks; unticking a degree
+    unticks those above it, ticking one ticks those below. enter: the
+    answers written (`remember`; a yes and a no each), then the start
+    with them; not written (no config directory, an error): the start
+    all the same, said in the child's log. esc: nothing written,
+    nothing started; the request fails `cancelled`.
+  - The request is answered when the user answers; the loop does not
+    wait. Several at once: a queue, one screen at a time; one whose
+    answers were given meanwhile goes on unshown. In a `batch`:
+    `bad-request`.
+  - Above every layer: laid over the app grid after the scene, which is
+    not shown while it is (`Engine::modal`). No sprite covers it, none
+    is beside it. Its mark: the double border, white on blue, ` ptyrc `
+    at the foot.
+  - The keys are the driver's: real host keys alone (stdin), before
+    the hotkey, a grab or a focus; a paste is dropped. `input.send`,
+    `{host}` included, never reaches it.
+  - A screen under 24x8: the request fails `not-usable`, hint
+    `enlarge`. Smaller after: cut. A list longer than the screen
+    scrolls with the selection (`↑ more`, `↓ more`).
+- **`app.permissions {app}`**: the same screen for an app that
+  declared, every permission it declared, ticked from the file (`This
+  app may:`, `enter save`). enter: written, and the grants of the app
+  set at once (`Apps::grant`); answer `{"app":info}`. esc:
+  `cancelled`. An app that declared nothing, or no screen to show:
+  `not-usable`. Closed to apps. `ptyrc manage`: `g` on an app.
 - **The table** (`grants::METHODS`, `grants::TOPICS`): every method and
   topic, with what opens it. A test holds it to the methods known
   (`hints::METHODS`) and the topics (`ptyrc_proto::TOPICS`). A method
@@ -1675,10 +1757,9 @@ answers cut to a degree, `app.start {store}`.
   | `keys-read`, `clicks`, `pointer` | | `input`, `mouse`, `hover` |
   | never | `session.resize`, `.colors`, `.handoff`, `input.send`, `input.click`, `tape.*`, `layer.*`, `widget.focus`, `widget.blur`, the other `app.*`, `debug.*` | `apps` |
 
-- A degree not held: lowered to the degree held (`Verdict::Lower`).
-  The cut answers are not done: `Driver::lowered` refuses, `denied`.
-  A topic not held, a degree or a permission: subscribed, no event
-  comes. A closed topic: `denied`.
+- A degree not held: lowered to the degree held (`Verdict::Lower`);
+  see The cut answers. A topic not held, a degree or a permission:
+  subscribed, no event comes. A closed topic: `denied`.
 - An act not held, a closed method: `denied`, the hint naming the
   permission (`grants::denied`).
 - A bound connection whose app left the table: `denied`, every request.
@@ -1693,6 +1774,45 @@ answers cut to a degree, `app.start {store}`.
   and the surface of a sprite (`front`, `front-widget`,
   `screen-wide`); the keys of its focused widget and the pointer on
   its own things, which reach it without a topic.
+
+**The cut answers** (`lower.rs`: `plan`, `Cut`; `Driver::dispatch`).
+An app that holds less than `text` is answered in the same form, cut
+to its degree; the answer bears `"degree": NAME` (`none`, `layout`,
+`shape`, `words`). The request is asked of the engine in a lesser form,
+or answered without it; the answer is built from the members known,
+not by removing from the whole.
+
+| asked | held | answered |
+|---|---|---|
+| `screen.text`, `screen.cells` | `shape`, `words` | the rows of `screen.shape`, with the words held; `cells`: one run a row, `{"t"}` alone; `ansi`, `sprites` ignored |
+| `screen.shape` with `words` | `shape`; `words` | no word; the words held among those asked |
+| `frame.text` | `shape`, `words` | each remembered line as its shape (`lower::mask`) |
+| `screen.text`, `.cells`, `.shape` | less than `shape` | empty lines, the size and the rect |
+| `frame.text` | less than `shape` | `{"lines":[],"y0":0}` |
+| `frame.heat` | less than `shape` | `9` and `.` everywhere |
+| `frame.idle`; `screen.wait` without `pattern` | less than `shape` | `{"score":1,"idle":true,"free":1}`; matched at once |
+| `screen.cursor` | less than `shape` | not visible, at 0, 0, no frame, an empty trail |
+| `screen.find`, `screen.wait` with `pattern` | `words` | a word held, literal: found whole, case ignored (`\bWORD\b`: `_` is of a word here, not in the shape) |
+| the same | else | no match; the wait answers at once, `matched` false (true with `gone`) |
+| `frame.list`, `frame.get` | `layout` and above | `key` and `support` null |
+| the same, `frame.at` | less than `layout` | one frame, the raw one, whatever was named: the surface; `frame` in every request above is ignored |
+| a frame info | less than `shape` | idle, `extent` the view |
+| `session.info`; `hello` | less than `text` | `protocol`, `server`, `size`, `headless`; `host_colors` from `shape` |
+| event `frames` | `layout` and above | the infos cut as above |
+
+- `hello`: a connection of a child is known at accept (its process
+  group); when the child holds less than `text` its `hello` is the cut
+  one, token or not.
+- Topics: a connection keeps what it subscribed to; each event is held
+  to the grants of its app then (`driver::ear`). A topic not heard
+  wakes nothing: not counted by the engine, nor for the host mouse.
+- Errors: for such an app `no-frame` and `no-sprite` bear no hint (it
+  lists frames, sprites).
+- A pending request (`screen.wait`) is cut when it completes.
+- A method the table lowers and `lower::plan` does not know: `denied`.
+- Known holes: `frame.at {name}` and a frame named in `draw.put` tell
+  whether a key exists; `origin` and `extent` from `layout` tell how
+  far a frame scrolled; `app.list`, `draw.list`, `widget.list` (below).
 
 Durations on the wire (`timeout_ms`, `ttl_ms`, `ms`, ...) are session
 time: real time times `$PTYRC_CLOCK_RATE` (default 1), read by the driver
@@ -1713,7 +1833,8 @@ server -> {"event":"frames","data":{...}}          after subscribe
 ```
 
 Error codes: `bad-request`, `unknown-method`, `bad-params`, `no-frame`,
-`no-sprite`, `not-usable`, `timeout`, `gone`, `denied`, `internal`.
+`no-sprite`, `not-usable`, `timeout`, `gone`, `denied`, `cancelled`
+(the user said no), `internal`.
 
 An error may carry `"hint"`: what to try, in one line. The valid values
 (frames, sprites, key names, colours, anchors, topics, extensions,
@@ -1769,7 +1890,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `widget.blur` | | `{}` |
 | `widget.list` | | `{"widgets":[info,...]}`, every connection's |
 | `widget.borders` | | `{"borders":[name,...]}` |
-| `app.list`, `app.start`, `app.stop`, `app.pause`, `app.resume`, `app.restart`, `app.forget`, `app.move` | | see Apps and the manager, Methods |
+| `app.list`, `app.start`, `app.stop`, `app.pause`, `app.resume`, `app.restart`, `app.forget`, `app.move`, `app.permissions` | | see Apps and the manager, Methods; Permissions |
 | `batch` | `calls`: `[{"method","params"}]` | `{"results":[{"result"} or {"error"},...]}`, applied in one repaint |
 | `subscribe` | `topics`: `screen`, `cursor`, `frames`, `text`, `idle`, `draw`, `input`, `mouse`, `hover`, `size`, `colors`, `widgets`, `apps`, `move`, `exit`; `snapshot` | `{}`; with `snapshot`, then the state now as events, to this client: `idle` per frame on screen, `cursor`, `frames`, `size`, `widgets` per widget, `apps` per app |
 | `debug.overlay` | `what`: `frames`, `heat`, `off` | `{}` |
@@ -2047,8 +2168,8 @@ first), `.above(n)`, `.below(n)`, then `.wait()`, `.read(width)`,
 `mouse` events on those sprites, presses only by default),
 `Pilot.on_click(sprite, handler)` (a thread that reads them),
 `Pilot.grab`, `Pilot.release`, `Pilot.apps`, `Pilot.app_start(argv,
-name=)`, `app_stop`, `app_pause`, `app_resume`, `app_restart(app,
-argv=, name=)`, `app_forget`, `app_move(app, frame)` (`app.*`, one to
+name=, declares=)`, `app_stop`, `app_pause`, `app_resume`, `app_restart(app,
+argv=, name=, declares=)`, `app_forget`, `app_move(app, frame)` (`app.*`, one to
 one; the info, the frame id for a move), `Pilot.shown` (text with
 the sprites), `Pilot.snapshot`; `Pilot.spawn(record=FILE)`,
 `Pilot.replay(FILE)` (paused at the start) and `pilot.tape` (`step`,

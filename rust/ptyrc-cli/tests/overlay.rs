@@ -45,7 +45,8 @@ fn the_menu_in_the_session() {
     std::fs::create_dir_all(&bin).unwrap();
     let catalog = r#"{"apps":[{"name":"nap","help":"sleeps","options":[{"flags":["-l","--long"],"kind":"flag","metavar":null,"choices":null,"default":false,"help":"longer"}],"positionals":[],"random":[[]]}]}"#;
     let script = format!(
-        "#!/bin/sh\nif [ \"$1\" = --catalog ]; then echo '{catalog}'; exit 0; fi\nexec sleep 60\n"
+        "#!/bin/sh\nif [ \"$1\" = --catalog ]; then echo '{catalog}'; exit 0; fi\n\
+         if [ \"$1\" = --declares ]; then echo null; exit 0; fi\nexec sleep 60\n"
     );
     let program = bin.join("ptyrc-app");
     std::fs::write(&program, script).unwrap();

@@ -417,7 +417,8 @@ fn rm_purge() {
     std::fs::write(
         d.permissions(),
         format!(
-            "[\"{}\"]\nshape = true\n\n[\"example.org/other/app\"]\nshape = true\n",
+            "[app.\"{}\"]\nallow = [\"shape\"]\ndeny = []\n\n\
+             [app.\"example.org/other/app\"]\nallow = [\"shape\"]\ndeny = []\n",
             origin.id()
         ),
     )

@@ -9,6 +9,7 @@ pub mod error;
 pub mod headless;
 pub mod live;
 pub mod runner;
+pub mod script;
 
 pub use crate::core::{CallError, Host, Limits};
 pub use crate::error::Error;

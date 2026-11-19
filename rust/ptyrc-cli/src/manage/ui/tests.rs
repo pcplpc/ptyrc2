@@ -85,6 +85,11 @@ impl Backend for Fake {
         Ok(())
     }
 
+    fn permissions(&mut self, id: u64) -> Result<(), Fail> {
+        self.asked.push(format!("permissions {id}"));
+        Ok(())
+    }
+
     fn move_to(&mut self, id: u64, frame: &str) -> Result<(), Fail> {
         self.asked.push(format!("move {id} {frame}"));
         Ok(())

@@ -95,10 +95,11 @@ fn run_with_apps_from_the_start() {
     let bin = sb.dir.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     let log = sb.dir.join("log");
-    // A stand-in for `ptyrc-app`: it notes its session and arguments,
-    // stays, and notes its SIGTERM.
+    // A stand-in for `ptyrc-app`: it declares nothing, notes its
+    // session and arguments, stays, and notes its SIGTERM.
     let script = format!(
-        "#!/bin/sh\nlog={}\necho \"$PTYRC_SESSION $*\" >> $log\n\
+        "#!/bin/sh\nif [ \"$1\" = --declares ]; then echo null; exit 0; fi\n\
+         log={}\necho \"$PTYRC_SESSION $*\" >> $log\n\
          trap 'echo \"term $1\" >> $log; exit' TERM\nsleep 60 & wait\n",
         log.display()
     );

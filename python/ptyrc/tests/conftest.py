@@ -37,7 +37,11 @@ def _driver_env() -> Iterator[None]:
             ["cargo", "build", "-q", "-p", "ptyrc-cli"], cwd=ROOT, check=True
         )
     runtime = tempfile.mkdtemp(prefix="ptyrc-t")
-    saved = {k: os.environ.get(k) for k in ("XDG_RUNTIME_DIR", "PTYRC_BIN")}
+    # The drivers read `permissions.toml` there, not the user's.
+    config = tempfile.mkdtemp(prefix="ptyrc-c")
+    names = ("XDG_RUNTIME_DIR", "PTYRC_BIN", "XDG_CONFIG_HOME")
+    saved = {k: os.environ.get(k) for k in names}
+    os.environ["XDG_CONFIG_HOME"] = config
     os.environ["XDG_RUNTIME_DIR"] = runtime
     os.environ["PTYRC_BIN"] = str(binary)
     for name in ("PTYRC_SESSION", "PTYRC_SOCKET"):
@@ -49,6 +53,7 @@ def _driver_env() -> Iterator[None]:
         else:
             os.environ[key] = value
     shutil.rmtree(runtime, ignore_errors=True)
+    shutil.rmtree(config, ignore_errors=True)
 
 
 Spawn = Callable[..., Pilot]

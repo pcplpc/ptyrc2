@@ -5,7 +5,7 @@ mod common;
 
 use common::{EVENT, INIT, TICK, guest};
 use ptyrc_box::Error;
-use ptyrc_box::headless::{Options, run};
+use ptyrc_box::headless::{Options, Tape, Under, run};
 use serde_json::json;
 
 /// A canvas of 5x1 at (2, 1): `hi`, then the count of ticks in place
@@ -116,7 +116,7 @@ fn call_answers() {
         report.log,
         [
             r#"     0 {"rate":20}"#,
-            r#"     0 {"result":{"headless":true,"size":[40,10]}}"#,
+            r#"     0 {"result":{"headless":true,"protocol":1,"server":"ptyrc-box","size":[40,10]}}"#,
             r#"     0 {"error":{"code":"headless","message":"input.send: not answered without a session"}}"#,
         ]
     );
@@ -209,4 +209,74 @@ fn missing_exports() {
         run(&wrong, &Options::default()),
         Err(Error::Export(_))
     ));
+}
+
+/// `init` sends its argument as `draw.put` and subscribes to `size`;
+/// events are logged, topic then data.
+fn putter() -> Vec<u8> {
+    guest(&format!(
+        r#"
+  (data (i32.const 16) "draw.put")
+  (data (i32.const 32) "subscribe")
+  (data (i32.const 48) "{{\"topics\":[\"size\"]}}")
+  (func (export "init") (param i32 i32)
+    (drop (call $call (i32.const 16) (i32.const 8) (local.get 0) (local.get 1)))
+    (drop (call $call (i32.const 32) (i32.const 9) (i32.const 48) (i32.const 19))))
+  (func (export "event") (param i32 i32 i32 i32)
+    (call $log (local.get 0) (local.get 1))
+    (call $log (local.get 2) (local.get 3)))
+  {TICK}
+"#
+    ))
+}
+
+/// A text sprite on a screen given as text: behind the text, the
+/// default layer.
+#[test]
+fn text_sprite_over_a_screen() {
+    let options = Options {
+        size: (20, 4),
+        under: Under::Text("hello world\nline two\n".into()),
+        args: json!({"anchor": {"at": [6, 1]}, "content": {"rows": ["TWO"]}}),
+        at: vec![0],
+        ..Options::default()
+    };
+    let report = run(&putter(), &options).unwrap();
+    assert_eq!(report.end, None, "{report}");
+    assert_eq!(report.screens[0].1, ["hello world", "line twoO", "", ""]);
+    assert_eq!(report.requests[0].params, json!({"anchor": {"at": [6, 1]}}));
+}
+
+/// A tape is played in session time; a resize is a `size` event.
+#[test]
+fn over_a_tape() {
+    let tape = Tape::parse(concat!(
+        r#"{"ptyrc":"tape","version":2,"size":[20,3]}"#,
+        "\n",
+        r#"{"t":0,"o":"abc"}"#,
+        "\n",
+        r#"{"t":300000,"ob":"DQp4eXo="}"#,
+        "\n",
+        r#"{"t":400000,"size":[30,5]}"#,
+        "\n",
+    ))
+    .unwrap();
+    let options = Options {
+        under: Under::Tape(tape),
+        args: json!({"anchor": {"at": [-1, -1], "space": "view"}, "content": {"rows": ["#"]}}),
+        at: vec![0, 350, 500],
+        duration_ms: 500,
+        ..Options::default()
+    };
+    let report = run(&putter(), &options).unwrap();
+    assert_eq!(report.end, None, "{report}");
+    let screen = |i: usize| report.screens[i].1.clone();
+    assert_eq!(screen(0), ["abc", "", "                   #"]);
+    assert_eq!(screen(1), ["abc", "xyz", "                   #"]);
+    assert_eq!(screen(2)[4], format!("{:>30}", "#"));
+    assert_eq!(report.log, ["   400 size", r#"   400 {"size":[30,5]}"#]);
+    assert_eq!(
+        report.to_string(),
+        run(&putter(), &options).unwrap().to_string()
+    );
 }

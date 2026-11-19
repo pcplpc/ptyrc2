@@ -11,9 +11,10 @@ use crate::host::Host;
 use crate::hostcolors::{Known, QUERY_BG, QUERY_FG, Replies};
 use crate::hotkey::{self, Hotkey};
 use crate::keys;
+use crate::lower::{self, Cut, Plan};
 use crate::mouse;
 use crate::paging;
-use crate::permissions::{self, Declared};
+use crate::permissions::{self, Declared, Entry};
 use crate::player::{Player, Replay, Step};
 use crate::pty::{self, Pty};
 use crate::record::{Header, Record, Recorder};
@@ -28,7 +29,7 @@ use rustix::io::Errno;
 use rustix::process::{Pid, Signal, kill_process_group};
 use serde_json::{Value, json};
 use signal_hook::consts::{SIGCHLD, SIGHUP, SIGINT, SIGTERM, SIGWINCH};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::{self, Read};
 use std::os::fd::AsFd;
@@ -39,6 +40,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+mod asks;
 
 /// Upper bounds of a burst (design: "Coalescing").
 const BURST_MAX_BYTES: usize = 1 << 20;
@@ -89,9 +92,10 @@ pub struct Config {
     /// grabbed, runs this command as a child app named `manage`; twice
     /// again while it runs ends it. `None`: no hotkey.
     pub hotkey: Option<Vec<String>>,
-    /// Commands started as child apps once the program has started;
-    /// terminated at the end.
-    pub apps: Vec<Vec<String>>,
+    /// Commands started as child apps once the program has started,
+    /// each with what it declares (`app.start {declares}`; `None`: the
+    /// whole session); terminated at the end.
+    pub apps: Vec<(Vec<String>, Option<Value>)>,
     /// Nothing is drawn (`PassThrough`): no app table, `app.*` refused.
     pub transparent: bool,
     /// The caller has a successor for the host terminal: `session.handoff`
@@ -249,6 +253,8 @@ struct Driver {
     /// Union of the topics clients subscribed to.
     topics: HashSet<String>,
     pending: HashMap<Token, (ConnId, Value)>,
+    /// The pending requests whose answer is cut to a degree.
+    cuts: HashMap<Token, (Cut, Degree)>,
     /// Messages to send once the request being answered is.
     after: Vec<(ConnId, Value)>,
     next_conn: u64,
@@ -271,6 +277,10 @@ struct Driver {
     handoff: bool,
     /// The app was hung up for it; when it is killed if it stays.
     handoff_kill: Option<Duration>,
+    /// Starts held by the pop-up, the one shown first (`asks.rs`).
+    asks: VecDeque<asks::Asking>,
+    /// The answers of the pop-up for the start it lets go on.
+    given: Option<Entry>,
 }
 
 /// Real time, milliseconds since the epoch.
@@ -416,7 +426,7 @@ impl Driver {
                 ),
             ];
             let hotkey = (cfg.hotkey.is_some() && !cfg.transparent).then(Hotkey::default);
-            let mut apps = (!cfg.transparent).then(|| Apps::new(env.clone(), &socket));
+            let apps = (!cfg.transparent).then(|| Apps::new(env.clone(), &socket));
             if std::env::var_os("TERM").is_none() {
                 env.push(("TERM".to_string(), "xterm-256color".to_string()));
             }
@@ -439,12 +449,6 @@ impl Driver {
             };
             let pty = pty::spawn(&cfg.argv, &env, cols, rows)
                 .map_err(|e| start::exec_error(program, &e))?;
-            if let Some(apps) = &mut apps {
-                for command in &cfg.apps {
-                    // One that does not start is not in the table.
-                    let _ = apps.start(command.clone(), None, false, Duration::ZERO);
-                }
-            }
             Ok::<_, RunError>((signals, host, pty, cols, rows, recorder, hotkey, apps))
         })();
         let (signals, host, pty, cols, rows, recorder, hotkey, apps) = match built {
@@ -490,6 +494,7 @@ impl Driver {
             conns: BTreeMap::new(),
             topics: HashSet::new(),
             pending: HashMap::new(),
+            cuts: HashMap::new(),
             after: Vec::new(),
             next_conn: 1,
             next_token: 1,
@@ -504,6 +509,8 @@ impl Driver {
             factory: None,
             handoff: false,
             handoff_kill: None,
+            asks: VecDeque::new(),
+            given: None,
         })
     }
 
@@ -553,6 +560,7 @@ impl Driver {
             conns: BTreeMap::new(),
             topics: HashSet::new(),
             pending: HashMap::new(),
+            cuts: HashMap::new(),
             next_conn: 1,
             next_token: 1,
             repaint: false,
@@ -566,6 +574,8 @@ impl Driver {
             factory: None,
             handoff: false,
             handoff_kill: None,
+            asks: VecDeque::new(),
+            given: None,
         })
     }
 
@@ -685,6 +695,7 @@ impl Driver {
         let colors = self.colors.colors;
         hook!(self, self.now(), |ctx| engine.on_host_colors(colors, ctx));
         self.ask_host_colors()?;
+        self.start_apps(engine.as_mut());
         loop {
             if self.player.as_mut().is_some_and(Player::take_rewound) {
                 self.rewind(engine);
@@ -985,7 +996,7 @@ impl Driver {
                 if self.hands.touch(&fed.forward) {
                     self.active_at = unix_ms();
                 }
-                self.host_input(&fed.forward, engine);
+                self.host_or_ask(&fed.forward, engine);
             }
             Err(Errno::INTR | Errno::AGAIN) => {}
             Err(_) => self.stdin_open = false,
@@ -1455,6 +1466,7 @@ impl Driver {
         if let Some(recorder) = &mut self.recorder {
             recorder.resize(now, cols, rows);
         }
+        self.show_ask(engine);
         let mut out = Vec::new();
         hook!(self, now, |ctx| {
             engine.on_resize(cols, rows, now, &mut out, ctx);
@@ -1475,7 +1487,7 @@ impl Driver {
             let Ok(mut conn) = Conn::new(stream) else {
                 continue;
             };
-            conn.send(&event("hello", self.hello()));
+            let mut hello = self.hello();
             let id = ConnId(self.next_conn);
             self.next_conn += 1;
             let now = self.now();
@@ -1486,11 +1498,17 @@ impl Driver {
                     Some(app) => {
                         let app = apps.get(app);
                         conn.paused = app.is_some_and(|app| app.state == State::Paused);
+                        // A child that holds less than `text`: its
+                        // `hello` tells no more, token or not.
+                        if let Some(degree) = app.and_then(|app| app.grants.cut()) {
+                            hello = lower::hello(hello, degree);
+                        }
                     }
                     // A client is entered at its first request.
                     None => conn.peer = peer,
                 }
             }
+            conn.send(&event("hello", hello));
             let paused = conn.paused;
             self.conns.insert(id, conn);
             if paused {
@@ -1578,11 +1596,53 @@ impl Driver {
         }
         // The check: every request of an app, the calls of a batch one
         // by one. A connection without a token is the user's.
-        match self.verdict(conn, method, &params) {
-            Verdict::Allow => {}
-            Verdict::Lower(degree) => return Some(self.lowered(method, degree)),
+        let lower = match self.verdict(conn, method, &params) {
+            Verdict::Allow => false,
+            Verdict::Lower(_) => true,
             Verdict::Denied(why) => return Some(Err(grants::denied(method, why))),
-        }
+        };
+        // An app below `text`: its answers cut to its degree.
+        let Some((degree, words)) = self.cut_of(conn) else {
+            return self.answer(conn, method, params, engine, in_batch);
+        };
+        let answer = match lower::plan(method, &params, degree, &words) {
+            // Fail closed: lowered by the table, not planned.
+            Plan::Pass if lower => Some(Err(grants::denied(method, Why::Unlisted))),
+            Plan::Pass => self.answer(conn, method, params, engine, in_batch),
+            Plan::Answer(mut value) => {
+                value["degree"] = json!(degree.name());
+                Some(Ok(value))
+            }
+            Plan::Ask(method, params, cut) => {
+                match self.answer(conn, method, params, engine, in_batch) {
+                    Some(answer) => Some(answer.map(|value| cut.apply(value, degree))),
+                    None => {
+                        // Pending: cut when the engine completes it.
+                        self.cuts.insert(Token(self.next_token - 1), (cut, degree));
+                        None
+                    }
+                }
+            }
+        };
+        answer.map(|answer| answer.map_err(lower::scrub))
+    }
+
+    /// The degree and the words of `conn` when its answers are cut: an
+    /// app that holds less than `text`.
+    fn cut_of(&self, conn: ConnId) -> Option<(Degree, Vec<String>)> {
+        let (_, held) = self.asker(conn).ok()??;
+        Some((held.cut()?, held.words.clone()))
+    }
+
+    /// Answer a request that passed the check.
+    fn answer(
+        &mut self,
+        conn: ConnId,
+        method: &str,
+        params: Value,
+        engine: &mut dyn Engine,
+        in_batch: bool,
+    ) -> Option<Result<Value, RpcError>> {
         Some(match method {
             "session.info" => Ok(self.session_info(engine)),
             "session.resize" => self.session_resize(&params, engine),
@@ -1616,7 +1676,16 @@ impl Driver {
                 Ok(json!({}))
             }
             _ if method.starts_with("tape.") => self.tape(method, &params, in_batch)?,
-            _ if method.starts_with("app.") => self.app_call(conn, method, &params, engine),
+            _ if method.starts_with("app.") => {
+                match self.ask_first(conn, method, &params, in_batch) {
+                    Ok(true) => {
+                        self.show_ask(engine);
+                        return None;
+                    }
+                    Ok(false) => self.app_call(conn, method, &params, engine),
+                    Err(e) => Err(e),
+                }
+            }
             "batch" if in_batch => Err(RpcError::new(ErrorCode::BadRequest, "batch inside batch")),
             "batch" => self.batch(conn, params, engine),
             _ => {
@@ -1686,17 +1755,6 @@ impl Driver {
             conn.app = Some(id);
         }
         Ok(json!({"app": id, "identity": who}))
-    }
-
-    /// The answer of a method of reading, cut to `degree`. Not done:
-    /// refused until it is, so that nothing is told beyond the grants.
-    fn lowered(&mut self, method: &str, degree: Degree) -> Result<Value, RpcError> {
-        Err(
-            RpcError::new(ErrorCode::Denied, format!("{method}: denied")).with_hint(format!(
-                "the app holds the degree `{}`; the answers cut to a degree are not done",
-                degree.name()
-            )),
-        )
     }
 
     fn session_info(&self, engine: &dyn Engine) -> Value {
@@ -1797,7 +1855,9 @@ impl Driver {
                 )),
             );
         }
-        // A topic the app does not hold: subscribed, no event comes.
+        // A topic the app does not hold: subscribed, no event comes
+        // (`ear`, at each event: a grant given later is heard).
+        let cut = self.cut_of(conn);
         let mut silent = Vec::new();
         if let Some((who, held)) = self
             .asker(conn)
@@ -1813,7 +1873,6 @@ impl Driver {
                 }
             }
         }
-        let topics: Vec<String> = topics.into_iter().filter(|t| !silent.contains(t)).collect();
         let snapshot = match params.get("snapshot") {
             None => false,
             Some(Value::Bool(snapshot)) => *snapshot,
@@ -1821,9 +1880,13 @@ impl Driver {
         };
         if snapshot {
             // Sent after the answer, to this client only.
-            for topic in &topics {
+            for topic in topics.iter().filter(|t| !silent.contains(t)) {
                 let state = self.topic_state(topic, engine, false);
-                let events = state.into_iter().map(|data| event(topic, data));
+                let state = state.into_iter().map(|data| match &cut {
+                    Some((degree, _)) => lower::event(topic, data, *degree),
+                    None => data,
+                });
+                let events = state.map(|data| event(topic, data));
                 self.after.extend(events.map(|message| (conn, message)));
             }
         }
@@ -2043,6 +2106,9 @@ impl Driver {
         if method == "app.move" {
             return self.app_move(conn, params, engine);
         }
+        // A screen that cannot be shown: the rule of a headless session.
+        let headless = !self.can_ask();
+        let given = self.given.take();
         let apps = self.apps.as_mut().expect("checked above");
         let refused = |apps: &Apps, id: u64, e: Refused| match e {
             Refused::Unknown => Self::no_app(apps, id),
@@ -2058,7 +2124,7 @@ impl Driver {
             let id = apps
                 .start(argv, name, false, now)
                 .map_err(|e| refused(apps, 0, e))?;
-            Self::grant(apps, id, declares, self.cfg.headless);
+            Self::grant(apps, id, declares, headless, given);
             id
         } else {
             let id = member("app")
@@ -2084,7 +2150,7 @@ impl Driver {
                     let anew = argv.is_some() || declares.is_some();
                     let done = apps.restart(id, argv, name, now);
                     if done.is_ok() && anew {
-                        Self::grant(apps, id, declares, self.cfg.headless);
+                        Self::grant(apps, id, declares, headless, given);
                     }
                     done.map(|()| None)
                 }
@@ -2111,10 +2177,17 @@ impl Driver {
     }
 
     /// What the child `id` holds from what it declares: the answers of
-    /// `permissions.toml` (`permissions::at_start`). Nothing declared:
-    /// the whole session. What the file holds that is not understood is
-    /// told in the child's log.
-    fn grant(apps: &mut Apps, id: u64, declares: Option<Declared>, headless: bool) {
+    /// the pop-up when `given`, else of `permissions.toml`
+    /// (`permissions::resolve`). Nothing declared: the whole session.
+    /// What the file holds that is not understood is told in the
+    /// child's log.
+    fn grant(
+        apps: &mut Apps,
+        id: u64,
+        declares: Option<Declared>,
+        headless: bool,
+        given: Option<Entry>,
+    ) {
         let Some(declared) = declares else {
             return apps.grant(id, None);
         };
@@ -2128,8 +2201,10 @@ impl Driver {
         for warning in &warnings {
             apps.note(id, warning);
         }
-        let entry = key.and_then(|key| answers.apps.get(&key));
-        let grants = permissions::at_start(&declared, entry, headless);
+        let entry = given
+            .as_ref()
+            .or(key.and_then(|key| answers.apps.get(&key)));
+        let grants = permissions::resolve(&declared, entry, headless).grants;
         apps.grant(id, Some((declared, grants)));
     }
 
@@ -2158,7 +2233,17 @@ impl Driver {
                 continue;
             }
             for topic in topics {
+                let ear = (self.conns.get(&id)).map(|c| ear(self.apps.as_ref(), c, &topic));
+                let degree = match ear {
+                    Some(Ear::Whole) => None,
+                    Some(Ear::Cut(degree)) => Some(degree),
+                    Some(Ear::Deaf) | None => continue,
+                };
                 for data in self.topic_state(&topic, engine, true) {
+                    let data = match degree {
+                        Some(degree) => lower::event(&topic, data, degree),
+                        None => data,
+                    };
                     self.send_event(id, &topic, data);
                 }
             }
@@ -2167,11 +2252,14 @@ impl Driver {
     }
 
     fn refresh_topics(&mut self) {
-        self.topics = self
-            .conns
-            .values()
-            .flat_map(|c| c.topics.iter().cloned())
-            .collect();
+        // The topics heard: one an app does not hold wakes nothing.
+        let apps = self.apps.as_ref();
+        let mut heard = HashSet::new();
+        for conn in self.conns.values() {
+            let topics = conn.topics.iter();
+            heard.extend(topics.filter(|t| ear(apps, conn, t) != Ear::Deaf).cloned());
+        }
+        self.topics = heard;
     }
 
     fn input_send(&mut self, params: &Value, engine: &mut dyn Engine) -> Result<Value, RpcError> {
@@ -2490,7 +2578,14 @@ impl Driver {
             self.send_event(conn, &topic, data);
         }
         for (token, result) in fx.completions {
+            let cut = self.cuts.remove(&token);
             if let Some((conn, id)) = self.pending.remove(&token) {
+                let result = match cut {
+                    Some((cut, degree)) => result
+                        .map(|value| cut.apply(value, degree))
+                        .map_err(lower::scrub),
+                    None => result,
+                };
                 self.respond(conn, &id, result);
             }
         }
@@ -2507,10 +2602,17 @@ impl Driver {
         if !self.topics.contains(topic) {
             return;
         }
-        let message = event(topic, data);
+        let message = event(topic, data.clone());
+        let apps = self.apps.as_ref();
         let reads = |c: &&mut Conn| c.topics.contains(topic) && !c.paused;
         for conn in self.conns.values_mut().filter(reads) {
-            conn.send(&message);
+            match ear(apps, conn, topic) {
+                Ear::Whole => conn.send(&message),
+                Ear::Cut(degree) => {
+                    conn.send(&event(topic, lower::event(topic, data.clone(), degree)))
+                }
+                Ear::Deaf => {}
+            }
         }
     }
 
@@ -2532,6 +2634,8 @@ impl Driver {
             }
             self.grab.take_if(|g| g.conn == id);
             self.pending.retain(|_, (conn, _)| *conn != id);
+            self.cuts
+                .retain(|token, _| self.pending.contains_key(token));
             self.refresh_topics();
             self.sync_host_mouse(engine);
             hook!(self, self.now(), |ctx| engine.on_disconnect(id, ctx));
@@ -2570,6 +2674,31 @@ impl Driver {
         let _ = fs::remove_file(&self.info.socket);
         crate::host::restore();
         status
+    }
+}
+
+/// What a connection is told of a topic it subscribed to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Ear {
+    /// Its app does not hold the topic, or left the table.
+    Deaf,
+    Whole,
+    /// Its app holds less than `text`: the data cut to the degree.
+    Cut(Degree),
+}
+
+/// Asked at each event: a change of the grants holds from the next.
+fn ear(apps: Option<&Apps>, conn: &Conn, topic: &str) -> Ear {
+    let Some(id) = conn.app else {
+        return Ear::Whole;
+    };
+    let app = apps.and_then(|apps| apps.get(id));
+    let Some((who, held)) = app.and_then(|a| Some((a.identity.as_ref()?, &a.grants))) else {
+        return Ear::Deaf;
+    };
+    match grants::check_topic(who, held, topic) {
+        Verdict::Allow => held.cut().map_or(Ear::Whole, Ear::Cut),
+        _ => Ear::Deaf,
     }
 }
 

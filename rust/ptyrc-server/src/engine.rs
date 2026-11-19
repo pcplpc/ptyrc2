@@ -38,6 +38,15 @@ pub struct Owned {
     pub frames: std::collections::BTreeSet<u32>,
 }
 
+/// The driver's own box (the pop-up), above every layer: its cells and
+/// the screen cell of its corner. While it is shown, nothing the
+/// clients drew is.
+#[derive(Clone, Debug)]
+pub struct Modal {
+    pub grid: ptyrc_vt::Grid,
+    pub at: (u16, u16),
+}
+
 /// Answer of `Engine::handle`.
 #[derive(Debug)]
 pub enum Reply {
@@ -247,6 +256,9 @@ pub trait Engine {
 
     /// The close key of the focused widget: it is hidden.
     fn focus_close(&mut self, _ctx: &mut Ctx) {}
+
+    /// Show the driver's box, or no more (`None`).
+    fn modal(&mut self, _modal: Option<Modal>) {}
 
     /// Members merged into the `session.info` result (an object, or null).
     fn session_extras(&self) -> Value {

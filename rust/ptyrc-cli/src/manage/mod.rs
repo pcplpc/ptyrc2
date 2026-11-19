@@ -23,6 +23,8 @@ pub const START_WAIT: Duration = Duration::from_millis(400);
 /// How long a stop or a restart may take.
 const END_WAIT: Duration = Duration::from_secs(5);
 const LOOK_EVERY: Duration = Duration::from_millis(25);
+/// How long `ptyrc-app --declares` may take.
+const DECLARES_WAIT: Duration = Duration::from_secs(2);
 
 #[derive(Args)]
 pub struct Manage {
@@ -245,7 +247,7 @@ fn early_end(info: &Value) -> Fail {
 /// with an error is a failure (status 1), the last line of its log the
 /// hint. The info of the app.
 pub fn start(client: &mut Client, argv: &[String], name: &str) -> Result<Value, Fail> {
-    let started = client.call("app.start", json!({"argv": argv, "name": name}))?;
+    let started = client.call("app.start", start_params(argv, name))?;
     let id = started["app"]["id"].as_u64().unwrap_or(0);
     let deadline = Instant::now() + START_WAIT;
     let mut info = started["app"].clone();
@@ -261,6 +263,53 @@ pub fn start(client: &mut Client, argv: &[String], name: &str) -> Result<Value, 
         }
         std::thread::sleep(LOOK_EVERY);
     }
+}
+
+/// What `argv` declares when it is `ptyrc-app NAME ARGS...`: what
+/// `ptyrc-app --declares NAME ARGS...` prints within `DECLARES_WAIT`.
+/// `None`: another program, or no answer; it then holds the whole
+/// session.
+pub fn declares(argv: &[String]) -> Option<Value> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    let (program, words) = argv.split_first()?;
+    if Path::new(program).file_name()? != apps::APP || words.is_empty() {
+        return None;
+    }
+    let mut child = Command::new(program)
+        .arg("--declares")
+        .args(words)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + DECLARES_WAIT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(LOOK_EVERY),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    };
+    let mut out = Vec::new();
+    child.stdout.take()?.read_to_end(&mut out).ok()?;
+    let value: Value = serde_json::from_slice(&out).ok()?;
+    (status.success() && value.is_object()).then_some(value)
+}
+
+/// The params of `app.start`: `argv`, `name`, and `declares` when it
+/// declares.
+pub fn start_params(argv: &[String], name: &str) -> Value {
+    let mut params = json!({"argv": argv, "name": name});
+    if let Some(declares) = declares(argv) {
+        params["declares"] = declares;
+    }
+    params
 }
 
 /// The `argv` and the name of `ptyrc-app WORDS`.

@@ -134,6 +134,7 @@ impl App {
             "since": since,
             "conns": self.conns.iter().map(|c| c.0).collect::<Vec<_>>(),
             "log": self.log.as_ref().map(|p| p.to_string_lossy()),
+            "declares": self.declares.is_some(),
         })
     }
 }

@@ -56,7 +56,8 @@ let checked = check(&tree)?;                         // or DirTree::new(dir)
   `assets`, `tape`.
 - `check_all`: every problem (`Vec<Error>`, never empty); what needs
   the manifest is skipped without it. `check` is its first.
-- `DirTree` skips a `.git` at its root.
+- `DirTree` skips, at its root, `.git` and a directory holding
+  `CACHEDIR.TAG` (cargo's `target/`).
 
 ## Install
 
@@ -81,7 +82,7 @@ let checked = check(&tree)?;                         // or DirTree::new(dir)
 - `install::list`, `install::trees(dirs, o)`, `install::prune(dirs, o)`
   (all but the commit in use and `previous`), `install::remove(dirs,
   ID|ORIGIN)` (lock entry and trees), `install::purge_storage(dirs, o)`,
-  `install::purge_grants(dirs, o)` (the table `["<origin>"]` of
+  `install::purge_grants(dirs, o)` (the table `[app."<origin>"]` of
   `permissions.toml`).
 - `Lock::load`, `save`, `get(origin)`, `resolve(ID|ORIGIN)`.
 

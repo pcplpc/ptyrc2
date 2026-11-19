@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "confetti"
+version = "0.1.0"
+summary = "Paper falls behind your text."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "frame"
+
+[options]
+rate = { type = "int", default = 12, doc = "pieces a second" }

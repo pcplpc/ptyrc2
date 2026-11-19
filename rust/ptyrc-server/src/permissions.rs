@@ -144,25 +144,6 @@ pub(crate) fn resolve(declared: &Declared, entry: Option<&Entry>, headless: bool
     Resolved { grants, missing }
 }
 
-/// The grants of a start: the answers of the file; what has none goes
-/// to the pop-up (`without_popup` until it exists).
-pub(crate) fn at_start(declared: &Declared, entry: Option<&Entry>, headless: bool) -> Grants {
-    let resolved = resolve(declared, entry, headless);
-    match resolved.missing.is_empty() || headless {
-        true => resolved.grants,
-        false => without_popup(declared, entry),
-    }
-}
-
-/// The pop-up, until it is made: a start with permissions not yet
-/// answered is a headless one: what has no answer is granted as
-/// declared, nothing is written. The pop-up replaces this: it asks
-/// for `Resolved::missing`, writes the answers (`remember`), and starts
-/// with `resolve` of the file then.
-fn without_popup(declared: &Declared, entry: Option<&Entry>) -> Grants {
-    resolve(declared, entry, true).grants
-}
-
 /// The directory of the file: `$XDG_CONFIG_HOME/ptyrc`, else
 /// `$HOME/.config/ptyrc`. A relative path is not one.
 pub(crate) fn dir() -> Option<PathBuf> {
@@ -188,7 +169,6 @@ pub(crate) fn load(dir: &Path) -> (Answers, Vec<String>) {
 /// Write the answers of `key` to the file in `dir`: read again, as
 /// another driver may have written since; replaced whole, by a rename.
 /// What the pop-up calls.
-#[allow(dead_code)]
 pub(crate) fn remember(dir: &Path, key: &str, entry: Entry) -> io::Result<()> {
     let (mut answers, _) = load(dir);
     answers.apps.insert(key.to_string(), entry);
@@ -511,13 +491,6 @@ mod tests {
             resolve(&snake, Some(&e), false).grants,
             Grants::of([Shape, KeysArrows])
         );
-        // The start, until the pop-up: as headless.
-        assert_eq!(
-            at_start(&snake, None, false),
-            Grants::of([Shape, KeysArrows])
-        );
-        let e = entry(&[], &[Shape]);
-        assert_eq!(at_start(&snake, Some(&e), false), Grants::of([KeysArrows]));
     }
 
     #[test]
