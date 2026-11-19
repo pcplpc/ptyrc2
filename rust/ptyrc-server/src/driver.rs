@@ -13,6 +13,7 @@ use crate::hotkey::{self, Hotkey};
 use crate::keys;
 use crate::mouse;
 use crate::paging;
+use crate::permissions::{self, Declared};
 use crate::player::{Player, Replay, Step};
 use crate::pty::{self, Pty};
 use crate::record::{Header, Record, Recorder};
@@ -1999,8 +2000,8 @@ impl Driver {
         }
         let members: &[&str] = match method {
             "app.list" => &[],
-            "app.start" => &["argv", "name"],
-            "app.restart" => &["app", "argv", "name"],
+            "app.start" => &["argv", "name", "declares"],
+            "app.restart" => &["app", "argv", "name", "declares"],
             "app.move" => &["app", "frame"],
             _ => &["app"],
         };
@@ -2035,6 +2036,7 @@ impl Driver {
                     .to_string(),
             ),
         };
+        let declares = member("declares").map(Declared::from_wire).transpose()?;
         if method == "app.list" {
             return Ok(json!({"apps": self.app_infos(Some(conn), engine)}));
         }
@@ -2053,8 +2055,11 @@ impl Driver {
                 RpcError::bad_params("argv: [program, arg...]")
                     .with_hint(r#"as in {"argv": ["ptyrc-app", "clock"]}"#)
             })?;
-            apps.start(argv, name, false, now)
-                .map_err(|e| refused(apps, 0, e))?
+            let id = apps
+                .start(argv, name, false, now)
+                .map_err(|e| refused(apps, 0, e))?;
+            Self::grant(apps, id, declares, self.cfg.headless);
+            id
         } else {
             let id = member("app")
                 .and_then(Value::as_u64)
@@ -2074,7 +2079,15 @@ impl Driver {
                 "stop" => apps.stop(id, now).map(|()| None),
                 "pause" => apps.pause(id, now).map(|was| was.then_some(true)),
                 "resume" => apps.resume(id, now).map(|was| was.then_some(false)),
-                "restart" => apps.restart(id, argv, name, now).map(|()| None),
+                "restart" => {
+                    // New words, or a new declaration: what it holds anew.
+                    let anew = argv.is_some() || declares.is_some();
+                    let done = apps.restart(id, argv, name, now);
+                    if done.is_ok() && anew {
+                        Self::grant(apps, id, declares, self.cfg.headless);
+                    }
+                    done.map(|()| None)
+                }
                 _ => apps.forget(id).map(|()| None),
             };
             let hint = |e: RpcError| match verb {
@@ -2095,6 +2108,29 @@ impl Driver {
             id
         };
         Ok(json!({"app": self.app_info(id, Some(conn), engine)}))
+    }
+
+    /// What the child `id` holds from what it declares: the answers of
+    /// `permissions.toml` (`permissions::at_start`). Nothing declared:
+    /// the whole session. What the file holds that is not understood is
+    /// told in the child's log.
+    fn grant(apps: &mut Apps, id: u64, declares: Option<Declared>, headless: bool) {
+        let Some(declared) = declares else {
+            return apps.grant(id, None);
+        };
+        let key = apps
+            .get(id)
+            .and_then(|a| a.identity.as_ref())
+            .map(|i| i.key());
+        let (answers, warnings) = permissions::dir()
+            .map(|dir| permissions::load(&dir))
+            .unwrap_or_default();
+        for warning in &warnings {
+            apps.note(id, warning);
+        }
+        let entry = key.and_then(|key| answers.apps.get(&key));
+        let grants = permissions::at_start(&declared, entry, headless);
+        apps.grant(id, Some((declared, grants)));
     }
 
     /// An app was paused or resumed: hide or show what its connections

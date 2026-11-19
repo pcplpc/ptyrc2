@@ -14,13 +14,13 @@ const ESU: &[u8] = b"\x1b[?2026l";
 
 /// An engine with a stand-in driver: time is set by the test, the host is
 /// a `Vt` fed with everything written.
-struct Rig {
+pub(crate) struct Rig {
     engine: ScreenEngine,
     info: SessionInfo,
     topics: HashSet<String>,
     now: Duration,
     /// What a real host would show.
-    host: Vt,
+    pub(crate) host: Vt,
     next: u64,
     /// Events and completions of the hooks, in order.
     events: Vec<(String, Value)>,
@@ -28,7 +28,7 @@ struct Rig {
 }
 
 impl Rig {
-    fn new(cols: u16, rows: u16) -> Rig {
+    pub(crate) fn new(cols: u16, rows: u16) -> Rig {
         let info = SessionInfo {
             name: "test".into(),
             socket: "/nonexistent".into(),
@@ -77,7 +77,7 @@ impl Rig {
     }
 
     /// App output; returns what went to the host.
-    fn burst(&mut self, bytes: &[u8]) -> Vec<u8> {
+    pub(crate) fn burst(&mut self, bytes: &[u8]) -> Vec<u8> {
         let now = self.now;
         let mut out = Vec::new();
         self.ctx(|e, ctx| e.on_burst(bytes, now, &mut out, ctx));
@@ -87,7 +87,7 @@ impl Rig {
     }
 
     /// One tick at the current time.
-    fn tick(&mut self) -> Vec<u8> {
+    pub(crate) fn tick(&mut self) -> Vec<u8> {
         let now = self.now;
         let mut out = Vec::new();
         self.ctx(|e, ctx| e.on_tick(now, &mut out, ctx));
@@ -97,7 +97,7 @@ impl Rig {
     }
 
     /// Let `ms` pass, ticking at every deadline; returns what went out.
-    fn advance(&mut self, ms: u64) -> Vec<u8> {
+    pub(crate) fn advance(&mut self, ms: u64) -> Vec<u8> {
         let end = self.now + Duration::from_millis(ms);
         let mut out = Vec::new();
         loop {
@@ -114,7 +114,7 @@ impl Rig {
         out
     }
 
-    fn call(&mut self, method: &str, params: Value) -> Value {
+    pub(crate) fn call(&mut self, method: &str, params: Value) -> Value {
         self.next += 1;
         let token = Token(self.next);
         let reply = self.ctx(|e, ctx| e.handle(ConnId(7), token, method, params, ctx));
@@ -910,7 +910,7 @@ fn a_declared_layer_name_is_used_and_hinted() {
 }
 
 impl Rig {
-    fn fail(&mut self, conn: u64, method: &str, params: Value) -> ptyrc_proto::RpcError {
+    pub(crate) fn fail(&mut self, conn: u64, method: &str, params: Value) -> ptyrc_proto::RpcError {
         let reply = self.ctx(|e, ctx| e.handle(ConnId(conn), Token(99), method, params, ctx));
         match reply {
             Reply::Err(e) => e,

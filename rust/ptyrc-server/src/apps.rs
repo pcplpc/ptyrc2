@@ -5,11 +5,13 @@
 
 use crate::engine::{ConnId, Owned};
 use crate::grants::{Grants, Identity};
+use crate::permissions::Declared;
 use crate::start;
 use rustix::process::{Pid, Signal, getpgid, kill_process, kill_process_group};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Write;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -90,8 +92,10 @@ pub(crate) struct App {
     pub conns: BTreeSet<ConnId>,
     /// Of a child: who it is, for the permissions.
     pub identity: Option<Identity>,
-    /// What it holds. Everything, until answers are read.
+    /// What it holds: the whole session when it declared nothing.
     pub grants: Grants,
+    /// What it declared at its start (`app.start {declares}`).
+    pub declares: Option<Declared>,
     /// Of the present run of a child.
     token: Option<String>,
     child: Option<Child>,
@@ -236,6 +240,7 @@ impl Apps {
             conns: BTreeSet::new(),
             identity: Some(Identity::Native(name.clone())),
             grants: Grants::whole(),
+            declares: None,
             token: Some(token),
             child: Some(child),
             kill_at: None,
@@ -291,6 +296,7 @@ impl Apps {
                     conns: BTreeSet::from([conn]),
                     identity: None,
                     grants: Grants::whole(),
+                    declares: None,
                     token: None,
                     child: None,
                     kill_at: None,
@@ -360,6 +366,24 @@ impl Apps {
     /// The info of the app of `conn` changed.
     pub fn touch(&mut self, conn: ConnId) {
         self.changed.extend(self.of_conn(conn));
+    }
+
+    /// Set what a child declared and holds. `None`: the whole session.
+    pub fn grant(&mut self, id: u64, declared: Option<(Declared, Grants)>) {
+        if let Some(app) = self.entries.get_mut(&id) {
+            (app.declares, app.grants) = match declared {
+                Some((declares, grants)) => (Some(declares), grants),
+                None => (None, Grants::whole()),
+            };
+        }
+    }
+
+    /// A line in the log of a child, after what it wrote.
+    pub fn note(&self, id: u64, line: &str) {
+        let log = self.get(id).and_then(|app| app.log.as_ref());
+        if let Some(mut file) = log.and_then(|log| start::private_file(log, true).ok()) {
+            let _ = writeln!(file, "ptyrc: {line}");
+        }
     }
 
     fn entry(&mut self, id: u64) -> Result<&mut App, Refused> {

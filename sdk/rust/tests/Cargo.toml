@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[package]
+name = "ptyrc-app-tests"
+description = "ptyrc: the Rust guests built and run headless"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+[workspace]
+
+[dev-dependencies]
+ptyrc-box = { path = "../../../rust/ptyrc-box" }
+serde_json = "1"

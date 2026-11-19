@@ -1,0 +1,15 @@
+;; SPDX-License-Identifier: GPL-3.0-or-later
+;; ESC, CSI (C1) and BEL in cells; an OSC 52 in the log.
+(data (i32.const 16) "a\1b]52;c\07b")
+(func (export "init") (param i32 i32) (local $c i32) (local $p i32)
+  (local.set $c (call $canvas (i32.const 5) (i32.const 1)))
+  (local.set $p (call $cells (local.get $c)))
+  (i32.store (local.get $p) (i32.const 0x61))
+  (i32.store (i32.add (local.get $p) (i32.const 16)) (i32.const 0x1b))
+  (i32.store (i32.add (local.get $p) (i32.const 32)) (i32.const 0x9b))
+  (i32.store (i32.add (local.get $p) (i32.const 48)) (i32.const 0x07))
+  (i32.store (i32.add (local.get $p) (i32.const 64)) (i32.const 0x62))
+  (drop (call $present (local.get $c) (i32.const 0) (i32.const 0)))
+  (call $log (i32.const 16) (i32.const 9)))
+(func (export "tick") (param i64))
+(func (export "event") (param i32 i32 i32 i32))

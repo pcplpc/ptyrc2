@@ -2,9 +2,11 @@
 //! `ptyrc <verb>`.
 
 mod apps;
+mod dev;
 mod manage;
 mod plugins;
 mod replay;
+mod store;
 mod tmux;
 mod tools;
 mod verbs;
@@ -116,6 +118,12 @@ enum Verb {
     },
     /// Run a client app: `ptyrc app bricks`; `ptyrc app` lists them
     App(apps::App),
+    /// Store apps: add, rm, update, ls, show, search
+    #[command(subcommand)]
+    Store(store::Store),
+    /// An app's author: check, entry
+    #[command(subcommand)]
+    Dev(dev::Dev),
     /// An interactive Python session with `pilot` connected
     Python(apps::Python),
     /// The apps of the session: start, stop, pause, restart; alone, a menu
@@ -351,7 +359,8 @@ pub fn tell_auto(auto: session::Auto) -> String {
 
 fn run(cli: Cli) -> Result<ExitCode, Fail> {
     let mut common = cli.common;
-    if !matches!(cli.verb, Verb::Run(_) | Verb::Replay(_) | Verb::Ls) {
+    let local = matches!(cli.verb, Verb::Store(_) | Verb::Dev(_));
+    if !local && !matches!(cli.verb, Verb::Run(_) | Verb::Replay(_) | Verb::Ls) {
         resolve_auto(&mut common)?;
     }
     match cli.verb {
@@ -397,6 +406,8 @@ fn run(cli: Cli) -> Result<ExitCode, Fail> {
         Verb::Replay(args) => replay::replay(args),
         Verb::Tape { verb } => replay::tape(&common, verb),
         Verb::App(args) => apps::app(&common, args),
+        Verb::Store(verb) => store::store(&common, verb),
+        Verb::Dev(verb) => dev::dev(verb),
         Verb::Python(args) => apps::python(&common, args),
         Verb::Manage(args) => manage::manage(&common, args),
         Verb::Tmux(verb) => tmux::tmux(&common, verb),

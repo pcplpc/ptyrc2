@@ -1902,6 +1902,12 @@ ptyrc manage [ls | start | stop | pause | resume | restart | forget |
 ptyrc tmux attach [-t SESSION] [-L NAME | -S PATH] [--app APP]...
 ptyrc tmux detach [-t SESSION] [-L NAME | -S PATH]
 ptyrc tmux restart [-t SESSION] [-L NAME | -S PATH] [--app APP]...
+ptyrc store add ORIGIN[@REF] [--latest] [--force] [--yes]
+ptyrc store rm ID|ORIGIN [--purge] ; update [ID|ORIGIN...] [--latest]
+      [--force] [--yes] ; ls ; show ID|ORIGIN ; search WORD
+                                  store apps (store-model.md, Install)
+ptyrc dev check [DIR] ; dev entry [DIR] [--remote NAME]
+                                  an app's author (store-model.md, Tools)
 ```
 
 `ptyrc app` executes `ptyrc-app` with its arguments as given, `ptyrc

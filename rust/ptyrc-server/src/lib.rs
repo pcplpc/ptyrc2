@@ -13,6 +13,8 @@ pub mod focus;
 mod grab;
 mod grants;
 pub use grab::{key_len, name as key_name};
+#[cfg(test)]
+mod glyph_tests;
 mod hands;
 mod hints;
 pub mod host;
@@ -21,6 +23,7 @@ mod hotkey;
 pub mod keys;
 pub mod mouse;
 mod paging;
+mod permissions;
 pub mod player;
 pub mod pty;
 pub mod record;
