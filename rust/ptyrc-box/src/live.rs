@@ -90,7 +90,23 @@ pub fn run(
     rate: f64,
     term: Arc<AtomicBool>,
 ) -> Result<i32, Error> {
+    run_confined(wasm, host, args, limits, rate, term, || Ok(()))
+}
+
+/// `run`, with `confine` called once the module is compiled and
+/// instantiated, before `init`: the place of the OS profile
+/// (`profile::apply`).
+pub fn run_confined(
+    wasm: &[u8],
+    host: Live,
+    args: &Value,
+    limits: Limits,
+    rate: f64,
+    term: Arc<AtomicBool>,
+    confine: impl FnOnce() -> Result<(), Error>,
+) -> Result<i32, Error> {
     let mut runner = Runner::load(wasm, host, limits)?;
+    confine()?;
     let start = Instant::now();
     let now = || (start.elapsed().as_secs_f64() * 1000.0 * rate) as u64;
     let exit = |done: Result<(), Error>| match done {

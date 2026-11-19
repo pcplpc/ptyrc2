@@ -1,0 +1,5 @@
+# Who may set a tier above untested: NAME [tested|approved] per line,
+# NAME as the forge names the author of a pull request. `approved`
+# (the default) may also change any listed version, yank, remove, and
+# edit files other than pointers. Empty: nobody; the policy is the
+# owner's.

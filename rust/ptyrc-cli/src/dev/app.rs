@@ -171,12 +171,26 @@ pub struct TestOpts {
 /// The flags of `ptyrc-box` that hold the app to what its manifest
 /// declares, less `deny`.
 fn grants(m: &Manifest, deny: &[String]) -> Result<Vec<OsString>, Fail> {
-    let declared: Vec<&str> = m.permissions.iter().map(|p| p.name.as_str()).collect();
+    let mut declared: Vec<&str> = m.permissions.iter().map(|p| p.name.as_str()).collect();
+    // `[limits]` asks `limit-memory`, `limit-time` (plan, Mechanism).
+    for l in &m.limits {
+        let p = match l.name.as_str() {
+            "memory-mib" | "canvas-screens" | "log-mib" => "limit-memory",
+            _ => "limit-time",
+        };
+        if !declared.contains(&p) {
+            declared.push(p);
+        }
+    }
     for d in deny {
-        if !manifest::PERMISSIONS.contains(&d.as_str()) {
+        let limit = ["limit-memory", "limit-time"].contains(&d.as_str());
+        if !manifest::PERMISSIONS.contains(&d.as_str()) && !limit {
             return Err(Fail::usage(
                 format!("--deny {d}: not a permission"),
-                format!("permissions: {}", manifest::PERMISSIONS.join(", ")),
+                format!(
+                    "permissions: {}, limit-memory, limit-time",
+                    manifest::PERMISSIONS.join(", ")
+                ),
             ));
         }
         if !declared.contains(&d.as_str()) {
@@ -195,6 +209,22 @@ fn grants(m: &Manifest, deny: &[String]) -> Result<Vec<OsString>, Fail> {
     Ok(flags)
 }
 
+/// The manifest as `ptyrc-box --manifest` takes it: what the app may
+/// know of itself, and `[limits]`.
+pub fn given(m: &Manifest) -> Value {
+    let permissions: Vec<Value> = (m.permissions.iter())
+        .map(|p| match p.words.is_empty() {
+            true => json!({"name": p.name}),
+            false => json!({"name": p.name, "words": p.words}),
+        })
+        .collect();
+    let limits: Map<String, Value> = (m.limits.iter())
+        .map(|l| (l.name.clone(), json!(l.value)))
+        .collect();
+    json!({"id": m.app.id, "version": m.app.version, "permissions": permissions,
+           "limits": limits})
+}
+
 pub fn test(o: TestOpts) -> Result<ExitCode, Fail> {
     let m = manifest_of(&o.dir)?;
     let args = init_args(&m, &o.args)?;
@@ -202,6 +232,8 @@ pub fn test(o: TestOpts) -> Result<ExitCode, Fail> {
     let program = runner()?;
     let status = Command::new(&program)
         .arg("--headless")
+        .arg("--manifest")
+        .arg(given(&m).to_string())
         .args(guest(&o.dir, &m)?)
         .arg(args.to_string())
         .args(&o.flags)

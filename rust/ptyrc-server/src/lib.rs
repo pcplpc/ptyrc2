@@ -35,6 +35,7 @@ pub mod screen;
 mod screen_tests;
 pub mod start;
 mod store;
+pub mod veil;
 
 pub use driver::{Config, Exit, replay, run};
 pub use engine::{ConnId, Ctx, Engine, Owned, PassThrough, Reply, SessionInfo, Token};

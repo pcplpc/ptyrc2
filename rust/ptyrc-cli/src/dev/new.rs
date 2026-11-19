@@ -9,6 +9,7 @@ use std::process::{Command, ExitCode, Stdio};
 const GPL: &str = include_str!("../../../../LICENSE.txt");
 const TEST: &str = include_str!("../../../../sdk/template/test.sh");
 const EXPECTED: &str = include_str!("../../../../sdk/template/expected.txt");
+const PROTOCOL: &str = include_str!("../../../../sdk/template/PROTOCOL.md");
 
 /// `(path, text, executable)`; `{{id}}` is replaced.
 type File = (&'static str, &'static str, bool);
@@ -17,6 +18,7 @@ const COMMON: &[File] = &[
     ("LICENSE.txt", GPL, false),
     ("test.sh", TEST, true),
     ("expected.txt", EXPECTED, false),
+    ("PROTOCOL.md", PROTOCOL, false),
 ];
 
 const SCRIPT: &[File] = &[

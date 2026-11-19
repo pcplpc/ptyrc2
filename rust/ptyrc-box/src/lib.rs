@@ -9,6 +9,8 @@ pub mod error;
 pub mod grants;
 pub mod headless;
 pub mod live;
+pub mod manifest;
+pub mod profile;
 pub mod runner;
 pub mod script;
 

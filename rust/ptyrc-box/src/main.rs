@@ -11,13 +11,25 @@
 //! (`--json`: one JSON value), the log on stderr. `--grant`, `--deny`,
 //! `--words`: the requests checked as the driver checks a store app.
 //! `--event`, `--key`: what the user does, at a session time.
+//! `--screen [T:]FILE`, again for each: the screen from T on.
+//! `--styles`: under each screen, its styles.
+//!
+//! `--manifest JSON`: the manifest as its reader (the driver, `ptyrc dev
+//! test`) read it: handed to `init` under `ptyrc:manifest`; its
+//! `[limits]` applied as far as `granted` (headless: the grants) holds
+//! `limit-memory`, `limit-time` (`manifest.rs`).
+//!
+//! The OS profile (`profile::apply`) is applied once the files are
+//! read and, live, the module loaded and the socket open.
+//! `--no-profile`: not applied, for debugging; said on stderr.
+//! `PTYRC_PROFILE=full`: a profile with a part missing is refused.
 //!
 //! Status: that of `exit`; 0 after SIGTERM; 70 a guest ended by the
-//! runner; 2 usage; 5 the connection.
+//! runner; 2 usage; 5 the connection, or the profile refused.
 
 use ptyrc_box::grants::Grants;
 use ptyrc_box::headless::{self, Inject, Options, Tape, Under};
-use ptyrc_box::{Error, Limits, live, script};
+use ptyrc_box::{Error, Limits, live, manifest, profile, script};
 use ptyrc_proto::{Client, session};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -25,9 +37,10 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-const USAGE: &str = "usage: ptyrc-box [--script] MODULE [ARGS]
-       ptyrc-box --headless [--script] MODULE [ARGS] [--size CxR] [--for T]
-                 [--at T,...] [--seed N] [--tape FILE | --screen FILE] [--json]
+const USAGE: &str = "usage: ptyrc-box [--no-profile] [--manifest JSON] [--script] MODULE [ARGS]
+       ptyrc-box --headless [--no-profile] [--manifest JSON] [--script] MODULE [ARGS]
+                 [--size CxR] [--for T] [--at T,...] [--seed N]
+                 [--tape FILE | --screen [T:]FILE...] [--json] [--styles]
                  [--grant NAME,...] [--deny NAME,...] [--words WORD,...]
                  [--event T:TOPIC:JSON]... [--key T:KEY]...
 T: milliseconds, or with a unit: 500ms, 2s";
@@ -75,9 +88,13 @@ fn millis(text: &str) -> Option<u64> {
     (v.is_finite() && v >= 0.0 && v * scale < 1e15).then(|| (v * scale).round() as u64)
 }
 
+/// `PTYRC_PROFILE=full`: refuse to start without the whole profile.
+const ENV_PROFILE: &str = "PTYRC_PROFILE";
+
 #[derive(Default)]
 struct Cli {
     headless: bool,
+    no_profile: bool,
     script: bool,
     module: Option<OsString>,
     args: Option<OsString>,
@@ -86,8 +103,11 @@ struct Cli {
     at: Vec<u64>,
     seed: Option<u64>,
     tape: Option<PathBuf>,
-    screen: Option<PathBuf>,
+    /// `(ms, file)`.
+    screen: Vec<(u64, PathBuf)>,
     json: bool,
+    styles: bool,
+    manifest: Option<manifest::Given>,
     grant: Option<Vec<String>>,
     deny: Vec<String>,
     words: Vec<String>,
@@ -124,6 +144,8 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
         match text.as_str() {
             "--headless" => cli.headless = true,
             "--script" => cli.script = true,
+            "--profile" => cli.no_profile = false,
+            "--no-profile" => cli.no_profile = true,
             "--size" => {
                 let v = string(value("--size")?);
                 let size = v
@@ -179,7 +201,20 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
                 cli.inject.push((t, Inject::Key(key.to_owned())));
             }
             "--tape" => cli.tape = Some(value("--tape")?.into()),
-            "--screen" => cli.screen = Some(value("--screen")?.into()),
+            "--screen" => {
+                let v = value("--screen")?;
+                let text = string(v.clone());
+                // `T:FILE` when T is a time; else the whole is the file.
+                let timed = (text.split_once(':')).and_then(|(t, f)| Some((millis(t)?, f)));
+                cli.screen.push(match timed {
+                    Some((t, f)) => (t, PathBuf::from(f)),
+                    None => (0, PathBuf::from(v)),
+                });
+            }
+            "--styles" => cli.styles = true,
+            "--manifest" => {
+                cli.manifest = Some(manifest::Given::parse(&string(value("--manifest")?))?);
+            }
             "--help" | "-h" => return Err(String::new()),
             t if t.starts_with("--") => return Err(format!("{t}: unknown option")),
             _ if cli.module.is_none() => cli.module = Some(arg),
@@ -192,20 +227,21 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
         || !cli.at.is_empty()
         || cli.seed.is_some()
         || cli.tape.is_some()
-        || cli.screen.is_some()
+        || !cli.screen.is_empty()
         || cli.json
+        || cli.styles
         || cli.grant.is_some()
         || !cli.deny.is_empty()
         || !cli.words.is_empty()
         || !cli.inject.is_empty();
     if headless_only && !cli.headless {
         return Err(
-            "--size, --for, --at, --seed, --tape, --screen, --json, --grant, --deny, \
-             --words, --event, --key: with --headless"
+            "--size, --for, --at, --seed, --tape, --screen, --json, --styles, --grant, \
+             --deny, --words, --event, --key: with --headless"
                 .into(),
         );
     }
-    if cli.tape.is_some() && (cli.screen.is_some() || cli.size.is_some()) {
+    if cli.tape.is_some() && (!cli.screen.is_empty() || cli.size.is_some()) {
         return Err("--tape gives the screen and its size: no --screen, no --size".into());
     }
     if cli.module.is_none() {
@@ -241,22 +277,78 @@ fn load(cli: &Cli, args: serde_json::Value) -> Result<(Vec<u8>, serde_json::Valu
     ))
 }
 
+/// Apply the OS profile, or say it is not. `told`: the lines of what
+/// was applied are logged (what is missing always is).
+fn confine(cli: &Cli, told: bool) -> Result<(), String> {
+    if cli.no_profile {
+        eprintln!("ptyrc-box: WARNING: --no-profile: the OS profile is NOT applied");
+        return Ok(());
+    }
+    let status = profile::apply();
+    for line in status.lines() {
+        if told || line.contains("MISSING") {
+            eprintln!("ptyrc-box: {line}");
+        }
+    }
+    let required = std::env::var_os(ENV_PROFILE).is_some_and(|v| v == "full");
+    if required && !status.full() {
+        return Err(format!("{ENV_PROFILE}=full: the profile is not whole"));
+    }
+    Ok(())
+}
+
+/// The argument of `init` with `ptyrc:manifest`, and the limits
+/// granted; without `--manifest`, as given and the defaults.
+fn given(cli: &Cli, args: serde_json::Value, granted: &[String]) -> (serde_json::Value, Limits) {
+    match &cli.manifest {
+        None => (args, Limits::default()),
+        Some(m) => (
+            manifest::with_member(args, m.member(granted)),
+            m.limits(granted),
+        ),
+    }
+}
+
 fn headless_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
     let read = |p: &Path| std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()));
-    let under = match (&cli.tape, &cli.screen) {
+    let under = match (&cli.tape, &cli.screen[..]) {
         (Some(p), _) => match read(p)
             .and_then(|t| Tape::parse(&t).map_err(|e| format!("{}: {e}", p.display())))
         {
             Ok(t) => Under::Tape(t),
             Err(e) => return fail(2, e),
         },
-        (_, Some(p)) => match read(p) {
-            Ok(t) => Under::Text(t),
-            Err(e) => return fail(2, e),
-        },
-        _ => Under::Empty,
+        (_, []) => Under::Empty,
+        (_, files) => {
+            let mut screens = Vec::new();
+            for (t, p) in files {
+                match read(p) {
+                    Ok(text) => screens.push((*t, text)),
+                    Err(e) => return fail(2, e),
+                }
+            }
+            Under::Screens(screens)
+        }
     };
+    if let Err(e) = confine(cli, false) {
+        return fail(5, e);
+    }
     let d = Options::default();
+    let grants = match (&cli.grant, cli.deny.is_empty()) {
+        (Some(grant), _) => Some(Grants::new(grant, &cli.deny, &cli.words)),
+        // Denied alone: every permission but these.
+        (None, false) => {
+            let all: Vec<String> = ALL.iter().map(|s| s.to_string()).collect();
+            Some(Grants::new(&all, &cli.deny, &cli.words))
+        }
+        (None, true) => None,
+    };
+    // Headless: what the grants hold, else all.
+    let granted: Vec<String> = match &grants {
+        Some(g) => g.held(),
+        None => ALL.iter().map(|s| s.to_string()).collect(),
+    };
+    let (args, limits) = given(cli, args, &granted);
     let options = Options {
         size: cli.size.unwrap_or(d.size),
         under,
@@ -265,15 +357,8 @@ fn headless_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
         at: cli.at.clone(),
         seed: cli.seed.unwrap_or(d.seed),
         inject: cli.inject.clone(),
-        grants: match (&cli.grant, cli.deny.is_empty()) {
-            (Some(grant), _) => Some(Grants::new(grant, &cli.deny, &cli.words)),
-            // Denied alone: every permission but these.
-            (None, false) => {
-                let all: Vec<String> = ALL.iter().map(|s| s.to_string()).collect();
-                Some(Grants::new(&all, &cli.deny, &cli.words))
-            }
-            (None, true) => None,
-        },
+        grants,
+        limits,
         ..d
     };
     let report = match headless::run(wasm, &options) {
@@ -286,7 +371,7 @@ fn headless_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
     if cli.json {
         println!("{}", report.to_json());
     } else {
-        print!("{report}");
+        print!("{}", report.text(cli.styles));
     }
     match report.end {
         None | Some(Error::Exit(0)) => ExitCode::SUCCESS,
@@ -335,8 +420,14 @@ fn main() -> ExitCode {
             return fail(5, e);
         }
     }
+    // Live: the driver tells what is granted.
+    let granted = (cli.manifest.as_ref())
+        .and_then(|m| m.granted.clone())
+        .unwrap_or_default();
+    let (args, limits) = given(&cli, args, &granted);
     let host = live::Live::new(client, Box::new(std::io::stderr()));
-    match live::run(&wasm, host, &args, Limits::default(), rate, term) {
+    let confined = || confine(&cli, true).map_err(Error::Host);
+    match live::run_confined(&wasm, host, &args, limits, rate, term, confined) {
         Ok(code) => ExitCode::from(code.clamp(0, 255) as u8),
         Err(e @ Error::Host(_)) => fail(5, e),
         Err(e) => fail(70, e),

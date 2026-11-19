@@ -131,6 +131,7 @@ fn new_app(tag: &str, rust: bool) -> PathBuf {
         "LICENSE.txt",
         "test.sh",
         "expected.txt",
+        "PROTOCOL.md",
     ] {
         assert!(app.join(f).is_file(), "{f}");
     }
@@ -426,10 +427,12 @@ fn grants_keys_events() {
         out,
         "--- 300 ms\nargs true 3\ntext shape\ngrab\nsize 9,9\ninput up\n\
          lowered at 0 ms: screen.text, to the degree shape\n\
-         not declared: text; the line of the manifest that would ask for it: \
-         [permissions] text = \"...\"\n\
-         not declared: keys-read; the line of the manifest that would ask for it: \
-         [permissions] keys-read = \"...\"\n"
+         lowered: text, not declared: fine if intended; else the manifest would ask for \
+         it: [permissions] text = \"...\"\n\
+         lowered: keys-read, not declared: fine if intended; else the manifest would ask \
+         for it: [permissions] keys-read = \"...\"\n\
+         note: declaring less is good: the user is asked less, and a lowered answer is \
+         an answer\n"
     );
     // The old forms, and `--` before the options.
     let old = run(&["--arg", "n=3", "--", "--wide"]);
@@ -456,8 +459,8 @@ fn grants_keys_events() {
         .map(|l| l["line"].as_str().unwrap())
         .collect();
     for line in [
-        "denied: shape, declared and answered no",
-        "denied: keys-arrows, declared and answered no",
+        "lowered: shape, declared and answered no",
+        "refused: keys-arrows, declared and answered no",
     ] {
         assert!(lacks.contains(&line), "{line}: {v}");
     }
@@ -472,7 +475,7 @@ fn grants_keys_events() {
     std::fs::copy(root().join("LICENSE.txt"), app.join("LICENSE.txt")).unwrap();
     let out = ok(&ptyrc(&app, &["dev", "test", "--for", "0"]));
     assert!(out.contains("text none\ngrab denied\n"), "{out}");
-    assert!(out.contains("not declared: keys-arrows"), "{out}");
+    assert!(out.contains("refused: keys-arrows, not declared"), "{out}");
     let said = ok(&ptyrc(&app, &["dev", "check"]));
     assert!(said.contains("asks no permission"), "{said}");
 }

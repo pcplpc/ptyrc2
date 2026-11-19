@@ -29,6 +29,8 @@ pub(crate) struct Found {
     pub declared: Declared,
     /// Permissions of the manifest the driver does not know.
     pub unknown: Vec<String>,
+    /// `[app] surface`.
+    pub surface: manifest::Surface,
     /// This commit has not started yet.
     first: bool,
 }
@@ -172,6 +174,7 @@ fn of_tree(
         ],
         declared,
         unknown,
+        surface: manifest.app.surface,
         first: !installed.started,
     })
 }

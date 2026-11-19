@@ -486,6 +486,7 @@ fn verb_run(args: Run) -> Result<ExitCode, Fail> {
         presets: !args.no_presets && !args.transparent,
         // Nothing is drawn on a transparent stream.
         hotkey: (!args.no_hotkey && !args.transparent).then(hotkey_command),
+        hide: hide_key().filter(|_| !args.transparent),
         handoff: false,
         apps,
         transparent: args.transparent,
@@ -509,6 +510,16 @@ pub fn hotkey_command() -> Vec<String> {
         "manage".into(),
         "--overlay".into(),
     ]
+}
+
+/// The key after ctrl+t that hides all: the one character of
+/// `$PTYRC_HIDE_KEY`, a letter or a digit; empty: none; else `h`.
+pub fn hide_key() -> Option<u8> {
+    match std::env::var("PTYRC_HIDE_KEY").as_deref().map(str::as_bytes) {
+        Ok(b"") => None,
+        Ok(&[key]) if key.is_ascii_alphanumeric() => Some(key),
+        _ => Some(b'h'),
+    }
 }
 
 fn verb_ls(common: &Common) -> Result<ExitCode, Fail> {

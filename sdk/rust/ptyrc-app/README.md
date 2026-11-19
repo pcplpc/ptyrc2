@@ -4,13 +4,17 @@ A ptyrc store app in Rust: a guest of ABI 1 (`rust/ptyrc-box/README.md`)
 for `wasm32-unknown-unknown`. The app implements `App`; `app!` exports
 it. No `extern`, no `unsafe` in the app.
 
+The methods, topics, permissions, manifest and limits: `PROTOCOL.md`,
+at the root of an app made by `ptyrc dev new` (here:
+`sdk/template/PROTOCOL.md`).
+
 ## An app
 
 ```
 myapp/
   Cargo.toml        crate-type = ["cdylib"], depends on ptyrc-app
   Cargo.lock
-  ptyrc-app.toml    the manifest (plan/store-model.md, Manifest)
+  ptyrc-app.toml    the manifest (PROTOCOL.md, Manifest)
   LICENSE.txt       the GPL text
   src/lib.rs
 ```
@@ -74,8 +78,9 @@ session (`PTYRC_SOCKET`); headless, through the library (Test).
 - The host drives: `init` once, then `tick` at the period asked and
   `event` for each topic subscribed, one at a time, never two at once.
   No thread, no sleep, no clock but `now_ms` (session time since start).
-- `init`, `tick`, `event`: 50 ms each (`init` 2 s); three late in a row:
-  paused. `call`: 1000 a second. Memory: 64 MiB.
+- `tick`, `event`: late past 50 ms, three late in a row: paused; ended
+  past 2 s. `init`: 2 s. `call`: 1000 a second. Memory: 64 MiB
+  (`PROTOCOL.md`, Limits).
 - A panic logs `panic: ...` and ends the app (`trap`). Nothing
   survives the end.
 - `std` works; there is no file, socket, clock, environment, stdout or
@@ -87,15 +92,15 @@ session (`PTYRC_SOCKET`); headless, through the library (Test).
 |---|---|
 | `trait App` | `init(args: Value) -> Self`; `tick(&mut self, now_ms: u64)`, `event(&mut self, topic: &str, data: Value)`, `stop(&mut self)`: optional. `args`: the arguments and options, parsed; `Null` when not JSON |
 | `app!(T)` | exports `init`, `tick`, `event`, `stop` for `T`. Once per module |
-| `call(method, params) -> Result<Value, Error>` | a protocol request (`plan/design.md`, Protocol); `params` a JSON object, `Value::Null` for `{}`; `Ok`: the `result` |
-| `Error { code, message, hint: Option }` | the protocol's codes; also `limit` (the rate), `gone` (the driver), `headless` (not answered without a session), `alloc`, `bad-answer` |
+| `call(method, params) -> Result<Value, Error>` | a protocol request (`PROTOCOL.md`); `params` a JSON object, `Value::Null` for `{}`; `Ok`: the `result` |
+| `Error { code, message, hint: Option }` | the protocol's codes (`unknown-method`, `denied`, ...); also `limit` (the rate), `gone` (the driver), `headless` (a method a test run does not answer), `alloc`, `bad-answer` |
 | `period(ms)` | the tick wanted; under 33: 33; 0: none (the default) |
 | `log(text)` | a line of the app's log; 1 MiB in all |
 | `random(&mut [u8])`, `random_u32()`, `random_below(n)` | from the host; `random_below`: `0..n` |
 | `exit(code) -> !` | the end |
 | `subscribe(&[topics])` | `size`, `draw`, `mouse`, `hover`, ... (`subscribe` of the Protocol) |
 | `size() -> (columns, rows)` | `session.info`; event `size` `{"size": [c, r]}` |
-| `put(sprite) -> id` | `draw.put` of a sprite as JSON (`plan/design.md`, scene) |
+| `put(sprite) -> id` | `draw.put` of a sprite as JSON (`PROTOCOL.md`, Methods) |
 | `text(x, y, rows, style) -> id` | `draw.put` of text rows at `(x, y)` of the raw frame; `style`: `{"fg": 11, "bold": true}`; a space is a hole |
 | `remove(id)` | `draw.remove` |
 | `Value`, `json!`, `json` | `serde_json` |
@@ -103,7 +108,9 @@ session (`PTYRC_SOCKET`); headless, through the library (Test).
 Anything else goes through `call`: `draw.update`, `widget.*`,
 `screen.*`, `frame.*`, `batch`, effects (`put(json!({"effect":
 {"name": "confetti", "params": {}}}))`). A request beyond the app's
-grants answers `denied` or a lowered result.
+grants answers `denied`, or a result cut to the degree held
+(`"degree"` in it). `screen.*` reads the program's cells, never a
+sprite.
 
 ### Canvas
 
@@ -140,8 +147,13 @@ each time as text, the requests refused, the limits met, the end
 `ptyrc_box::headless::run`: session time an argument, `random` from a
 seed, the same report every time; sprites, canvases and widgets drawn
 as the driver draws them, over an empty screen, a text or a tape. It
-answers `draw.*`, `widget.*`, `subscribe`, `unsubscribe`,
-`session.info`, `screen.text`, `screen.shape`; the rest: `headless`.
+answers `draw.put`, `.update`, `.remove`, `.clear`, `widget.declare`,
+`.show`, `.set`, `.hide`, `subscribe`, `input.grab`, `.release`,
+`session.info`, `screen.text`, `screen.shape`; another method of the
+driver: `headless`; a name the driver does not know: `unknown-method`.
+`ptyrc dev test --deny NAME`: a permission answered no; `--screen F`,
+`--tape F`: the screen; `--key MS:NAME`, `--event MS:TOPIC:JSON`:
+what the user does (`PROTOCOL.md`, Headless).
 
 ```rust
 // dev-dependencies: ptyrc-box = { path = ".../rust/ptyrc-box" }, serde_json

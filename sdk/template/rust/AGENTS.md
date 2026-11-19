@@ -9,6 +9,7 @@ no thread, no clock but `tick`.
 | | |
 |---|---|
 | `ptyrc-app.toml` | the manifest: id, version, entry, `[options]`, `[permissions]` |
+| `PROTOCOL.md` | the methods, topics, permissions, manifest and limits |
 | `src/lib.rs` | the app |
 | `vendor/ptyrc-app/` | the guest crate, vendored; `README.md` there is the API, whole |
 | `Cargo.toml`, `Cargo.lock` | keep the lock in the tree |
@@ -34,8 +35,7 @@ ptyrc_app::app!(MyApp);
   right or bottom edge of the canvas from the right or bottom, `-1` the
   last cell.
 - `call(method, params) -> Result<Value, Error>`: a request of the
-  protocol (`draw.put`, `widget.show`, `session.info`, ...);
-  `Error { code, message, hint }`.
+  protocol (`PROTOCOL.md`); `Error { code, message, hint }`.
 - The size: `ptyrc_app::size()`, then `subscribe(&["size"])` and
   `event("size", {"size": [c, r]})`.
 
@@ -46,9 +46,13 @@ ptyrc_app::app!(MyApp);
   the host (seeded in a test).
 - Limits: `tick`, `event` 50 ms (three late in a row: paused), 2 s
   (ended); `init` 2 s; memory 64 MiB; `call` 1000 a second; all
-  canvases four screens of cells.
+  canvases four screens of cells (`PROTOCOL.md`).
 - A panic logs `panic: ...` and ends the app (`ended: trap`).
-- Sprites go behind the program's text unless `"layer": "front"`.
+- Sprites go behind the program's text unless `"layer": "front"` and
+  `front` held; headless as the driver.
+- `screen.*` reads the program's cells, never a sprite. Subscribe to
+  `text` or `screen` and read on the event; headless sends them when
+  the screen changes (a tape, `--screen T:FILE`).
 - Keep the run deterministic: everything from `now_ms`, `args` and
   `random`.
 - The store does not install Rust apps yet; `dev check` says so.
@@ -68,12 +72,18 @@ ptyrc dev run [--NAME VALUE]   in a live session (ptyrc run -- $SHELL), rebuilt 
 `ptyrc dev test` prints the screen at each time (`--- T ms`), then
 `refused at T ms: METHOD (CODE)`, `lowered at T ms: METHOD, to the
 degree D`, `dropped at T ms: ...` (a key or an event that reached
-nobody), `not declared: NAME; the line of the manifest ...`, `limit
-met: NAME`, `ended: ...`; `--json`: the same as one JSON value.
+nobody), `refused: NAME, ...` or `lowered: NAME, ...` (a permission
+not held; not declared is fine if intended: declaring less is good),
+`limit met: NAME`, `ended: ...`; `--json`: the same as one JSON value,
+with the styles; `--styles`: a grid of the styles under each screen.
 
-The app holds what `[permissions]` declares; `--deny` answers a no, as
-the driver does: a reading cut to a lesser degree (`"degree"` in the
-answer), an act `denied`. Options of `[options]`: `--NAME VALUE`,
+The app holds what `[permissions]` declares (names: `PROTOCOL.md`);
+`--deny NAME,...` answers a no, as the driver does: a reading cut to a
+lesser degree (`"degree"` in the answer), an act `denied`, a topic
+silent. `--screen F`: a text under the app; `--tape F`: a recording.
+`--key MS:NAME`: a host key (to a grab); `--event MS:TOPIC:JSON`. A
+method headless does not answer: `headless`; one that does not exist:
+`unknown-method`. Options of `[options]`: `--NAME VALUE`,
 `--NAME`, `--no-NAME`, as `ptyrc app` takes them; after `--` when a
 name is one of ptyrc's.
 The app's log and cargo's go to stderr.

@@ -147,14 +147,14 @@ def test_layers(shell: Pilot) -> None:
 
 
 def test_animation_and_ttl(shell: Pilot) -> None:
-    anim = shell.draw(frames=[["1"], ["2"], ["3"]], frame_ms=60, loop=False, at=(50, 3))
-    seen = set()
-    deadline = time.monotonic() + 3
-    while anim.info() is not None and time.monotonic() < deadline:
-        seen.add(shown(shell)[3][50:51])
-        time.sleep(0.01)
-    assert anim.info() is None, "a finite animation removes itself"
-    assert {"2", "3"} <= seen
+    # Frames long enough to be seen by polling on a loaded machine.
+    anim = shell.draw(
+        frames=[["1"], ["2"], ["3"]], frame_ms=1500, loop=False, at=(50, 3)
+    )
+    for glyph in "123":
+        until(lambda g=glyph: shown(shell)[3][50:51] == g)
+    until(lambda: anim.info() is None)
+    assert shown(shell)[3][50:51].strip() == "", "a finite animation removes itself"
 
     forever = shell.draw(frames=[["x"], ["y"]], frame_ms=40, at=(50, 3))
     time.sleep(0.3)

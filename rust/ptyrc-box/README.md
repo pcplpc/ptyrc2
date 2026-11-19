@@ -4,8 +4,8 @@ The runner of store apps: one WebAssembly guest, its limits, its
 canvases. `plan/store-model.md` is the plan; this file is the ABI.
 
 ```
-ptyrc-box [--script] MODULE [ARGS]
-ptyrc-box --headless [--script] MODULE [ARGS] [--size CxR] [--for T]
+ptyrc-box [--no-profile] [--script] MODULE [ARGS]
+ptyrc-box --headless [--no-profile] [--script] MODULE [ARGS] [--size CxR] [--for T]
           [--at T,...] [--seed N] [--tape FILE | --screen FILE] [--json]
           [--grant NAME,...] [--deny NAME,...] [--words WORD,...]
           [--event T:TOPIC:JSON]... [--key T:KEY]...
@@ -15,7 +15,7 @@ Runs `MODULE` (a binary module; with `--script`, `APP.js`) in the
 session of `PTYRC_SOCKET`, presenting `PTYRC_TOKEN`. `ARGS`: the JSON
 given to `init`, default `{}`. The log is stderr. SIGTERM: `stop`, then
 the end. Status: that of `exit`; 0 after SIGTERM; 70 a guest ended by
-the runner; 2 usage; 5 the connection.
+the runner; 2 usage; 5 the connection, or the OS profile refused.
 
 `--headless`: no session; `headless::run` (Library). The report on
 stdout (`--json`: one JSON value), the log on stderr. `T`: ms, or
@@ -32,6 +32,45 @@ that of `exit`, or 70.
 - `--event T:TOPIC:JSON`: an event at `T`, to a topic subscribed and
   held. `--key T:KEY`: a key named as `input.send` names it, to the
   app when it grabbed it (`input.grab`); `ctrl+t` releases the grab.
+
+## OS profile
+
+`profile::apply`: the third wall (plan, Model). Live: once the module
+is read, compiled and instantiated, and the socket open; before `init`.
+Headless: once the files (`--tape`, `--screen`) are read; the report
+goes to stdout, open already. Not undone. Linux, every thread:
+
+- Landlock, every right handled, no rule: no file opened, created,
+  executed; ABI 4 on, no TCP bind or connect; ABI 6 on, no abstract
+  unix socket, no signal outside the process; ABI 8 on, every thread
+  (before: the calling thread only).
+- `PR_SET_NO_NEW_PRIVS`.
+- seccomp. Allowed: `read`, `write`, `recvfrom`, `sendto`, `recvmsg`,
+  `sendmsg` and their vectors, `close`, `futex`, memory (`mmap`,
+  `mprotect`, `mremap`, `madvise`, `brk`, `munmap`, `membarrier`),
+  time, sleeps and `restart_syscall`, `sched_yield`,
+  `sched_getaffinity`, signals to itself (`rt_sig*`, `sigaltstack`,
+  `tgkill` of its own pid), `getrandom`, `exit*`, threads (`clone`
+  with `CLONE_THREAD`; `clone3`: `ENOSYS`), `setsockopt`
+  `SO_RCVTIMEO`/`SO_SNDTIMEO`, `fcntl F_GETFD`, `prctl
+  PR_SET_NAME`/`PR_GET_NAME`. The process killed: `execve*`, `ptrace`,
+  `process_vm_*`, `process_madvise`, `pidfd_getfd`, `io_uring_*`,
+  `bpf`, `perf_event_open`, `userfaultfd`, keys, namespaces, mounts,
+  `open_by_handle_at`, modules, `kexec*`, `reboot`, `fork`, `vfork`:
+  no path of the runner makes them. The rest: `EPERM` (`open*`,
+  `socket`, `connect`, `kill`, ...): std and the engine probe some of
+  them on a cold path (cgroups, a panic), and a probe must fail, not
+  end the app.
+
+What applies is logged (`profile: ...`, live), what the kernel lacks
+always (`profile: MISSING: ...`): the profile is best effort.
+`PTYRC_PROFILE=full`: refused instead (status 5). `--no-profile`: none,
+for debugging, said on stderr. Elsewhere than Linux: none, said.
+
+The engine makes no memfd (`memory_init_cow(false)`): a module may be
+compiled under the profile (headless, the tests). `tests/profile.rs`:
+the profile from host code; `tests/abi.rs`, `tests/hostile/`,
+`tests/script.rs` run under it.
 
 ## Guest ABI, version 1
 
@@ -82,10 +121,11 @@ bytes in the guest's memory, no terminator. JSON is a text.
   `(ptr << 32) | len`. The guest frees it. 0: `alloc` gave none.
 - `{"result": ...}`, or `{"error": {"code", "message", "hint"?}}`. The
   codes of the protocol, and `limit` (the rate), `gone` (the driver),
-  `headless` (a run without a session answers `draw.put`, `update`,
-  `remove`, `clear`, `widget.declare`, `show`, `set`, `hide`,
-  `subscribe`, `unsubscribe`, `session.info`, `screen.text`,
-  `screen.shape`, `input.grab`, `input.release` only).
+  `headless` (a run without a session answers only `headless::SERVED`:
+  `draw.put`, `update`, `remove`, `clear`, `widget.declare`, `show`,
+  `set`, `hide`, `subscribe`, `session.info`, `screen.text`, `shape`,
+  `find`, `wait`, `cursor`, `frame.list`, `get`, `at`, `idle`,
+  `input.grab`, `input.release`).
 - Methods and topics: `plan/design.md`, Protocol.
 
 `canvas`, `cells`
@@ -191,10 +231,12 @@ print!("{report}");
   own.
 - `Report`: the screens at each time as text (one string a row,
   trailing spaces cut), the requests (`refused`: the code; `lowered`:
-  the degree; `content`, `frames` and `rows` left out), the log, the
-  limits met, the end, the permissions lacking (`lacks`: denied, or
-  not declared with the line of the manifest that would ask for it),
-  what was injected and reached nobody (`dropped`). `Report::to_json`.
+  the degree; `content`, `frames` and `rows` left out), the styles of
+  each screen (`[y, x, w, style]`), the log, the limits met, the end,
+  the permissions lacking (`lacks`: refused or lowered, declared or
+  not, with the line of the manifest that would ask for it), what was
+  injected and reached nobody (`dropped`), `notes` (a screen file that
+  wraps or scrolls). `Report::to_json`, `Report::text(styles)`.
 
 The size. `session.info` answers `{"protocol": 1, "server",
 "size": [columns, rows], "headless": true}` (headless: `"server":
@@ -213,38 +255,43 @@ of the tape.
 ## Speed
 
 `tests/live.rs` (ignored; needs `target/release/ptyrc`): a 200x60
-canvas repainted whole, 30 Hz, a headless driver. Measured 2026-11-19:
+canvas repainted whole, 30 Hz, a headless driver; it asserts the
+bound of the plan, one colour: 2 ms of the driver a frame
+(`PTYRC_SPEED_SLACK`: a factor on it, for a loaded machine). Processor
+time a frame, 90 frames, 30 Hz held; 2026-11-19, the two drivers run
+in turn on one machine (16 cores, load 10 to 20):
 
-| | driver, a frame | runner, a frame |
+| | before | now |
 |---|---|---|
-| | content as JSON runs, whole | `grid`, rows changed |
-|---|---|---|
-| one colour: driver | 2.1 ms | 2.5 ms |
-| one colour: runner | 0.6 ms | 0.3 ms |
-| a colour a cell: driver | 6.9 ms | 3.9 ms |
-| a colour a cell: runner | 13.8 ms | 1.5 ms |
+| one colour: driver | 2.44 ms | 1.67 to 1.78 ms |
+| a colour a cell: driver | 3.9 to 4.0 ms | 3.0 to 3.3 ms |
+| runner, one colour (a colour a cell) | 0.33 ms (1.5 ms) | the same |
 
-Processor time a frame, 90 frames. 30 Hz held. The bound of the plan
-(2 ms for the driver) is not. Where the driver's time goes, `grid`,
-timed inside it, one colour (a colour a cell):
+On a quieter machine (runner 0.22 ms): 1.44 ms and 2.8 ms. The bound
+holds for one colour; a colour a cell is over it.
+
+Inside the driver (`ptyrc-server`, `speed_200x60`, ignored: the
+median a frame, in process), one colour (a colour a cell):
 
 | | |
 |---|---|
-| read, JSON | 0.35 ms |
-| `draw.update`: base64, the canvas | 0.7 ms |
-| `compose`, a back layer | 1.2 ms |
-| `repair`, to the host | 0.4 ms (1.6 ms) |
+| `draw.update`: base64, the canvas | 0.25 ms (0.46 ms) |
+| tick, compose, repair | 0.80 ms (1.80 ms) |
+| of which compose, all rows changed | 0.52 ms |
+| one cell changed: `draw.update`, paint | 0.005 ms, 0.09 ms |
 
-Before, as JSON runs: the runs built and encoded took the runner's
-time; read and parsed, most of the driver's. The framing is no
-longer the cost: what is left is the composition of the whole screen
-and its repair, at each frame, whatever changed.
+The composition is kept (`scene::Composer`) and only the rows that
+changed are composed again: one cell changed costs a row, not the
+screen (0.009 ms against 0.6 ms). What is left with a colour a cell
+is the repair: some 200 KB of SGR a frame, written and fed to the
+model of the host (1.3 ms of the 1.8).
 
 ## Tests
 
 - `tests/abi.rs`: the ABI against small guests.
 - `tests/hostile/`: guests that must end contained.
 - `tests/live.rs`: above.
+- `tests/profile.rs`: the OS profile.
 - `tests/script.rs`: script apps and hostile scripts. They need the
   interpreter: `cargo build --release --manifest-path
   sdk/js/interp/Cargo.toml`. Without it they pass, testing nothing,
@@ -262,4 +309,5 @@ allocator).
   a debug build): `Module::deserialize` is `unsafe`, and `unsafe` is
   kept to `ptyrc-server`.
 - `wasmi` where wasmtime does not build.
-- The OS profile (milestone 6).
+- The OS profile: macOS; W^X after the drop (live, no `PROT_EXEC`
+  once compiled); the driver setting `PTYRC_PROFILE=full`.

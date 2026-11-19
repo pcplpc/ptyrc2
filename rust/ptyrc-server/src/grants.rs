@@ -108,6 +108,39 @@ impl Identity {
     }
 }
 
+/// Where a store app draws: `surface` of its manifest, with the frame
+/// it was started on or moved to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Surface {
+    /// Its widgets alone: a bare sprite is shown nowhere.
+    Widget,
+    /// Clipped to that frame.
+    Frame(u32),
+    /// Anywhere with `screen-wide`; else as `Frame`.
+    Screen(u32),
+}
+
+impl Surface {
+    /// Of the manifest, on `frame`.
+    pub fn of(surface: ptyrc_store::manifest::Surface, frame: u32) -> Surface {
+        use ptyrc_store::manifest::Surface as Of;
+        match surface {
+            Of::Widget => Surface::Widget,
+            Of::Frame => Surface::Frame(frame),
+            Of::Screen => Surface::Screen(frame),
+        }
+    }
+
+    /// Moved to `frame` (`app.move`).
+    pub fn moved(self, frame: u32) -> Surface {
+        match self {
+            Surface::Widget => Surface::Widget,
+            Surface::Frame(_) => Surface::Frame(frame),
+            Surface::Screen(_) => Surface::Screen(frame),
+        }
+    }
+}
+
 /// What an identity holds.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Grants {
@@ -273,9 +306,13 @@ pub(crate) const TOPICS: &[(&str, Gate)] = &[
     ("text", Read(Shape)),
     ("idle", Read(Shape)),
     ("draw", Open),
+    // Every key; those of its focused widget and of its grab come
+    // without a topic.
     ("input", Needs(Permission::KeysRead)),
-    ("mouse", Needs(Permission::Clicks)),
-    ("hover", Needs(Permission::Pointer)),
+    // Told event by event (`driver::own`): on its own things by
+    // default, elsewhere with `clicks`, `pointer`.
+    ("mouse", Open),
+    ("hover", Open),
     ("size", Open),
     ("colors", Read(Shape)),
     ("widgets", Open),
@@ -507,7 +544,8 @@ mod tests {
         assert_eq!(topic(&none, "nope"), Verdict::Denied(Why::Unlisted));
         let keys = Grants::of([Permission::KeysRead, Permission::Shape]);
         assert_eq!(topic(&keys, "input"), Verdict::Allow);
-        assert_eq!(topic(&keys, "hover"), Verdict::Lower(Degree::Shape));
+        assert_eq!(topic(&keys, "hover"), Verdict::Allow);
+        assert_eq!(topic(&none, "mouse"), Verdict::Allow);
     }
 
     #[test]

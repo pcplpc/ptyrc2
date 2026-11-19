@@ -41,7 +41,10 @@ OPEN |= {f"widget.{m}" for m in ("declare", "show", "set", "hide", "ask", "relea
 OPEN |= {"widget.list", "widget.borders"}
 OPEN_TOPICS = {"draw", "size", "widgets", "move", "exit"}
 #: Topics of a permission.
-ASKED_TOPICS = {"input": "keys-read", "mouse": "clicks", "hover": "pointer"}
+ASKED_TOPICS = {"input": "keys-read"}
+#: Told on its own widgets and sprites in front by default; on a sprite
+#: behind the text, or another's, of a permission.
+POINTER_TOPICS = {"mouse": "clicks", "hover": "pointer"}
 #: Named keys that are not text: a grab of these alone is `keys-arrows`.
 NOT_TEXT = {"up", "down", "left", "right", "home", "end", "pageup", "pagedown"}
 NOT_TEXT |= {"insert", "delete"} | {f"f{n}" for n in range(1, 13)}
@@ -132,7 +135,7 @@ def test_declares() -> None:
     assert list(flower["permissions"]) == ["shape", "words", "front"]
     assert names("flower", "-a") == ["shape", "words", "text", "front"]
     assert names("pace") == ["shape", "text", "keys-read", "clock"]
-    assert names("timer", "5m", "--click") == ["clicks"]
+    assert names("timer", "5m", "--click") == []
     # Words it cannot parse: the options as written.
     assert names("ask", "--front") == []
     assert _catalog.declares("nope", []) is None
@@ -218,6 +221,13 @@ def needs(sent: list[tuple[str, dict[str, Any]]], args: list[str]) -> set[str]:
     `grants::gate` tells them; `never ...`: a method closed to apps."""
     out = set()
     hand = bool(USER_HAND & set(args))
+
+    def front(params: dict[str, Any]) -> bool:
+        layer = params.get("layer")
+        return layer in ("front", "hud") or (type(layer) is int and layer > 0)
+
+    drawn = {"draw.put", "draw.ext"}
+    behind = any(m in drawn and not front(p) for m, p in sent)
     for method, params in sent:
         if method not in OPEN | TEXT | SHAPE | LAYOUT:
             out.add(f"never {method}")
@@ -230,12 +240,13 @@ def needs(sent: list[tuple[str, dict[str, Any]]], args: list[str]) -> set[str]:
         for topic in params.get("topics", ()) if method == "subscribe" else ():
             if topic in ASKED_TOPICS:
                 out.add(ASKED_TOPICS[topic])
+            elif topic in POINTER_TOPICS:
+                if behind:
+                    out.add(POINTER_TOPICS[topic])
             elif topic not in OPEN_TOPICS | TOPICS | LAYOUT_TOPICS:
                 out.add(f"never {topic}")
-        layer = params.get("layer")
-        tint = params.get("blend") in ("tint", "over") and layer is None
-        front = layer in ("front", "hud") or (type(layer) is int and layer > 0)
-        if (front or tint) and not hand:
+        tint = params.get("blend") in ("tint", "over") and params.get("layer") is None
+        if (front(params) or tint) and not hand:
             out.add("front-widget" if method.startswith("widget.") else "front")
     return out
 

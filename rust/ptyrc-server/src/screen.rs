@@ -5,11 +5,12 @@
 
 use crate::engine::{ConnId, Ctx, Engine, Reply, Token};
 use crate::rpc;
+use crate::veil::{self, Veil};
 use ptyrc_core::frames::{FrameConfig, FrameEvent, Frames, ScreenInput};
 use ptyrc_core::plugin::{DrawExt, TuiSupport};
 use ptyrc_core::scene::{Composer, Scene};
 use ptyrc_core::widgets::{WidgetConfig, Widgets};
-use ptyrc_core::{FrameId, FrameSel, OwnerId, TextQuery};
+use ptyrc_core::{FrameId, FrameSel, OwnerId, Surfaces, TextQuery};
 use ptyrc_proto::{ErrorCode, RpcError};
 use ptyrc_vt::{Grid, Rect, Vt, VtEvent, repair};
 use serde_json::{Value, json};
@@ -136,6 +137,8 @@ pub struct ScreenEngine {
     pub(crate) burst_time: Duration,
     /// The driver's box: over the app grid alone, the scene hidden.
     modal: Option<crate::engine::Modal>,
+    /// The key that hides all.
+    veil: Veil,
 }
 
 impl ScreenEngine {
@@ -180,6 +183,7 @@ impl ScreenEngine {
             paints: 0,
             burst_time: Duration::ZERO,
             modal: None,
+            veil: Veil::Off,
         }
     }
 
@@ -301,6 +305,20 @@ impl ScreenEngine {
             }
             repair(&mut self.host, &desired, out);
             self.painted = true;
+        } else if self.veil == Veil::Hidden {
+            repair(&mut self.host, self.app.grid(), out);
+            self.painted = true;
+        } else if let Veil::Told(names) = &self.veil {
+            let mut desired = match self.scene.is_empty() {
+                true => self.app.grid().clone(),
+                false => (self.scene)
+                    .compose_with(self.app.grid(), &self.frames, &mut self.composer)
+                    .clone(),
+            };
+            let boxes = self.boxes();
+            veil::tell(&mut desired, &boxes, names);
+            repair(&mut self.host, &desired, out);
+            self.painted = true;
         } else if self.scene.is_empty() {
             repair(&mut self.host, self.app.grid(), out);
             self.painted = false;
@@ -315,6 +333,24 @@ impl ScreenEngine {
         self.injected += (out.len() - before) as u64;
         self.unpainted = false;
         self.paints += 1;
+    }
+
+    /// The screen cells of each sprite shown, cut to its view, and its
+    /// owner.
+    fn boxes(&self) -> Vec<(Rect, u64)> {
+        let screen = self.app.grid().rect();
+        let sprites = self.scene.list_on(self.app.grid(), &self.frames);
+        let boxes = sprites.into_iter().filter_map(|s| {
+            let [x, y] = s.screen?;
+            let view = s.frame.and_then(|f| self.frames.info(f)).map(|i| i.rect);
+            let cut = |v: i64| v.clamp(0, i64::from(u16::MAX)) as u16;
+            let (x0, y0) = (cut(x), cut(y));
+            let (x1, y1) = (cut(x + i64::from(s.size[0])), cut(y + i64::from(s.size[1])));
+            let rect = Rect::new(x0, y0, x1 - x0, y1 - y0).intersect(&screen);
+            let rect = view.map_or(rect, |v| rect.intersect(&v));
+            (!rect.is_empty()).then_some((rect, s.owner))
+        });
+        boxes.collect()
     }
 
     /// Bring the host model up to date after a time without sprites.
@@ -795,8 +831,12 @@ impl Engine for ScreenEngine {
     }
 
     /// The topmost sprite whose box holds the cell; effects are not
-    /// clicked, nor the debug overlay.
+    /// clicked, nor the debug overlay; none while the key that hides
+    /// all has hidden them.
     fn sprite_at(&self, x: u16, y: u16) -> Option<Value> {
+        if self.veil != Veil::Off {
+            return None;
+        }
         let (cx, cy) = (x as i64, y as i64);
         let sprites = self.scene.list();
         let (hit, [sx, sy]) = sprites.iter().rev().find_map(|s| {
@@ -814,6 +854,10 @@ impl Engine for ScreenEngine {
             "y": y,
             "frame": at.map(|(id, _)| id),
             "pos": at.map(|(_, pos)| [pos.x, pos.y]),
+            // For the driver alone (`driver::Hit`), not sent.
+            "owner": hit.owner,
+            "widget": self.widgets.list().iter().any(|w| w.sprite == Some(hit.id)),
+            "layer": hit.layer,
         }))
     }
 
@@ -918,6 +962,11 @@ impl Engine for ScreenEngine {
 
     fn modal(&mut self, modal: Option<crate::engine::Modal>) {
         self.modal = modal;
+        self.unpainted = true;
+    }
+
+    fn veil(&mut self, veil: Veil) {
+        self.veil = veil;
         self.unpainted = true;
     }
 

@@ -1,0 +1,6 @@
+origin = "https://github.com/pcplpc/ptyrc2"
+manifest = "sdk/js/examples/confetti/ptyrc-app.toml"
+
+[[version]]
+commit = "5edcc80d4ecf89d58c1fed44adf6e58ad24900d8"
+tier = "untested"

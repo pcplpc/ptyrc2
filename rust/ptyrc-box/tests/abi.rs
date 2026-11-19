@@ -3,6 +3,9 @@
 
 mod common;
 
+/// Every test under the OS profile (`common::confine`).
+const CONFINE: bool = true;
+
 use common::{EVENT, INIT, TICK, guest};
 use ptyrc_box::Error;
 use ptyrc_box::headless::{Options, Tape, Under, run};
@@ -117,7 +120,7 @@ fn call_answers() {
         [
             r#"     0 {"rate":20}"#,
             r#"     0 {"result":{"headless":true,"protocol":1,"server":"ptyrc-box","size":[40,10]}}"#,
-            r#"     0 {"error":{"code":"headless","message":"input.send: not answered without a session"}}"#,
+            r#"     0 {"error":{"code":"headless","hint":"a method of the driver, answered in a session (ptyrc dev run), not in a test: PROTOCOL.md, Headless","message":"input.send: not answered without a session"}}"#,
         ]
     );
     assert_eq!(report.requests[1].params, json!({"text": "x"}));

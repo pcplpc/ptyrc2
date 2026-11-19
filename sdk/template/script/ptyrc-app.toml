@@ -10,3 +10,10 @@ surface = "screen"
 
 [options]
 label = { type = "string", default = "t", doc = "shown before the time" }
+
+# The format, every permission and limit: PROTOCOL.md.
+# [permissions]
+# shape = "why, in one line"
+# words = { list = ["food", "fish"], why = "why, in one line" }
+# [limits]
+# memory-mib = 128

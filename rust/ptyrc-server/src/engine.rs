@@ -260,6 +260,9 @@ pub trait Engine {
     /// Show the driver's box, or no more (`None`).
     fn modal(&mut self, _modal: Option<Modal>) {}
 
+    /// What is shown of what the clients drew: the key that hides all.
+    fn veil(&mut self, _veil: crate::veil::Veil) {}
+
     /// Members merged into the `session.info` result (an object, or null).
     fn session_extras(&self) -> Value {
         Value::Null

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The hotkey: ctrl+t twice in a row on the host keyboard. The driver
-//! runs a command on it (the manager), or ends it when it runs.
+//! runs a command on it (the manager), or ends it when it runs. The
+//! key that hides all: ctrl+t, then `h`.
 
 use crate::grab;
 use std::time::Duration;
@@ -15,6 +16,8 @@ pub(crate) enum Part {
     Keys(Vec<u8>),
     /// ctrl+t came twice in a row: it reaches nobody.
     Pair,
+    /// ctrl+t, then the key of `hide`: it reaches nobody.
+    Hide,
 }
 
 #[derive(Default)]
@@ -24,9 +27,19 @@ pub(crate) struct Hotkey {
     /// A pair ended the last read: the release of its second key, if
     /// it comes first, goes with it.
     paired: bool,
+    /// The key after ctrl+t that hides all, as typed without the
+    /// kitty protocol; `None`: no such key.
+    hide: Option<u8>,
 }
 
 impl Hotkey {
+    pub fn new(hide: Option<u8>) -> Hotkey {
+        Hotkey {
+            hide,
+            ..Hotkey::default()
+        }
+    }
+
     /// When the held key is due.
     pub fn due(&self) -> Option<Duration> {
         self.held.as_ref().map(|(_, at)| *at)
@@ -37,17 +50,19 @@ impl Hotkey {
         self.held.take().map(|(key, _)| key).unwrap_or_default()
     }
 
-    /// Sort keyboard bytes, in order: what goes on, and each pair of
-    /// ctrl+t in a row. A first ctrl+t is held, until the next key or
-    /// `due`. The release event of the second one (kitty keyboard
-    /// protocol) goes with the pair. Not `armed`: nothing is held.
-    pub fn parts(&mut self, bytes: &[u8], now: Duration, armed: bool) -> Vec<Part> {
+    /// Sort keyboard bytes, in order: what goes on, each pair of ctrl+t
+    /// in a row, each ctrl+t and `hide`. A first ctrl+t is held, until
+    /// the next key or `due`. The release event of the second key
+    /// (kitty keyboard protocol) goes with it. Not `armed`: no pair;
+    /// not `hides` either: nothing is held.
+    pub fn parts(&mut self, bytes: &[u8], now: Duration, armed: bool, hides: bool) -> Vec<Part> {
         let mut forward = self.flush();
         let mut rest = bytes;
         if std::mem::take(&mut self.paired) {
             rest = grab::skip_release(rest);
         }
-        if !armed {
+        let hide = self.hide.filter(|_| hides);
+        if !armed && hide.is_none() {
             forward.extend_from_slice(rest);
             return vec![Part::Keys(forward)];
         }
@@ -56,8 +71,14 @@ impl Hotkey {
         while !rest.is_empty() {
             let (key, tail) = rest.split_at(grab::key_len(rest));
             rest = tail;
-            let is_key = grab::legacy(key).as_deref().unwrap_or(key) == KEY;
+            let plain = grab::legacy(key);
+            let plain = plain.as_deref().unwrap_or(key);
+            let is_key = plain == KEY;
             match (held.take(), is_key) {
+                (Some(first), true) if !armed => {
+                    forward.extend(first);
+                    held = Some(key.to_vec());
+                }
                 (Some(_), true) => {
                     if !forward.is_empty() {
                         parts.push(Part::Keys(std::mem::take(&mut forward)));
@@ -72,6 +93,14 @@ impl Hotkey {
                     forward.extend_from_slice(key);
                     held = Some(first);
                 }
+                (Some(_), false) if hide.is_some_and(|h| plain == [h]) => {
+                    if !forward.is_empty() {
+                        parts.push(Part::Keys(std::mem::take(&mut forward)));
+                    }
+                    parts.push(Part::Hide);
+                    self.paired = rest.is_empty();
+                    rest = grab::skip_release(rest);
+                }
                 (first, false) => {
                     forward.extend(first.unwrap_or_default());
                     forward.extend_from_slice(key);
@@ -85,15 +114,21 @@ impl Hotkey {
         parts
     }
 
+    #[cfg(test)]
+    fn parts_of(&mut self, bytes: &[u8], now: Duration, armed: bool) -> Vec<Part> {
+        self.parts(bytes, now, armed, false)
+    }
+
     /// `parts` as one: what goes on, and whether a pair came.
     #[cfg(test)]
     fn sort(&mut self, bytes: &[u8], now: Duration, armed: bool) -> (Vec<u8>, bool) {
         let mut forward = Vec::new();
         let mut twice = false;
-        for part in self.parts(bytes, now, armed) {
+        for part in self.parts(bytes, now, armed, false) {
             match part {
                 Part::Keys(keys) => forward.extend(keys),
                 Part::Pair => twice = true,
+                Part::Hide => unreachable!("not asked"),
             }
         }
         (forward, twice)
@@ -147,7 +182,7 @@ mod tests {
     fn pairs_in_order() {
         let mut d = demo();
         let keys = |text: &str| Part::Keys(text.as_bytes().to_vec());
-        let parts = d.parts(b"a\x14\x14b\x14\x14\x14\x14c", T0, true);
+        let parts = d.parts_of(b"a\x14\x14b\x14\x14\x14\x14c", T0, true);
         let expected = [
             keys("a"),
             Part::Pair,
@@ -158,11 +193,39 @@ mod tests {
         ];
         assert_eq!(parts, expected);
         // The release of the second ctrl+t goes with the pair.
-        let parts = d.parts(b"\x1b[116;5u\x1b[116;5u\x1b[116;5:3ux", T0, true);
+        let parts = d.parts_of(b"\x1b[116;5u\x1b[116;5u\x1b[116;5:3ux", T0, true);
         assert_eq!(parts, [Part::Pair, keys("x")]);
         // In the next read too.
-        assert_eq!(d.parts(b"\x1b[116;5u\x1b[116;5u", T0, true), [Part::Pair]);
-        assert_eq!(d.parts(b"\x1b[116;5:3uy", T0, true), [keys("y")]);
+        assert_eq!(
+            d.parts_of(b"\x1b[116;5u\x1b[116;5u", T0, true),
+            [Part::Pair]
+        );
+        assert_eq!(d.parts_of(b"\x1b[116;5:3uy", T0, true), [keys("y")]);
+    }
+
+    #[test]
+    fn ctrl_t_then_h_hides() {
+        let mut d = Hotkey::new(Some(b'h'));
+        let keys = |text: &[u8]| Part::Keys(text.to_vec());
+        let parts = d.parts(b"a\x14hb\x14\x14\x14h", T0, true, true);
+        assert_eq!(
+            parts,
+            [keys(b"a"), Part::Hide, keys(b"b"), Part::Pair, Part::Hide]
+        );
+        assert_eq!(d.parts(b"\x14h", T0, false, true), [Part::Hide]);
+        assert_eq!(d.parts(b"\x14h", T0, false, true), [Part::Hide]);
+        // Not asked: the app's.
+        assert_eq!(d.parts(b"\x14h", T0, true, false), [keys(b"\x14h")]);
+        // Under a grab: no pair, the key that hides all the same.
+        let parts = d.parts(b"\x14\x14h\x14", T0, false, true);
+        assert_eq!(parts, [keys(b"\x14"), Part::Hide]);
+        assert_eq!(d.flush(), b"\x14");
+        // The kitty forms, the release of `h` with it.
+        let parts = d.parts(b"\x1b[116;5u\x1b[104u\x1b[104;1:3ux", T0, true, true);
+        assert_eq!(parts, [Part::Hide, keys(b"x")]);
+        // No such key: ctrl+t, h, typed.
+        let mut d = Hotkey::new(None);
+        assert_eq!(d.parts(b"\x14h", T0, false, true), [keys(b"\x14h")]);
     }
 
     #[test]

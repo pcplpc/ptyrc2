@@ -5,10 +5,15 @@
 //!   cargo build --release -p ptyrc-cli
 //!   cargo test --release -p ptyrc-box --test live -- --ignored --nocapture
 //!
-//! Prints the cost of a frame for the driver (the bound of the plan:
-//! 2 ms); asserts only that 30 Hz is held and the picture whole.
+//! Prints the cost of a frame for the driver; asserts that 30 Hz is
+//! held, the picture whole, and, one colour, the bound of the plan:
+//! 2 ms a frame of the driver's processor time (measured 1.4 to 1.8 ms).
+//! `PTYRC_SPEED_SLACK`: a factor on it, for a loaded machine.
 
 mod common;
+
+/// Not under the OS profile: the test starts the driver.
+const CONFINE: bool = false;
 
 use common::{EVENT, guest};
 use ptyrc_box::{Limits, live};
@@ -21,6 +26,8 @@ use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 const FRAMES: u32 = 90;
+/// The bound of the plan, one colour: ms of the driver a frame.
+const BOUND_MS: f64 = 2.0;
 
 /// A 200x60 canvas repainted whole at every tick, 30 Hz, `FRAMES`
 /// times. `vary`: 1, every cell its own colour (12000 cells sent a
@@ -148,5 +155,15 @@ fn repaint_200x60_at_30_hz() {
             wall.as_secs_f64()
         );
         assert!(wall < Duration::from_secs(4), "30 Hz not held: {wall:?}");
+        if vary == 0 {
+            let slack = std::env::var("PTYRC_SPEED_SLACK")
+                .ok()
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(1.0);
+            assert!(
+                cost < BOUND_MS * slack,
+                "{what}: {cost:.2} ms a frame, over {BOUND_MS} ms (PTYRC_SPEED_SLACK {slack})"
+            );
+        }
     }
 }

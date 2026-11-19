@@ -239,10 +239,26 @@ pub struct Registry {
     pub url: Option<String>,
 }
 
+/// What [`Registries::lookup_present`] found.
+#[derive(Debug, Default)]
+pub struct Present<'a> {
+    pub found: Option<(&'a Registry, Pointer)>,
+    pub absent: Vec<&'a Registry>,
+}
+
 /// Bound on the pointer files read by [`Registry::pointers`].
 const MAX_POINTERS: usize = 100_000;
 
 impl Registry {
+    /// Where a registry by `url` is fetched from; none for a `path`.
+    pub fn remote(&self) -> Option<crate::origin::Remote> {
+        let u = self.url.as_deref()?;
+        Some(match u.starts_with('/') {
+            true => crate::origin::Remote::Local(PathBuf::from(u)),
+            false => crate::origin::Remote::Https(u.to_string()),
+        })
+    }
+
     /// Every pointer file under `apps/`, sorted by path; symlinks are not
     /// followed. A file that does not parse, or does not speak for its
     /// place, is an error.
@@ -333,8 +349,9 @@ impl Registries {
     }
 
     /// Parses `store.toml`: `[[registry]]` with `name` and one of `url`
-    /// (https; cloned in `<cache>/ptyrc/registry/<name>/`) or `path` (a
-    /// local directory).
+    /// (https, or the absolute path of a git repository; fetched into
+    /// `<cache>/ptyrc/registry/<name>/`) or `path` (a directory, read as
+    /// it is).
     pub fn parse(dirs: &Dirs, src: &str) -> Result<Registries> {
         let hint = "[[registry]] name = \"main\", url = \"https://...\" or path = \"/dir\"";
         let f: StoreFile = toml::from_str(src).map_err(|e| {
@@ -359,7 +376,10 @@ impl Registries {
                 ));
             }
             let (dir, url) = match (r.url, r.path) {
-                (Some(u), None) if u.starts_with("https://") && !u.contains("::") => {
+                (Some(u), None)
+                    if (u.starts_with("https://") && !u.contains("::"))
+                        || (u.starts_with('/') && !u.contains(':')) =>
+                {
                     (dirs.registry().join(&r.name), Some(u))
                 }
                 (None, Some(p)) if p.is_absolute() => (p, None),
@@ -379,7 +399,67 @@ impl Registries {
         Ok(Registries { list })
     }
 
-    /// The first registry that lists `origin`, and its pointer.
+    /// `store.toml` for these registries.
+    pub fn to_toml(&self) -> String {
+        let q = |s: &str| toml::Value::String(s.to_string()).to_string();
+        let mut out = String::from(
+            "# The registries, in order: the first that lists an origin speaks for it.\n\
+             # url: https, or a git repository here (fetched); path: a directory (read as it is).\n",
+        );
+        for r in &self.list {
+            out.push_str(&format!("\n[[registry]]\nname = {}\n", q(&r.name)));
+            match &r.url {
+                Some(u) => out.push_str(&format!("url = {}\n", q(u))),
+                None => out.push_str(&format!("path = {}\n", q(&r.dir.to_string_lossy()))),
+            }
+        }
+        out
+    }
+
+    /// Appends a registry: `url` (`path` false) or `path`, validated as
+    /// `store.toml` would be.
+    pub fn add(&mut self, dirs: &Dirs, name: &str, source: &str, path: bool) -> Result<()> {
+        let q = |s: &str| toml::Value::String(s.to_string()).to_string();
+        let key = if path { "path" } else { "url" };
+        let one = format!("[[registry]]\nname = {}\n{key} = {}\n", q(name), q(source));
+        let new = Registries::parse(dirs, &one)?;
+        let mut all = self.clone();
+        all.list.extend(new.list);
+        Registries::parse(dirs, &all.to_toml())?;
+        *self = all;
+        Ok(())
+    }
+
+    /// Writes `<config>/ptyrc/store.toml`, 0600.
+    pub fn save(&self, dirs: &Dirs) -> Result<()> {
+        let text = self.to_toml();
+        Registries::parse(dirs, &text)?;
+        crate::install::write_private(&dirs.store(), text.as_bytes())
+    }
+
+    /// The first registry present here that lists `origin`, and its
+    /// pointer; and the registries absent here before it, which might
+    /// have spoken first.
+    pub fn lookup_present(&self, origin: &Origin) -> Result<Present<'_>> {
+        let mut out = Present::default();
+        let Some(rel) = origin.registry_path() else {
+            return Ok(out);
+        };
+        for r in &self.list {
+            if !r.dir.is_dir() {
+                out.absent.push(r);
+                continue;
+            }
+            if let Some(p) = read_pointer(&r.dir, &rel, origin)? {
+                out.found = Some((r, p));
+                break;
+            }
+        }
+        Ok(out)
+    }
+
+    /// The first registry that lists `origin`, and its pointer; a
+    /// registry absent here is an error.
     pub fn lookup(&self, origin: &Origin) -> Result<Option<(&Registry, Pointer)>> {
         let Some(rel) = origin.registry_path() else {
             return Ok(None);

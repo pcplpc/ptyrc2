@@ -347,10 +347,17 @@ def played(pilot: Pilot, *options: str) -> tuple[int, int]:
     whole all along, the grass on the last row, and the host be clean
     after."""
     lines = ("words in the way", "   more words here")
-    pilot.send("clear; printf '\\n\\n{}\\n\\n{}\\n'\n".format(*lines))
+    # The lines of a former play cleared first: the typed command shows
+    # them too, a `clear` after it would hide them during the play.
+    pilot.send("clear\n")
+    pilot.wait_for(lines[1].strip(), gone=True, frame="raw")
+    pilot.send("printf '\\n\\n{}\\n\\n{}\\n'\n".format(*lines))
     pilot.wait_for(lines[1].strip(), frame="raw")
     deadline = time.monotonic() + 4
-    while not pilot.panes() and time.monotonic() < deadline:
+    while time.monotonic() < deadline and not (
+        pilot.panes()
+        and all(s.strip() in "\n".join(pilot.dump()["host"]) for s in lines)
+    ):
         time.sleep(0.05)
     args = ["-s", pilot.session, "--seed", "4", "--night", "20", *options]
     status: list[int] = []

@@ -61,6 +61,11 @@ impl Out {
         );
         assert!(!self.stderr.contains("os error"), "{}", self.stderr);
     }
+
+    #[track_caller]
+    fn fails_status(&self, status: i32) {
+        assert_eq!(self.status, status, "stderr: {}", self.stderr);
+    }
 }
 
 impl Root {
@@ -461,7 +466,7 @@ fn rust_app_not_built_yet() {
 fn search_without_registry() {
     let r = Root::new("noreg");
     r.ptyrc(&["store", "search", "sand"])
-        .fails(2, "no registry", "[[registry]]");
+        .fails(2, "no registry", "ptyrc store registry add");
 }
 
 #[test]
@@ -615,4 +620,419 @@ fn untested_asks_on_a_terminal() {
     assert_eq!(status, 0, "{seen}");
     assert!(seen.contains("added"), "{seen}");
     assert!(r.lock().contains(&c1));
+}
+
+/// The pointer of `site` listing `versions` (`commit`, `tier`, extra).
+fn pointer_of(site: &str, versions: &[(&str, &str, &str)]) -> String {
+    let mut s = format!("origin = \"https://{site}\"\n");
+    for (c, t, extra) in versions {
+        s.push_str(&format!(
+            "\n[[version]]\ncommit = \"{c}\"\ntier = \"{t}\"\n{extra}"
+        ));
+    }
+    s
+}
+
+#[test]
+fn registry_fetched_and_yanked_after_install() {
+    let r = Root::new("fetched");
+    let site = "example.org/someone/sand";
+    let rel = "apps/example.org/someone/sand.toml";
+    let c1 = r.hosted(site, &files(&app_files("0.1.0")));
+    let (src, _) = r.bare(
+        "regsrc.git",
+        &[(rel, &pointer_of(site, &[(&c1, "approved", "")]))],
+    );
+    let src = src.to_str().unwrap();
+
+    let add = r.ptyrc(&["store", "registry", "add", "main", src]);
+    assert!(add.ok().stdout.contains("main: fetched"), "{}", add.stdout);
+    let ls = r.ptyrc(&["store", "registry", "ls"]);
+    assert!(ls.ok().stdout.contains("fetched"), "{}", ls.stdout);
+    let toml = std::fs::read_to_string(r.dirs().store()).unwrap();
+    assert!(toml.contains(&format!("url = \"{src}\"")), "{toml}");
+    assert!(
+        r.ptyrc(&["store", "add", site])
+            .ok()
+            .stdout
+            .contains("approved")
+    );
+
+    // Yanked upstream; the copy is a second old: not fetched yet.
+    r.bare(
+        "regsrc.git",
+        &[(
+            rel,
+            &pointer_of(site, &[(&c1, "approved", "yanked = true\n")]),
+        )],
+    );
+    let ls = r.ptyrc(&["store", "ls"]);
+    assert!(ls.ok().stdout.contains("approved"), "{}", ls.stdout);
+    let sync = r.ptyrc(&["store", "sync"]);
+    assert!(
+        sync.ok().stdout.contains("main: fetched"),
+        "{}",
+        sync.stdout
+    );
+    let ls = r.ptyrc(&["store", "ls"]);
+    let row = ls.ok().stdout.lines().nth(1).unwrap().to_string();
+    assert!(row.ends_with("yanked"), "{row}");
+    assert!(
+        ls.stderr.contains("the version installed is yanked"),
+        "{}",
+        ls.stderr
+    );
+    assert!(ls.stderr.contains("ptyrc store update"), "{}", ls.stderr);
+    let json: Value = serde_json::from_str(&r.ptyrc(&["--json", "store", "ls"]).stdout).unwrap();
+    assert_eq!(json[0]["listed"], "yanked");
+    assert_eq!(json[0]["tier"], "approved");
+    let show = r.ptyrc(&["store", "show", "sand"]);
+    assert!(
+        show.ok().stdout.contains("listed now   yanked"),
+        "{}",
+        show.stdout
+    );
+
+    // Nothing else listed, the head is the yanked commit: said.
+    r.ptyrc(&["store", "update", "sand"]).fails(
+        2,
+        "is yanked, and no other version is listed",
+        "ptyrc store rm",
+    );
+
+    // Another version approved: update takes it.
+    let c2 = r.hosted(site, &files(&app_files("0.2.0")));
+    r.bare(
+        "regsrc.git",
+        &[(
+            rel,
+            &pointer_of(
+                site,
+                &[(&c1, "approved", "yanked = true\n"), (&c2, "approved", "")],
+            ),
+        )],
+    );
+    r.ptyrc(&["store", "sync"]).ok();
+    let up = r.ptyrc(&["store", "update"]);
+    assert!(up.ok().stdout.contains("updated"), "{}", up.stdout);
+    assert!(r.lock().contains(&c2));
+    assert!(!r.ptyrc(&["store", "ls"]).stderr.contains("yanked"));
+}
+
+#[test]
+fn yanked_after_install_leaves_for_an_untested_head() {
+    let r = Root::new("yank-head");
+    let site = "example.org/someone/sand";
+    let rel = "apps/example.org/someone/sand.toml";
+    let c1 = r.hosted(site, &files(&app_files("0.1.0")));
+    r.registry(&[(rel, &pointer_of(site, &[(&c1, "approved", "")]))]);
+    r.ptyrc(&["store", "add", site]).ok();
+    let c2 = r.hosted(site, &files(&app_files("0.2.0")));
+    // Not yanked: the approved commit, the head passed over.
+    let held = r.ptyrc(&["store", "update", "--yes"]);
+    assert!(held.ok().stdout.contains("up to date"), "{}", held.stdout);
+    // Yanked: the hold is off; the untested head is asked for.
+    r.registry(&[(
+        rel,
+        &pointer_of(site, &[(&c1, "approved", "yanked = true\n")]),
+    )]);
+    r.ptyrc(&["store", "update"])
+        .fails(2, "untested; not installed", "--yes");
+    let up = r.ptyrc(&["store", "update", "--yes"]);
+    assert!(up.ok().stdout.contains("updated"), "{}", up.stdout);
+    assert!(r.lock().contains(&c2));
+}
+
+#[test]
+fn registry_unreachable() {
+    let r = Root::new("unreachable");
+    let site = "example.org/someone/sand";
+    let rel = "apps/example.org/someone/sand.toml";
+    let c1 = r.hosted(site, &files(&app_files("0.1.0")));
+    let none = r.dir.join("none.git");
+    let none = none.to_str().unwrap();
+    std::fs::create_dir_all(r.dirs().store().parent().unwrap()).unwrap();
+    std::fs::write(
+        r.dirs().store(),
+        format!("[[registry]]\nname = \"far\"\nurl = \"{none}\"\n"),
+    )
+    .unwrap();
+    let out = r.ptyrc(&["store", "add", "--yes", site]);
+    out.fails(5, "registry far: not fetched", "--latest, or ORIGIN@REF");
+    assert!(
+        out.stderr.contains("warning: registry far"),
+        "{}",
+        out.stderr
+    );
+    let latest = r.ptyrc(&["store", "add", "--yes", "--latest", site]);
+    assert!(latest.ok().stdout.contains("untested"), "{}", latest.stdout);
+    r.ptyrc(&["store", "rm", site]).ok();
+    r.ptyrc(&["store", "sync"])
+        .fails(5, "registry far", "git repository");
+
+    // Fetched once, then gone: the stale copy speaks, with a warning.
+    let (src, _) = r.bare(
+        "regsrc.git",
+        &[(rel, &pointer_of(site, &[(&c1, "approved", "")]))],
+    );
+    std::fs::write(
+        r.dirs().store(),
+        format!(
+            "[[registry]]\nname = \"far\"\nurl = \"{}\"\n",
+            src.display()
+        ),
+    )
+    .unwrap();
+    r.ptyrc(&["store", "sync"]).ok();
+    std::fs::remove_dir_all(&src).unwrap();
+    let out = r.ptyrc(&["store", "sync"]);
+    out.fails(5, "registry far", "the copy of");
+    // A day later, as the implicit sync sees it.
+    let stamp = r.dirs().registry().join("far/.fetched");
+    let text = std::fs::read_to_string(&stamp).unwrap();
+    let commit = text.split_whitespace().nth(1).unwrap().to_string();
+    std::fs::write(&stamp, format!("1 {commit}\n")).unwrap();
+    let add = r.ptyrc(&["store", "add", site]);
+    assert!(add.ok().stdout.contains("approved"), "{}", add.stdout);
+    assert!(
+        add.stderr.contains("the copy of 1970-01-01 is used"),
+        "{}",
+        add.stderr
+    );
+}
+
+#[test]
+fn registry_verbs() {
+    let r = Root::new("regverbs");
+    let plain = r.dir.join("plain");
+    std::fs::create_dir_all(plain.join("apps")).unwrap();
+    let p = plain.to_str().unwrap();
+    r.ptyrc(&["store", "registry", "add", "a", p])
+        .fails(2, "not a git repository", "--path");
+    r.ptyrc(&["store", "registry", "add", "--path", "a", p])
+        .ok();
+    r.ptyrc(&["store", "registry", "add", "--path", "a", p])
+        .fails(2, "name \"a\"", "unique");
+    r.ptyrc(&["store", "registry", "add", "b", "http://example.org/r"])
+        .fails(2, "http:", "an https URL");
+    let (src, _) = r.bare("regsrc.git", &[("apps/.keep", "")]);
+    r.ptyrc(&["store", "registry", "add", "b", src.to_str().unwrap()])
+        .ok();
+    let ls = r.ptyrc(&["store", "registry", "ls"]);
+    let lines: Vec<&str> = ls.ok().stdout.lines().collect();
+    assert!(
+        lines[0].starts_with("a  path ") && lines[1].starts_with("b  url "),
+        "{lines:?}"
+    );
+    assert!(r.dirs().registry().join("b").is_dir());
+    r.ptyrc(&["store", "registry", "rm", "b"]).ok();
+    assert!(!r.dirs().registry().join("b").exists());
+    r.ptyrc(&["store", "registry", "rm", "b"])
+        .fails(4, "registry b", "ptyrc store registry ls");
+    let toml = std::fs::read_to_string(r.dirs().store()).unwrap();
+    assert!(
+        toml.contains("name = \"a\"") && !toml.contains("name = \"b\""),
+        "{toml}"
+    );
+}
+
+#[test]
+fn search_reads_the_index() {
+    let r = Root::new("searchix");
+    let site = "example.org/someone/garden";
+    let rel = "apps/example.org/someone/garden.toml";
+    let c1 = "1".repeat(40);
+    let index = serde_json::json!({
+        "format": 1,
+        "apps": [{
+            "origin": site,
+            "url": format!("https://{site}"),
+            "manifest": "ptyrc-app.toml",
+            "id": "sand",
+            "summary": "Grains that pile\u{1b}[2J on text.",
+            "permissions": [{"name": "text", "why": "it reads", "colour": "red"}],
+        }]
+    });
+    r.registry(&[
+        (rel, &pointer_of(site, &[(&c1, "tested", "")])),
+        ("index.json", &index.to_string()),
+    ]);
+    let found = r.ptyrc(&["store", "search", "PILE"]);
+    assert!(found.ok().stdout.contains(site), "{}", found.stdout);
+    assert!(
+        found.stdout.contains("Grains that pile[2J on text."),
+        "{}",
+        found.stdout
+    );
+    assert!(!found.stdout.contains('\u{1b}'));
+    let show = r.ptyrc(&["store", "show", site]);
+    assert!(
+        show.ok().stdout.contains("summary      Grains"),
+        "{}",
+        show.stdout
+    );
+    assert!(show.stdout.contains("  text: it reads"), "{}", show.stdout);
+    // A broken index: passed over.
+    r.registry(&[("index.json", "{")]);
+    assert_eq!(r.ptyrc(&["store", "search", "pile"]).status, 1);
+    assert!(
+        r.ptyrc(&["store", "search", "garden"])
+            .ok()
+            .stdout
+            .contains(site)
+    );
+}
+
+/// The colours of `ptyrc-store` are the pop-up's (`ptyrc-server`,
+/// `popup::told`), read from its source.
+#[test]
+fn colours_are_the_popups() {
+    let src = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../ptyrc-server/src/popup.rs"),
+    )
+    .unwrap();
+    let body = &src[src.find("fn told(").unwrap()..];
+    let body = &body[..body.find("\n}\n").unwrap()];
+    let mut seen = 0;
+    for line in body.lines() {
+        let line = line.trim();
+        let Some((variant, rest)) = line.split_once(" =>") else {
+            continue;
+        };
+        let variant = variant.split_whitespace().next().unwrap();
+        let colour = ["Plain", "Amber", "Red"]
+            .into_iter()
+            .find(|c| {
+                rest.trim_end_matches([',', ')']).ends_with(c) || rest.contains(&format!(", {c})"))
+            })
+            .unwrap_or_else(|| panic!("{line}"));
+        let mut name = String::new();
+        for (i, ch) in variant.chars().enumerate() {
+            if ch.is_uppercase() && i > 0 {
+                name.push('-');
+            }
+            name.push(ch.to_ascii_lowercase());
+        }
+        if name.starts_with("limit-") {
+            continue;
+        }
+        let ours = ptyrc_store::manifest::colour(&name);
+        assert_eq!(format!("{ours:?}"), colour, "{name}");
+        seen += 1;
+    }
+    assert!(seen >= ptyrc_store::manifest::PERMISSIONS.len(), "{seen}");
+}
+
+/// The registry's scripts in a repository of their own: the example
+/// listed, a pull request checked, the index and the page built.
+#[test]
+fn registry_scripts() {
+    let r = Root::new("scripts");
+    let here = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../registry");
+    let mut skel = Vec::new();
+    for rel in [
+        "README.md",
+        "MAINTAINERS",
+        "ci/check.sh",
+        "ci/merge.sh",
+        "apps/github.com/pcplpc/ptyrc2/sdk/js/examples/confetti.toml",
+    ] {
+        skel.push((rel, std::fs::read_to_string(here.join(rel)).unwrap()));
+    }
+    // The example pointer parses and speaks for its place.
+    let p = Pointer::parse("example", &skel[4].1).unwrap();
+    assert_eq!(p.origin().unwrap().registry_path().unwrap(), skel[4].0);
+    let mut skel: Vec<(&str, String)> = skel.into_iter().take(4).collect();
+    skel[1].1.push_str("mia\ntom tested\n");
+    let w = r.work("registry", &files(&skel));
+    git(
+        &w,
+        &["update-index", "--chmod=+x", "ci/check.sh", "ci/merge.sh"],
+    );
+    let site = "example.org/someone/sand";
+    let rel = "apps/example.org/someone/sand.toml";
+    let c1 = r.hosted(site, &files(&app_files("0.1.0")));
+    let base = git(&w, &["rev-parse", "HEAD"]);
+    let run = |script: &str, args: &[&str]| {
+        let out = Command::new("sh")
+            .arg(w.join("ci").join(script))
+            .args(args)
+            .envs(r.env())
+            .env("PTYRC", BIN)
+            .current_dir(&w)
+            .output()
+            .unwrap();
+        Out {
+            status: out.status.code().unwrap_or(-1),
+            stdout: String::from_utf8(out.stdout).unwrap(),
+            stderr: String::from_utf8(out.stderr).unwrap(),
+        }
+    };
+    // A pull request: the app, untested, by anyone.
+    let head = r.work(
+        "registry",
+        &[(rel, &pointer_of(site, &[(&c1, "untested", "")]))],
+    );
+    let head = git(&head, &["rev-parse", "HEAD"]);
+    let ok = run("check.sh", &[&base, &head, "eve"]);
+    assert!(
+        ok.ok().stdout.contains(&format!("checked {site} at {c1}")),
+        "{}",
+        ok.stdout
+    );
+    // Approved by eve: refused; by tom: too far; by mia: fine.
+    let approved = |by: &str| pointer_of(site, &[(&c1, "approved", &format!("by = \"{by}\"\n"))]);
+    let w2 = r.work("registry", &[(rel, &approved("eve"))]);
+    let h2 = git(&w2, &["rev-parse", "HEAD"]);
+    run("check.sh", &[&head, &h2, "eve"]).fails(1, "untested to approved", "by = \"eve\"");
+    run("check.sh", &[&head, &h2, "tom"]).fails(1, "untested to approved", "by = \"tom\"");
+    let w3 = r.work("registry", &[(rel, &approved("mia"))]);
+    let h3 = git(&w3, &["rev-parse", "HEAD"]);
+    run("check.sh", &[&head, &h3, "mia"]).ok();
+    // A commit that does not pass `dev check`.
+    let bad = r.hosted(site, &[("LICENSE", "all rights reserved\n")]);
+    let w4 = r.work(
+        "registry",
+        &[(
+            rel,
+            &pointer_of(
+                site,
+                &[(&c1, "approved", "by = \"mia\"\n"), (&bad, "untested", "")],
+            ),
+        )],
+    );
+    let h4 = git(&w4, &["rev-parse", "HEAD"]);
+    run("check.sh", &[&h3, &h4, "eve"]).fails(1, "GPL version 3", "LICENSE or COPYING");
+    let json = Command::new(BIN)
+        .args([
+            "--json",
+            "dev",
+            "registry-check",
+            "--author",
+            "eve",
+            "--repo",
+        ])
+        .arg(&w)
+        .args([&h3, &h4])
+        .envs(r.env())
+        .output()
+        .unwrap();
+    let json: Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(json["ok"], false);
+    run("check.sh", &[&base]).fails_status(2);
+
+    // On merge: the index and the page.
+    git(&w, &["reset", "--quiet", "--hard", &h3]);
+    run("merge.sh", &[]).ok();
+    let ix: Value =
+        serde_json::from_str(&std::fs::read_to_string(w.join("index.json")).unwrap()).unwrap();
+    assert_eq!(ix["apps"][0]["origin"], site);
+    assert_eq!(ix["apps"][0]["tier"], "approved");
+    assert_eq!(ix["apps"][0]["summary"], "Sand that piles on your text.");
+    assert_eq!(ix["apps"][0]["permissions"][0]["colour"], "plain");
+    let html = std::fs::read_to_string(w.join("site/index.html")).unwrap();
+    assert!(html.contains("Sand that piles on your text."));
+    assert!(html.contains("<span class=\"approved\">approved</span>"));
+    r.ptyrc(&["dev", "index", "/no/such"])
+        .fails(4, "no apps/", "registry");
 }

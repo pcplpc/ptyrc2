@@ -17,6 +17,13 @@ use unicode_width::UnicodeWidthChar;
 /// cell's text is untrusted (a sprite's, a widget's).
 fn glyph(cell: &Cell) -> Cow<'_, str> {
     let text = cell.text.as_str();
+    if let [b] = text.as_bytes()
+        && (0x20..0x7f).contains(b)
+        && cell.width == 1
+    {
+        // Printable ASCII: no control, nothing hidden, one column.
+        return Cow::Borrowed(text);
+    }
     let mut chars = text.chars();
     let ok = match chars.next() {
         Some(c) if !c.is_control() && !is_hidden(c) => {

@@ -395,6 +395,7 @@ fn wrap(args: Wrap) -> Result<ExitCode, Fail> {
         argv: plain.clone(),
         name: Some(name.clone()),
         hotkey: Some(crate::hotkey_command()),
+        hide: crate::hide_key(),
         apps: (args.app.iter().map(command))
             .map(|argv| {
                 let declares = crate::manage::declares(&argv);

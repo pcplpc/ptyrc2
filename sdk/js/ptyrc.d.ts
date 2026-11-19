@@ -38,8 +38,8 @@
 declare module "ptyrc" {
   /**
    * A request of the ptyrc protocol, answered before it returns:
-   * `call("subscribe", { topics: ["size"] })`. The methods and their
-   * members: `plan/design.md`, Protocol. At most 1000 a second.
+   * `call("subscribe", { topics: ["size"] })`. The methods, topics and
+   * the permission each needs: `PROTOCOL.md`. At most 1000 a second.
    * @throws PtyrcError when the request is refused.
    */
   export function call(method: string, params?: object): any;
@@ -49,7 +49,9 @@ declare module "ptyrc" {
     /**
      * The code of the protocol: `denied` (a permission the app does
      * not hold: go on without), `limit` (too many calls a second),
-     * `usage`, `not-found`, `headless` (a test run has no session), ...
+     * `bad-params`, `no-sprite`, `not-usable`, `unknown-method`,
+     * `headless` (a method a test run does not answer), ...
+     * `PROTOCOL.md`, Errors.
      */
     code: string;
     /** What would cure it, when the host knows. */
@@ -103,7 +105,7 @@ declare module "ptyrc" {
     alpha?: number;
     /** Removed after that long. */
     ttl_ms?: number;
-    /** Other members of a sprite (`plan/design.md`, scene). */
+    /** Other members of a sprite: `layer`, `motion`, ... (`PROTOCOL.md`). */
     [member: string]: unknown;
   }
 

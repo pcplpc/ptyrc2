@@ -4,6 +4,7 @@
 
 mod app;
 mod new;
+mod registry;
 
 use crate::store::io_text;
 use crate::{Common, Fail};
@@ -56,9 +57,14 @@ pub enum Dev {
         /// time; its size is the screen's
         #[arg(long, value_name = "FILE", conflicts_with_all = ["screen", "size"])]
         tape: Option<PathBuf>,
-        /// A text file as the program's screen under the app
-        #[arg(long, value_name = "FILE")]
-        screen: Option<PathBuf>,
+        /// A text file as the program's screen under the app, from
+        /// session time T on [default T: 0]; again for each change
+        #[arg(long, value_name = "[T:]FILE")]
+        screen: Vec<String>,
+        /// Under each screen, a grid of its styles: a letter per style
+        /// that is not the default, and the legend
+        #[arg(long)]
+        styles: bool,
         /// An option of the manifest's [options]; again for each
         #[arg(long = "arg", value_name = "NAME=VALUE")]
         args: Vec<String>,
@@ -107,6 +113,8 @@ pub enum Dev {
         #[arg(long, value_name = "NAME")]
         remote: Option<String>,
     },
+    #[command(flatten)]
+    Registry(registry::RegistryDev),
 }
 
 pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
@@ -114,6 +122,7 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
     match verb {
         Dev::New { name, rust } => new::new(&name, rust),
         Dev::Check { dir } => check(&here(dir)),
+        Dev::Registry(v) => registry::registry_dev(common.json, v),
         Dev::Test {
             dir,
             size,
@@ -122,6 +131,7 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
             seed,
             tape,
             screen,
+            styles,
             mut args,
             mut deny,
             events,
@@ -145,6 +155,7 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
                         args.extend(words.by_ref());
                     }
                     "--json" if inline.is_none() => json = true,
+                    "--styles" if inline.is_none() => flags.push("--styles".into()),
                     "--arg" => args.push(value()),
                     "--deny" => deny.push(value()),
                     "--size" | "--for" | "--at" | "--seed" | "--tape" | "--screen" | "--event"
@@ -164,12 +175,18 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
             flag("--at", at.map(Into::into));
             flag("--seed", seed.map(|s| s.to_string().into()));
             flag("--tape", tape.map(Into::into));
-            flag("--screen", screen.map(Into::into));
+            for s in screen {
+                flag("--screen", Some(s.into()));
+            }
+
             for e in events {
                 flag("--event", Some(e.into()));
             }
             for k in keys {
                 flag("--key", Some(k.into()));
+            }
+            if styles {
+                flags.push("--styles".into());
             }
             if json {
                 flags.push("--json".into());

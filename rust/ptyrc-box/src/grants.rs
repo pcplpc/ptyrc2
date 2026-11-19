@@ -75,6 +75,11 @@ impl Grants {
         self.declared.contains(name)
     }
 
+    /// The permissions held, by name.
+    pub fn held(&self) -> Vec<String> {
+        self.held.iter().cloned().collect()
+    }
+
     /// The highest degree held.
     pub fn degree(&self) -> Degree {
         let held = LADDER.into_iter().filter(|d| self.holds(d.name()));
@@ -108,6 +113,71 @@ pub enum Gate {
     /// Closed to apps whatever they hold.
     Never,
 }
+
+/// Every method the driver knows (`ptyrc-server`, `grants::METHODS`);
+/// held to it by `tests/protocol.rs`.
+pub const METHODS: &[&str] = &[
+    "auth",
+    "batch",
+    "subscribe",
+    "session.info",
+    "session.resize",
+    "session.colors",
+    "session.handoff",
+    "screen.text",
+    "screen.cells",
+    "screen.find",
+    "screen.shape",
+    "screen.cursor",
+    "screen.wait",
+    "input.send",
+    "input.click",
+    "input.grab",
+    "input.release",
+    "tape.status",
+    "tape.step",
+    "tape.seek",
+    "tape.play",
+    "tape.pause",
+    "tape.quit",
+    "frame.list",
+    "frame.get",
+    "frame.at",
+    "frame.text",
+    "frame.heat",
+    "frame.idle",
+    "draw.put",
+    "draw.update",
+    "draw.remove",
+    "draw.clear",
+    "draw.list",
+    "draw.ext",
+    "draw.exts",
+    "layer.define",
+    "layer.list",
+    "widget.declare",
+    "widget.show",
+    "widget.set",
+    "widget.hide",
+    "widget.ask",
+    "widget.release",
+    "widget.focus",
+    "widget.blur",
+    "widget.list",
+    "widget.borders",
+    "app.list",
+    "app.start",
+    "app.enrol",
+    "app.stop",
+    "app.pause",
+    "app.resume",
+    "app.restart",
+    "app.forget",
+    "app.move",
+    "app.permissions",
+    "debug.overlay",
+    "debug.dump",
+];
 
 /// Methods closed to apps whatever they hold (`grants::METHODS`, `Never`).
 const NEVER: &[&str] = &[
@@ -154,6 +224,9 @@ pub fn gate(method: &str, params: &serde_json::Value) -> Gate {
     match method {
         _ if NEVER.contains(&method) || method.starts_with("tape.") => Gate::Never,
         "screen.shape" if words.is_some_and(|w| !w.is_empty()) => Gate::Read(Degree::Words),
+        "screen.wait" if params.get("pattern").is_none_or(|p| p.is_null()) => {
+            Gate::Read(Degree::Shape)
+        }
         "screen.shape" | "screen.cursor" | "frame.heat" | "frame.idle" => Gate::Read(Degree::Shape),
         "screen.text" | "screen.cells" | "screen.find" | "screen.wait" | "frame.text"
         | "session.info" => Gate::Read(Degree::Text),

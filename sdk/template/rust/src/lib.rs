@@ -22,10 +22,9 @@ impl Clock {
         // Right-aligned: the last cell of the canvas, at -1, the last column.
         let len = text.chars().count() as u32;
         self.canvas.text(WIDTH.saturating_sub(len), 0, &text);
-        self.canvas.present(&json!({
-            "anchor": {"at": [-1, 0], "space": "view"},
-            "layer": "front",
-        }));
+        // Behind the text, as an app that declares nothing draws.
+        self.canvas
+            .present(&json!({"anchor": {"at": [-1, 0], "space": "view"}}));
     }
 }
 

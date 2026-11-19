@@ -159,7 +159,7 @@ impl StoreLock {
 }
 
 /// Writes `bytes` to `p`, 0600, by a rename.
-fn write_private(p: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write_private(p: &Path, bytes: &[u8]) -> Result<()> {
     let dir = p.parent().expect("a file has a parent");
     mkdir(dir)?;
     let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("file");

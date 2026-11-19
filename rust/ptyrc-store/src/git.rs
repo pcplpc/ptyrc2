@@ -331,6 +331,16 @@ impl Repo {
         }
     }
 
+    /// The commit `rev` names in this repository (`main`, `HEAD~1`, an
+    /// id).
+    pub fn commit(&self, rev: &str) -> Result<String> {
+        if rev.is_empty() || rev.starts_with('-') || rev.chars().any(|c| c.is_control()) {
+            return Err(fetch_err(format!("{rev:?}: not a revision")));
+        }
+        self.resolve(&format!("{rev}^{{commit}}"))
+            .map_err(|e| e.with_hint("a branch, a tag or a commit of the repository"))
+    }
+
     fn resolve(&self, rev: &str) -> Result<String> {
         let out = self.run(
             self.git(None)

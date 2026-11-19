@@ -8,6 +8,9 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+/// Every guest under the OS profile (`common::confine`).
+const CONFINE: bool = true;
+
 use common::{bare, guest};
 use ptyrc_box::headless::{Options, Report, run};
 use ptyrc_box::{Error, Limits};

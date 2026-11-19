@@ -37,12 +37,34 @@ pub const INIT: &str = r#"(func (export "init") (param i32 i32))"#;
 pub const TICK: &str = r#"(func (export "tick") (param i64))"#;
 pub const EVENT: &str = r#"(func (export "event") (param i32 i32 i32 i32))"#;
 
-/// A module: the prelude and `body`.
+/// The OS profile, once a process, where the test file asks for it
+/// (`const CONFINE: bool`): what follows runs under it.
+pub fn confine() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let status = ptyrc_box::profile::apply();
+        // Past the capture of the test harness.
+        use std::io::Write;
+        let _ = writeln!(std::io::stderr(), "{}", status.lines().join("\n"));
+        if cfg!(target_os = "linux") {
+            assert!(!status.applied.is_empty(), "{status:?}");
+        }
+    });
+}
+
+/// A module: the prelude and `body`. Under the profile when the test
+/// file asks for it.
 pub fn guest(body: &str) -> Vec<u8> {
+    if crate::CONFINE {
+        confine();
+    }
     wat::parse_str(format!("(module {PRELUDE} {body})")).expect("wat")
 }
 
 /// A module of `body` alone.
 pub fn bare(body: &str) -> Vec<u8> {
+    if crate::CONFINE {
+        confine();
+    }
     wat::parse_str(format!("(module {body})")).expect("wat")
 }

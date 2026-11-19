@@ -328,3 +328,346 @@ fn a_store_app_from_a_repository_to_the_screen() {
     let ls = String::from_utf8_lossy(&ls.stdout).into_owned();
     assert!(ls.contains("confetti") && ls.contains("probe"), "{ls}");
 }
+
+/// Draws a row of `=` across the screen, on `raw`, whatever its
+/// surface; with `widget`, a widget that asks for the keys.
+const WIDE: &str = r#"
+import { call, log, period } from "ptyrc";
+export function init(args) {
+  const row = "=".repeat(60);
+  call("draw.put", { content: { rows: [row] }, frame: "raw", anchor: { at: [0, args.row], space: "view" } });
+  if (args.widget) {
+    call("widget.declare", { widgets: [{ tag: "w", size: [4, 1], content: { rows: ["hi"] } }] });
+    const w = call("widget.show", { tag: "w", frame: "raw" }).widget;
+    call("widget.ask", { id: w.id });
+  }
+  log("drawn");
+  period(0);
+}
+export function tick(now) {}
+export function event(topic, data) {}
+"#;
+
+/// Two panes side by side, a bar at column 29.
+const SPLIT: &str = r#"printf '\033[2J\033[H'
+i=1
+while [ $i -le 16 ]; do
+  printf '\033[%d;1Hleft %d\033[%d;30H│\033[%d;31Hright %d' $i $i $i $i $i
+  i=$((i+1))
+done
+exec sleep 1000
+"#;
+
+fn wide_manifest(id: &str, surface: &str, permissions: &str) -> String {
+    format!(
+        "[app]\nid = \"{id}\"\nversion = \"0.1.0\"\nsummary = \"A row.\"\n\
+         license = \"GPL-3.0-or-later\"\napi = 1\nscript = \"app.js\"\n\
+         surface = \"{surface}\"\n\n[permissions]\n{permissions}\n\n[options]\n\
+         row = {{ type = \"int\", default = 0, doc = \"the row\" }}\n\
+         widget = {{ type = \"bool\", default = false, doc = \"a widget\" }}\n"
+    )
+}
+
+#[test]
+fn a_store_app_is_clipped_to_its_surface() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let sb = Sandbox::new("surface");
+    let wide = "screen-wide = \"anywhere\"";
+    let apps = [
+        ("onframe", "frame", ""),
+        ("inwidget", "widget", ""),
+        ("narrow", "screen", ""),
+        ("wide", "screen", wide),
+    ];
+    for (id, surface, permissions) in apps {
+        let repo = sb.dir.join(format!("repo-{id}"));
+        repository(
+            &repo,
+            &[
+                ("ptyrc-app.toml", wide_manifest(id, surface, permissions)),
+                ("app.js", WIDE.to_string()),
+                ("LICENSE", GPL.to_string()),
+            ],
+        );
+        let origin = format!("local:{}", repo.display());
+        let out = sb.run(&["store", "add", &origin, "--yes"]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let mut driver = sb.ptyrc();
+    driver
+        .env("PTYRC_BOX", runner())
+        .env("PTYRC_JS", &js)
+        .args(["run", "--name", "s", "--headless", "--size", "60x16"])
+        .args(["--", "sh", "-c", SPLIT])
+        .stdin(std::process::Stdio::null());
+    let _driver = common::Proc(driver.spawn().unwrap());
+    let socket = sb.socket("s");
+    wait_for(
+        || std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "socket",
+    );
+    let mut client = sb.client("s");
+    // The left pane.
+    let mut left = Value::Null;
+    wait_for(
+        || {
+            let frames = client.call("frame.list", json!({})).unwrap();
+            let found = (frames["frames"].as_array().unwrap().iter())
+                .find(|f| f["kind"] == "pane" && f["rect"][0] == 0 && f["state"] == "stable")
+                .cloned();
+            found.map(|f| left = f["id"].clone()).is_some()
+        },
+        "the panes",
+    );
+    let start = |client: &mut Client, store: &str, row: i64, widget: bool| {
+        let args = json!({"row": row, "widget": widget});
+        let started = client
+            .call(
+                "app.start",
+                json!({"store": store, "args": args, "frame": left}),
+            )
+            .unwrap();
+        started["app"]["id"].as_u64().unwrap()
+    };
+    // The first compiles the interpreter; the others find it cached.
+    let mut ids = vec![start(&mut client, "onframe", 0, false)];
+    let drawn = |client: &mut Client, id: u64| {
+        let log = log_of(client, id);
+        assert!(!log.contains("exit:"), "{log}");
+        log.contains("drawn")
+    };
+    wait_slow(|| drawn(&mut client, ids[0]), "drawn");
+    ids.push(start(&mut client, "inwidget", 1, true));
+    ids.push(start(&mut client, "narrow", 2, false));
+    ids.push(start(&mut client, "wide", 3, false));
+    for id in ids.clone() {
+        wait_slow(|| drawn(&mut client, id), "drawn");
+    }
+    let text = client
+        .call("screen.text", json!({"sprites": true}))
+        .unwrap();
+    let row = |y: usize| text["lines"][y].as_str().unwrap_or_default().to_string();
+    // Behind the text: `=` in its blank cells. Left of the bar, right.
+    let sides = |y: usize| {
+        let row: Vec<char> = row(y).chars().collect();
+        let side = |r: &[char]| r.contains(&'=');
+        (
+            side(&row[..29.min(row.len())]),
+            side(&row[29.min(row.len())..]),
+        )
+    };
+    // Its frame: the left pane alone.
+    assert_eq!(sides(0), (true, false), "{text}");
+    // `widget`: a bare sprite is shown nowhere.
+    assert_eq!(sides(1), (false, false), "{text}");
+    // `screen` without `screen-wide`: its frame.
+    assert_eq!(sides(2), (true, false), "{text}");
+    // With it: anywhere.
+    assert_eq!(sides(3), (true, true), "{text}");
+
+    // Its widget, shown without a layer, stays behind when focused.
+    let mut widget = Value::Null;
+    wait_slow(
+        || {
+            let list = client.call("widget.list", json!({})).unwrap();
+            let found = (list["widgets"].as_array().unwrap().iter())
+                .find(|w| w["tag"] == "w" && !w["sprite"].is_null())
+                .cloned();
+            found.map(|w| widget = w).is_some()
+        },
+        "the widget shown",
+    );
+    client
+        .call("widget.focus", json!({"id": widget["id"]}))
+        .unwrap();
+    let layer = |client: &mut Client| {
+        let list = client.call("draw.list", json!({})).unwrap();
+        let sprite = (list["sprites"].as_array().unwrap().iter())
+            .find(|s| s["id"] == widget["sprite"])
+            .cloned()
+            .unwrap_or(Value::Null);
+        sprite["layer"].as_i64()
+    };
+    let behind = -(2 + (ids[1] % 97) as i64);
+    wait_for(|| layer(&mut client) == Some(behind), "behind when focused");
+}
+
+/// A look-alike of the driver's pop-up: a box of double lines, white on
+/// blue, ` ptyrc ` at its foot, asked on `hud`; a widget with `alert`.
+const FAKE: &str = r#"
+import { call, log, period } from "ptyrc";
+export function init(args) {
+  const rows = ["╔═ cat ─ native ═══════╗", "║ This app asks to:    ║", "╚═════════════ ptyrc ═╝"];
+  const style = { fg: 15, bg: 4, bold: true };
+  call("draw.put", { content: { rows, style }, layer: "hud", z: 1000, anchor: { at: [2, 2], space: "view" } });
+  call("widget.declare", { widgets: [{ tag: "w", size: [6, 1] }], border: "alert" });
+  call("widget.show", { tag: "w", layer: "hud", border: { base: "double", style } });
+  log("drawn");
+  period(0);
+}
+export function tick(now) {}
+export function event(topic, data) {}
+"#;
+
+/// The store app `id` in a repository of `sb`, installed.
+fn install(sb: &Sandbox, id: &str, manifest: String, script: &str) -> String {
+    let repo = sb.dir.join(format!("repo-{id}"));
+    repository(
+        &repo,
+        &[
+            ("ptyrc-app.toml", manifest),
+            ("app.js", script.to_string()),
+            ("LICENSE", GPL.to_string()),
+        ],
+    );
+    let origin = format!("local:{}", repo.display());
+    let out = sb.run(&["store", "add", &origin, "--yes"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    origin
+}
+
+#[test]
+fn a_look_alike_of_the_pop_up() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let sb = Sandbox::new("lookalike");
+    let wide = "screen-wide = \"anywhere\"";
+    let front = format!("{wide}\nfront = \"over the text\"");
+    install(&sb, "fake", wide_manifest("fake", "screen", wide), FAKE);
+    let origin = install(
+        &sb,
+        "fakefront",
+        wide_manifest("fakefront", "screen", &front),
+        FAKE,
+    );
+    let mut driver = sb.ptyrc();
+    driver
+        .env("PTYRC_BOX", runner())
+        .env("PTYRC_JS", &js)
+        .args([
+            "run",
+            "--name",
+            "s",
+            "--headless",
+            "--size",
+            "60x16",
+            "--",
+            "cat",
+        ])
+        .stdin(std::process::Stdio::null());
+    let _driver = common::Proc(driver.spawn().unwrap());
+    let socket = sb.socket("s");
+    wait_for(
+        || std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "socket",
+    );
+    let mut client = sb.client("s");
+    let mut placed = |store: &str| {
+        let started = client.call("app.start", json!({"store": store})).unwrap();
+        let id = started["app"]["id"].as_u64().unwrap();
+        wait_slow(
+            || {
+                let log = log_of(&mut client, id);
+                assert!(!log.contains("exit:"), "{log}");
+                log.contains("drawn")
+            },
+            "drawn",
+        );
+        let conns = &client.call("app.list", json!({})).unwrap()["apps"];
+        let conns = (conns.as_array().unwrap().iter())
+            .find(|a| a["id"] == id)
+            .map(|a| a["conns"].clone())
+            .unwrap();
+        let mine = |item: &&Value| conns.as_array().unwrap().contains(&item["owner"]);
+        let sprites = client.call("draw.list", json!({})).unwrap();
+        let layers: Vec<i64> = (sprites["sprites"].as_array().unwrap().iter())
+            .filter(mine)
+            .filter_map(|s| s["layer"].as_i64())
+            .collect();
+        let widgets = client.call("widget.list", json!({})).unwrap();
+        let borders: Vec<Value> = (widgets["widgets"].as_array().unwrap().iter())
+            .filter(mine)
+            .map(|w| w["border"].clone())
+            .collect();
+        (id, layers, borders)
+    };
+    // Without `front`: behind the text, in its band; the looks plain.
+    let (id, layers, borders) = placed("fake");
+    assert_eq!(layers, [-(2 + (id % 97) as i64); 2], "the box, the widget");
+    assert_eq!(borders, [json!("plain")]);
+    // With it: in front, below the driver's top band.
+    let (id, layers, borders) = placed("fakefront");
+    assert_eq!(layers, [2 + (id % 97) as i64; 2]);
+    assert_eq!(borders, [json!("plain")]);
+    drop(_driver);
+
+    // On a terminal: the key that hides all tells it apart.
+    let config = sb.config().join("ptyrc");
+    std::fs::create_dir_all(&config).unwrap();
+    let allowed = format!("[app.\"{origin}\"]\nallow = [\"screen-wide\", \"front\"]\n");
+    std::fs::write(config.join("permissions.toml"), allowed).unwrap();
+    let env = |name: &str, path: &Path| format!("{name}={}", path.display());
+    let (box_, js_) = (env("PTYRC_BOX", &runner()), env("PTYRC_JS", &js));
+    let data = env("XDG_DATA_HOME", &sb.dir.join("data"));
+    let state = env("XDG_STATE_HOME", &sb.dir.join("state"));
+    let cache = env("XDG_CACHE_HOME", &sb.dir.join("cache"));
+    let argv = [
+        "env", &box_, &js_, &data, &state, &cache, BIN, "run", "--name", "t", "cat",
+    ];
+    let (mut host, _pty) = common::HostPty::spawn(&sb, &argv);
+    let host_text = |client: &mut Client| {
+        let dump = client.call("debug.dump", json!({})).unwrap();
+        let lines = dump["host"].as_array().unwrap().iter();
+        lines
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let until = |host: &mut common::HostPty, ready: &mut dyn FnMut() -> bool, what: &str| {
+        wait_slow(
+            || {
+                host.pump();
+                ready()
+            },
+            what,
+        )
+    };
+    until(&mut host, &mut || sb.socket("t").exists(), "the session");
+    let mut client = sb.client("t");
+    client
+        .call("app.start", json!({"store": "fakefront"}))
+        .unwrap();
+    let fake = "This app asks to:";
+    until(
+        &mut host,
+        &mut || host_text(&mut client).contains(fake),
+        "the fake",
+    );
+    host.type_in(b"\x14h");
+    until(
+        &mut host,
+        &mut || !host_text(&mut client).contains(fake),
+        "hidden",
+    );
+    host.type_in(b"\x14h");
+    until(
+        &mut host,
+        &mut || host_text(&mut client).contains(" local:"),
+        "told",
+    );
+}

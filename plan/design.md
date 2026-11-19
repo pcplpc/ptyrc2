@@ -1185,6 +1185,8 @@ Store apps. `app.start {store}` starts an installed app
 - `args`: checked against `[options]` of the manifest (a name not
   declared, a value of another type: `bad-params`); the defaults
   filled in; the whole given to `init`.
+- `frame`: the frame it is clipped to (Permissions, A store app);
+  resolved as any frame name, `no-frame` as any; absent: `active`.
 - The child is the runner: `ptyrc-box --script TREE/SCRIPT ARGS`
   (`$PTYRC_BOX`, else beside `ptyrc`, else of `PATH`), with its token.
   Its identity is the origin (`permissions.toml`: `[app."ORIGIN"]`);
@@ -1252,6 +1254,19 @@ command that does not start rings the bell. `ptyrc run` and `ptyrc tmux
 wrap` give `ptyrc manage --overlay` (the driver's own binary), or the
 words of `$PTYRC_HOTKEY`. `--no-hotkey` (`--no-demo` is read as it),
 `--transparent`: none. `ptyrc-app demo`, `$PTYRC_DEMO`: gone.
+
+**The key that hides all** (`Config::hide`, `veil.rs`; principle 7 of
+`plan/store-model.md`): ctrl+t, then `h`, on the host keyboard,
+whoever holds the keys: before a grab, a focus, the hotkey; under a
+grab, a first ctrl+t is held as well. It reaches no client, and
+`input.send {host}` does not press it. First press: nothing a client
+drew is shown, nor hit by the mouse. Second: what each connection drew
+tinted (a colour per owner, never blue) and named once, at its first
+sprite, in the driver's mark (bold white on blue): the identity of its
+app, else the app's name, else `user`; laid last, over everything.
+Third: as before. The pop-up stays above. `$PTYRC_HIDE_KEY`: another
+letter or digit; empty: none. Kept with `--no-hotkey`; none with
+`--transparent`.
 
 ### Modal widgets
 
@@ -1810,14 +1825,14 @@ the pop-up. Not done: `app.start {store}`.
 
   | opened by | methods | topics |
   |---|---|---|
-  | the default profile | `auth`, `batch`, `subscribe`, `input.release`, `draw.*`, `widget.declare`, `.show`, `.set`, `.hide`, `.ask`, `.release`, `.list`, `.borders`, `app.list` | `draw`, `size`, `widgets`, `move`, `exit` |
+  | the default profile | `auth`, `batch`, `subscribe`, `input.release`, `draw.*`, `widget.declare`, `.show`, `.set`, `.hide`, `.ask`, `.release`, `.list`, `.borders`, `app.list` | `draw`, `size`, `widgets`, `move`, `exit`; `mouse`, `hover`, told by event (The pointer) |
   | `layout` | `frame.list`, `frame.get`, `frame.at` | `frames` |
   | `shape` | `screen.shape`, `screen.cursor`, `screen.wait` without `pattern`, `frame.heat`, `frame.idle` | `screen`, `cursor`, `text`, `idle`, `colors` |
   | `words` | `screen.shape` with `words` | |
   | `text` | `screen.text`, `screen.cells`, `screen.find`, `screen.wait` with `pattern`, `frame.text`, `session.info` | |
   | `keys-arrows` | `input.grab` of named keys that are not text: the arrows, `home`, `end`, `pageup`, `pagedown`, `insert`, `delete`, `f1`..`f12` | |
   | `keys-grab` | any other `input.grab`; `widget.show` with `modal` | |
-  | `keys-read`, `clicks`, `pointer` | | `input`, `mouse`, `hover` |
+  | `keys-read` | | `input` |
   | never | `session.resize`, `.colors`, `.handoff`, `input.send`, `input.click`, `tape.*`, `layer.*`, `widget.focus`, `widget.blur`, the other `app.*`, `debug.*` | `apps` |
 
 - A degree not held: lowered to the degree held (`Verdict::Lower`);
@@ -1847,17 +1862,41 @@ the pop-up. Not done: `app.start {store}`.
     97` in front (between `front` and `hud`). In front only when asked
     (a positive layer, `front`, `hud`; a modal) and held: `front` for a
     sprite, `front-widget` or `front` for a widget; else behind, the
-    lesser form. A widget shown without `layer` keeps the default
-    (`back`; raised while focused). `layer.*` closed (the table).
+    lesser form. A widget shown without `layer`: the default (`back`;
+    raised while focused) with `front-widget` or `front`; else its band
+    behind, focused or not. `layer.*` closed (the table).
+  - Its surface (`[app] surface`; `grants::Surface`): its frame is the
+    one `app.start {store, frame}` names, else `active`, resolved at the
+    start; `app.move` moves it. `frame`: `frame` of `draw.put`,
+    `draw.ext` without `id`, `widget.show`, and of `draw.update` and
+    `draw.ext {id}` when given, is replaced by its frame: clipped to its
+    view, which it follows. `screen`: as named with `screen-wide`, else
+    as `frame`. `widget`: a widget as named; a bare sprite on
+    `rpc::NOWHERE`, a frame id no frame has: put, listed, never shown.
+    Clipped, never refused; nothing in the answers tells it. Its frame
+    gone (a new layout): what it draws goes to `NOWHERE` until moved.
   - Limits of the driver, all its connections: 256 sprites
     (`draw.put`, `draw.ext` without `id`), 16 widgets (`widget.show` of
     a new tag), 32 subscriptions. Past one: `not-usable`, the message
     and the hint name it.
-- Not told apart yet, each open by default above: `surface` of the
-  manifest (`widget`, `frame`, `screen` with `screen-wide`) is not
-  enforced: a store app draws on any frame, unclipped; the keys of its
-  focused widget and the pointer on its own things, which reach it
-  without a topic.
+- **Keys.** The keys of its focused widget and of its grab come
+  without a topic; `input`, every key, is `keys-read`. A grab:
+  `keys-arrows` or `keys-grab` by its keys; a modal: `keys-grab`.
+- **The pointer** (`driver/own.rs`: `emit_pointer`). `mouse` and
+  `hover` are open; each report on a sprite is told to an app that does
+  not hold the whole session when on its own widget, or its own sprite
+  in front of the text (layer above 0); else with `clicks` (`mouse`),
+  `pointer` (`hover`). The leave (`sprite` null) goes to those told the
+  last `hover`, and to those that hold `pointer`. A click is taken from
+  the program when a listener of the whole session hears it, or one
+  told it on its own thing, or one that holds `clicks-grab`; else the
+  program has it too.
+- **The driver's looks** (`driver/own.rs`), for every such app: a
+  `border` of `widget.declare`, `widget.show` that is `alert` (or of
+  that `base`), or double lines (`double`, `╔═║`...) on a background
+  (`bg`, `inverse`, of the style or the title's): `plain`. Not of a
+  store app (its band): a layer of the top band (`hud`, 100 and above),
+  a modal without `layer`: 99.
 
 **The cut answers** (`lower.rs`: `plan`, `Cut`; `Driver::dispatch`).
 An app that holds less than `text` is answered in the same form, cut
@@ -2111,13 +2150,17 @@ ptyrc tmux detach [-t SESSION] [-L NAME | -S PATH]
 ptyrc tmux restart [-t SESSION] [-L NAME | -S PATH] [--app APP]...
 ptyrc store add ORIGIN[@REF] [--latest] [--force] [--yes]
 ptyrc store rm ID|ORIGIN [--purge] ; update [ID|ORIGIN...] [--latest]
-      [--force] [--yes] ; ls ; show ID|ORIGIN ; search WORD
+      [--force] [--yes] ; ls ; show ID|ORIGIN ; search WORD ; sync ;
+      registry ls | add NAME URL|DIR [--path] | rm NAME
                                   store apps (store-model.md, Install)
 ptyrc dev new NAME [--rust] ; dev check [DIR] ; dev entry [DIR]
       [--remote NAME] ; dev test [DIR] [--size CxR] [--for T] [--at T,...]
       [--seed N] [--tape F | --screen F] [--deny P,...] [--key T:KEY]...
       [--event T:TOPIC:JSON]... [--NAME VALUE...] ; dev run [DIR]
       [--NAME VALUE...]           an app's author (store-model.md, Tools)
+ptyrc dev index DIR [--out F] [--html F] ; dev registry-check BASE HEAD
+      --author NAME [--maintainers F] [--repo DIR]
+                                  a registry's CI (store-model.md, Registry)
 ```
 
 `ptyrc app` executes `ptyrc-app` with its arguments as given, after

@@ -10,6 +10,9 @@
 //! Where it is not built, each test passes and tests nothing; the
 //! first says so on the terminal (not captured). `PTYRC_REQUIRE_JS=1`:
 //! they fail instead.
+//!
+//! Every test runs under the OS profile (`ptyrc_box::profile`), applied
+//! once the files are read (`interpreter`).
 
 use ptyrc_box::headless::{Options, Report, run};
 use ptyrc_box::{Error, Limits, script};
@@ -24,31 +27,50 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
+/// The sources of `sdk/js/examples/confetti`, read before the profile.
+fn confetti() -> &'static BTreeMap<String, String> {
+    static SOURCES: OnceLock<BTreeMap<String, String>> = OnceLock::new();
+    SOURCES.get_or_init(|| script::sources(&root().join("sdk/js/examples/confetti")).unwrap())
+}
+
+/// The interpreter; read, with every other file, before the OS profile
+/// is applied.
 fn interpreter() -> Option<&'static [u8]> {
     static WASM: OnceLock<Option<Vec<u8>>> = OnceLock::new();
     WASM.get_or_init(|| {
-        let path = std::env::var_os(script::ENV_JS).map_or_else(
-            || root().join("sdk/js/interp/target/wasm32-unknown-unknown/release/ptyrc_js.wasm"),
-            PathBuf::from,
-        );
-        let wasm = std::fs::read(&path).ok();
-        if wasm.is_none() {
-            assert!(
-                std::env::var_os("PTYRC_REQUIRE_JS").is_none(),
-                "no interpreter at {}",
-                path.display()
-            );
-            // Past the capture of the test harness: seen in every run.
-            let _ = writeln!(
-                std::io::stderr(),
-                "script tests SKIPPED: no interpreter at {}; \
-                 cargo build --release --manifest-path sdk/js/interp/Cargo.toml",
-                path.display()
-            );
+        let wasm = read_interpreter();
+        confetti();
+        let status = ptyrc_box::profile::apply();
+        let _ = writeln!(std::io::stderr(), "{}", status.lines().join("\n"));
+        if cfg!(target_os = "linux") {
+            assert!(!status.applied.is_empty(), "{status:?}");
         }
         wasm
     })
     .as_deref()
+}
+
+fn read_interpreter() -> Option<Vec<u8>> {
+    let path = std::env::var_os(script::ENV_JS).map_or_else(
+        || root().join("sdk/js/interp/target/wasm32-unknown-unknown/release/ptyrc_js.wasm"),
+        PathBuf::from,
+    );
+    let wasm = std::fs::read(&path).ok();
+    if wasm.is_none() {
+        assert!(
+            std::env::var_os("PTYRC_REQUIRE_JS").is_none(),
+            "no interpreter at {}",
+            path.display()
+        );
+        // Past the capture of the test harness: seen in every run.
+        let _ = writeln!(
+            std::io::stderr(),
+            "script tests SKIPPED: no interpreter at {}; \
+             cargo build --release --manifest-path sdk/js/interp/Cargo.toml",
+            path.display()
+        );
+    }
+    wasm
 }
 
 fn options(files: &[(&str, &str)], args: Value) -> Options {
@@ -442,11 +464,10 @@ fn sprites_and_widgets_show() {
 #[test]
 fn confetti_is_the_same_twice() {
     let Some(wasm) = interpreter() else { return };
-    let dir = root().join("sdk/js/examples/confetti");
-    let sources = script::sources(&dir).unwrap();
+    let sources = confetti();
     let options = Options {
         size: (40, 12),
-        args: script::init_args("app.js", &sources, json!({"rate": 40})),
+        args: script::init_args("app.js", sources, json!({"rate": 40})),
         duration_ms: 2000,
         at: vec![500, 1000, 2000],
         ..Options::default()

@@ -22,5 +22,6 @@ function draw(now) {
   const text = `${label} = ${(now / 1000).toFixed(1)} s`;
   // Right-aligned: the last cell of the canvas, at -1, the last column.
   canvas.clear().text(Math.max(0, WIDTH - text.length), 0, text, INK);
-  canvas.present({ anchor: { at: [-1, 0], space: "view" }, layer: "front" });
+  // Behind the text, as an app that declares nothing draws.
+  canvas.present({ anchor: { at: [-1, 0], space: "view" } });
 }

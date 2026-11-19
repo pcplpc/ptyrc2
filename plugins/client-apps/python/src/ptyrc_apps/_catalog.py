@@ -180,7 +180,6 @@ class Asks:
         return {"always": dict(self.always), "options": dict(self.options)}
 
 
-WIDGET = "the pointer over its widget"
 GRAB = {"keys-arrows": "the arrows steer it, until ctrl+t"}
 
 #: Per app; an app not named here needs nothing more. As measured
@@ -194,13 +193,10 @@ ASKS: dict[str, Asks] = {
         }
     ),
     "clock": Asks({"clock": "the time of day, in its zone"}),
-    "fire": Asks({"pointer": WIDGET}),
-    "fishes": Asks(options={"--tank": {"pointer": WIDGET}}),
     "flock": Asks({"pointer": "the birds take flight from the pointer"}),
     "flower": Asks({"front": "its word redrawn in bold, over the text"}),
     "gallery": Asks(
         options={
-            "-a": {"pointer": WIDGET},
             "--file": {"files": "the pictures named"},
             "--dir": {"files": "the pictures of the directories named"},
         }
@@ -209,10 +205,8 @@ ASKS: dict[str, Asks] = {
         {
             "probe-git": "the state of the repository: runs git",
             "clock": "the dates of the commits, in the local zone",
-        },
-        {"-a": {"pointer": WIDGET}},
+        }
     ),
-    "globe": Asks({"pointer": WIDGET}),
     "life": Asks(
         options={
             "--cursor": {"pointer": "the pointer clears the cells near it"},
@@ -220,7 +214,6 @@ ASKS: dict[str, Asks] = {
         }
     ),
     "marks": Asks({"front": "the matches tinted over the text; the counts"}),
-    "minimap": Asks({"pointer": WIDGET}),
     "monitor": Asks(
         {
             "probe-system": "the processes, the sessions, the machine",
@@ -239,7 +232,6 @@ ASKS: dict[str, Asks] = {
             "clock": "the dates of the words counted",
         },
         {
-            "-a": {"pointer": WIDGET},
             "--save": {
                 "files": "the file named keeps the counts",
                 "files-write": "the file named keeps the counts",
@@ -274,8 +266,6 @@ ASKS: dict[str, Asks] = {
     ),
     "timer": Asks(
         options={
-            "-a": {"pointer": WIDGET},
-            "--click": {"clicks": "a click on it pauses"},
             "--modal": {
                 "keys-grab": "at the end, a modal: it takes the keys",
                 "front-widget": "at the end, a modal: over the text",
@@ -283,8 +273,8 @@ ASKS: dict[str, Asks] = {
             "--until": {"clock": "the time of day it ends at"},
         }
     ),
-    "train": Asks({"pointer": WIDGET, "clock": "the time of day and the season"}),
-    "window": Asks({"pointer": WIDGET, "clock": "the time of day and the season"}),
+    "train": Asks({"clock": "the time of day and the season"}),
+    "window": Asks({"clock": "the time of day and the season"}),
 }
 
 #: Apps that hold the whole session, and why: started with no

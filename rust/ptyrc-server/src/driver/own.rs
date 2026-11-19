@@ -3,12 +3,12 @@
 //! connection bound to an app that does not hold the whole session,
 //! the lists hold its own objects alone, and an id of another's is
 //! answered as one that does not exist. A store app, besides: its own
-//! band of layers, behind unless it holds `front`; the limits of the
-//! driver.
+//! band of layers, behind unless it holds `front`; its surface (a
+//! draw put on its frame, or nowhere); the limits of the driver.
 
 use super::Driver;
 use crate::engine::{ConnId, Engine};
-use crate::grants::{Degree, Permission};
+use crate::grants::{Degree, Permission, Surface};
 use ptyrc_proto::{ErrorCode, RpcError};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -16,6 +16,34 @@ use std::time::Duration;
 
 /// Frame names resolved by the cursor or the heat: of `shape`.
 const OF_SHAPE: [&str; 3] = ["active", "quietest", "idle"];
+
+/// Layers of the top band, `hud` and above: the driver's.
+const TOP_BAND: i64 = 100;
+
+/// Lines of the double border, of the driver's pop-up.
+const DOUBLE: &str = "╔╗╚╝═║╠╣╦╩╬";
+
+/// A border on the wire that only the driver may show: `alert`; double
+/// lines on a background, the look of its pop-up.
+fn reserved(border: &Value) -> bool {
+    let named = |name: Option<&str>| matches!(name, Some("alert"));
+    let Some(object) = border.as_object() else {
+        return named(border.as_str());
+    };
+    let base = object.get("base").and_then(Value::as_str);
+    let lines = ["corners", "top", "bottom", "left", "right"];
+    let given = lines.iter().filter_map(|m| object.get(*m)?.as_str());
+    let double =
+        base == Some("double") || given.clone().any(|l| l.chars().any(|c| DOUBLE.contains(c)));
+    let filled = |style: Option<&Value>| {
+        style.is_some_and(|s| {
+            s.get("bg").is_some_and(|b| !b.is_null())
+                || s.get("inverse") == Some(&Value::Bool(true))
+        })
+    };
+    let title = object.get("title").and_then(|t| t.get("style"));
+    named(base) || (double && (filled(object.get("style")) || filled(title)))
+}
 
 /// The limits of the driver for a store app, all its connections.
 pub(super) const MAX_SPRITES: usize = 256;
@@ -58,6 +86,31 @@ pub(super) struct Own {
     pub store: bool,
     pub front: bool,
     pub front_widget: bool,
+    pub surface: Option<Surface>,
+    pub screen_wide: bool,
+}
+
+impl Own {
+    /// The frame of its surface, when it has one.
+    pub fn frame(&self) -> Option<u32> {
+        match self.surface? {
+            Surface::Frame(frame) | Surface::Screen(frame) => Some(frame),
+            Surface::Widget => None,
+        }
+    }
+
+    /// The frame a draw of a store app is put on, whatever it named:
+    /// its frame; for a bare sprite of `widget`, nowhere. None: as
+    /// named.
+    fn clip(&self, widget: bool) -> Option<Value> {
+        match self.surface? {
+            Surface::Widget if widget => None,
+            Surface::Widget => Some(json!(crate::rpc::NOWHERE)),
+            Surface::Frame(frame) => Some(json!(frame)),
+            Surface::Screen(_) if self.screen_wide => None,
+            Surface::Screen(frame) => Some(json!(frame)),
+        }
+    }
 }
 
 fn absent(id: &Value) -> RpcError {
@@ -78,6 +131,8 @@ impl Driver {
             front: app.grants.holds(Permission::Front),
             front_widget: (app.grants.holds(Permission::Front)
                 || app.grants.holds(Permission::FrontWidget)),
+            surface: app.surface,
+            screen_wide: app.grants.holds(Permission::ScreenWide),
         })
     }
 
@@ -121,10 +176,30 @@ impl Driver {
                 "widget.show" if asked.is_some() || modal => {
                     Some(band(own.app, (front || modal) && own.front_widget))
                 }
+                // Not raised by the focus above the text.
+                "widget.show" if !own.front_widget => Some(band(own.app, false)),
                 _ => None,
             };
             if let Some(layer) = layer {
                 object.insert("layer".into(), json!(layer));
+            }
+        }
+        // The driver's looks: lowered, not refused.
+        if let Some(border) = object.get_mut("border").filter(|b| reserved(b)) {
+            *border = json!("plain");
+        }
+        if !own.store
+            && matches!(
+                method,
+                "draw.put" | "draw.ext" | "draw.update" | "widget.show"
+            )
+        {
+            let top =
+                |l: &Value| l.as_str() == Some("hud") || l.as_i64().is_some_and(|z| z >= TOP_BAND);
+            let modal = object.get("modal") == Some(&Value::Bool(true));
+            let layer = object.get("layer").filter(|l| !l.is_null());
+            if layer.is_some_and(top) || (method == "widget.show" && modal && layer.is_none()) {
+                object.insert("layer".into(), json!(TOP_BAND - 1));
             }
         }
         // Below `layout` one frame, the surface; below `shape` no name
@@ -141,6 +216,20 @@ impl Driver {
                     "name" => json!("raw"),
                     _ => json!(0),
                 };
+            }
+        }
+        // Its surface: clipped, never refused, nothing told.
+        if own.store {
+            let named = object.get("frame").is_some_and(|f| !f.is_null());
+            let clip = match method {
+                "draw.put" => own.clip(false),
+                "draw.ext" if !object.contains_key("id") => own.clip(false),
+                "draw.update" | "draw.ext" if named => own.clip(false),
+                "widget.show" => own.clip(true),
+                _ => None,
+            };
+            if let Some(frame) = clip {
+                object.insert("frame".into(), frame);
             }
         }
         Ok(())
@@ -223,6 +312,81 @@ impl Driver {
     }
 }
 
+/// Members of a report on a sprite for the driver alone.
+const HIT: [&str; 3] = ["owner", "widget", "layer"];
+
+impl Driver {
+    /// A report of the host mouse on a sprite (`mouse`, `hover`) to
+    /// `conn`: heard, and taken from the program. On its own widget or
+    /// its own sprite in front of the text: by default. Else `pointer`
+    /// (`hover`) or `clicks` (`mouse`) to hear it; `clicks-grab`
+    /// besides to take it.
+    fn pointer_heard(&self, conn: ConnId, topic: &str, data: &Value) -> (bool, bool) {
+        let Some(id) = self.conns.get(&conn).and_then(|c| c.app) else {
+            return (true, true);
+        };
+        let Some(app) = self.apps.as_ref().and_then(|apps| apps.get(id)) else {
+            return (false, false);
+        };
+        if !app.grants.narrowed() {
+            return (true, true);
+        }
+        let owner = data.get("owner").and_then(Value::as_u64);
+        let own = owner.is_some_and(|o| app.conns.contains(&ConnId(o)));
+        let widget = data.get("widget") == Some(&Value::Bool(true));
+        let front = data
+            .get("layer")
+            .and_then(Value::as_i64)
+            .is_some_and(|l| l > 0);
+        if own && (widget || front) {
+            return (true, true);
+        }
+        let needs = match topic {
+            "hover" => Permission::Pointer,
+            _ => Permission::Clicks,
+        };
+        let heard = app.grants.holds(needs);
+        (heard, heard && app.grants.holds(Permission::ClicksGrab))
+    }
+
+    /// `topic` of a report on a sprite, or of a leave (no `owner`), to
+    /// each listener that hears it; `also`: listeners that hear it
+    /// whatever it is. True: taken from the program. The listeners of
+    /// a `hover` are kept, for the leave.
+    pub(super) fn emit_pointer(
+        &mut self,
+        topic: &str,
+        data: Value,
+        also: &BTreeSet<ConnId>,
+    ) -> bool {
+        let mut bare = data.clone();
+        if let Some(object) = bare.as_object_mut() {
+            HIT.iter().for_each(|m| drop(object.remove(*m)));
+        }
+        let message = ptyrc_proto::envelope::event(topic, bare);
+        let listeners: Vec<ConnId> = (self.conns.iter())
+            .filter(|(_, c)| c.topics.contains(topic) && !c.paused)
+            .map(|(id, _)| *id)
+            .collect();
+        let mut taken = false;
+        let mut heard = BTreeSet::new();
+        for id in listeners {
+            let (hears, takes) = self.pointer_heard(id, topic, &data);
+            if hears || also.contains(&id) {
+                heard.insert(id);
+                taken |= hears && takes;
+                if let Some(conn) = self.conns.get_mut(&id) {
+                    conn.send(&message);
+                }
+            }
+        }
+        if topic == "hover" {
+            self.hover_heard = heard;
+        }
+        taken
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,5 +400,19 @@ mod tests {
         }
         assert!(in_front(&json!("hud")) && in_front(&json!(5)));
         assert!(!in_front(&json!("back")) && !in_front(&json!(-5)) && !in_front(&json!("x")));
+    }
+
+    #[test]
+    fn the_drivers_looks_are_reserved() {
+        assert!(reserved(&json!("alert")) && reserved(&json!({"base": "alert"})));
+        let blue = json!({"bg": 4, "fg": 15, "bold": true});
+        assert!(reserved(&json!({"base": "double", "style": blue})));
+        assert!(reserved(
+            &json!({"corners": "╔╗╚╝", "style": {"inverse": true}})
+        ));
+        assert!(reserved(&json!({"top": "═", "title": {"style": blue}})));
+        assert!(!reserved(&json!("double")) && !reserved(&json!("plain")));
+        assert!(!reserved(&json!({"base": "double", "style": {"fg": 4}})));
+        assert!(!reserved(&json!({"base": "heavy", "style": blue})));
     }
 }

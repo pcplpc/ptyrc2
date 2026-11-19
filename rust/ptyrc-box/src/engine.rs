@@ -70,6 +70,9 @@ fn shared() -> Result<&'static Engine, Error> {
             let mut config = Config::new();
             config.epoch_interruption(true);
             config.max_wasm_stack(STACK);
+            // No memfd for the memory images: a module compiled under
+            // the OS profile, which refuses memfd_create.
+            config.memory_init_cow(false);
             let engine = Engine::new(&config).map_err(|e| format!("{e:#}"))?;
             let ticking = engine.clone();
             std::thread::spawn(move || {

@@ -8,4 +8,5 @@ license.workspace = true
 [dependencies]
 rustix = { version = "1", features = ["process"] }
 serde.workspace = true
+serde_json.workspace = true
 toml = { version = "1", default-features = false, features = ["std", "parse", "serde", "display"] }

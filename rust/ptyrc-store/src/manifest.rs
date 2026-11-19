@@ -41,6 +41,61 @@ pub const PERMISSIONS: &[&str] = &[
     "words",
 ];
 
+/// How a permission is shown: plain (one yes for all), amber (can
+/// confuse, cannot leak), red (can leak or act). `plan/store-model.md`,
+/// Colours.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum Colour {
+    Plain,
+    Amber,
+    Red,
+}
+
+impl Colour {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Colour::Plain => "plain",
+            Colour::Amber => "amber",
+            Colour::Red => "red",
+        }
+    }
+}
+
+/// The colour of each name of [`PERMISSIONS`]; the same table as the
+/// driver's pop-up (`ptyrc-server`, `popup::told`), pinned by a test.
+pub const COLOURS: &[(&str, Colour)] = &[
+    ("clicks", Colour::Red),
+    ("clicks-grab", Colour::Red),
+    ("clock", Colour::Plain),
+    ("files", Colour::Plain),
+    ("files-write", Colour::Red),
+    ("front", Colour::Amber),
+    ("front-widget", Colour::Plain),
+    ("keys-arrows", Colour::Plain),
+    ("keys-grab", Colour::Red),
+    ("keys-read", Colour::Red),
+    ("layout", Colour::Plain),
+    ("pointer", Colour::Plain),
+    ("probe-git", Colour::Plain),
+    ("probe-system", Colour::Plain),
+    ("screen-wide", Colour::Amber),
+    ("shape", Colour::Plain),
+    ("storage", Colour::Plain),
+    ("text", Colour::Red),
+    ("words", Colour::Plain),
+];
+
+/// The colour of a permission; an unknown name: red.
+pub fn colour(name: &str) -> Colour {
+    COLOURS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map_or(Colour::Red, |(_, c)| *c)
+}
+
 /// `[limits]` keys and their defaults; a value must exceed its default.
 pub const LIMITS: &[(&str, u64)] = &[
     ("calls-per-second", 1000),

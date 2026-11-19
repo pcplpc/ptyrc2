@@ -5,7 +5,7 @@ use crate::apps::{Apps, Refused, State};
 use crate::conn::Conn;
 use crate::engine::{ConnId, Ctx, Effects, Engine, Reply, SessionInfo, Token};
 use crate::grab::{self, Grab};
-use crate::grants::{self, Degree, Grants, Identity, Verdict, Why};
+use crate::grants::{self, Degree, Grants, Identity, Surface, Verdict, Why};
 use crate::hands::Hands;
 use crate::host::Host;
 use crate::hostcolors::{Known, QUERY_BG, QUERY_FG, Replies};
@@ -29,7 +29,7 @@ use rustix::io::Errno;
 use rustix::process::{Pid, Signal, kill_process_group};
 use serde_json::{Value, json};
 use signal_hook::consts::{SIGCHLD, SIGHUP, SIGINT, SIGTERM, SIGWINCH};
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::{self, Read};
 use std::os::fd::AsFd;
@@ -93,6 +93,9 @@ pub struct Config {
     /// grabbed, runs this command as a child app named `manage`; twice
     /// again while it runs ends it. `None`: no hotkey.
     pub hotkey: Option<Vec<String>>,
+    /// The key that hides all: ctrl+t, then this key, on the host
+    /// keyboard, whoever holds the keys. `None`: none.
+    pub hide: Option<u8>,
     /// Commands started as child apps once the program has started,
     /// each with what it declares (`app.start {declares}`; `None`: the
     /// whole session); terminated at the end.
@@ -120,6 +123,7 @@ impl Default for Config {
             record_input: false,
             presets: true,
             hotkey: None,
+            hide: Some(b'h'),
             apps: Vec::new(),
             transparent: false,
             handoff: false,
@@ -240,6 +244,10 @@ struct Driver {
     active_at: Option<u64>,
     /// The child the hotkey started, while in the table.
     hotkey_app: Option<u64>,
+    /// The key that hides all: where it is.
+    veil: crate::veil::Veil,
+    /// The keys at hand come from `input.send {host}`, not the host.
+    typed_by_client: bool,
     /// The app table; `None` in a replay and when transparent.
     apps: Option<Apps>,
     /// The pty returned end of file or EIO.
@@ -270,6 +278,8 @@ struct Driver {
     host_mouse: mouse::HostMouse,
     /// The sprite the last `hover` event named.
     hovered: Option<Value>,
+    /// Who heard the last `hover`: told of the leave.
+    hover_heard: BTreeSet<ConnId>,
     /// A press went to this sprite: so do the moves and the release.
     mouse_held: Option<Value>,
     /// A replay: makes the engine again when the tape is rewound.
@@ -428,7 +438,8 @@ impl Driver {
                     socket.to_string_lossy().into_owned(),
                 ),
             ];
-            let hotkey = (cfg.hotkey.is_some() && !cfg.transparent).then(Hotkey::default);
+            let keys = cfg.hotkey.is_some() || cfg.hide.is_some();
+            let hotkey = (keys && !cfg.transparent).then(|| Hotkey::new(cfg.hide));
             let apps = (!cfg.transparent).then(|| Apps::new(env.clone(), &socket));
             if std::env::var_os("TERM").is_none() {
                 env.push(("TERM".to_string(), "xterm-256color".to_string()));
@@ -483,6 +494,8 @@ impl Driver {
             grab: None,
             hotkey,
             hotkey_app: None,
+            veil: crate::veil::Veil::Off,
+            typed_by_client: false,
             partial: None,
             pasting: false,
             drop_release: false,
@@ -508,6 +521,7 @@ impl Driver {
             replies_until: None,
             host_mouse: mouse::HostMouse::Off,
             hovered: None,
+            hover_heard: BTreeSet::new(),
             mouse_held: None,
             factory: None,
             handoff: false,
@@ -550,6 +564,8 @@ impl Driver {
             grab: None,
             hotkey: None,
             hotkey_app: None,
+            veil: crate::veil::Veil::Off,
+            typed_by_client: false,
             partial: None,
             pasting: false,
             drop_release: false,
@@ -574,6 +590,7 @@ impl Driver {
             replies_until: None,
             host_mouse: mouse::HostMouse::Off,
             hovered: None,
+            hover_heard: BTreeSet::new(),
             mouse_held: None,
             factory: None,
             handoff: false,
@@ -1040,12 +1057,13 @@ impl Driver {
             Some(mut data) => {
                 self.hovered = Some(data["sprite"].clone());
                 data["mods"] = json!(report.mods());
-                self.emit("hover", data);
+                self.emit_pointer("hover", data, &BTreeSet::new());
             }
             None if self.hovered.take().is_some() => {
                 let data = json!({"sprite": null, "at": null, "x": report.x, "y": report.y,
                                   "frame": null, "pos": null, "mods": report.mods()});
-                self.emit("hover", data);
+                let heard = std::mem::take(&mut self.hover_heard);
+                self.emit_pointer("hover", data, &heard);
             }
             None => {}
         }
@@ -1108,7 +1126,9 @@ impl Driver {
                     data["button"] = json!(report.button());
                     data["action"] = json!(report.action());
                     data["mods"] = json!(report.mods());
-                    self.emit("mouse", data);
+                    if !self.emit_pointer("mouse", data, &BTreeSet::new()) {
+                        out.extend(app(report).unwrap_or_default());
+                    }
                 }
                 None => out.extend(app(report).unwrap_or_default()),
             }
@@ -1160,10 +1180,12 @@ impl Driver {
         let Some(hotkey) = &mut self.hotkey else {
             return self.forward_input(bytes, engine);
         };
-        let armed = self.grab.is_none();
-        for part in hotkey.parts(bytes, self.clock.elapsed(), armed) {
+        let armed = self.grab.is_none() && self.cfg.hotkey.is_some();
+        let hides = !self.typed_by_client;
+        for part in hotkey.parts(bytes, self.clock.elapsed(), armed, hides) {
             match part {
                 hotkey::Part::Keys(keys) => self.forward_input(&keys, engine),
+                hotkey::Part::Hide => self.veil_next(engine),
                 hotkey::Part::Pair => {
                     // The manager up and no widget focused: the pair ends it.
                     let now = self.now();
@@ -1205,6 +1227,24 @@ impl Driver {
             }
             _ => self.forward_app(&paste.bytes(), engine),
         }
+    }
+
+    /// The key that hides all, pressed: hidden, told apart, shown.
+    /// Each connection told by the identity of its app, else its name;
+    /// one of no app is the user's hand.
+    fn veil_next(&mut self, engine: &mut dyn Engine) {
+        let apps = self.apps.as_ref();
+        let names = self.conns.keys().map(|conn| {
+            let app = apps.and_then(|apps| apps.get(apps.of_conn(*conn)?));
+            let name = match app {
+                Some(app) => (app.identity.as_ref()).map_or_else(|| app.name.clone(), |i| i.key()),
+                None => "user".to_string(),
+            };
+            (conn.0, name)
+        });
+        self.veil = self.veil.next(names.collect());
+        engine.veil(self.veil.clone());
+        self.repaint = true;
     }
 
     /// The child of the hotkey runs.
@@ -1611,6 +1651,13 @@ impl Driver {
             if let Err(e) = self.own_params(own, method, &mut params) {
                 return Some(Err(e));
             }
+            // Its frame gone: what it draws is shown nowhere, not refused.
+            let frame = params.get("frame").and_then(Value::as_u64);
+            if let Some(frame) = frame.filter(|f| *f != 0 && own.frame() == Some(*f as u32))
+                && self.frame_id(conn, json!(frame), engine).is_err()
+            {
+                params["frame"] = json!(crate::rpc::NOWHERE);
+            }
             if let Err(e) = self.own_limits(conn, own, method, &params, engine, now) {
                 return Some(Err(e));
             }
@@ -1691,7 +1738,7 @@ impl Driver {
             .with_hint("`widget.blur` drops the focus (ptyrc focus --none)")),
             "input.grab" => self.input_grab(conn, &params),
             "widget.ask"
-                if self.hotkey.is_none() && params.get("escape") == Some(&json!(false)) =>
+                if self.cfg.hotkey.is_none() && params.get("escape") == Some(&json!(false)) =>
             {
                 Err(RpcError::new(
                     ErrorCode::NotUsable,
@@ -2021,7 +2068,25 @@ impl Driver {
                 )),
             );
         }
-        // Resolved as any frame name, with the same errors.
+        let frame = self.frame_id(conn, frame.clone(), engine)?;
+        // A store app is clipped to the frame it is moved to.
+        let apps = self.apps.as_mut().expect("checked by the caller");
+        if let Some(surface) = apps.get(id).and_then(|a| a.surface) {
+            apps.set_surface(id, surface.moved(frame));
+        }
+        for mover in movers {
+            self.send_event(mover, "move", json!({"frame": frame}));
+        }
+        Ok(json!({"app": self.app_info(id, Some(conn), engine), "frame": frame}))
+    }
+
+    /// The id of a frame named as any frame name, with the same errors.
+    fn frame_id(
+        &mut self,
+        conn: ConnId,
+        frame: Value,
+        engine: &mut dyn Engine,
+    ) -> Result<u32, RpcError> {
         let token = Token(self.next_token);
         self.next_token += 1;
         let now = self.now();
@@ -2033,15 +2098,13 @@ impl Driver {
             asked,
             ctx
         ));
-        let frame = match found {
-            Reply::Ok(found) => found["frame"]["id"].clone(),
-            Reply::Err(error) => return Err(error),
-            Reply::Pending => return Err(RpcError::new(ErrorCode::Internal, "frame.get")),
-        };
-        for mover in movers {
-            self.send_event(mover, "move", json!({"frame": frame}));
+        match found {
+            Reply::Ok(found) => (found["frame"]["id"].as_u64())
+                .and_then(|id| u32::try_from(id).ok())
+                .ok_or_else(|| RpcError::new(ErrorCode::Internal, "frame.get: no id")),
+            Reply::Err(error) => Err(error),
+            Reply::Pending => Err(RpcError::new(ErrorCode::Internal, "frame.get")),
         }
-        Ok(json!({"app": self.app_info(id, Some(conn), engine), "frame": frame}))
     }
 
     /// Topic `apps`: the entries that changed, those that left.
@@ -2102,7 +2165,7 @@ impl Driver {
         }
         let members: &[&str] = match method {
             "app.list" => &[],
-            "app.start" => &["argv", "name", "declares", "store", "args"],
+            "app.start" => &["argv", "name", "declares", "store", "args", "frame"],
             "app.enrol" => &["name", "argv", "declares"],
             "app.restart" => &["app", "argv", "name", "declares"],
             "app.move" => &["app", "frame"],
@@ -2188,6 +2251,10 @@ impl Driver {
                     .with_hint(r#"a store app: {"store": ORIGIN, "args": {OPTION: VALUE}}"#));
             }
             let found = crate::store::find(store, member("args"))?;
+            // The frame it is clipped to: the one given, else the active.
+            let frame = member("frame").cloned().unwrap_or(json!("active"));
+            let frame = self.frame_id(conn, frame, engine)?;
+            let apps = self.apps.as_mut().expect("checked above");
             let identity = Some(Identity::Store(found.origin.clone()));
             let id = apps
                 .start_as(
@@ -2204,6 +2271,7 @@ impl Driver {
             for name in &found.unknown {
                 apps.note(id, &format!("permission `{name}`: not known, not held"));
             }
+            apps.set_surface(id, Surface::of(found.surface, frame));
             Self::grant(apps, id, Some(found.declared.clone()), headless, given);
             found.started();
             id
@@ -2415,7 +2483,9 @@ impl Driver {
             // grab take what is theirs.
             Some(Value::Bool(true)) => {
                 self.can_type()?;
+                self.typed_by_client = true;
                 self.host_input(&bytes, engine);
+                self.typed_by_client = false;
                 Ok(json!({}))
             }
             Some(_) => Err(RpcError::bad_params("host: true or false")),

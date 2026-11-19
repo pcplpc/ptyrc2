@@ -4,7 +4,7 @@
 //! No clock inside: time is an argument.
 
 use crate::engine::{ConnId, Owned};
-use crate::grants::{Grants, Identity};
+use crate::grants::{Grants, Identity, Surface};
 use crate::permissions::Declared;
 use crate::start;
 use rustix::process::{Pid, Signal, getpgid, kill_process, kill_process_group};
@@ -96,6 +96,8 @@ pub(crate) struct App {
     pub identity: Option<Identity>,
     /// What it holds: the whole session when it declared nothing.
     pub grants: Grants,
+    /// Of a store app: where it draws.
+    pub surface: Option<Surface>,
     /// What it declared at its start (`app.start {declares}`).
     pub declares: Option<Declared>,
     /// Of the present run of a child.
@@ -279,6 +281,7 @@ impl Apps {
             conns: BTreeSet::new(),
             identity: Some(identity.unwrap_or_else(|| Identity::Native(name.clone()))),
             grants: Grants::whole(),
+            surface: None,
             declares: None,
             token: Some(token),
             child: Some(child),
@@ -341,6 +344,7 @@ impl Apps {
                     conns: BTreeSet::from([conn]),
                     identity: None,
                     grants: Grants::whole(),
+                    surface: None,
                     declares: None,
                     token: None,
                     child: None,
@@ -417,6 +421,7 @@ impl Apps {
             conns: BTreeSet::new(),
             identity: Some(Identity::Native(name)),
             grants: Grants::whole(),
+            surface: None,
             declares: None,
             token: Some(token),
             child: None,
@@ -470,6 +475,13 @@ impl Apps {
 
     pub fn get(&self, id: u64) -> Option<&App> {
         self.entries.get(&id)
+    }
+
+    /// Of a store app: where it draws.
+    pub fn set_surface(&mut self, id: u64, surface: Surface) {
+        if let Some(app) = self.entries.get_mut(&id) {
+            app.surface = Some(surface);
+        }
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &App> {

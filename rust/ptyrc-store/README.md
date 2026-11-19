@@ -1,9 +1,9 @@
 # ptyrc-store
 
 Store apps without the engine: the manifest, the origin, the fetch, the
-tree check, the install and the registry. Plan: `plan/store-model.md`.
-Not here: the Rust build, the runner, the CLI (`ptyrc store`, `ptyrc
-dev` in `ptyrc-cli`), the grants.
+tree check, the install, the registry, its index, page and review.
+Plan: `plan/store-model.md`. Not here: the Rust build, the runner, the
+CLI (`ptyrc store`, `ptyrc dev` in `ptyrc-cli`), the grants.
 
 Every fallible call returns `Result<T, Error>`; `Error { kind, message,
 hint }`: `message` says what was refused (manifest errors as
@@ -91,18 +91,63 @@ let checked = check(&tree)?;                         // or DirTree::new(dir)
 - `Pointer::parse(name, src)`: `origin`, `manifest`, `yanked`,
   `[[version]] { commit, tier, by, date, yanked }`; `Pointer::origin()`.
 - `Registries::load(dirs)` from `store.toml` (`[[registry]] name, url |
-  path`); `lookup(origin)`: the first that lists it. A registry by `url`
-  is read from `<cache>/ptyrc/registry/<name>/`; fetching it is the
-  caller's. `Registry::pointers()`: every pointer under `apps/`.
+  path`): `url` https or the absolute path of a git repository, fetched
+  to `<cache>/ptyrc/registry/<name>/`; `path` a directory read as it is.
+  None by default. `add(dirs, name, source, path)`, `to_toml`, `save`.
+- `lookup(origin)`: the first that lists it; a registry absent here is
+  an error. `lookup_present(origin) -> Present { found, absent }`: absent
+  ones passed over, those before `found` named.
+- `Registry::pointers()`: every pointer under `apps/`; `remote()`.
 - `choose(Option<&Pointer>, &Want { reference, latest, force }) -> Pick
   { reference, tier }`; after fetching a name or `HEAD`,
   `registry::tier_of(pointer, commit, force)`.
 - `Tier::Untested < Tested < Approved`.
 
+## Sync
+
+`sync::sync(registry, now, max_age) -> Synced`: a `url` registry whose
+copy is older than `max_age` (`None`: any) is fetched with `Repo` (head,
+depth 1, the same hardening, `MAX_REGISTRY_FETCH`); its `apps/**.toml`
+(1 MiB each, 100 000, 64 MiB in all, no hidden component) and
+`index.json` (32 MiB) read with `git cat-file` and written to a new
+copy, swapped in; the bare repository removed. `Local | Fresh |
+Fetched { commit } | Stale { error, since } | Missing { error }`: a
+failure keeps the old copy. `sync::stamp`: when, and which commit.
+`now` is an argument; `MAX_AGE` a day. The caller holds the store lock.
+
+## Index and page
+
+- `index::build(dirs, registry, remote) -> Index`: each pointer, each
+  listed commit fetched and checked (`fetch_checked`); the fields of the
+  version `choose` picks: `id`, `summary`, `version`, `license`,
+  `surface`, `tape`, `commit`, `tier`, `permissions { name, why, colour,
+  words }`; each version's `version` or `error`. `Index::{to_json,
+  parse, load, get}`; `FORMAT` 1. Read for display only, never for
+  trust.
+- `page::render(index, title)`: one HTML file, inline style, no script,
+  no external resource, a CSP of `default-src 'none'`. Every text
+  escaped (`page::escape`).
+- `manifest::COLOURS`, `colour(name) -> Colour::{Plain, Amber, Red}`:
+  the pop-up's table (`ptyrc-server`, `popup::told`), duplicated and
+  pinned by `ptyrc-cli/tests/store.rs`. The server is to take it from
+  here.
+
+## Review
+
+`review::review(base, head, author, maintainers, check) -> Review {
+problems, checked }`, two trees of a registry: only pointer files
+change, each where its origin says; a new commit fetched and checked by
+`check`; a tier above `untested` set by one `Maintainers::may` (`NAME
+[tested|approved]` per line), with `by` the author; any other change to
+a listed version, a yank, a removal, another file: an `approved`
+maintainer's. `Repo::commit(rev)` resolves BASE and HEAD.
+
 ## A `store add`, in order
 
 1. `StoreLock::take`.
-2. `Origin::parse_spec`; `Registries::load(&dirs)?.lookup(&origin)`.
+2. `Origin::parse_spec`; `Registries::load(&dirs)?`; `sync` each, a
+   day old; `lookup_present(&origin)`: an absent registry before the
+   one found wants `@REF` or `--latest`.
 3. `choose`.
 4. `Repo::open`, `fetch`, `tree`, `check`, `tier_of`; `untested`: ask
    the user.

@@ -444,9 +444,14 @@ fn frame_at(engine: &ScreenEngine, params: Value) -> Res {
     Ok(json!({"frame": id, "pos": [pos.x, pos.y]}))
 }
 
-/// Refuse a sprite on a frame id that does not exist.
+/// A frame id no frame has: a sprite there is never shown. The
+/// driver's, for a store app that draws on its widgets alone.
+pub(crate) const NOWHERE: FrameId = FrameId::MAX;
+
+/// Refuse a sprite on a frame id that does not exist, but `NOWHERE`.
 fn check_frame(engine: &ScreenEngine, sel: &FrameSel) -> Result<(), RpcError> {
     match sel {
+        FrameSel::Id(NOWHERE) => Ok(()),
         FrameSel::Id(id) if engine.frames.info(*id).is_none() => Err(ScreenEngine::no_frame(id)),
         _ => Ok(()),
     }
