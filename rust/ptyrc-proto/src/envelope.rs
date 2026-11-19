@@ -39,6 +39,7 @@ pub enum ErrorCode {
     NotUsable,
     Timeout,
     Gone,
+    Denied,
     Internal,
 }
 
@@ -53,6 +54,7 @@ impl ErrorCode {
             ErrorCode::NotUsable => "not-usable",
             ErrorCode::Timeout => "timeout",
             ErrorCode::Gone => "gone",
+            ErrorCode::Denied => "denied",
             ErrorCode::Internal => "internal",
         }
     }
@@ -196,6 +198,7 @@ mod tests {
             ErrorCode::NotUsable,
             ErrorCode::Timeout,
             ErrorCode::Gone,
+            ErrorCode::Denied,
             ErrorCode::Internal,
         ] {
             assert_eq!(serde_json::to_value(code).unwrap(), json!(code.as_str()));

@@ -440,6 +440,9 @@ class Pilot(Tools, Widgets):
         self._proc: subprocess.Popen[bytes] | None = None
         self._batch: _Batch | None = None
         self.hello: dict[str, Any] = self._conn.hello
+        #: Of an app the driver started (`PTYRC_TOKEN`): `native/NAME`.
+        #: None: the user's hand, the whole session.
+        self.identity: str | None = self._conn.identity
 
     @classmethod
     def spawn(

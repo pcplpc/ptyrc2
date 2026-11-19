@@ -11,10 +11,12 @@ use ptyrc_core::widgets::WidgetId;
 use ptyrc_proto::{ErrorCode, RpcError, suggest};
 
 /// Every method of the protocol, for the nearest-name hint.
-const METHODS: [&str; 56] = [
+pub(crate) const METHODS: [&str; 58] = [
+    "auth",
     "session.info",
     "session.resize",
     "session.colors",
+    "session.handoff",
     "screen.text",
     "screen.shape",
     "screen.cells",

@@ -1103,7 +1103,8 @@ The driver keeps a table of apps (`ptyrc-server/src/apps.rs`):
   (`run --app`, `tmux attach --app`), the hotkey. Its own process group,
   stdin and stdout null, stderr to `<socket dir>/<session>.app-<id>.log`
   (truncated at each run, removed with the entry and at the end);
-  environment: `PTYRC_SESSION`, `PTYRC_SOCKET`, `PTYRC_APP=<id>`.
+  environment: `PTYRC_SESSION`, `PTYRC_SOCKET`, `PTYRC_APP=<id>`,
+  `PTYRC_TOKEN` (Protocol, Permissions).
   SIGTERM to its group at the end of the session.
 - **client**: a process connected to the socket that is no child's: one
   entry a pid (`SO_PEERCRED`), made at its first request that is not
@@ -1620,7 +1621,78 @@ the whole session.
   others when it was there and open: a tape (`--record`), the host log
   (`--host-log`), the log of a child app (`start::private_file`).
 
-Per-app permissions: `plan/notes-app-permissions.md`, not done.
+### Permissions
+
+`plan/store-model.md`, Permissions. Done: who asks, and the check;
+every app holds everything. Not done: the file, the pop-up, the
+answers cut to a degree, `app.start {store}`.
+
+- **The token.** The driver makes one per run of a child app: 128 bits
+  of `/dev/urandom`, hex, in `PTYRC_TOKEN`. A restart makes another; an
+  exited child has none.
+- **`auth {token}`**: the first request of a connection, or none (later,
+  twice, in a `batch`: `bad-request`). Answer: `{"app":id,
+  "identity":"native/NAME"}`; the connection is bound to that app for
+  as long as it lives. A token not known: `denied`, then the connection
+  is closed.
+- The token alone is not enough: the connection is one of that child
+  already, matched at accept by the process group of its peer
+  (`Apps::attach`). A token read by another process is of no use to it.
+- The clients present it by themselves (`Client::connect`,
+  `Connection`): when `PTYRC_TOKEN` is set and the socket is the one of
+  `PTYRC_SOCKET`. A token is of one session. `Client::connect_as`,
+  `Connection(path, token=)`: one given by hand. `Pilot.identity`,
+  `Connection.identity`: the answer; None: the user's hand.
+- **Identity** (`grants::Identity`): a child, `native/NAME`, `NAME` its
+  name on the table (`app.start {name}`, else the file name of
+  `argv[0]`; `app.restart {name}` changes it); a store app, its origin
+  (not made yet). The key of `permissions.toml`.
+- A connection that presented no token is the user's hand: the whole
+  session, never checked. A native app may connect without its token:
+  the token holds a careless app, the sandbox a hostile one.
+- **The check** (`grants::check`, `grants::check_topic`; called by
+  `Driver::dispatch` and `Driver::subscribe`): every request of a bound
+  connection, the calls of a `batch` one by one, before anything else
+  looks at it. It answers allow, lower (a degree), or `denied`.
+- **Grants** (`grants::Grants`, on the app's entry): the permissions
+  held, or the whole session. Every child holds the whole session until
+  the file is read: nothing is lowered or denied yet. Read at each
+  request: a change holds from the next one on.
+- **The table** (`grants::METHODS`, `grants::TOPICS`): every method and
+  topic, with what opens it. A test holds it to the methods known
+  (`hints::METHODS`) and the topics (`ptyrc_proto::TOPICS`). A method
+  not listed is closed to an app that does not hold the whole session.
+
+  | opened by | methods | topics |
+  |---|---|---|
+  | the default profile | `auth`, `batch`, `subscribe`, `input.release`, `draw.*`, `widget.declare`, `.show`, `.set`, `.hide`, `.ask`, `.release`, `.list`, `.borders`, `app.list` | `draw`, `size`, `widgets`, `move`, `exit` |
+  | `layout` | `frame.list`, `frame.get`, `frame.at` | `frames` |
+  | `shape` | `screen.shape`, `screen.cursor`, `screen.wait` without `pattern`, `frame.heat`, `frame.idle` | `screen`, `cursor`, `text`, `idle`, `colors` |
+  | `words` | `screen.shape` with `words` | |
+  | `text` | `screen.text`, `screen.cells`, `screen.find`, `screen.wait` with `pattern`, `frame.text`, `session.info` | |
+  | `keys-arrows` | `input.grab` of named keys that are not text: the arrows, `home`, `end`, `pageup`, `pagedown`, `insert`, `delete`, `f1`..`f12` | |
+  | `keys-grab` | any other `input.grab`; `widget.show` with `modal` | |
+  | `keys-read`, `clicks`, `pointer` | | `input`, `mouse`, `hover` |
+  | never | `session.resize`, `.colors`, `.handoff`, `input.send`, `input.click`, `tape.*`, `layer.*`, `widget.focus`, `widget.blur`, the other `app.*`, `debug.*` | `apps` |
+
+- A degree not held: lowered to the degree held (`Verdict::Lower`).
+  The cut answers are not done: `Driver::lowered` refuses, `denied`.
+  A topic not held, a degree or a permission: subscribed, no event
+  comes. A closed topic: `denied`.
+- An act not held, a closed method: `denied`, the hint naming the
+  permission (`grants::denied`).
+- A bound connection whose app left the table: `denied`, every request.
+- The names (`grants::Permission`): `layout`, `shape`, `words`, `text`,
+  `front-widget`, `front`, `screen-wide`, `keys-arrows`, `keys-grab`,
+  `keys-read`, `pointer`, `clicks`, `clicks-grab`, `clock`, `storage`,
+  `files`, `files-write`, `probe-git`, `probe-system`, `limit-memory`,
+  `limit-time`. Proposed, as the list of the plan.
+- Not told apart yet, each open by default above: an app's own
+  sprites, widgets and entry from the others' (`draw.list`,
+  `draw.update`, `draw.remove`, `widget.list`, `app.list`); the layer
+  and the surface of a sprite (`front`, `front-widget`,
+  `screen-wide`); the keys of its focused widget and the pointer on
+  its own things, which reach it without a topic.
 
 Durations on the wire (`timeout_ms`, `ttl_ms`, `ms`, ...) are session
 time: real time times `$PTYRC_CLOCK_RATE` (default 1), read by the driver
@@ -1641,7 +1713,7 @@ server -> {"event":"frames","data":{...}}          after subscribe
 ```
 
 Error codes: `bad-request`, `unknown-method`, `bad-params`, `no-frame`,
-`no-sprite`, `not-usable`, `timeout`, `gone`, `internal`.
+`no-sprite`, `not-usable`, `timeout`, `gone`, `denied`, `internal`.
 
 An error may carry `"hint"`: what to try, in one line. The valid values
 (frames, sprites, key names, colours, anchors, topics, extensions,
@@ -1652,6 +1724,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 
 | method | params | result |
 |---|---|---|
+| `auth` | `token` | `{"app":id,"identity":name}`; see Permissions |
 | `session.info` | | hello data (`active_at` with it), `alt_screen`, `title`, `driver_pid`, `headless`, `grabbed`, `handoff` (a successor waits), `tape` (a replay), `"modes":{"app_cursor","bracketed_paste","mouse":[1000,...],"mouse_sgr"}`, `"host_colors":{"fg","bg","from":{"fg","bg"}}` (`from`: `host`, `option`, `client`, `default`) |
 | `session.resize` | `size`: `[c, r]` | `{}`; headless only |
 | `session.colors` | `fg`, `bg`, `ask` | `host_colors`, and `asked`; see Rendering |

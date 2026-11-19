@@ -22,6 +22,10 @@ pub(crate) struct Conn {
     pub paused: bool,
     /// The pid of the peer, while it is no app of the table yet.
     pub peer: Option<u32>,
+    /// The app whose token it presented (`auth`). None: the user's.
+    pub app: Option<u64>,
+    /// A request was read: `auth` comes first or not at all.
+    pub asked: bool,
 }
 
 impl Conn {
@@ -35,6 +39,8 @@ impl Conn {
             dead: false,
             paused: false,
             peer: None,
+            app: None,
+            asked: false,
         })
     }
 

@@ -5,6 +5,7 @@ use crate::apps::{Apps, Refused, State};
 use crate::conn::Conn;
 use crate::engine::{ConnId, Ctx, Effects, Engine, Reply, SessionInfo, Token};
 use crate::grab::{self, Grab};
+use crate::grants::{self, Degree, Grants, Identity, Verdict, Why};
 use crate::hands::Hands;
 use crate::host::Host;
 use crate::hostcolors::{Known, QUERY_BG, QUERY_FG, Replies};
@@ -1519,9 +1520,19 @@ impl Driver {
                 method,
                 params,
             } = request;
-            match self.dispatch(id, &method, params, engine, false) {
+            let answer = self.dispatch(id, &method, params, engine, false);
+            if let Some(conn) = self.conns.get_mut(&id) {
+                conn.asked = true;
+            }
+            match answer {
                 Some(result) => {
+                    // A token not known: answered, then closed.
+                    let refused = method == "auth"
+                        && matches!(&result, Err(e) if e.code == ErrorCode::Denied);
                     self.respond(id, &request_id, result);
+                    if let Some(conn) = self.conns.get_mut(&id).filter(|_| refused) {
+                        conn.dead = true;
+                    }
                     for (to, message) in std::mem::take(&mut self.after) {
                         if let Some(conn) = self.conns.get_mut(&to) {
                             conn.send(&message);
@@ -1560,6 +1571,16 @@ impl Driver {
             && let Some(peer) = self.conns.get_mut(&conn).and_then(|c| c.peer.take())
         {
             apps.attach(conn, Some(peer), false, self.clock.elapsed());
+        }
+        if method == "auth" {
+            return Some(self.auth(conn, &params, in_batch));
+        }
+        // The check: every request of an app, the calls of a batch one
+        // by one. A connection without a token is the user's.
+        match self.verdict(conn, method, &params) {
+            Verdict::Allow => {}
+            Verdict::Lower(degree) => return Some(self.lowered(method, degree)),
+            Verdict::Denied(why) => return Some(Err(grants::denied(method, why))),
         }
         Some(match method {
             "session.info" => Ok(self.session_info(engine)),
@@ -1614,6 +1635,67 @@ impl Driver {
                 }
             }
         })
+    }
+
+    /// Who `conn` is and what it holds. `Ok(None)`: the user's hand.
+    /// `Err`: bound to an app (`auth`) that left the table.
+    fn asker(&self, conn: ConnId) -> Result<Option<(&Identity, &Grants)>, Why> {
+        let Some(id) = self.conns.get(&conn).and_then(|c| c.app) else {
+            return Ok(None);
+        };
+        let app = self.apps.as_ref().and_then(|apps| apps.get(id));
+        match app.and_then(|a| Some((a.identity.as_ref()?, &a.grants))) {
+            Some(asker) => Ok(Some(asker)),
+            None => Err(Why::Gone),
+        }
+    }
+
+    /// The check of a request of `conn`.
+    fn verdict(&self, conn: ConnId, method: &str, params: &Value) -> Verdict {
+        match self.asker(conn) {
+            Ok(None) => Verdict::Allow,
+            Ok(Some((who, held))) => grants::check(who, held, method, params),
+            Err(why) => Verdict::Denied(why),
+        }
+    }
+
+    /// `auth`: bind the connection to the child whose token it is.
+    fn auth(&mut self, conn: ConnId, params: &Value, in_batch: bool) -> Result<Value, RpcError> {
+        let first = self.conns.get(&conn).is_some_and(|c| !c.asked);
+        if in_batch || !first {
+            return Err(RpcError::new(
+                ErrorCode::BadRequest,
+                "auth: the first request of a connection, or none",
+            ));
+        }
+        let token = params
+            .get("token")
+            .and_then(Value::as_str)
+            .ok_or_else(|| RpcError::bad_params("token: a string"))?;
+        let app = self.apps.as_ref().and_then(|apps| apps.auth(conn, token));
+        let Some((id, who)) = app.and_then(|a| Some((a.id, a.identity.as_ref()?.key()))) else {
+            return Err(
+                RpcError::new(ErrorCode::Denied, "auth: token not known").with_hint(
+                    "a token is of one app the driver started, for its own connections \
+                     ($PTYRC_TOKEN, with $PTYRC_SOCKET); without one a connection is the user's",
+                ),
+            );
+        };
+        if let Some(conn) = self.conns.get_mut(&conn) {
+            conn.app = Some(id);
+        }
+        Ok(json!({"app": id, "identity": who}))
+    }
+
+    /// The answer of a method of reading, cut to `degree`. Not done:
+    /// refused until it is, so that nothing is told beyond the grants.
+    fn lowered(&mut self, method: &str, degree: Degree) -> Result<Value, RpcError> {
+        Err(
+            RpcError::new(ErrorCode::Denied, format!("{method}: denied")).with_hint(format!(
+                "the app holds the degree `{}`; the answers cut to a degree are not done",
+                degree.name()
+            )),
+        )
     }
 
     fn session_info(&self, engine: &dyn Engine) -> Value {
@@ -1714,6 +1796,23 @@ impl Driver {
                 )),
             );
         }
+        // A topic the app does not hold: subscribed, no event comes.
+        let mut silent = Vec::new();
+        if let Some((who, held)) = self
+            .asker(conn)
+            .map_err(|why| grants::denied("subscribe", why))?
+        {
+            for topic in &topics {
+                match grants::check_topic(who, held, topic) {
+                    Verdict::Allow => {}
+                    Verdict::Lower(_) => silent.push(topic.clone()),
+                    Verdict::Denied(why) => {
+                        return Err(grants::denied(&format!("subscribe: {topic}"), why));
+                    }
+                }
+            }
+        }
+        let topics: Vec<String> = topics.into_iter().filter(|t| !silent.contains(t)).collect();
         let snapshot = match params.get("snapshot") {
             None => false,
             Some(Value::Bool(snapshot)) => *snapshot,

@@ -4,6 +4,7 @@
 //! No clock inside: time is an argument.
 
 use crate::engine::{ConnId, Owned};
+use crate::grants::{Grants, Identity};
 use crate::start;
 use rustix::process::{Pid, Signal, getpgid, kill_process, kill_process_group};
 use serde_json::{Value, json};
@@ -20,6 +21,24 @@ pub(crate) const KILL_AFTER: Duration = Duration::from_secs(2);
 const EXITED_KEPT: usize = 16;
 /// Set for a child: its id in the table.
 pub(crate) const ENV_APP: &str = "PTYRC_APP";
+/// Set for a child: the secret its connections present (`auth`).
+pub(crate) const ENV_TOKEN: &str = "PTYRC_TOKEN";
+
+/// A secret for one run of one child: 128 bits, hex.
+fn new_token() -> Result<String, String> {
+    use std::io::Read;
+    let mut bytes = [0u8; 16];
+    fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut bytes))
+        .map_err(|e| format!("no token: /dev/urandom: {}", start::describe(&e)))?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// Equal, in a time that does not tell where they differ.
+fn same(a: &str, b: &str) -> bool {
+    let diff = a.bytes().zip(b.bytes()).fold(0, |d, (x, y)| d | (x ^ y));
+    a.len() == b.len() && diff == 0
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
@@ -69,6 +88,12 @@ pub(crate) struct App {
     /// When the present state began.
     pub since: Duration,
     pub conns: BTreeSet<ConnId>,
+    /// Of a child: who it is, for the permissions.
+    pub identity: Option<Identity>,
+    /// What it holds. Everything, until answers are read.
+    pub grants: Grants,
+    /// Of the present run of a child.
+    token: Option<String>,
     child: Option<Child>,
     /// Asked to end: when it is killed if it stays.
     kill_at: Option<Duration>,
@@ -161,7 +186,8 @@ impl Apps {
 
     /// `argv` in its own process group; stdin and stdout null, stderr to
     /// `log`.
-    fn spawn(&self, id: u64, argv: &[String], log: &Path) -> Result<Child, String> {
+    fn spawn(&self, id: u64, argv: &[String], log: &Path) -> Result<(Child, String), String> {
+        let token = new_token()?;
         let (program, args) = argv.split_first().ok_or("argv: empty")?;
         let stderr = match start::private_file(log, false) {
             Ok(file) => Stdio::from(file),
@@ -171,11 +197,13 @@ impl Apps {
             .args(args)
             .envs(self.env.iter().map(|(k, v)| (k, v)))
             .env(ENV_APP, id.to_string())
+            .env(ENV_TOKEN, &token)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(stderr)
             .process_group(0)
             .spawn()
+            .map(|child| (child, token))
             .map_err(|e| format!("cannot run {program}: {}", start::describe(&e)))
     }
 
@@ -189,7 +217,7 @@ impl Apps {
     ) -> Result<u64, Refused> {
         let id = self.next_id;
         let log = self.log_path(id);
-        let child = self.spawn(id, &argv, &log).map_err(|e| {
+        let (child, token) = self.spawn(id, &argv, &log).map_err(|e| {
             let _ = fs::remove_file(&log);
             Refused::Spawn(e)
         })?;
@@ -198,7 +226,7 @@ impl Apps {
         let app = App {
             id,
             kind: Kind::Child,
-            name,
+            name: name.clone(),
             argv,
             pid: child.id(),
             state: State::Running,
@@ -206,6 +234,9 @@ impl Apps {
             runs: 1,
             since: now,
             conns: BTreeSet::new(),
+            identity: Some(Identity::Native(name.clone())),
+            grants: Grants::whole(),
+            token: Some(token),
             child: Some(child),
             kill_at: None,
             again: false,
@@ -258,6 +289,9 @@ impl Apps {
                     runs: 1,
                     since: now,
                     conns: BTreeSet::from([conn]),
+                    identity: None,
+                    grants: Grants::whole(),
+                    token: None,
                     child: None,
                     kill_at: None,
                     again: false,
@@ -270,6 +304,17 @@ impl Apps {
         };
         self.changed.insert(id);
         Some(id)
+    }
+
+    /// The child whose token `conn` presents. The token alone is not
+    /// enough: the connection is one of that child already, matched at
+    /// accept by the process group of its peer. A token read by another
+    /// process is of no use to it.
+    pub fn auth(&self, conn: ConnId, token: &str) -> Option<&App> {
+        let app = self.get(self.of_conn(conn)?)?;
+        let live = app.kind == Kind::Child && app.state != State::Exited;
+        let known = app.token.as_deref().is_some_and(|t| same(t, token));
+        (live && known).then_some(app)
     }
 
     /// A connection closed. A client without one leaves the table.
@@ -390,6 +435,7 @@ impl Apps {
             app.argv = argv;
         }
         if let Some(name) = name {
+            app.identity = Some(Identity::Native(name.clone()));
             app.name = name;
         }
         let exited = app.state == State::Exited;
@@ -409,9 +455,10 @@ impl Apps {
         app.again = false;
         self.changed.insert(id);
         match spawned {
-            Ok(child) => {
+            Ok((child, token)) => {
                 app.pid = child.id();
                 app.child = Some(child);
+                app.token = Some(token);
                 app.state = State::Running;
                 app.status = None;
                 app.runs += 1;
@@ -737,6 +784,51 @@ mod tests {
         apps.detach(ConnId(5));
         apps.detach(ConnId(1));
         assert!(apps.get(id).unwrap().conns.is_empty());
+        apps.finish();
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_token_is_of_one_run_of_one_child() {
+        let (mut apps, dir) = apps("token");
+        let a = apps
+            .start(sh("sleep 60"), Some("a".into()), false, T0)
+            .unwrap();
+        let b = apps.start(sh("sleep 60"), None, false, T0).unwrap();
+        let token = |apps: &Apps, id| apps.get(id).unwrap().token.clone().unwrap();
+        let (of_a, of_b) = (token(&apps, a), token(&apps, b));
+        assert_eq!(of_a.len(), 32);
+        assert_ne!(of_a, of_b);
+        let pid = |apps: &Apps, id| apps.get(id).unwrap().pid;
+        apps.attach(ConnId(1), Some(pid(&apps, a)), true, T0);
+        apps.attach(ConnId(2), Some(pid(&apps, b)), true, T0);
+        let me = std::process::id();
+        apps.attach(ConnId(3), Some(me), false, T0);
+        // Its own token, on its own connection.
+        let app = apps.auth(ConnId(1), &of_a).unwrap();
+        assert_eq!(app.id, a);
+        assert_eq!(app.identity.as_ref().unwrap().key(), "native/a");
+        assert_eq!(apps.auth(ConnId(2), &of_b).unwrap().id, b);
+        // Not another's, not from elsewhere, not a guess.
+        assert!(apps.auth(ConnId(2), &of_a).is_none());
+        assert!(apps.auth(ConnId(3), &of_a).is_none());
+        assert!(apps.auth(ConnId(9), &of_a).is_none());
+        assert!(apps.auth(ConnId(1), "").is_none());
+        assert!(apps.auth(ConnId(1), &of_a[1..]).is_none());
+        // A new run, a new token; the name is the identity.
+        apps.restart(a, None, Some("c".into()), T0).unwrap();
+        wait(&mut apps, T0, |apps| apps.get(a).unwrap().runs == 2);
+        assert_ne!(token(&apps, a), of_a);
+        apps.attach(ConnId(4), Some(pid(&apps, a)), true, T0);
+        assert!(apps.auth(ConnId(4), &of_a).is_none());
+        let app = apps.auth(ConnId(4), &token(&apps, a)).unwrap();
+        assert_eq!(app.identity.as_ref().unwrap().key(), "native/c");
+        // An exited child has none.
+        apps.stop(b, T0).unwrap();
+        wait(&mut apps, T0, |apps| {
+            apps.get(b).unwrap().state == State::Exited
+        });
+        assert!(apps.auth(ConnId(2), &of_b).is_none());
         apps.finish();
         fs::remove_dir_all(dir).unwrap();
     }

@@ -84,8 +84,15 @@ pub struct Client {
 
 impl Client {
     /// Connect to a socket of this user (`session::connect`) and read
-    /// the `hello`.
+    /// the `hello`. An app the driver started presents its token
+    /// (`session::token_for`).
     pub fn connect(path: &Path) -> Result<Client, ClientError> {
+        Client::connect_as(path, session::token_for(path).as_deref())
+    }
+
+    /// As `connect`. `token`: presented first (`auth`); a token the
+    /// driver does not know is an error.
+    pub fn connect_as(path: &Path, token: Option<&str>) -> Result<Client, ClientError> {
         let stream = session::connect(path)?;
         let mut client = Client {
             stream,
@@ -99,6 +106,9 @@ impl Client {
             Some(Incoming::Event(e)) if e.event == "hello" => client.hello = e.data,
             Some(_) => return Err(ClientError::Protocol("no hello".into())),
             None => return Err(ClientError::Protocol("hello timed out".into())),
+        }
+        if let Some(token) = token {
+            client.call("auth", json!({"token": token}))?;
         }
         Ok(client)
     }
@@ -249,6 +259,39 @@ mod tests {
             c.next_event(Some(Duration::from_millis(500))),
             Err(ClientError::Closed)
         ));
+        server.join().unwrap();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_token_is_presented_first() {
+        let path = temp_socket("c.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        let server = std::thread::spawn(move || {
+            for known in [true, false] {
+                let (mut s, _) = listener.accept().unwrap();
+                s.write_all(&encode(&envelope::event("hello", json!({"protocol": 1}))))
+                    .unwrap();
+                let mut line = String::new();
+                BufReader::new(s.try_clone().unwrap())
+                    .read_line(&mut line)
+                    .unwrap();
+                let req: crate::Request = serde_json::from_str(&line).unwrap();
+                assert_eq!(req.method, "auth");
+                assert_eq!(req.params, json!({"token": "secret"}));
+                let result = match known {
+                    true => Ok(json!({"app": 1, "identity": "native/x"})),
+                    false => Err(RpcError::new(crate::ErrorCode::Denied, "auth")),
+                };
+                s.write_all(&encode(&envelope::response(&req.id, result)))
+                    .unwrap();
+            }
+        });
+        assert!(Client::connect_as(&path, Some("secret")).is_ok());
+        match Client::connect_as(&path, Some("secret")) {
+            Err(ClientError::Rpc(e)) => assert_eq!(e.code, crate::ErrorCode::Denied),
+            other => panic!("{:?}", other.err()),
+        }
         server.join().unwrap();
         let _ = std::fs::remove_file(&path);
     }

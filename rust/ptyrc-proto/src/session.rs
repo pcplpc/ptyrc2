@@ -14,6 +14,23 @@ use std::time::Duration;
 pub const ENV_SESSION: &str = "PTYRC_SESSION";
 /// Environment variable holding the socket path; set by the driver.
 pub const ENV_SOCKET: &str = "PTYRC_SOCKET";
+/// Environment variable holding the token of an app the driver
+/// started; set by the driver, with `PTYRC_SOCKET`.
+pub const ENV_TOKEN: &str = "PTYRC_TOKEN";
+
+/// The token to present on the socket `path`: that of the environment,
+/// when `path` is the socket it came with. A token is of one session.
+pub fn token_for(path: &Path) -> Option<String> {
+    let socket = std::env::var_os(ENV_SOCKET)?;
+    let token = std::env::var(ENV_TOKEN).ok().filter(|t| !t.is_empty())?;
+    token_of(path, Path::new(&socket), token)
+}
+
+fn token_of(path: &Path, socket: &Path, token: String) -> Option<String> {
+    let same = path == socket
+        || matches!((path.canonicalize(), socket.canonicalize()), (Ok(a), Ok(b)) if a == b);
+    same.then_some(token)
+}
 
 /// In place of a session name: the session the user typed in last.
 pub const AUTO: &str = "auto";
@@ -371,6 +388,16 @@ pub fn select(explicit: Option<&str>) -> Result<Session, SelectError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_token_is_of_its_socket() {
+        let token = || "t".to_string();
+        let here = Path::new("/nowhere/a.sock");
+        assert_eq!(token_of(here, here, token()), Some(token()));
+        assert_eq!(token_of(here, Path::new("/nowhere/b.sock"), token()), None);
+        let dir = std::env::temp_dir();
+        assert_eq!(token_of(&dir.join("."), &dir, token()), Some(token()));
+    }
 
     #[test]
     fn names() {

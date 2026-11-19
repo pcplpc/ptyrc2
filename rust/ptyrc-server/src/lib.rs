@@ -11,6 +11,7 @@ pub mod driver;
 pub mod engine;
 pub mod focus;
 mod grab;
+mod grants;
 pub use grab::{key_len, name as key_name};
 mod hands;
 mod hints;

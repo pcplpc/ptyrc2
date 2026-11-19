@@ -201,11 +201,29 @@ def socket_path(session: str | None = None) -> Path:
     )
 
 
+def _token_for(path: Path | str) -> str | None:
+    """The token of the environment (`PTYRC_TOKEN`), when `path` is the
+    socket it came with (`PTYRC_SOCKET`): a token is of one session."""
+    token = os.environ.get("PTYRC_TOKEN")
+    socket_ = os.environ.get("PTYRC_SOCKET")
+    if not token or not socket_:
+        return None
+    try:
+        same = os.path.samefile(path, socket_)
+    except OSError:
+        same = Path(path) == Path(socket_)
+    return token if same else None
+
+
 class Connection:
     """One client connection. Calls are thread-safe; a reader thread routes
     replies by id and queues events."""
 
-    def __init__(self, path: Path | str, timeout: float = 5.0) -> None:
+    def __init__(
+        self, path: Path | str, timeout: float = 5.0, token: str | None = None
+    ) -> None:
+        """`token`: presented first (`auth`); absent: that of the
+        environment, when `path` is the socket it came with."""
         try:
             self._sock = _connect(path, timeout)
         except OSError as exc:
@@ -231,6 +249,15 @@ class Connection:
             self.close()
             raise PtyrcError("bad-request", f"protocol {hello.get('protocol')}")
         self.hello = hello
+        #: Of an app the driver started: `native/NAME`. None: the user's.
+        self.identity: str | None = None
+        token = token or _token_for(path)
+        if token:
+            try:
+                self.identity = self.call("auth", {"token": token})["identity"]
+            except PtyrcError:
+                self.close()
+                raise
 
     @property
     def closed(self) -> bool:

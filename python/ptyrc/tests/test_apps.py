@@ -73,3 +73,43 @@ def test_app_lifecycle(shell: Pilot) -> None:
         d["state"] for topic, d in events if topic == "apps" and d["id"] == app["id"]
     ]
     assert states[-1] == "gone" and "paused" in states and "exited" in states
+
+
+#: A child that tells who it is, and its token.
+WHO = """
+import os
+from ptyrc import Pilot
+pilot = Pilot()
+pilot.draw(["I AM %s" % pilot.identity], at=(2, 2), space="view", layer="front")
+pilot.draw(["T=%s." % os.environ["PTYRC_TOKEN"]], at=(2, 3), space="view", layer="front")
+for _ in pilot.events(timeout=None):
+    pass
+"""
+
+
+def test_a_child_presents_its_token(shell: Pilot) -> None:
+    from ptyrc._wire import Connection
+
+    assert shell.identity is None
+    path = shell._conn._sock.getpeername()
+    app = shell.app_start([sys.executable, "-c", WHO], name="who")
+    until(lambda: "I AM native/who" in "\n".join(shell.shown()))
+    assert by_id(shell, app["id"])["conns"]
+
+    # Its token, read by another process, is of no use there.
+    shown = "\n".join(shell.shown())
+    token = shown.split("T=")[1].split(".")[0]
+    assert len(token) == 32
+    for bad in (token, "0" * 32):
+        with pytest.raises(PtyrcError) as err:
+            Connection(path, token=bad)
+        assert err.value.code == "denied" and "PTYRC_TOKEN" in err.value.hint
+
+    # `auth` is the first request, or none.
+    with pytest.raises(PtyrcError) as err:
+        shell.call("auth", token=token)
+    assert err.value.code == "bad-request"
+    calls = [{"method": "auth", "params": {"token": token}}]
+    (result,) = shell.call("batch", calls=calls)["results"]
+    assert result["error"]["code"] == "bad-request"
+    assert shell.text()
