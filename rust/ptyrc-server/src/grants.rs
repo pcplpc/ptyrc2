@@ -94,8 +94,7 @@ impl Permission {
 pub(crate) enum Identity {
     /// A shipped app, or any program the driver started: `native/NAME`.
     Native(String),
-    /// A store app: its origin, `host/owner/repo[#path]`. Not made yet.
-    #[allow(dead_code)]
+    /// A store app: its origin, `host/owner/repo[#path]`.
     Store(String),
 }
 
@@ -343,7 +342,12 @@ fn judge(grants: &Grants, gate: Option<Gate>) -> Verdict {
 /// The check of a request. Every request of a connection that
 /// presented a token goes through it; one without a token is the
 /// user's and is not asked.
-pub(crate) fn check(_who: &Identity, grants: &Grants, method: &str, params: &Value) -> Verdict {
+pub(crate) fn check(who: &Identity, grants: &Grants, method: &str, params: &Value) -> Verdict {
+    // The table tells every app and its command line: not a store
+    // app's to read, until it lists its own alone.
+    if matches!(who, Identity::Store(_)) && method == "app.list" {
+        return Verdict::Denied(Why::Never);
+    }
     judge(grants, gate(method, params))
 }
 

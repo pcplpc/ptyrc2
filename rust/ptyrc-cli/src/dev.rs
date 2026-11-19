@@ -2,21 +2,72 @@
 //! `ptyrc dev`: the tools of an app's author. See `plan/store-model.md`,
 //! "Tools".
 
-use crate::Fail;
+mod app;
+mod new;
+
 use crate::store::io_text;
+use crate::{Common, Fail};
 use clap::Subcommand;
 use ptyrc_store::manifest::MANIFEST;
 use ptyrc_store::{DirTree, Pointer, check_all, install};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 
 #[derive(Subcommand)]
 pub enum Dev {
+    /// Write a new app at NAME: the manifest, the app, a test, the
+    /// licence, AGENTS.md; a git repository
+    New {
+        /// The directory to create; its last part is the app's id
+        name: PathBuf,
+        /// A Rust app, `ptyrc-app` vendored, in place of a script
+        #[arg(long)]
+        rust: bool,
+    },
     /// What the install checks, on a directory: every problem, with its
     /// hint; status 1 if any
     Check {
         /// The app's directory [default: .]
         dir: Option<PathBuf>,
+    },
+    /// Run the app headless: the screen at each time as text, then the
+    /// requests refused, the limits met, the end; the log on stderr. The
+    /// same run every time. A Rust app is built first (cargo)
+    Test {
+        /// The app's directory [default: .]
+        dir: Option<PathBuf>,
+        /// Screen size, COLSxROWS [default: 80x24]
+        #[arg(long, value_name = "CxR")]
+        size: Option<String>,
+        /// Session time the run lasts: 1500, 1500ms, 1.5s [default: 1s]
+        #[arg(long = "for", value_name = "T")]
+        duration: Option<String>,
+        /// Times of the screens shown, comma-separated [default: the end]
+        #[arg(long, value_name = "T,...")]
+        at: Option<String>,
+        /// Seed of the random numbers [default: 1]
+        #[arg(long, value_name = "N")]
+        seed: Option<u64>,
+        /// A tape (`ptyrc run --record`) played under the app, in session
+        /// time; its size is the screen's
+        #[arg(long, value_name = "FILE", conflicts_with_all = ["screen", "size"])]
+        tape: Option<PathBuf>,
+        /// A text file as the program's screen under the app
+        #[arg(long, value_name = "FILE")]
+        screen: Option<PathBuf>,
+        /// An option of the manifest's [options]; again for each
+        #[arg(long = "arg", value_name = "NAME=VALUE")]
+        args: Vec<String>,
+    },
+    /// Run the app in a live session, as the user's own client; start it
+    /// again when a file of DIR changes. The log on stderr; Ctrl-C ends
+    Run {
+        /// The app's directory [default: .]
+        dir: Option<PathBuf>,
+        /// Options of the manifest's [options]
+        #[arg(value_name = "NAME=VALUE")]
+        args: Vec<String>,
     },
     /// Print the registry's pointer file for the app at DIR: the origin
     /// from the git remote, the manifest's path, the head commit as
@@ -31,9 +82,42 @@ pub enum Dev {
     },
 }
 
-pub fn dev(verb: Dev) -> Result<ExitCode, Fail> {
+pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
+    let here = |dir: Option<PathBuf>| dir.unwrap_or_else(|| ".".into());
     match verb {
-        Dev::Check { dir } => check(&dir.unwrap_or_else(|| ".".into())),
+        Dev::New { name, rust } => new::new(&name, rust),
+        Dev::Check { dir } => check(&here(dir)),
+        Dev::Test {
+            dir,
+            size,
+            duration,
+            at,
+            seed,
+            tape,
+            screen,
+            args,
+        } => {
+            let dir = here(dir);
+            is_dir(&dir)?;
+            let mut flags: Vec<OsString> = Vec::new();
+            let mut flag = |name: &str, v: Option<OsString>| {
+                if let Some(v) = v {
+                    flags.extend([name.into(), v]);
+                }
+            };
+            flag("--size", size.map(Into::into));
+            flag("--for", duration.map(Into::into));
+            flag("--at", at.map(Into::into));
+            flag("--seed", seed.map(|s| s.to_string().into()));
+            flag("--tape", tape.map(Into::into));
+            flag("--screen", screen.map(Into::into));
+            app::test(app::TestOpts { dir, args, flags })
+        }
+        Dev::Run { dir, args } => {
+            let dir = here(dir);
+            is_dir(&dir)?;
+            app::run(common, &dir, &args)
+        }
         Dev::Entry { dir, remote } => entry(&dir.unwrap_or_else(|| ".".into()), remote),
     }
 }
@@ -56,20 +140,28 @@ fn is_dir(dir: &Path) -> Result<(), Fail> {
 fn check(dir: &Path) -> Result<ExitCode, Fail> {
     is_dir(dir)?;
     let problems = match check_all(&DirTree::new(dir)) {
-        Ok(ok) => match install::supported(&ok) {
-            Ok(()) => {
-                let a = &ok.manifest.app;
-                println!(
-                    "ok: {} {}: {} files, {} bytes",
-                    a.id,
-                    a.version,
-                    ok.files.len(),
-                    ok.size
-                );
-                return Ok(ExitCode::SUCCESS);
+        Ok(ok) => {
+            let supported = install::supported(&ok);
+            let rust = matches!(ok.manifest.app.entry, ptyrc_store::Entry::Rust(_));
+            match supported {
+                // A Rust app: `dev test` builds it here; the store, not yet.
+                Err(e) if !rust => vec![e],
+                _ => {
+                    let a = &ok.manifest.app;
+                    println!(
+                        "ok: {} {}: {} files, {} bytes",
+                        a.id,
+                        a.version,
+                        ok.files.len(),
+                        ok.size
+                    );
+                    if let Err(e) = supported {
+                        eprintln!("ptyrc: note: {}: `ptyrc store add` refuses it", e.message);
+                    }
+                    return Ok(ExitCode::SUCCESS);
+                }
             }
-            Err(e) => vec![e],
-        },
+        }
         Err(v) => v,
     };
     for e in &problems {

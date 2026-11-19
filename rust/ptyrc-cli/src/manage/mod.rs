@@ -9,7 +9,7 @@ mod overlay;
 mod tty;
 pub mod ui;
 
-use crate::{Common, Fail, apps, connect, print_json};
+use crate::{Common, Fail, apps, connect, print_json, storeapp};
 use clap::{Args, Subcommand};
 use ptyrc_proto::Client;
 use serde_json::{Value, json};
@@ -142,9 +142,19 @@ fn app_word(argv: &[String]) -> Option<usize> {
     (at + 1 < argv.len()).then_some(at)
 }
 
+/// The installed store app `name` names: as `ptyrc app`.
+pub fn store_app(name: &str) -> Option<Result<storeapp::StoreApp, Fail>> {
+    let found = storeapp::find(name)?;
+    let native = || catalog::load().is_some_and(|c| c.app(name).is_some());
+    (storeapp::is_origin(name) || !native()).then_some(found)
+}
+
 /// The name an app goes by: of one run by `ptyrc-app`, its first word
-/// (`bricks`); else the name the driver has.
+/// (`bricks`); of a store app, its id; else the name the driver has.
 pub fn label(info: &Value) -> String {
+    if info["store"].is_string() {
+        return info["name"].as_str().unwrap_or("?").to_string();
+    }
     let argv = argv_of(info);
     match app_word(&argv) {
         Some(at) => argv[at + 1].clone(),
@@ -247,7 +257,12 @@ fn early_end(info: &Value) -> Fail {
 /// with an error is a failure (status 1), the last line of its log the
 /// hint. The info of the app.
 pub fn start(client: &mut Client, argv: &[String], name: &str) -> Result<Value, Fail> {
-    let started = client.call("app.start", start_params(argv, name))?;
+    start_with(client, start_params(argv, name))
+}
+
+/// `start`, with the params of `app.start` made.
+pub fn start_with(client: &mut Client, params: Value) -> Result<Value, Fail> {
+    let started = client.call("app.start", params)?;
     let id = started["app"]["id"].as_u64().unwrap_or(0);
     let deadline = Instant::now() + START_WAIT;
     let mut info = started["app"].clone();
@@ -344,7 +359,7 @@ fn say(info: &Value) {
     println!("{} {}: {}", info["id"], label(info), state(info));
 }
 
-fn report(common: &Common, infos: &[Value]) {
+pub fn report(common: &Common, infos: &[Value]) {
     if common.json {
         print_json(&json!(infos), false);
     } else {
@@ -405,6 +420,15 @@ pub fn ls(common: &Common) -> Result<ExitCode, Fail> {
 }
 
 fn start_verb(common: &Common, cmd: bool, words: Vec<String>) -> Result<ExitCode, Fail> {
+    // An installed store app, unless a native app has the name.
+    if !cmd && let Some(found) = store_app(&words[0]) {
+        let Some(params) = storeapp::start_params(&found?, &words[1..])? else {
+            return Err("--help: ptyrc app APP --help".into());
+        };
+        let info = start_with(&mut connect(common)?, params)?;
+        report(common, &[info]);
+        return Ok(ExitCode::SUCCESS);
+    }
     let (argv, name) = match cmd {
         true => {
             let name = file_name(&words[0]).to_string();

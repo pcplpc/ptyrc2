@@ -119,6 +119,14 @@ impl App {
         };
     }
 
+    /// Of a store app: its origin.
+    pub fn store(&self) -> Option<&str> {
+        match &self.identity {
+            Some(Identity::Store(origin)) => Some(origin),
+            _ => None,
+        }
+    }
+
     /// As JSON, without `me`, `sprites` and `widgets`.
     fn json(&self, now: Duration) -> Value {
         let since = now.saturating_sub(self.since).as_millis() as f64 / 1000.0;
@@ -135,6 +143,7 @@ impl App {
             "conns": self.conns.iter().map(|c| c.0).collect::<Vec<_>>(),
             "log": self.log.as_ref().map(|p| p.to_string_lossy()),
             "declares": self.declares.is_some(),
+            "store": self.store(),
         })
     }
 }
@@ -220,6 +229,19 @@ impl Apps {
         ephemeral: bool,
         now: Duration,
     ) -> Result<u64, Refused> {
+        self.start_as(argv, name, None, ephemeral, now)
+    }
+
+    /// `start`, as `identity`: a store app, its origin. `None`:
+    /// `native/NAME`.
+    pub fn start_as(
+        &mut self,
+        argv: Vec<String>,
+        name: Option<String>,
+        identity: Option<Identity>,
+        ephemeral: bool,
+        now: Duration,
+    ) -> Result<u64, Refused> {
         let id = self.next_id;
         let log = self.log_path(id);
         let (child, token) = self.spawn(id, &argv, &log).map_err(|e| {
@@ -239,7 +261,7 @@ impl Apps {
             runs: 1,
             since: now,
             conns: BTreeSet::new(),
-            identity: Some(Identity::Native(name.clone())),
+            identity: Some(identity.unwrap_or_else(|| Identity::Native(name.clone()))),
             grants: Grants::whole(),
             declares: None,
             token: Some(token),

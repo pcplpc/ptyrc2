@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[package]
+name = "{{id}}"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# The guest crate, vendored: its source is in this tree, its version
+# with it.
+ptyrc-app = { path = "vendor/ptyrc-app" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

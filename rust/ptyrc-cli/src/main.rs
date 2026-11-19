@@ -7,6 +7,7 @@ mod manage;
 mod plugins;
 mod replay;
 mod store;
+mod storeapp;
 mod tmux;
 mod tools;
 mod verbs;
@@ -121,7 +122,7 @@ enum Verb {
     /// Store apps: add, rm, update, ls, show, search
     #[command(subcommand)]
     Store(store::Store),
-    /// An app's author: check, entry
+    /// An app's author: new, check, test, run, entry
     #[command(subcommand)]
     Dev(dev::Dev),
     /// An interactive Python session with `pilot` connected
@@ -407,7 +408,7 @@ fn run(cli: Cli) -> Result<ExitCode, Fail> {
         Verb::Tape { verb } => replay::tape(&common, verb),
         Verb::App(args) => apps::app(&common, args),
         Verb::Store(verb) => store::store(&common, verb),
-        Verb::Dev(verb) => dev::dev(verb),
+        Verb::Dev(verb) => dev::dev(&common, verb),
         Verb::Python(args) => apps::python(&common, args),
         Verb::Manage(args) => manage::manage(&common, args),
         Verb::Tmux(verb) => tmux::tmux(&common, verb),

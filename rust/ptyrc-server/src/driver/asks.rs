@@ -67,6 +67,39 @@ impl Driver {
             return Ok(false);
         };
         let member = |name: &str| params.get(name).filter(|v| !v.is_null());
+        if let (Some(store), "app.start") = (member("store").and_then(Value::as_str), method) {
+            // What does not start is told by `app_call`.
+            if ["argv", "name", "declares"]
+                .iter()
+                .any(|m| member(m).is_some())
+            {
+                return Ok(false);
+            }
+            let Ok(found) = crate::store::find(store, member("args")) else {
+                return Ok(false);
+            };
+            let key = Identity::Store(found.origin.clone()).key();
+            let (entry, _) = file_entry(&key);
+            let resolved = permissions::resolve(&found.declared, entry.as_ref(), false);
+            if resolved.missing.is_empty() || !self.can_ask() {
+                return Ok(false);
+            }
+            self.fits(method, in_batch)?;
+            let ask = Ask::new(
+                &found.name,
+                &key,
+                &found.tier,
+                &found.declared,
+                entry.unwrap_or_default(),
+                &resolved.missing,
+                false,
+            );
+            let then = Then::Call {
+                method: method.to_string(),
+                params: params.clone(),
+            };
+            return Ok(self.hold(conn, ask, then));
+        }
         let Some(declared) = member("declares").and_then(|d| Declared::from_wire(d).ok()) else {
             return Ok(false);
         };
@@ -173,7 +206,11 @@ impl Driver {
         let ask = Ask::new(
             &app.name,
             &key,
-            "native",
+            if app.store().is_some() {
+                "store"
+            } else {
+                "native"
+            },
             declared,
             entry.unwrap_or_default(),
             &shown,
@@ -331,6 +368,9 @@ impl Driver {
                         // The one function that sets what an app holds.
                         let grants = permissions::resolve(&declared, Some(&entry), false).grants;
                         apps.grant(id, Some((declared, grants)));
+                        // What it hears, and the host mouse, follow.
+                        self.refresh_topics();
+                        self.sync_host_mouse(engine);
                         Ok(json!({"app": self.app_info(id, Some(conn), engine)}))
                     }
                     _ => Err(RpcError::new(

@@ -9,6 +9,7 @@ JavaScript interpreter that is itself a guest of ABI 1
 | `ptyrc.d.ts` | the API, typed: the whole of it. An app is written from this file |
 | `interp/` | the interpreter guest (`ptyrc-js`): Boa, the module `"ptyrc"` (`src/prelude.js`), the loader |
 | `examples/confetti/` | an app |
+| `../template/` | what `ptyrc dev new` writes (embedded in `ptyrc`) |
 
 ## Build
 
@@ -17,7 +18,8 @@ rustup target add wasm32-unknown-unknown
 cargo build --release --manifest-path sdk/js/interp/Cargo.toml
 ```
 
-The module: `sdk/js/interp/target/wasm32-unknown-unknown/release/ptyrc_js.wasm`.
+The module: `sdk/js/interp/target/wasm32-unknown-unknown/release/ptyrc_js.wasm`,
+found there by a `ptyrc-box` of `target/<profile>/`.
 It is not in the repository: built with a release, not on the user's
 machine. `interp/` is a workspace of its own; its `Cargo.lock` is kept.
 
@@ -128,12 +130,15 @@ to Rust.
 the errors, the hostile scripts (loops, memory, recursion, a module
 named as the API, the natives asked for, imports outside the tree,
 reserved members as arguments, floods, escape bytes), the example
-twice. Where the interpreter is not built, each says `skipped` and
-passes.
+twice. Where the interpreter is not built, they pass and a line `script
+tests SKIPPED` says so.
+
+`rust/ptyrc-cli/tests/dev.rs`: `ptyrc dev new`, `check`, `test`, `run`
+on the template; every example passes `dev check` and `dev test`.
 
 ## Not done
 
 - The compiled module is not kept between starts: each start compiles
   it (see Speed).
 - A promise rejected and never awaited is silent.
-- `dev new`, `dev test`, the other examples.
+- The examples `sand`, `snake`.

@@ -4,16 +4,20 @@ The runner of store apps: one WebAssembly guest, its limits, its
 canvases. `plan/store-model.md` is the plan; this file is the ABI.
 
 ```
-ptyrc-box MODULE [ARGS]
-
-ptyrc-box --script APP.js [ARGS]
+ptyrc-box [--script] MODULE [ARGS]
+ptyrc-box --headless [--script] MODULE [ARGS] [--size CxR] [--for T]
+          [--at T,...] [--seed N] [--tape FILE | --screen FILE]
 ```
 
-Runs `MODULE` (a binary module) in the session of `PTYRC_SOCKET`,
-presenting `PTYRC_TOKEN`. `ARGS`: the JSON given to `init`, default
-`{}`. The log is stderr. SIGTERM: `stop`, then the end. Status: that of
-`exit`; 0 after SIGTERM; 70 a guest ended by the runner; 2 usage; 5 the
-connection.
+Runs `MODULE` (a binary module; with `--script`, `APP.js`) in the
+session of `PTYRC_SOCKET`, presenting `PTYRC_TOKEN`. `ARGS`: the JSON
+given to `init`, default `{}`. The log is stderr. SIGTERM: `stop`, then
+the end. Status: that of `exit`; 0 after SIGTERM; 70 a guest ended by
+the runner; 2 usage; 5 the connection.
+
+`--headless`: no session; `headless::run` (Library). The report on
+stdout, the log on stderr. `T`: ms, or `500ms`, `2s`. Defaults: 80x24,
+1 s, the end, seed 1. Status: 0, or that of `exit`, or 70.
 
 ## Guest ABI, version 1
 
@@ -64,8 +68,10 @@ bytes in the guest's memory, no terminator. JSON is a text.
   `(ptr << 32) | len`. The guest frees it. 0: `alloc` gave none.
 - `{"result": ...}`, or `{"error": {"code", "message", "hint"?}}`. The
   codes of the protocol, and `limit` (the rate), `gone` (the driver),
-  `headless` (a run without a session answers `draw.*`, `subscribe`,
-  `unsubscribe`, `session.info`, `screen.text`, `screen.shape` only).
+  `headless` (a run without a session answers `draw.put`, `update`,
+  `remove`, `clear`, `widget.declare`, `show`, `set`, `hide`,
+  `subscribe`, `unsubscribe`, `session.info`, `screen.text`,
+  `screen.shape` only).
 - Methods and topics: `plan/design.md`, Protocol.
 
 `canvas`, `cells`
@@ -128,10 +134,12 @@ outside the memory), `stack`, `trap`, `exit`, `gone`.
 ## Script apps
 
 `--script`: the guest is the interpreter of `sdk/js` (`PTYRC_JS`; else
-`ptyrc-js.wasm` beside the program; else `../share/ptyrc/` from
-there). The ABI is the same. The scripts of the directory of `APP.js`
-(`.js`, `.mjs`; 1 MiB, 512 files) ride in the JSON of `init`, under
-two reserved members the runner sets, whatever `ARGS` holds:
+`ptyrc-js.wasm` beside the program; else `../share/ptyrc/` from there;
+else, from `target/<profile>/` of the source tree, the module built in
+`sdk/js/interp/target/`). The ABI is the same. The scripts of the
+directory of `APP.js` (`.js`, `.mjs`; 1 MiB, 512 files) ride in the JSON
+of `init`, under two reserved members the runner sets, whatever `ARGS`
+holds:
 
 ```json
 {"ptyrc:sources": {"app.js": "...", "lib/util.js": "..."},
@@ -150,11 +158,29 @@ let report = run(&wasm, &Options { size: (80, 24), duration_ms: 1000,
 print!("{report}");
 ```
 
-- `headless::run`: an empty screen, session time an argument, `random`
-  from a seed: the same report every time. `Report`: the screens at
-  each time (canvases with an anchor `at`; another anchor: the origin),
-  the requests (`refused`: the code), the log, the limits met, the end.
-  Lateness is wall time: a guest near 50 ms a tick may differ.
+- `headless::run`: session time an argument, `random` from a seed: the
+  same report every time. Lateness is wall time: a guest near 50 ms a
+  tick may differ.
+- The screen: `Options::under`: `Empty`; `Text` (written from the top
+  left, `\n` a line, escapes read); `Tape` (`Tape::parse`, the format
+  of `plan/design.md`, Tapes: output and resizes, in session time,
+  `t / 1000` ms; its size is the screen's).
+- Drawn by the scene and the widgets of `ptyrc-core`, as the driver
+  draws: canvases, text sprites (`rows`, `cells`), `frames`, anchors,
+  layers (behind the text by default), `ttl_ms`, `motion`, the
+  built-in effects, widgets (laid out once the screen is still, under
+  a second). Not: draw extensions of plugins, the pop-up, other
+  clients.
+- `Report`: the screens at each time as text (one string a row,
+  trailing spaces cut), the requests (`refused`: the code; `content`
+  and `frames` left out), the log, the limits met, the end.
+
+The size. `session.info` answers `{"protocol": 1, "server",
+"size": [columns, rows], "headless": true}` (headless: `"server":
+"ptyrc-box"`), as the driver answers at the degree `none`. A change:
+the event `size`, `{"size": [columns, rows]}`, to an app subscribed
+(`call("subscribe", {"topics": ["size"]})`); headless, at each resize
+of the tape.
 - `live::run`: a session (`Live::new(Client, log)`), real time times
   `PTYRC_CLOCK_RATE`.
 - `Runner<H: Host>`: `load`, `init`, `tick`, `event`, `stop`; `Host` is
@@ -182,8 +208,11 @@ rows patched alone. Nothing changes for the guest.
 - `tests/abi.rs`: the ABI against small guests.
 - `tests/hostile/`: guests that must end contained.
 - `tests/live.rs`: above.
-- `tests/script.rs`: script apps and hostile scripts; needs the
-  interpreter built, else each test says `skipped` and passes.
+- `tests/script.rs`: script apps and hostile scripts. They need the
+  interpreter: `cargo build --release --manifest-path
+  sdk/js/interp/Cargo.toml`. Without it they pass, testing nothing,
+  and a line `script tests SKIPPED` is printed past the capture;
+  `PTYRC_REQUIRE_JS=1`: they fail.
 
 Guests are text modules (`tests/common`: the imports, a bump
 allocator).
@@ -192,6 +221,8 @@ allocator).
 
 - Paused: nothing resumes it but `Runner::resume`; the manager is not
   told.
-- A screen under the headless run (a tape).
+- The compiled interpreter is not kept on disk (1 s a start, 20 s in
+  a debug build): `Module::deserialize` is `unsafe`, and `unsafe` is
+  kept to `ptyrc-server`.
 - `wasmi` where wasmtime does not build.
 - The OS profile (milestone 6).

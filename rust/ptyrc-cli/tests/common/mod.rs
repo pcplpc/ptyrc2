@@ -41,6 +41,9 @@ impl Sandbox {
         command
             .env("XDG_RUNTIME_DIR", &self.dir)
             .env("XDG_CONFIG_HOME", self.config())
+            .env("XDG_DATA_HOME", self.dir.join("data"))
+            .env("XDG_STATE_HOME", self.dir.join("state"))
+            .env("XDG_CACHE_HOME", self.dir.join("cache"))
             .env_remove("PTYRC_SESSION")
             .env_remove("PTYRC_SOCKET");
         command

@@ -88,18 +88,28 @@ pub fn init_args(main: &str, sources: &BTreeMap<String, String>, args: Value) ->
     Value::Object(out)
 }
 
+/// Built in the source tree, from `target/<profile>/`.
+const BUILT: &str = "../../sdk/js/interp/target/wasm32-unknown-unknown/release/ptyrc_js.wasm";
+
 /// Where the interpreter is: `PTYRC_JS`; else `ptyrc-js.wasm` beside
-/// the program; else `../share/ptyrc/ptyrc-js.wasm` from there.
+/// the program; else `../share/ptyrc/ptyrc-js.wasm` from there; else,
+/// the program in `target/<profile>/` of the source tree, the module
+/// built there (`sdk/js/README.md`).
 pub fn interpreter_path() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os(ENV_JS) {
         return Ok(PathBuf::from(path));
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let dir = exe.parent().unwrap_or(Path::new("."));
-    let tried = [dir.join(MODULE), dir.join("../share/ptyrc").join(MODULE)];
+    let tried = [
+        dir.join(MODULE),
+        dir.join("../share/ptyrc").join(MODULE),
+        dir.join(BUILT),
+    ];
     tried.iter().find(|p| p.is_file()).cloned().ok_or_else(|| {
         format!(
-            "the script interpreter is not installed ({}); build it (sdk/js/README.md) or set {ENV_JS}",
+            "the script interpreter is not installed ({}); build it: cargo build --release \
+             --manifest-path sdk/js/interp/Cargo.toml (sdk/js/README.md), or set {ENV_JS}",
             tried[0].display()
         )
     })

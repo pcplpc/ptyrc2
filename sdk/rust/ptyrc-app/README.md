@@ -134,11 +134,14 @@ A buffer of cells in the guest's memory, shown as one sprite.
 
 ## Test
 
-`ptyrc_box::headless::run`: an empty screen, session time an argument,
-`random` from a seed: the same report every time. It answers `draw.*`,
-`subscribe`, `unsubscribe`, `session.info`, `screen.text`,
-`screen.shape`; the rest: `headless`. It shows canvases (not text
-sprites) anchored `at`.
+`ptyrc dev test DIR` builds the app and runs it headless: the screen at
+each time as text, the requests refused, the limits met, the end
+(`ptyrc dev new NAME --rust`: an app with its test). Underneath,
+`ptyrc_box::headless::run`: session time an argument, `random` from a
+seed, the same report every time; sprites, canvases and widgets drawn
+as the driver draws them, over an empty screen, a text or a tape. It
+answers `draw.*`, `widget.*`, `subscribe`, `unsubscribe`,
+`session.info`, `screen.text`, `screen.shape`; the rest: `headless`.
 
 ```rust
 // dev-dependencies: ptyrc-box = { path = ".../rust/ptyrc-box" }, serde_json

@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "{{id}}"
+version = "0.1.0"
+summary = "A clock in the top right corner."
+license = "GPL-3.0-or-later"
+api = 1
+rust = "src/lib.rs"
+rustc = "1.85"
+surface = "screen"
+
+[options]
+label = { type = "string", default = "t", doc = "shown before the time" }

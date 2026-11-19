@@ -34,6 +34,7 @@ pub mod screen;
 #[cfg(test)]
 mod screen_tests;
 pub mod start;
+mod store;
 
 pub use driver::{Config, Exit, replay, run};
 pub use engine::{ConnId, Ctx, Engine, Owned, PassThrough, Reply, SessionInfo, Token};

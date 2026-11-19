@@ -2063,7 +2063,7 @@ impl Driver {
         }
         let members: &[&str] = match method {
             "app.list" => &[],
-            "app.start" => &["argv", "name", "declares"],
+            "app.start" => &["argv", "name", "declares", "store", "args"],
             "app.restart" => &["app", "argv", "name", "declares"],
             "app.move" => &["app", "frame"],
             _ => &["app"],
@@ -2116,7 +2116,45 @@ impl Driver {
             Refused::Spawn(message) => RpcError::bad_params(message)
                 .with_hint("argv: a program of the driver's PATH, or its path, then its arguments"),
         };
-        let id = if method == "app.start" {
+        let store =
+            match member("store") {
+                None => None,
+                Some(store) => Some(store.as_str().filter(|s| !s.is_empty()).ok_or_else(|| {
+                    RpcError::bad_params("store: an origin, or the id of an app")
+                })?),
+            };
+        let id = if let (true, Some(store)) = (method == "app.start", store) {
+            // The driver finds the tree and the runner: no program, no
+            // name, no declaration is the client's to give.
+            if argv.is_some() || name.is_some() || declares.is_some() {
+                return Err(RpcError::bad_params("app.start: store, or argv: not both")
+                    .with_hint(r#"a store app: {"store": ORIGIN, "args": {OPTION: VALUE}}"#));
+            }
+            let found = crate::store::find(store, member("args"))?;
+            let identity = Some(Identity::Store(found.origin.clone()));
+            let id = apps
+                .start_as(
+                    found.argv.clone(),
+                    Some(found.name.clone()),
+                    identity,
+                    false,
+                    now,
+                )
+                .map_err(|e| match e {
+                    Refused::Spawn(message) => RpcError::new(ErrorCode::NotUsable, message),
+                    e => refused(apps, 0, e),
+                })?;
+            for name in &found.unknown {
+                apps.note(id, &format!("permission `{name}`: not known, not held"));
+            }
+            Self::grant(apps, id, Some(found.declared.clone()), headless, given);
+            found.started();
+            id
+        } else if method == "app.start" {
+            if member("args").is_some() {
+                return Err(RpcError::bad_params("app.start: args: of a store app")
+                    .with_hint("the arguments of a program are in argv"));
+            }
             let argv = argv.ok_or_else(|| {
                 RpcError::bad_params("argv: [program, arg...]")
                     .with_hint(r#"as in {"argv": ["ptyrc-app", "clock"]}"#)
@@ -2135,6 +2173,15 @@ impl Driver {
             }
             let me = apps.of_conn(conn) == Some(id);
             let verb = &method["app.".len()..];
+            // A store app is its origin: started again as it is.
+            let of_store = apps.get(id).is_some_and(|a| a.store().is_some());
+            if of_store && (argv.is_some() || name.is_some() || declares.is_some()) {
+                return Err(RpcError::new(
+                    ErrorCode::NotUsable,
+                    format!("app {id} is a store app: restarted as it is"),
+                )
+                .with_hint("other options: stop it, then ptyrc app ORIGIN OPTION..."));
+            }
             if me && matches!(verb, "stop" | "pause" | "restart") {
                 return Err(RpcError::new(
                     ErrorCode::NotUsable,

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! `ptyrc app` and `ptyrc python`: the Python programs, under one name.
 
-use crate::{Common, Fail};
+use crate::{Common, Fail, storeapp};
 use clap::Args;
 use ptyrc_proto::session;
 use std::os::unix::process::CommandExt;
@@ -79,6 +79,16 @@ pub fn not_found(name: &str) -> impl FnOnce() -> Fail {
 /// session chosen and several live: the one the user typed in last.
 pub fn app(common: &Common, args: App) -> Result<ExitCode, Fail> {
     let session = common.session.clone().or_else(|| typed_in(&args.args));
+    if let Some((name, words)) = args.args.split_first()
+        && !name.starts_with('-')
+        && let Some(found) = crate::manage::store_app(name)
+    {
+        let common = Common {
+            session,
+            json: common.json,
+        };
+        return storeapp::run(&common, &found?, words);
+    }
     exec(APP, session.as_deref(), &args.args)
 }
 

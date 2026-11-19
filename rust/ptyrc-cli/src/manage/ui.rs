@@ -223,7 +223,16 @@ pub struct Session {
 
 impl Session {
     pub fn new(client: Client) -> (Session, Option<Catalog>) {
-        let catalog = catalog::load();
+        // The installed store apps, beside the native ones.
+        let mut catalog = catalog::load();
+        let taken: Vec<String> = (catalog.iter().flat_map(|c| &c.apps))
+            .map(|a| a.name.clone())
+            .collect();
+        let taken: Vec<&str> = taken.iter().map(String::as_str).collect();
+        let stored = crate::storeapp::catalog_apps(&taken);
+        if !stored.is_empty() {
+            catalog.get_or_insert_default().apps.extend(stored);
+        }
         let session = Session {
             client,
             frames: Vec::new(),
@@ -262,8 +271,15 @@ impl Backend for Session {
     fn start(&mut self, name: &str, args: &[String]) -> Result<u64, Fail> {
         let mut words = vec![name.to_string()];
         words.extend_from_slice(args);
-        let (argv, name) = super::app_argv(&words)?;
-        let started = self.call("app.start", super::start_params(&argv, &name))?;
+        let params = match super::store_app(name) {
+            Some(found) => crate::storeapp::start_params(&found?, args)?
+                .ok_or("--help: ptyrc app APP --help")?,
+            None => {
+                let (argv, name) = super::app_argv(&words)?;
+                super::start_params(&argv, &name)
+            }
+        };
+        let started = self.call("app.start", params)?;
         started["app"]["id"]
             .as_u64()
             .ok_or_else(|| "app.start: no id".into())

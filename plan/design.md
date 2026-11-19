@@ -1140,6 +1140,7 @@ not kept, nor the child of the hotkey once it has ended.
 |---|---|---|
 | `app.list` | | `{"apps":[info,...]}`, by id |
 | `app.start` | `argv`: `[program, arg...]`, `name`, `declares` (Permissions) | `{"app":info}`, once the pop-up is answered when it asks; `bad-params` with the reason when it does not start; `cancelled` |
+| `app.start` | `store`: an origin or the id of an installed app, `args`: `{OPTION: VALUE}` | the same; see Store apps |
 | `app.stop` | `app`: id | `{"app":info}`; SIGTERM, SIGCONT when paused, SIGKILL after 2 s. A child: its group; a client: its pid. An exited child: nothing |
 | `app.pause` | `app` | `{"app":info}`; see Pause |
 | `app.resume` | `app` | `{"app":info}` |
@@ -1151,6 +1152,33 @@ An unknown id: `no-sprite`, `no such app: N`, the hint naming the apps.
 An app may not stop, pause or restart itself (`me`): `not-usable`.
 An unknown member: `bad-params`. Not on a replay (`bad-request`), nor
 on `--transparent` (`Config::transparent`): no table.
+
+Store apps. `app.start {store}` starts an installed app
+(`plan/store-model.md`): the client names it, the driver finds the rest.
+
+- `store` with `argv`, `name` or `declares`: `bad-params`. The driver
+  reads `apps.lock` and the tree itself (`ptyrc_store::install::locate`,
+  the XDG directories of its own environment); not installed, a Rust
+  app, no runner: `not-usable`, the hint the cure.
+- `args`: checked against `[options]` of the manifest (a name not
+  declared, a value of another type: `bad-params`); the defaults
+  filled in; the whole given to `init`.
+- The child is the runner: `ptyrc-box --script TREE/SCRIPT ARGS`
+  (`$PTYRC_BOX`, else beside `ptyrc`, else of `PATH`), with its token.
+  Its identity is the origin (`permissions.toml`: `[app."ORIGIN"]`);
+  what it declares is `[permissions]` of the manifest, asked by the
+  same pop-up, which bears its tier and commit. It never holds the
+  whole session: nothing declared is the default profile. A permission
+  of the manifest the driver does not know is not held, and said in
+  the log.
+- The info bears `"store": ORIGIN` (`null` otherwise); `name` is
+  `[app] id`.
+- `app.restart` of a store app takes no `argv`, `name` nor `declares`
+  (`not-usable`): it is started again as it is, from the same tree.
+- `app.list` is closed to a store app (`denied`) until it lists its own
+  alone.
+- The first start of a commit is told to the lock
+  (`install::started`): the tree before it is pruned.
 
 Topic `apps`: the info of an app, when its state, pid, connections,
 argv or `moves` change; `"state":"gone"` once for an entry that leaves
@@ -2015,6 +2043,8 @@ ptyrc events [TOPIC...] [--snapshot]   JSON events, one per line;
 ptyrc debug overlay frames|heat|off ; ptyrc debug dump
 ptyrc call METHOD [JSON]          raw request
 ptyrc app [NAME [OPTION...]]      a client app: `ptyrc-app NAME...`
+ptyrc app ID|ORIGIN [OPTION...]   an installed store app, started by the
+                                  driver; `--help`: its options
 ptyrc python [FILE [ARG...]]      Python with `pilot` connected:
       a console, or FILE run as `__main__`
 ptyrc manage [ls | start | stop | pause | resume | restart | forget |
@@ -2027,8 +2057,10 @@ ptyrc store add ORIGIN[@REF] [--latest] [--force] [--yes]
 ptyrc store rm ID|ORIGIN [--purge] ; update [ID|ORIGIN...] [--latest]
       [--force] [--yes] ; ls ; show ID|ORIGIN ; search WORD
                                   store apps (store-model.md, Install)
-ptyrc dev check [DIR] ; dev entry [DIR] [--remote NAME]
-                                  an app's author (store-model.md, Tools)
+ptyrc dev new NAME [--rust] ; dev check [DIR] ; dev entry [DIR]
+      [--remote NAME] ; dev test [DIR] [--size CxR] [--for T] [--at T,...]
+      [--seed N] [--tape F | --screen F] [--arg NAME=VALUE]... ; dev run
+      [DIR] [NAME=VALUE...]       an app's author (store-model.md, Tools)
 ```
 
 `ptyrc app` executes `ptyrc-app` with its arguments as given, `ptyrc
@@ -2036,6 +2068,15 @@ python` `ptyrc-python`; `-s` becomes `$PTYRC_SESSION` and unsets
 `$PTYRC_SOCKET`. The program is taken from `PATH`; else from `.venv/bin`
 or `venv/bin` in the current directory or one above it; else from the same
 above the `ptyrc` binary. None: status 127.
+
+`ptyrc app WORD`, `ptyrc manage start WORD` and the menu of `ptyrc
+manage` start an installed store app when `WORD` is its origin, or its
+id and no native app has that name (a native name first): `app.start
+{store, args}`, the options read from `[options]` of its manifest
+(`--NAME VALUE`, `--NAME=VALUE`; yes or no: `--NAME`, `--no-NAME`).
+The verb ends once the app has started (the pop-up answered); the app
+is a child of the driver. In the menu a store app's help begins
+`store, TIER:`; one whose id a native app has goes by its origin.
 
 `ptyrc run --app APP`: `ptyrc-app` (found as above) with the words of APP
 is a child app of the session once the program has started (Apps and

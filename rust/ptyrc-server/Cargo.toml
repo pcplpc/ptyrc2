@@ -9,6 +9,7 @@ license.workspace = true
 ptyrc-vt.workspace = true
 ptyrc-core.workspace = true
 ptyrc-proto.workspace = true
+ptyrc-store = { path = "../ptyrc-store" }
 serde.workspace = true
 serde_json.workspace = true
 rustix = { version = "1", features = ["termios", "pty", "process", "event", "fs", "stdio", "net"] }
