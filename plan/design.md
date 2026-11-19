@@ -581,9 +581,25 @@ Sprite, as JSON (the wire form; serde on the core types):
   - `{"cursor": {"dx": 1, "dy": 0}}`: follows the cursor.
 - `content`: `rows` (strings; a space is transparent unless `"opaque":
   true`) with one `style`, or `cells`: rows of runs `[{"t": "ab", "fg":
-  ..., ...}]` for per-run styles. `frames` instead of `content` for an
+  ..., ...}]` for per-run styles, or `grid`: rows of cells, each row a
+  base64 string. `frames` instead of `content` for an
   animation; `loop`: `true`, `false` or a count; the sprite is removed
   after the last frame of a finite animation.
+- `grid`: a cell is 16 bytes, little-endian, the canvas cell of
+  `ptyrc-box` (`rust/ptyrc-box/README.md`): the scalar (`u32`, 0: a
+  hole), `fg`, `bg` (4 bytes: `[0,0,0,0]` absent, `[1,0,0,0]` default,
+  `[2,i,0,0]` palette, `[3,r,g,b]`), attributes (`u16`: 1 bold, 2 dim,
+  4 italic, 8 underline, 16 inverse, 32 strike, 64 blink), repeats
+  (`u16`: the cell that many times more). The width: the longest row;
+  a row at most 4096 cells. A value goes through the glyph filter: a
+  control character or no scalar is a space, a hidden character a
+  hole; a glyph of no width is a space; a wide glyph takes the next
+  cell, a space in the last column. A space is a hole unless `opaque`
+  or a `bg`; `style` gives what a cell leaves absent.
+  `draw.update {id, rows: {"y": row}}` redraws those rows of what the
+  sprite shows (a `content`, not `frames` nor an effect), each as a
+  row of `grid`, no wider; a shorter row leaves holes. Not with
+  `content`, `frames`, `effect`.
 - `style`: `fg`, `bg` (colour name, `0..255`, `"#rrggbb"`, `"default"`;
   absent: inherit the cell below), `bold`, `dim`, `italic`, `underline`,
   `inverse`, `strike`, `blink`.
@@ -1900,7 +1916,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `frame.get` | `frame` | `{"frame":info}` |
 | `frame.at` | `x`, `y`, or `name` | `{"frame":id,"pos":[x,y]}` |
 | `draw.put` | sprite | `{"id":n}` |
-| `draw.update` | `id`, patch; `effect`: tune the running effect, or start another | `{}` |
+| `draw.update` | `id`, patch; `effect`: tune the running effect, or start another; `rows`: rows of the content redrawn (`grid`) | `{}` |
 | `draw.remove` | `id` | `{}` |
 | `draw.clear` | `all` | `{"removed":n}` |
 | `draw.list` | | `{"sprites":[{..., "style":{...}, "screen":[x,y]\|null, "visible":bool, "covered":0..1}]}`; `style`: that of the content, of the first frame, of the first run; absent when none or an effect |

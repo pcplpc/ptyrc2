@@ -161,8 +161,15 @@ that every import is of `ptyrc`, runs each twice and compares the text.
 cd sdk/rust/tests && cargo test
 ```
 
-## Example
+## Examples
 
 `sdk/rust/examples/confetti`: pops of colour, the twin of the Python
 `confetti` without `--fancy`, `--random`, `--fireworks`, `--sparkle`;
 `one-shot` exits once the last pop is played.
+
+`sdk/rust/examples/sand`: the effect `sand` of the driver, one
+`draw.put`, no permission; where the effect is missing (the test
+host), a pile of its own. `sdk/rust/examples/snake`: the text is the
+wall (`screen.shape`); `grab`: the arrows steer it (`input.grab`);
+each denied, it plays on. Both are twins of `sdk/js/examples/`: the
+same seed, the same screens.

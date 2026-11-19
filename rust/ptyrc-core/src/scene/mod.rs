@@ -5,6 +5,7 @@
 //! `tick` alone at `next_wake`; a `compose` is then due when `take_dirty`.
 
 mod effect;
+pub mod grid;
 mod raster;
 mod spec;
 #[cfg(test)]
@@ -52,6 +53,9 @@ struct Anim {
     timed: bool,
     /// Style of the first content, for `draw.list`.
     style: Option<StyleSpec>,
+    /// The `style` and `opaque` of a content, for `rows` of a patch.
+    base: StyleSpec,
+    opaque: bool,
 }
 
 /// The style a content is given: its `style`, else that of its first run.
@@ -392,6 +396,8 @@ impl Scene {
                 plays: None,
                 timed: false,
                 style: first_style(content),
+                base: content.style.unwrap_or_default(),
+                opaque: content.opaque,
             }),
             (None, Some(list)) if !list.is_empty() => Ok(Anim {
                 frames: list
@@ -404,6 +410,8 @@ impl Scene {
                 plays: looping.plays(),
                 timed: true,
                 style: first_style(&list[0].content),
+                base: StyleSpec::default(),
+                opaque: false,
             }),
             (None, Some(_)) => Err(SceneError::BadParams("frames is empty".into())),
             _ => Err(SceneError::BadParams(
@@ -575,6 +583,10 @@ impl Scene {
                 }
             }
         }
+        let rows = match &patch.rows {
+            Some(rows) => Some(self.grid_rows(index, rows, &patch)?),
+            None => None,
+        };
         let body = if patch.content.is_some() || patch.frames.is_some() {
             let looping = patch.looping.unwrap_or_default();
             let mut anim = self.body(&patch.content, &patch.frames, looping)?;
@@ -615,6 +627,12 @@ impl Scene {
                 sprite.text_at = None;
             }
             sprite.anchor = anchor;
+        }
+        if let (Some(rows), Body::Anim(anim)) = (rows, &mut sprite.body) {
+            let canvas = &mut anim.frames[0];
+            for (y, cells) in rows {
+                canvas.grid_row(y, &cells, &anim.base, anim.opaque);
+            }
         }
         match (body, &mut sprite.body) {
             (Some(anim), _) => sprite.body = Body::Anim(anim),
@@ -668,6 +686,38 @@ impl Scene {
         }
         self.dirty = true;
         Ok(())
+    }
+
+    /// `rows` of a patch, decoded and checked: the sprite shows one
+    /// content, the patch replaces nothing else it shows, each row is in
+    /// it and no wider.
+    fn grid_rows(
+        &self,
+        index: usize,
+        rows: &BTreeMap<u16, String>,
+        patch: &SpritePatch,
+    ) -> Result<Vec<(u16, Vec<u8>)>, SceneError> {
+        let bad = |what: &str| Err(SceneError::BadParams(format!("rows: {what}")));
+        if patch.content.is_some() || patch.frames.is_some() || patch.effect.is_some() {
+            return bad("excludes content, frames and effect");
+        }
+        let canvas = match &self.sprites[index].body {
+            Body::Anim(anim) if !anim.timed && anim.frames.len() == 1 => &anim.frames[0],
+            _ => return bad("the sprite shows no content"),
+        };
+        let mut out = Vec::with_capacity(rows.len());
+        for (&y, text) in rows {
+            if y >= canvas.height() {
+                return bad(&format!("{y}: past the last row"));
+            }
+            let mut cells = Vec::new();
+            grid::decode_row(text, &mut cells)?;
+            if cells.len() / grid::CELL > canvas.width() as usize {
+                return bad(&format!("{y}: wider than the content"));
+            }
+            out.push((y, cells));
+        }
+        Ok(out)
     }
 
     pub fn remove(&mut self, id: SpriteId) -> bool {

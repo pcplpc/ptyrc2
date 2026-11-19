@@ -2,7 +2,7 @@
 //! What the imports do: the host behind a trait, the canvases and
 //! their diff, the limits that are counts. No engine here.
 
-use crate::abi::{self, CELL, MIN_PERIOD_MS};
+use crate::abi::{CELL, MIN_PERIOD_MS};
 use serde_json::{Map, Value, json};
 use std::fmt;
 use std::time::Duration;
@@ -99,8 +99,17 @@ struct Canvas {
     place: Map<String, Value>,
 }
 
+/// A row of `content.grid`; `trim`: trailing holes left out.
+fn grid_row(cells: &[u8], trim: bool) -> Value {
+    let mut s = String::new();
+    ptyrc_core::scene::grid::encode_row(cells, trim, &mut s);
+    s.into()
+}
+
 /// Sprite members a `place` may not set: the content is the canvas.
-const NOT_PLACE: [&str; 6] = ["id", "content", "frames", "loop", "effect", "persist"];
+const NOT_PLACE: [&str; 7] = [
+    "id", "content", "frames", "loop", "effect", "persist", "rows",
+];
 
 /// The state behind the imports.
 pub struct Core<H> {
@@ -285,8 +294,11 @@ impl<H: Host> Core<H> {
         };
         let width = canvas.w as usize * CELL;
         let content = |cells: &[u8]| {
-            let rows: Vec<Value> = cells.chunks_exact(width).map(abi::row_runs).collect();
-            json!({"cells": rows})
+            let rows: Vec<Value> = cells
+                .chunks_exact(width)
+                .map(|r| grid_row(r, false))
+                .collect();
+            json!({"grid": rows})
         };
         let fresh = canvas.shown != cells;
         let moved = canvas.place != place;
@@ -297,7 +309,15 @@ impl<H: Host> Core<H> {
             let mut patch = if moved { place.clone() } else { Map::new() };
             patch.insert("id".into(), json!(sprite));
             if fresh {
-                patch.insert("content".into(), content(cells));
+                // The rows that changed; trailing holes are left out.
+                let rows: Map<String, Value> = cells
+                    .chunks_exact(width)
+                    .zip(canvas.shown.chunks_exact(width))
+                    .enumerate()
+                    .filter(|(_, (now, was))| now != was)
+                    .map(|(y, (now, _))| (y.to_string(), grid_row(now, true)))
+                    .collect();
+                patch.insert("rows".into(), Value::Object(rows));
             }
             match self.host.call("draw.update", Value::Object(patch)) {
                 Ok(_) => return self.keep(slot, None, place, fresh.then_some(cells)),
@@ -362,5 +382,80 @@ impl<H: Host> Core<H> {
     /// `exit`.
     pub fn set_exit(&mut self, code: i32) {
         self.exit.get_or_insert(code);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::abi::{Cell, Color};
+
+    #[derive(Default)]
+    struct Calls(Vec<(String, Value)>);
+
+    impl Host for Calls {
+        fn call(&mut self, method: &str, params: Value) -> Result<Value, CallError> {
+            self.0.push((method.into(), params));
+            Ok(json!({"id": 9}))
+        }
+        fn size(&self) -> (u32, u32) {
+            (80, 24)
+        }
+        fn log(&mut self, _: &str) {}
+        fn random(&mut self, _: &mut [u8]) {}
+    }
+
+    /// Cells as sent: base64, bytes 14..16 the repeats.
+    fn b64_of(cells: &[(Cell, u16)]) -> Value {
+        let mut bytes = Vec::new();
+        for (c, n) in cells {
+            bytes.extend_from_slice(&c.bytes()[..14]);
+            bytes.extend(n.to_le_bytes());
+        }
+        let mut s = String::new();
+        ptyrc_core::scene::grid::encode(&bytes, &mut s);
+        s.into()
+    }
+
+    /// The first `present` puts every row, equal cells as repeats; then
+    /// the rows that changed, trailing holes left out; nothing when
+    /// nothing changed.
+    #[test]
+    fn present_sends_changed_rows() {
+        let mut core = Core::new(Calls::default(), Limits::default());
+        let id = core.canvas(3, 2);
+        let blank = [0u8; 3 * 2 * CELL];
+        let mut cells = blank;
+        let a = Cell {
+            ch: Some('a'),
+            fg: Color::Rgb(1, 2, 3),
+            bg: Color::None,
+            attrs: 1,
+        };
+        cells[CELL..2 * CELL].copy_from_slice(&a.bytes());
+        assert_eq!(core.present(id, b"", &cells), 0);
+        assert_eq!(core.present(id, b"", &cells), 0);
+        cells[3 * CELL..4 * CELL].copy_from_slice(&a.bytes());
+        assert_eq!(core.present(id, b"{\"z\":2,\"rows\":{}}", &cells), 0);
+        let none = Cell {
+            ch: None,
+            fg: Color::None,
+            bg: Color::None,
+            attrs: 0,
+        };
+        let calls = &core.host.0;
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].0, "draw.put");
+        assert_eq!(
+            calls[0].1,
+            json!({"content": {"grid": [b64_of(&[(none, 0), (a, 0), (none, 0)]), b64_of(&[(none, 2)])]}})
+        );
+        assert_eq!(
+            calls[1],
+            (
+                "draw.update".into(),
+                json!({"id": 9, "z": 2, "rows": {"1": b64_of(&[(a, 0)])}})
+            )
+        );
     }
 }

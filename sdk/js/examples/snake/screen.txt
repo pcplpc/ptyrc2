@@ -1,0 +1,7 @@
+$ ls -l
+total 12
+drwxr-xr-x 2 user user 4096 src
+-rw-r--r-- 1 user user  220 notes
+
+$ make
+cc -O2 -o snake snake.c

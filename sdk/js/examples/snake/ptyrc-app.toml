@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "snake"
+version = "0.1.0"
+summary = "A snake that plays alone between the words."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "frame"
+
+[permissions]
+shape = "the text is the wall"
+keys-arrows = "with grab: the arrows steer it, until ctrl+t"
+
+[options]
+speed = { type = "int", default = 12, doc = "moves a second, 1 to 30" }
+grab = { type = "bool", default = false, doc = "the arrows steer it, at half the speed; ctrl+t ends" }

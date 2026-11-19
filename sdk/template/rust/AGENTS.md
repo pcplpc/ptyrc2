@@ -60,7 +60,7 @@ rustup target add wasm32-unknown-unknown    once
 ptyrc dev check            the manifest, the licence, the sizes: what the store checks
 ./test.sh                  ptyrc dev test (it builds) against expected.txt
 ./test.sh --update         after a change meant to change the screen
-ptyrc dev test . --size 80x24 --for 3s --at 0,1s,3s [--screen F | --tape F] [--seed N]
+ptyrc dev test . --size 80x24 --for 3s --at 0,1s,3s [--screen F | --tape F] [--seed N] [--arg NAME=VALUE]
 ptyrc dev run              in a live session (ptyrc run -- $SHELL), rebuilt on save
 ```
 

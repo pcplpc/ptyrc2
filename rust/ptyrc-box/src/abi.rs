@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! ABI 1: names, the canvas cell. See `README.md`.
 
-use serde_json::{Map, Value, json};
-
 /// The ABI version.
 pub const ABI: u32 = 1;
 /// The only module a guest imports from.
@@ -16,16 +14,6 @@ const KIND_NONE: u8 = 0;
 const KIND_DEFAULT: u8 = 1;
 const KIND_PALETTE: u8 = 2;
 const KIND_RGB: u8 = 3;
-
-const ATTRS: [(u16, &str); 7] = [
-    (1, "bold"),
-    (2, "dim"),
-    (4, "italic"),
-    (8, "underline"),
-    (16, "inverse"),
-    (32, "strike"),
-    (64, "blink"),
-];
 
 /// A colour of a cell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,15 +43,6 @@ impl Color {
             Color::Default => [KIND_DEFAULT, 0, 0, 0],
             Color::Palette(i) => [KIND_PALETTE, i, 0, 0],
             Color::Rgb(r, g, b) => [KIND_RGB, r, g, b],
-        }
-    }
-
-    fn wire(self) -> Option<Value> {
-        match self {
-            Color::None => None,
-            Color::Default => Some(json!("default")),
-            Color::Palette(i) => Some(json!(i)),
-            Color::Rgb(r, g, b) => Some(json!(format!("#{r:02x}{g:02x}{b:02x}"))),
         }
     }
 }
@@ -103,74 +82,6 @@ impl Cell {
         b[12..14].copy_from_slice(&self.attrs.to_le_bytes());
         b
     }
-
-    fn style(self) -> (Color, Color, u16) {
-        (self.fg, self.bg, self.attrs)
-    }
-}
-
-/// One row of a canvas as runs of the wire (`content.cells`).
-/// A cell with nothing drawn is a space without `bg`: a hole. The cell
-/// after a wide glyph is skipped. A glyph of no width reads as a space.
-pub fn row_runs(row: &[u8]) -> Value {
-    let mut runs: Vec<Value> = Vec::new();
-    let mut text = String::new();
-    let mut style = (Color::None, Color::None, 0u16);
-    let mut skip = false;
-    let flush = |text: &mut String, style: (Color, Color, u16), runs: &mut Vec<Value>| {
-        if text.is_empty() {
-            return;
-        }
-        let mut run = Map::new();
-        run.insert("t".into(), Value::String(std::mem::take(text)));
-        if let Some(c) = style.0.wire() {
-            run.insert("fg".into(), c);
-        }
-        if let Some(c) = style.1.wire() {
-            run.insert("bg".into(), c);
-        }
-        for (bit, name) in ATTRS {
-            if style.2 & bit != 0 {
-                run.insert(name.into(), Value::Bool(true));
-            }
-        }
-        runs.push(Value::Object(run));
-    };
-    for raw in row.chunks_exact(CELL) {
-        if skip {
-            skip = false;
-            continue;
-        }
-        let cell = Cell::read(raw);
-        let (ch, st) = match cell.ch {
-            None => (' ', (Color::None, Color::None, 0)),
-            Some(c) => match ptyrc_vt::char_width(c) {
-                0 => (' ', cell.style()),
-                1 => (c, cell.style()),
-                _ => {
-                    skip = true;
-                    (c, cell.style())
-                }
-            },
-        };
-        if st != style {
-            flush(&mut text, style, &mut runs);
-            style = st;
-        }
-        text.push(ch);
-    }
-    // A wide glyph in the last column does not fit.
-    if skip {
-        text.pop();
-        text.push(' ');
-    }
-    // Trailing holes carry nothing.
-    if style == (Color::None, Color::None, 0) {
-        let kept = text.trim_end_matches(' ').len();
-        text.truncate(kept);
-    }
-    flush(&mut text, style, &mut runs);
-    Value::Array(runs)
 }
 
 /// One row as plain text, holes as spaces; for the headless screen.
@@ -201,31 +112,6 @@ pub fn row_text(row: &[u8]) -> Vec<Option<char>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn cell(c: char, fg: Color) -> [u8; CELL] {
-        Cell {
-            ch: Some(c),
-            fg,
-            bg: Color::None,
-            attrs: 0,
-        }
-        .bytes()
-    }
-
-    #[test]
-    fn runs() {
-        let mut row = Vec::new();
-        row.extend(cell('a', Color::Palette(1)));
-        row.extend(cell('b', Color::Palette(1)));
-        row.extend([0u8; CELL]);
-        row.extend(cell('世', Color::Rgb(255, 0, 16)));
-        row.extend(cell('x', Color::None));
-        row.extend([0u8; CELL]);
-        assert_eq!(
-            row_runs(&row),
-            json!([{"t": "ab", "fg": 1}, {"t": " "}, {"t": "世", "fg": "#ff0010"}])
-        );
-    }
 
     #[test]
     fn control_is_a_space() {

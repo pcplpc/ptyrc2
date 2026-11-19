@@ -23,8 +23,8 @@ use std::time::{Duration, Instant};
 const FRAMES: u32 = 90;
 
 /// A 200x60 canvas repainted whole at every tick, 30 Hz, `FRAMES`
-/// times. `vary`: 1, every cell its own colour (12000 runs a frame);
-/// 0, one colour (60 runs).
+/// times. `vary`: 1, every cell its own colour (12000 cells sent a
+/// frame); 0, one colour (a cell and its repeats a row).
 fn repaint(vary: u32) -> Vec<u8> {
     guest(&format!(
         r#"

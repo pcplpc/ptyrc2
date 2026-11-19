@@ -9,6 +9,8 @@ JavaScript interpreter that is itself a guest of ABI 1
 | `ptyrc.d.ts` | the API, typed: the whole of it. An app is written from this file |
 | `interp/` | the interpreter guest (`ptyrc-js`): Boa, the module `"ptyrc"` (`src/prelude.js`), the loader |
 | `examples/confetti/` | an app |
+| `examples/sand/` | one effect of the driver started, no permission; the twin of `sdk/rust/examples/sand` |
+| `examples/snake/` | `screen.shape`, `input.grab` of the arrows, each denied in turn; the twin of `sdk/rust/examples/snake` |
 | `../template/` | what `ptyrc dev new` writes (embedded in `ptyrc`) |
 
 ## Build

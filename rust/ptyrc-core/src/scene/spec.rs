@@ -261,16 +261,19 @@ impl From<Run> for RunRepr {
     }
 }
 
-/// What a sprite shows: `rows` with one `style`, or `cells`.
+/// What a sprite shows: `rows` with one `style`, `cells`, or `grid`.
 ///
-/// In `rows` a space is transparent unless `opaque`. In `cells` a space is
-/// transparent unless `opaque` or its run sets `bg`.
+/// In `rows` a space is transparent unless `opaque`. In `cells` and
+/// `grid` a space is transparent unless `opaque` or it has a `bg`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Content {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rows: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cells: Option<Vec<Vec<Run>>>,
+    /// Rows of 16-byte cells, base64 (`grid.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub style: Option<StyleSpec>,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -616,6 +619,9 @@ pub struct SpritePatch {
     pub persist: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub motion: Option<Motion>,
+    /// Rows of the content replaced, each as a row of `grid`: `{"y": base64}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rows: Option<std::collections::BTreeMap<u16, String>>,
 }
 
 /// A sprite as `draw.list` reports it. `frame` is null until a frame name

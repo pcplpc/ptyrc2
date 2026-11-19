@@ -402,6 +402,7 @@ impl Host for Headless {
         {
             p.remove("content");
             p.remove("frames");
+            p.remove("rows");
         }
         self.requests.push(Request {
             t: self.now,

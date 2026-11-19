@@ -126,6 +126,25 @@ fn audit(what: &str, calls: &[(&str, Value)]) {
     assert_host_clean(&mut rig, what);
 }
 
+/// A row of `content.grid`: a cell for each scalar of `text`, then
+/// values that are no scalar; every other cell with a `bg`.
+fn grid_row(text: &str) -> String {
+    let mut bytes = Vec::new();
+    let values = text
+        .chars()
+        .map(u32::from)
+        .chain([0xd800, 0x11_0000, u32::MAX]);
+    for (i, v) in values.enumerate() {
+        bytes.extend(v.to_le_bytes());
+        bytes.extend([3, 255, 0, 0]);
+        bytes.extend(if i % 2 == 0 { [0; 4] } else { [2, 4, 0, 0] });
+        bytes.extend([0x7f, 0, 0, 0]);
+    }
+    let mut s = String::new();
+    ptyrc_core::scene::grid::encode(&bytes, &mut s);
+    s
+}
+
 fn sprite(content: Value) -> Value {
     json!({"anchor": {"at": [2, 2], "space": "view"}, "content": content, "layer": "front"})
 }
@@ -144,6 +163,28 @@ fn sprite_text_is_glyphs_only() {
                 "draw.put",
                 sprite(json!({"cells": [[{"t": text, "fg": "red"}, {"t": bad, "bg": "blue"}]]})),
             )],
+        );
+        audit(
+            &format!("{n}: grid"),
+            &[(
+                "draw.put",
+                sprite(json!({"grid": [grid_row(&text), grid_row(bad)]})),
+            )],
+        );
+        audit(
+            &format!("{n}: grid rows"),
+            &[
+                (
+                    "draw.put",
+                    sprite(
+                        json!({"grid": [grid_row(&"plain".repeat(10)), "", ""], "opaque": true}),
+                    ),
+                ),
+                (
+                    "draw.update",
+                    json!({"id": "$", "rows": {"0": grid_row(bad), "2": grid_row(&text)}}),
+                ),
+            ],
         );
         audit(
             &format!("{n}: opaque"),

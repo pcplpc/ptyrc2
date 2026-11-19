@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Sprite cells: what a content, a frame of animation or an effect draws.
 
+use super::grid;
 use super::spec::{Content, SceneError, StyleSpec};
 use ptyrc_vt::{Attrs, Cell, Color, Style};
 
@@ -215,9 +216,66 @@ impl Canvas {
             .min(u16::MAX as u32) as u16
     }
 
+    /// Row `y` drawn again from `cells` (`grid.rs`); a row short of the
+    /// width leaves holes. The values pass `ptyrc_vt::drawn` as text
+    /// does: a control character is a space, a hidden one a hole.
+    pub(crate) fn grid_row(&mut self, y: u16, cells: &[u8], base: &StyleSpec, opaque: bool) {
+        let w = self.w as usize;
+        let start = y as usize * w;
+        let (base_fg, base_bg, base_attrs) =
+            (base.fg.map(|c| c.0), base.bg.map(|c| c.0), base.attrs());
+        let n = (cells.len() / grid::CELL).min(w);
+        let mut x = 0usize;
+        while x < w {
+            let at = x;
+            x += 1;
+            let slot = match cells.get(at * grid::CELL..(at + 1) * grid::CELL) {
+                Some(b) if at < n => grid_slot(b, at + 1 < w, base_fg, base_bg, base_attrs, opaque),
+                _ => Slot::Empty,
+            };
+            let wide = matches!(&slot, Slot::Glyph(g) if g.cell.width == 2);
+            self.replace(start + at, slot);
+            if wide {
+                self.replace(start + x, Slot::Spacer);
+                x += 1;
+            }
+        }
+    }
+
+    /// Slot `i` replaced; the index is noted when it was empty, so that
+    /// `drawn` holds each slot once.
+    fn replace(&mut self, i: usize, slot: Slot) {
+        if self.slots[i] == Slot::Empty && slot != Slot::Empty {
+            self.drawn.push(i as u32);
+        }
+        self.slots[i] = slot;
+    }
+
     /// Rasterize a content.
     pub(crate) fn from_content(content: &Content) -> Result<Canvas, SceneError> {
         let base = content.style.unwrap_or_default();
+        if let Some(rows) = &content.grid {
+            if content.rows.is_some() || content.cells.is_some() {
+                return Err(SceneError::BadParams(
+                    "content: rows, cells and grid are exclusive".into(),
+                ));
+            }
+            let mut bytes = Vec::new();
+            let mut decoded = Vec::with_capacity(rows.len());
+            let mut w = 0;
+            for row in rows {
+                grid::decode_row(row, &mut bytes)?;
+                w = w.max(bytes.len() / grid::CELL);
+                decoded.push(std::mem::take(&mut bytes));
+            }
+            let w = u16::try_from(w)
+                .map_err(|_| SceneError::BadParams("content: grid: too wide".into()))?;
+            let mut canvas = Canvas::new(w, clamp_h(rows.len())?);
+            for (y, row) in decoded.iter().enumerate() {
+                canvas.grid_row(y as u16, row, &base, content.opaque);
+            }
+            return Ok(canvas);
+        }
         match (&content.rows, &content.cells) {
             (Some(rows), None) => {
                 let w = rows
@@ -257,6 +315,70 @@ impl Canvas {
                 "content: rows or cells required".into(),
             )),
         }
+    }
+}
+
+/// Attribute bits of a grid cell.
+const GRID_ATTRS: [(u16, u16); 7] = [
+    (1, Attrs::BOLD),
+    (2, Attrs::DIM),
+    (4, Attrs::ITALIC),
+    (8, Attrs::UNDERLINE),
+    (16, Attrs::INVERSE),
+    (32, Attrs::STRIKE),
+    (64, Attrs::BLINK),
+];
+
+/// The slot of a grid cell. `room`: a column after it, for a wide glyph.
+fn grid_slot(
+    b: &[u8],
+    room: bool,
+    base_fg: Option<Color>,
+    base_bg: Option<Color>,
+    base_attrs: Attrs,
+    opaque: bool,
+) -> Slot {
+    let v = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+    if v == 0 {
+        return Slot::Empty;
+    }
+    let Some(mut ch) = ptyrc_vt::drawn(char::from_u32(v).unwrap_or(' ')) else {
+        return Slot::Empty;
+    };
+    let mut width = char_width(ch);
+    if width == 0 || (width == 2 && !room) {
+        (ch, width) = (' ', 1);
+    }
+    let bg = grid_color(&b[8..12]).or(base_bg);
+    if ch == ' ' && bg.is_none() && !opaque {
+        return Slot::Empty;
+    }
+    let mut attrs = base_attrs;
+    let bits = u16::from_le_bytes([b[12], b[13]]);
+    if bits != 0 {
+        for (bit, attr) in GRID_ATTRS {
+            if bits & bit != 0 {
+                attrs.insert(attr);
+            }
+        }
+    }
+    Slot::Glyph(Glyph {
+        cell: Cell::glyph(ch, width, Style::default()),
+        fg: grid_color(&b[4..8]).or(base_fg),
+        bg,
+        attrs,
+        opacity: 255,
+    })
+}
+
+/// A colour of a grid cell: kind 0 none, 1 default, 2 palette, 3 RGB;
+/// another kind: none.
+fn grid_color(b: &[u8]) -> Option<Color> {
+    match b[0] {
+        1 => Some(Color::Default),
+        2 => Some(Color::Indexed(b[1])),
+        3 => Some(Color::Rgb(b[1], b[2], b[3])),
+        _ => None,
     }
 }
 

@@ -102,10 +102,11 @@ bytes in the guest's memory, no terminator. JSON is a text.
 - `place`: a JSON object, or `len` 0 for `{}`: the members of a sprite
   (`plan/design.md`, scene) other than its content: `anchor`, `frame`,
   `z`, `alpha`, `layer`, `blend`, `ttl_ms`, `motion`, ... `id`,
-  `content`, `frames`, `loop`, `effect`, `persist` are dropped.
-- The first time: `draw.put`. Then `draw.update`, with the content when
-  a cell changed, the place when it changed; neither: no request. The
-  content is sent whole (see Speed).
+  `content`, `frames`, `loop`, `effect`, `persist`, `rows` are dropped.
+- The first time: `draw.put`, the cells as `content.grid` (`plan/design.md`,
+  scene), equal cells as one and its repeats. Then `draw.update`, with
+  `rows` when a cell changed (the rows changed, trailing holes left
+  out), the place when it changed; neither: no request.
 - A canvas is one sprite of the app's connection: it dies with it.
 
 ### Limits
@@ -172,8 +173,8 @@ print!("{report}");
   a second). Not: draw extensions of plugins, the pop-up, other
   clients.
 - `Report`: the screens at each time as text (one string a row,
-  trailing spaces cut), the requests (`refused`: the code; `content`
-  and `frames` left out), the log, the limits met, the end.
+  trailing spaces cut), the requests (`refused`: the code; `content`,
+  `frames` and `rows` left out), the log, the limits met, the end.
 
 The size. `session.info` answers `{"protocol": 1, "server",
 "size": [columns, rows], "headless": true}` (headless: `"server":
@@ -196,12 +197,28 @@ canvas repainted whole, 30 Hz, a headless driver. Measured 2026-11-19:
 
 | | driver, a frame | runner, a frame |
 |---|---|---|
-| one colour (60 runs) | 2.1 ms | 0.6 ms |
-| a colour a cell (12000 runs) | 6.9 ms | 13.8 ms |
+| | content as JSON runs, whole | `grid`, rows changed |
+|---|---|---|
+| one colour: driver | 2.1 ms | 2.5 ms |
+| one colour: runner | 0.6 ms | 0.3 ms |
+| a colour a cell: driver | 6.9 ms | 3.9 ms |
+| a colour a cell: runner | 13.8 ms | 1.5 ms |
 
-30 Hz held in both. The bound of the plan (2 ms) is not: the content
-goes as JSON runs, whole. Wanted of the protocol: a binary content,
-rows patched alone. Nothing changes for the guest.
+Processor time a frame, 90 frames. 30 Hz held. The bound of the plan
+(2 ms for the driver) is not. Where the driver's time goes, `grid`,
+timed inside it, one colour (a colour a cell):
+
+| | |
+|---|---|
+| read, JSON | 0.35 ms |
+| `draw.update`: base64, the canvas | 0.7 ms |
+| `compose`, a back layer | 1.2 ms |
+| `repair`, to the host | 0.4 ms (1.6 ms) |
+
+Before, as JSON runs: the runs built and encoded took the runner's
+time; read and parsed, most of the driver's. The framing is no
+longer the cost: what is left is the composition of the whole screen
+and its repair, at each frame, whatever changed.
 
 ## Tests
 

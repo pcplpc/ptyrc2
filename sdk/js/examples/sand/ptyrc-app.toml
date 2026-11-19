@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "sand"
+version = "0.1.0"
+summary = "A thin stream of sand piles on your text."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "frame"
+
+# No permission: the effect `sand` of the driver looks at the text and
+# answers nothing; the app learns nothing of the screen.
+
+[options]
+rate = { type = "float", default = 60.0, doc = "grains a second" }
+cursor = { type = "bool", default = false, doc = "pour over the cursor's column" }

@@ -3119,3 +3119,110 @@ fn motions_share_one_clock() {
         "{repaints} repaints in a second"
     );
 }
+
+/// A row of `content.grid`: 16-byte cells, base64.
+fn grid_row(cells: &[(u32, [u8; 4], [u8; 4], u16)]) -> String {
+    let mut bytes = Vec::new();
+    for &(v, fg, bg, attrs) in cells {
+        bytes.extend(v.to_le_bytes());
+        bytes.extend(fg);
+        bytes.extend(bg);
+        bytes.extend(attrs.to_le_bytes());
+        bytes.extend([0, 0]);
+    }
+    let mut s = String::new();
+    grid::encode(&bytes, &mut s);
+    s
+}
+
+#[test]
+fn grid_content_and_rows() {
+    let mock = Mock::new();
+    let mut base = base();
+    for x in 0..20 {
+        base.put(x, 0, Cell::narrow("=", Style::default()));
+        base.put(x, 1, Cell::narrow("=", Style::default()));
+    }
+    let none = [0; 4];
+    let red = [2, 1, 0, 0];
+    let rgb = [3, 1, 2, 3];
+    // A hole, a space without bg (a hole), a space with bg, a control
+    // character (a space, no bg: a hole), a wide glyph and the cell it
+    // covers, a combining mark (a space), a hidden one (a hole), a wide
+    // glyph in the last column (a space).
+    let row0 = grid_row(&[
+        (0, red, red, 0),
+        ('a' as u32, red, none, 1 | 16),
+        (' ' as u32, none, none, 0),
+        (' ' as u32, none, rgb, 0),
+        (0x1b, red, none, 0),
+        ('世' as u32, none, none, 0),
+        ('x' as u32, none, none, 0),
+        (0x301, none, none, 0),
+        (0x202e, none, none, 0),
+        (0xD800, none, rgb, 0),
+        ('界' as u32, none, none, 0),
+    ]);
+    let row1 = grid_row(&[('b' as u32, none, none, 0)]);
+    let mut scene = Scene::new();
+    let id = scene
+        .add(
+            1,
+            spec(json!({"anchor": {"at": [0, 0]}, "content": {"grid": [row0, row1]}, "layer": "front"})),
+            ms(0),
+        )
+        .unwrap();
+    scene.tick(ms(0), &mock);
+    let out = scene.compose(&base, &mock);
+    assert_eq!(out.row_text(0), "=a= =世== ==========");
+    assert_eq!(out.row_text(1), "b===================");
+    let a = out.cell(1, 0).style;
+    assert_eq!(a.fg, Color::Indexed(1));
+    assert!(a.attrs.contains(Attrs::BOLD | Attrs::INVERSE));
+    assert_eq!(out.cell(3, 0).style.bg, Color::Rgb(1, 2, 3));
+    assert_eq!(out.cell(5, 0).width, 2);
+
+    // A row alone: the other kept; a short row leaves holes.
+    let patch = |v| serde_json::from_value::<SpritePatch>(v).unwrap();
+    let row = grid_row(&[('c' as u32, none, none, 0), ('d' as u32, none, none, 0)]);
+    scene
+        .update(id, patch(json!({"rows": {"0": row}})), ms(10))
+        .unwrap();
+    scene.tick(ms(10), &mock);
+    let out = scene.compose(&base, &mock);
+    assert_eq!(out.row_text(0), "cd==================");
+    assert_eq!(out.row_text(1), "b===================");
+
+    // Refused, nothing applied: past the last row, wider, not base64,
+    // with content.
+    let wide = grid_row(&[('e' as u32, none, none, 0); 12]);
+    for bad in [
+        json!({"rows": {"2": row1.clone()}}),
+        json!({"rows": {"0": wide}}),
+        json!({"rows": {"0": "AAA"}}),
+        json!({"rows": {"1": row1.clone()}, "content": {"rows": ["z"]}}),
+        json!({"rows": {"0": row1.clone(), "9": row1.clone()}}),
+    ] {
+        let err = scene.update(id, patch(bad.clone()), ms(20)).unwrap_err();
+        assert_eq!(err.code(), "bad-params", "{bad}");
+    }
+    scene.tick(ms(20), &mock);
+    assert_eq!(
+        scene.compose(&base, &mock).row_text(0),
+        "cd=================="
+    );
+
+    // Only a sprite showing a content takes rows.
+    let anim = scene
+        .add(
+            1,
+            spec(json!({"frames": [{"rows": ["a"]}, {"rows": ["b"]}]})),
+            ms(0),
+        )
+        .unwrap();
+    let err = scene.update(anim, patch(json!({"rows": {"0": row1}})), ms(20));
+    assert_eq!(err.unwrap_err().code(), "bad-params");
+    // Exclusive with rows and cells.
+    let both = spec(json!({"content": {"grid": [], "rows": ["a"]}}));
+    assert_eq!(scene.add(1, both, ms(0)).unwrap_err().code(), "bad-params");
+}

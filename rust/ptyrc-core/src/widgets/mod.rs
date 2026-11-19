@@ -511,6 +511,7 @@ impl Widgets {
 
     fn check_content(content: &Option<Content>) -> Result<(), WidgetError> {
         match content {
+            Some(c) if c.grid.is_some() => bad("content: grid is for sprites"),
             Some(c) if c.rows.is_some() && c.cells.is_some() => {
                 bad("content: rows and cells are exclusive")
             }
