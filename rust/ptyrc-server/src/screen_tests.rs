@@ -1245,3 +1245,85 @@ fn shape_masks_the_apps_cells_and_keeps_the_words() {
     let e = rig.fail(7, "screen.shap", json!({}));
     assert!(e.hint.unwrap().starts_with("did you mean screen.shape?"));
 }
+
+/// The frame path of `ptyrc-box`'s live test, in process: a 200x60
+/// `grid` canvas, every row sent again a frame, then a tick. Prints the
+/// median time a frame of `draw.update`, of the paint (tick, compose,
+/// repair), of a whole compose and of a compose kept across frames.
+/// Ignored: run it in release,
+///
+///   cargo test --release -p ptyrc-server speed_200x60 -- --ignored --nocapture
+#[test]
+#[ignore = "a measure, in release"]
+fn speed_200x60() {
+    use ptyrc_core::scene::{Composer, grid};
+    use std::time::Instant;
+    let (w, h) = (200usize, 60usize);
+    let cells = |n: u32, vary: u32| -> Vec<u8> {
+        let mut b = vec![0u8; w * h * grid::CELL];
+        for (i, c) in b.chunks_exact_mut(grid::CELL).enumerate() {
+            c[..4].copy_from_slice(&(0x41 + n % 26).to_le_bytes());
+            let rgb = (vary * (i as u32 + n)) << 8 | 3;
+            c[4..8].copy_from_slice(&rgb.to_le_bytes());
+        }
+        b
+    };
+    let rows = |b: &[u8], trim: bool| -> Vec<String> {
+        b.chunks_exact(w * grid::CELL)
+            .map(|r| {
+                let mut s = String::new();
+                grid::encode_row(r, trim, &mut s);
+                s
+            })
+            .collect()
+    };
+    let median = |mut v: Vec<Duration>| {
+        v.sort();
+        v[v.len() / 2].as_secs_f64() * 1e3
+    };
+    for (vary, what) in [(0, "one colour"), (1, "a colour a cell"), (2, "a cell")] {
+        let mut rig = Rig::new(w as u16, h as u16);
+        let id = rig.put(json!({"content": {"grid": rows(&cells(0, vary.min(1)), false)}}));
+        let mut kept = Composer::new();
+        let [mut update, mut paint, mut whole, mut again] = [(); 4].map(|_| Vec::new());
+        for n in 1..=300u32 {
+            let mut patch = serde_json::Map::new();
+            if vary == 2 {
+                // One cell changes.
+                let mut b = cells(0, 0);
+                b[..4].copy_from_slice(&(0x41 + n % 26).to_le_bytes());
+                patch.insert("0".into(), rows(&b, true).swap_remove(0).into());
+            } else {
+                for (y, row) in rows(&cells(n, vary), true).into_iter().enumerate() {
+                    patch.insert(y.to_string(), row.into());
+                }
+            }
+            let params = json!({"id": id, "rows": patch});
+            rig.now += Duration::from_millis(33);
+            let t = Instant::now();
+            rig.call("draw.update", params);
+            update.push(t.elapsed());
+            let now = rig.now;
+            let t = Instant::now();
+            let mut out = Vec::new();
+            rig.ctx(|e, ctx| e.on_tick(now, &mut out, ctx));
+            paint.push(t.elapsed());
+            rig.host.feed(&out);
+            let e = &rig.engine;
+            let t = Instant::now();
+            std::hint::black_box(e.scene.compose(e.app.grid(), &e.frames));
+            whole.push(t.elapsed());
+            let t = Instant::now();
+            std::hint::black_box(e.scene.compose_with(e.app.grid(), &e.frames, &mut kept));
+            again.push(t.elapsed());
+        }
+        rig.check();
+        println!(
+            "  {what}: draw.update {:.3} ms, paint {:.3} ms; compose: whole {:.3} ms, kept {:.3} ms",
+            median(update),
+            median(paint),
+            median(whole),
+            median(again),
+        );
+    }
+}

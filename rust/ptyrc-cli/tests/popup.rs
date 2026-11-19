@@ -325,3 +325,52 @@ fn the_screen_of_manage_changes_the_answers() {
         .unwrap_err();
     assert!(error.to_string().contains("declares nothing"), "{error}");
 }
+
+#[test]
+fn a_foreground_app_is_asked_and_esc_starts_nothing() {
+    use std::os::unix::fs::PermissionsExt;
+    let sb = Sandbox::new("popup-enrol");
+    let (mut host, _driver, mut client) = session(&sb);
+    let bin = sb.dir.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let ran = sb.dir.join("ran");
+    let script = format!(
+        "#!/bin/sh\nif [ \"$1\" = --declares ]; then\n\
+         echo '{{\"permissions\": {{\"text\": \"to read\"}}}}'; exit 0; fi\ntouch {}\n",
+        ran.display()
+    );
+    std::fs::write(bin.join("ptyrc-app"), script).unwrap();
+    std::fs::set_permissions(
+        bin.join("ptyrc-app"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    let mut started = sb
+        .ptyrc()
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .args(["-s", "p", "app", "peek"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    until(
+        &mut host,
+        || host_text(&mut client).contains(ASKS),
+        "the pop-up",
+    );
+    assert!(host_text(&mut client).contains("peek ─ native"));
+    host.type_in(b"\x1b");
+    let status = loop {
+        host.pump();
+        if let Some(status) = started.try_wait().unwrap() {
+            break status;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let mut stderr = String::new();
+    std::io::Read::read_to_string(&mut started.stderr.take().unwrap(), &mut stderr).unwrap();
+    assert!(!status.success());
+    assert!(stderr.contains("cancelled"), "{stderr}");
+    assert!(!ran.exists());
+    assert!(!names(&mut client).contains(&"peek".to_string()));
+}

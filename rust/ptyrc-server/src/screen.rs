@@ -7,7 +7,7 @@ use crate::engine::{ConnId, Ctx, Engine, Reply, Token};
 use crate::rpc;
 use ptyrc_core::frames::{FrameConfig, FrameEvent, Frames, ScreenInput};
 use ptyrc_core::plugin::{DrawExt, TuiSupport};
-use ptyrc_core::scene::Scene;
+use ptyrc_core::scene::{Composer, Scene};
 use ptyrc_core::widgets::{WidgetConfig, Widgets};
 use ptyrc_core::{FrameId, FrameSel, OwnerId, TextQuery};
 use ptyrc_proto::{ErrorCode, RpcError};
@@ -100,6 +100,8 @@ pub struct ScreenEngine {
     unpainted: bool,
     pub(crate) frames: Frames,
     pub(crate) scene: Scene,
+    /// The last composition, composed again where it changed.
+    composer: Composer,
     pub(crate) widgets: Widgets,
     pub(crate) focus: crate::focus::Focus,
     pub(crate) exts: Vec<Box<dyn DrawExt>>,
@@ -157,6 +159,7 @@ impl ScreenEngine {
             unpainted: true,
             frames: Frames::new(FrameConfig::default(), supports),
             scene,
+            composer: Composer::new(),
             widgets,
             focus: Default::default(),
             exts,
@@ -302,8 +305,10 @@ impl ScreenEngine {
             repair(&mut self.host, self.app.grid(), out);
             self.painted = false;
         } else {
-            let desired = self.scene.compose(self.app.grid(), &self.frames);
-            repair(&mut self.host, &desired, out);
+            let desired =
+                self.scene
+                    .compose_with(self.app.grid(), &self.frames, &mut self.composer);
+            repair(&mut self.host, desired, out);
             self.painted = true;
         }
         self.host.take_events();

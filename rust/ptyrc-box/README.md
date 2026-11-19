@@ -6,7 +6,9 @@ canvases. `plan/store-model.md` is the plan; this file is the ABI.
 ```
 ptyrc-box [--script] MODULE [ARGS]
 ptyrc-box --headless [--script] MODULE [ARGS] [--size CxR] [--for T]
-          [--at T,...] [--seed N] [--tape FILE | --screen FILE]
+          [--at T,...] [--seed N] [--tape FILE | --screen FILE] [--json]
+          [--grant NAME,...] [--deny NAME,...] [--words WORD,...]
+          [--event T:TOPIC:JSON]... [--key T:KEY]...
 ```
 
 Runs `MODULE` (a binary module; with `--script`, `APP.js`) in the
@@ -16,8 +18,20 @@ the end. Status: that of `exit`; 0 after SIGTERM; 70 a guest ended by
 the runner; 2 usage; 5 the connection.
 
 `--headless`: no session; `headless::run` (Library). The report on
-stdout, the log on stderr. `T`: ms, or `500ms`, `2s`. Defaults: 80x24,
-1 s, the end, seed 1. Status: 0, or that of `exit`, or 70.
+stdout (`--json`: one JSON value), the log on stderr. `T`: ms, or
+`500ms`, `2s`. Defaults: 80x24, 1 s, the end, seed 1. Status: 0, or
+that of `exit`, or 70.
+
+- `--grant`: the permissions declared; `--deny`: those answered no;
+  `--words`: the words of `words`. Given, the requests are checked as
+  the driver checks a store app (`grants.rs`): a reading above the
+  degree held is cut to it, marked `"degree"`; an act not held, a
+  method closed to apps: `denied`, the hint naming the permission.
+  `--deny` alone: every permission but these. Neither: the whole
+  session.
+- `--event T:TOPIC:JSON`: an event at `T`, to a topic subscribed and
+  held. `--key T:KEY`: a key named as `input.send` names it, to the
+  app when it grabbed it (`input.grab`); `ctrl+t` releases the grab.
 
 ## Guest ABI, version 1
 
@@ -71,7 +85,7 @@ bytes in the guest's memory, no terminator. JSON is a text.
   `headless` (a run without a session answers `draw.put`, `update`,
   `remove`, `clear`, `widget.declare`, `show`, `set`, `hide`,
   `subscribe`, `unsubscribe`, `session.info`, `screen.text`,
-  `screen.shape` only).
+  `screen.shape`, `input.grab`, `input.release` only).
 - Methods and topics: `plan/design.md`, Protocol.
 
 `canvas`, `cells`
@@ -169,12 +183,18 @@ print!("{report}");
 - Drawn by the scene and the widgets of `ptyrc-core`, as the driver
   draws: canvases, text sprites (`rows`, `cells`), `frames`, anchors,
   layers (behind the text by default), `ttl_ms`, `motion`, the
-  built-in effects, widgets (laid out once the screen is still, under
-  a second). Not: draw extensions of plugins, the pop-up, other
-  clients.
+  effects and borders of the driver's draw extensions
+  (`plugins/draw-ext`, `headless::draw_ext`), widgets (laid out once
+  the screen is still, under a second). An unknown effect: the hint
+  lists the known. Not: `draw.ext`, the pop-up, other clients.
+- `random`: xorshift64 from the seed mixed (splitmix64): each seed its
+  own.
 - `Report`: the screens at each time as text (one string a row,
-  trailing spaces cut), the requests (`refused`: the code; `content`,
-  `frames` and `rows` left out), the log, the limits met, the end.
+  trailing spaces cut), the requests (`refused`: the code; `lowered`:
+  the degree; `content`, `frames` and `rows` left out), the log, the
+  limits met, the end, the permissions lacking (`lacks`: denied, or
+  not declared with the line of the manifest that would ask for it),
+  what was injected and reached nobody (`dropped`). `Report::to_json`.
 
 The size. `session.info` answers `{"protocol": 1, "server",
 "size": [columns, rows], "headless": true}` (headless: `"server":

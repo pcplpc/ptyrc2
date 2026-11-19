@@ -138,6 +138,11 @@ impl Grants {
         }
     }
 
+    /// Less than the whole session: it sees its own alone.
+    pub fn narrowed(&self) -> bool {
+        !self.whole
+    }
+
     pub fn holds(&self, permission: Permission) -> bool {
         self.whole || self.held.contains(&permission)
     }
@@ -248,6 +253,7 @@ pub(crate) const METHODS: &[(&str, Gate)] = &[
     ("widget.borders", Open),
     ("app.list", Open),
     ("app.start", Never),
+    ("app.enrol", Never),
     ("app.stop", Never),
     ("app.pause", Never),
     ("app.resume", Never),
@@ -342,12 +348,7 @@ fn judge(grants: &Grants, gate: Option<Gate>) -> Verdict {
 /// The check of a request. Every request of a connection that
 /// presented a token goes through it; one without a token is the
 /// user's and is not asked.
-pub(crate) fn check(who: &Identity, grants: &Grants, method: &str, params: &Value) -> Verdict {
-    // The table tells every app and its command line: not a store
-    // app's to read, until it lists its own alone.
-    if matches!(who, Identity::Store(_)) && method == "app.list" {
-        return Verdict::Denied(Why::Never);
-    }
+pub(crate) fn check(_who: &Identity, grants: &Grants, method: &str, params: &Value) -> Verdict {
     judge(grants, gate(method, params))
 }
 

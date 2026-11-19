@@ -7,13 +7,16 @@
 //! (`script::interpreter_path`), the sources are the scripts of the
 //! directory of `APP.js`.
 //!
-//! `--headless`: no session; `headless::run`, the report on stdout,
-//! the log on stderr.
+//! `--headless`: no session; `headless::run`, the report on stdout
+//! (`--json`: one JSON value), the log on stderr. `--grant`, `--deny`,
+//! `--words`: the requests checked as the driver checks a store app.
+//! `--event`, `--key`: what the user does, at a session time.
 //!
 //! Status: that of `exit`; 0 after SIGTERM; 70 a guest ended by the
 //! runner; 2 usage; 5 the connection.
 
-use ptyrc_box::headless::{self, Options, Tape, Under};
+use ptyrc_box::grants::Grants;
+use ptyrc_box::headless::{self, Inject, Options, Tape, Under};
 use ptyrc_box::{Error, Limits, live, script};
 use ptyrc_proto::{Client, session};
 use std::ffi::OsString;
@@ -24,8 +27,35 @@ use std::sync::atomic::AtomicBool;
 
 const USAGE: &str = "usage: ptyrc-box [--script] MODULE [ARGS]
        ptyrc-box --headless [--script] MODULE [ARGS] [--size CxR] [--for T]
-                 [--at T,...] [--seed N] [--tape FILE | --screen FILE]
+                 [--at T,...] [--seed N] [--tape FILE | --screen FILE] [--json]
+                 [--grant NAME,...] [--deny NAME,...] [--words WORD,...]
+                 [--event T:TOPIC:JSON]... [--key T:KEY]...
 T: milliseconds, or with a unit: 500ms, 2s";
+
+/// The permissions of the plan (`ptyrc-store`, `PERMISSIONS`).
+const ALL: &[&str] = &[
+    "layout",
+    "shape",
+    "words",
+    "text",
+    "front-widget",
+    "front",
+    "screen-wide",
+    "keys-arrows",
+    "keys-grab",
+    "keys-read",
+    "pointer",
+    "clicks",
+    "clicks-grab",
+    "clock",
+    "storage",
+    "files",
+    "files-write",
+    "probe-git",
+    "probe-system",
+    "limit-memory",
+    "limit-time",
+];
 
 fn fail(status: u8, text: impl std::fmt::Display) -> ExitCode {
     eprintln!("ptyrc-box: {text}");
@@ -57,6 +87,28 @@ struct Cli {
     seed: Option<u64>,
     tape: Option<PathBuf>,
     screen: Option<PathBuf>,
+    json: bool,
+    grant: Option<Vec<String>>,
+    deny: Vec<String>,
+    words: Vec<String>,
+    inject: Vec<(u64, Inject)>,
+}
+
+fn list(v: &str) -> Vec<String> {
+    v.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// `T:REST`: the time and the rest.
+fn timed<'a>(flag: &str, v: &'a str) -> Result<(u64, &'a str), String> {
+    let (t, rest) = v
+        .split_once(':')
+        .ok_or_else(|| format!("{flag} {v}: T:..."))?;
+    let t = millis(t).ok_or_else(|| format!("{flag} {v}: {t}: a time"))?;
+    Ok((t, rest))
 }
 
 fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
@@ -97,6 +149,35 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
                 let v = string(value("--seed")?);
                 cli.seed = Some(v.parse().map_err(|_| format!("--seed {v}: an integer"))?);
             }
+            "--json" => cli.json = true,
+            "--grant" => {
+                let v = string(value("--grant")?);
+                cli.grant.get_or_insert_with(Vec::new).extend(list(&v));
+            }
+            "--deny" => cli.deny.extend(list(&string(value("--deny")?))),
+            "--words" => cli.words.extend(list(&string(value("--words")?))),
+            "--event" => {
+                let v = string(value("--event")?);
+                let (t, rest) = timed("--event", &v)?;
+                let (topic, data) = rest.split_once(':').unwrap_or((rest, "{}"));
+                let data = serde_json::from_str(data)
+                    .map_err(|e| format!("--event {v}: the data: {e}"))?;
+                if topic.is_empty() {
+                    return Err(format!("--event {v}: T:TOPIC:JSON"));
+                }
+                cli.inject.push((t, Inject::Event(topic.to_owned(), data)));
+            }
+            "--key" => {
+                let v = string(value("--key")?);
+                let (t, key) = timed("--key", &v)?;
+                if headless::key_bytes(key).is_none() && key != "ctrl+t" {
+                    return Err(format!(
+                        "--key {v}: {key}: not a key; {}",
+                        headless::KEY_NAMES
+                    ));
+                }
+                cli.inject.push((t, Inject::Key(key.to_owned())));
+            }
             "--tape" => cli.tape = Some(value("--tape")?.into()),
             "--screen" => cli.screen = Some(value("--screen")?.into()),
             "--help" | "-h" => return Err(String::new()),
@@ -111,9 +192,18 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
         || !cli.at.is_empty()
         || cli.seed.is_some()
         || cli.tape.is_some()
-        || cli.screen.is_some();
+        || cli.screen.is_some()
+        || cli.json
+        || cli.grant.is_some()
+        || !cli.deny.is_empty()
+        || !cli.words.is_empty()
+        || !cli.inject.is_empty();
     if headless_only && !cli.headless {
-        return Err("--size, --for, --at, --seed, --tape, --screen: with --headless".into());
+        return Err(
+            "--size, --for, --at, --seed, --tape, --screen, --json, --grant, --deny, \
+             --words, --event, --key: with --headless"
+                .into(),
+        );
     }
     if cli.tape.is_some() && (cli.screen.is_some() || cli.size.is_some()) {
         return Err("--tape gives the screen and its size: no --screen, no --size".into());
@@ -174,6 +264,16 @@ fn headless_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
         duration_ms: cli.duration.unwrap_or(d.duration_ms),
         at: cli.at.clone(),
         seed: cli.seed.unwrap_or(d.seed),
+        inject: cli.inject.clone(),
+        grants: match (&cli.grant, cli.deny.is_empty()) {
+            (Some(grant), _) => Some(Grants::new(grant, &cli.deny, &cli.words)),
+            // Denied alone: every permission but these.
+            (None, false) => {
+                let all: Vec<String> = ALL.iter().map(|s| s.to_string()).collect();
+                Some(Grants::new(&all, &cli.deny, &cli.words))
+            }
+            (None, true) => None,
+        },
         ..d
     };
     let report = match headless::run(wasm, &options) {
@@ -183,7 +283,11 @@ fn headless_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
     for line in &report.log {
         eprintln!("{line}");
     }
-    print!("{report}");
+    if cli.json {
+        println!("{}", report.to_json());
+    } else {
+        print!("{report}");
+    }
     match report.end {
         None | Some(Error::Exit(0)) => ExitCode::SUCCESS,
         Some(Error::Exit(code)) => ExitCode::from(code.clamp(1, 255) as u8),

@@ -600,6 +600,9 @@ Sprite, as JSON (the wire form; serde on the core types):
   sprite shows (a `content`, not `frames` nor an effect), each as a
   row of `grid`, no wider; a shorter row leaves holes. Not with
   `content`, `frames`, `effect`.
+- A canvas (`rows`, `cells`, `grid`, a frame, an effect's `size`) is
+  2^20 cells at most, width times height, the widest row giving the
+  width: four times a 512x512 screen. Past it the request fails.
 - `style`: `fg`, `bg` (colour name, `0..255`, `"#rrggbb"`, `"default"`;
   absent: inherit the cell below), `bold`, `dim`, `italic`, `underline`,
   `inverse`, `strike`, `blink`.
@@ -1126,6 +1129,8 @@ The driver keeps a table of apps (`ptyrc-server/src/apps.rs`):
   entry a pid (`SO_PEERCRED`), made at its first request that is not
   `app.*`, gone with its last connection. A process that only asks of
   the table (a verb of `ptyrc manage`) is no app.
+- **foreground**: a client enrolled by `app.enrol` (`ptyrc app NAME`),
+  before it connects. Stopped, paused as a client.
 
 A connection belongs to the child whose process group holds its peer
 (`getpgid` of the peer pid, at accept), else to the client of its pid.
@@ -1133,7 +1138,7 @@ A connection belongs to the child whose process group holds its peer
 App info: `{"id","kind":"child"|"client","name","argv":[...],"pid",
 "state":"running"|"paused"|"exited","status":code|null,"runs":n,
 "since":seconds,"conns":[id,...],"sprites":n,"widgets":n,"frames":[id,
-...],"moves":bool,"log":path|null,"me":bool}`. `id`: from 1; that of a
+...],"moves":bool,"log":path|null,"foreground":bool,"me":bool}`. `id`: from 1; that of a
 child is never used twice in a session, that of a client is free again
 when it leaves and no entry came after it (a verb that comes and goes
 costs none). `name`: given at `app.start`; else the file name of
@@ -1157,6 +1162,7 @@ not kept, nor the child of the hotkey once it has ended.
 | `app.list` | | `{"apps":[info,...]}`, by id |
 | `app.start` | `argv`: `[program, arg...]`, `name`, `declares` (Permissions) | `{"app":info}`, once the pop-up is answered when it asks; `bad-params` with the reason when it does not start; `cancelled` |
 | `app.start` | `store`: an origin or the id of an installed app, `args`: `{OPTION: VALUE}` | the same; see Store apps |
+| `app.enrol` | `name`, `argv`, `declares` | `{"app":info,"token":hex}`, as `app.start`: the pop-up, the file, the headless rule; see Permissions, Foreground apps |
 | `app.stop` | `app`: id | `{"app":info}`; SIGTERM, SIGCONT when paused, SIGKILL after 2 s. A child: its group; a client: its pid. An exited child: nothing |
 | `app.pause` | `app` | `{"app":info}`; see Pause |
 | `app.resume` | `app` | `{"app":info}` |
@@ -1191,8 +1197,7 @@ Store apps. `app.start {store}` starts an installed app
   `[app] id`.
 - `app.restart` of a store app takes no `argv`, `name` nor `declares`
   (`not-usable`): it is started again as it is, from the same tree.
-- `app.list` is closed to a store app (`denied`) until it lists its own
-  alone.
+- `app.list`: its own entry alone (Permissions, Its own).
 - The first start of a commit is told to the lock
   (`install::started`): the tree before it is pruned.
 
@@ -1690,7 +1695,21 @@ the pop-up. Not done: `app.start {store}`.
 - The token alone is not enough: the connection is one of that child
   already, matched at accept by the process group of its peer
   (`Apps::attach`). A token read by another process is of no use to it.
-- The clients present it by themselves (`Client::connect`,
+- **Foreground apps** (`app.enrol`, `Apps::enrol`): `ptyrc app NAME`
+  runs in the user's terminal, not as a child. It reads what the app
+  declares (`ptyrc-app --declares`), asks `app.enrol`, then executes
+  `ptyrc-app` in its place with `PTYRC_TOKEN` and `PTYRC_SOCKET`. The
+  token is bound to the pid of the peer that asked (`SO_PEERCRED`): a
+  connection is of that entry when its peer is that process, or of its
+  process group when it leads one. Presented within 30 s
+  (`ENROL_WITHIN`), else never; accepted then for the life of the
+  process. The entry leaves with the last connection, or at the end of
+  the 30 s when none came. esc: `cancelled`; `ptyrc app` fails with it
+  and starts nothing. No session, `--help`, no answer to `--declares`,
+  a driver without a table: executed as before, the whole session.
+  It holds a careless app, as the token of a child does: the process
+  may connect without it.
+
   `Connection`): when `PTYRC_TOKEN` is set and the socket is the one of
   `PTYRC_SOCKET`. A token is of one session. `Client::connect_as`,
   `Connection(path, token=)`: one given by hand. `Pilot.identity`,
@@ -1736,7 +1755,7 @@ the pop-up. Not done: `app.start {store}`.
   screen, between `app.start` (or `app.restart {declares}`) and the
   start. Every start that declares goes through it: the menu, `ptyrc
   manage start`, `run --app` and `Config::apps` (each with `ptyrc-app
-  --declares`), a client's `app.start`.
+  --declares`), `ptyrc app` (`app.enrol`), a client's `app.start`.
 
   ```
   ╔═ cat ─ native ═══════════════════════════════╗
@@ -1812,12 +1831,33 @@ the pop-up. Not done: `app.start {store}`.
   `keys-read`, `pointer`, `clicks`, `clicks-grab`, `clock`, `storage`,
   `files`, `files-write`, `probe-git`, `probe-system`, `limit-memory`,
   `limit-time`. Proposed, as the list of the plan.
-- Not told apart yet, each open by default above: an app's own
-  sprites, widgets and entry from the others' (`draw.list`,
-  `draw.update`, `draw.remove`, `widget.list`, `app.list`); the layer
-  and the surface of a sprite (`front`, `front-widget`,
-  `screen-wide`); the keys of its focused widget and the pointer on
-  its own things, which reach it without a topic.
+- **Its own** (`driver/own.rs`): a connection bound to an app that
+  does not hold the whole session (`Grants::narrowed`: a store app; a
+  child or a foreground app that declared) sees its own objects alone,
+  those of the connections of its app. `app.list`: its entry;
+  `draw.list`, `widget.list`: what its connections own (`owner`);
+  `draw.update`, `draw.remove`, `draw.ext {id}` on a sprite it did not
+  put: `no-sprite`, as an id that does not exist; `draw.clear {all}`:
+  its own. `widget.set`, `.hide`, `.ask`, `.release` are of the
+  connection already. Errors `no-frame`, `no-sprite`: no hint.
+- **A store app** (`driver/own.rs`), besides:
+  - Its band of layers: `layer` of `draw.put`, `draw.ext`, of
+    `draw.update` and `widget.show` when given, is replaced by its own,
+    `-(2 + id % 97)` behind (between `wallpaper` and `back`), `2 + id %
+    97` in front (between `front` and `hud`). In front only when asked
+    (a positive layer, `front`, `hud`; a modal) and held: `front` for a
+    sprite, `front-widget` or `front` for a widget; else behind, the
+    lesser form. A widget shown without `layer` keeps the default
+    (`back`; raised while focused). `layer.*` closed (the table).
+  - Limits of the driver, all its connections: 256 sprites
+    (`draw.put`, `draw.ext` without `id`), 16 widgets (`widget.show` of
+    a new tag), 32 subscriptions. Past one: `not-usable`, the message
+    and the hint name it.
+- Not told apart yet, each open by default above: `surface` of the
+  manifest (`widget`, `frame`, `screen` with `screen-wide`) is not
+  enforced: a store app draws on any frame, unclipped; the keys of its
+  focused widget and the pointer on its own things, which reach it
+  without a topic.
 
 **The cut answers** (`lower.rs`: `plan`, `Cut`; `Driver::dispatch`).
 An app that holds less than `text` is answered in the same form, cut
@@ -1840,7 +1880,8 @@ not by removing from the whole.
 | the same | else | no match; the wait answers at once, `matched` false (true with `gone`) |
 | `frame.list`, `frame.get` | `layout` and above | `key` and `support` null |
 | the same, `frame.at` | less than `layout` | one frame, the raw one, whatever was named: the surface; `frame` in every request above is ignored |
-| a frame info | less than `shape` | idle, `extent` the view |
+| a frame info | less than `shape` | idle, `origin` 0, 0, `extent` the view |
+| `frame` of any request, `frame.at {name}` | less than `layout`; less than `shape` | the surface; `active`, `quietest`, `idle` (of the cursor, of the heat): `raw` |
 | `session.info`; `hello` | less than `text` | `protocol`, `server`, `size`, `headless`; `host_colors` from `shape` |
 | event `frames` | `layout` and above | the infos cut as above |
 
@@ -1854,9 +1895,8 @@ not by removing from the whole.
   lists frames, sprites).
 - A pending request (`screen.wait`) is cut when it completes.
 - A method the table lowers and `lower::plan` does not know: `denied`.
-- Known holes: `frame.at {name}` and a frame named in `draw.put` tell
-  whether a key exists; `origin` and `extent` from `layout` tell how
-  far a frame scrolled; `app.list`, `draw.list`, `widget.list` (below).
+- Known holes: where an own sprite was placed (`draw.list`: `screen`,
+  `frame`) tells where its anchor found the text.
 
 Durations on the wire (`timeout_ms`, `ttl_ms`, `ms`, ...) are session
 time: real time times `$PTYRC_CLOCK_RATE` (default 1), read by the driver
@@ -2075,11 +2115,13 @@ ptyrc store rm ID|ORIGIN [--purge] ; update [ID|ORIGIN...] [--latest]
                                   store apps (store-model.md, Install)
 ptyrc dev new NAME [--rust] ; dev check [DIR] ; dev entry [DIR]
       [--remote NAME] ; dev test [DIR] [--size CxR] [--for T] [--at T,...]
-      [--seed N] [--tape F | --screen F] [--arg NAME=VALUE]... ; dev run
-      [DIR] [NAME=VALUE...]       an app's author (store-model.md, Tools)
+      [--seed N] [--tape F | --screen F] [--deny P,...] [--key T:KEY]...
+      [--event T:TOPIC:JSON]... [--NAME VALUE...] ; dev run [DIR]
+      [--NAME VALUE...]           an app's author (store-model.md, Tools)
 ```
 
-`ptyrc app` executes `ptyrc-app` with its arguments as given, `ptyrc
+`ptyrc app` executes `ptyrc-app` with its arguments as given, after
+`app.enrol` when the app declares (Permissions, Foreground apps); `ptyrc
 python` `ptyrc-python`; `-s` becomes `$PTYRC_SESSION` and unsets
 `$PTYRC_SOCKET`. The program is taken from `PATH`; else from `.venv/bin`
 or `venv/bin` in the current directory or one above it; else from the same

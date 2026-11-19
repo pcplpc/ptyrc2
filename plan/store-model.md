@@ -263,13 +263,20 @@ ptyrc dev check [DIR]           what the install and the registry
                                 check: manifest, licence, sizes, the
                                 build, the imports
 ptyrc dev test [DIR] [--tape F] [--size CxR] [--for T] [--at T,...]
+               [--deny P,...] [--key T:KEY] [--event T:TOPIC:JSON]
+               [--json] [--NAME VALUE...]
                                 the app on a tape or an empty screen,
                                 headless, the clock an argument; the
                                 screen at each T as text, the requests
-                                refused, the limits met. The same run
+                                refused or lowered, the permissions
+                                lacking, the limits met. It holds what
+                                it declares; --deny: a no, answered as
+                                the driver answers it. The same run
                                 every time
-ptyrc dev run [DIR] [ARG...]    in a live session; started again when
-                                a file changes
+ptyrc dev run [DIR] [--NAME VALUE...]
+                                in a live session; started again when
+                                a file changes; SIGTERM, SIGINT: the
+                                app stopped (`stop`), then the end
 ptyrc dev entry [DIR]           the file to add to the registry
 ```
 

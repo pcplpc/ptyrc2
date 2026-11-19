@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 pub enum Dev {
     /// Write a new app at NAME: the manifest, the app, a test, the
     /// licence, AGENTS.md; a git repository
@@ -32,8 +33,10 @@ pub enum Dev {
         dir: Option<PathBuf>,
     },
     /// Run the app headless: the screen at each time as text, then the
-    /// requests refused, the limits met, the end; the log on stderr. The
-    /// same run every time. A Rust app is built first (cargo)
+    /// requests refused or lowered, the permissions lacking, the limits
+    /// met, the end; the log on stderr. The same run every time. A Rust
+    /// app is built first (cargo). It holds what its manifest declares
+    #[command(allow_hyphen_values = true)]
     Test {
         /// The app's directory [default: .]
         dir: Option<PathBuf>,
@@ -59,14 +62,38 @@ pub enum Dev {
         /// An option of the manifest's [options]; again for each
         #[arg(long = "arg", value_name = "NAME=VALUE")]
         args: Vec<String>,
+        /// Permissions declared and denied: answered as the driver
+        /// answers a no (lowered, or `denied`)
+        #[arg(long, value_name = "NAME,...")]
+        deny: Vec<String>,
+        /// An event at session time T, to a topic subscribed and held
+        #[arg(long = "event", value_name = "T:TOPIC:JSON")]
+        events: Vec<String>,
+        /// A key of the keyboard at session time T: to the app when it
+        /// grabbed it
+        #[arg(long = "key", value_name = "T:KEY")]
+        keys: Vec<String>,
+        /// Options of the manifest's [options], as `ptyrc app` takes
+        /// them: --NAME VALUE, --NAME, --no-NAME; after `--`, or here
+        #[arg(
+            value_name = "OPTION",
+            trailing_var_arg = true,
+            allow_hyphen_values = true
+        )]
+        options: Vec<String>,
     },
     /// Run the app in a live session, as the user's own client; start it
     /// again when a file of DIR changes. The log on stderr; Ctrl-C ends
     Run {
         /// The app's directory [default: .]
         dir: Option<PathBuf>,
-        /// Options of the manifest's [options]
-        #[arg(value_name = "NAME=VALUE")]
+        /// Options of the manifest's [options], as `ptyrc app` takes
+        /// them: --NAME VALUE, --NAME, --no-NAME; NAME=VALUE
+        #[arg(
+            value_name = "OPTION",
+            trailing_var_arg = true,
+            allow_hyphen_values = true
+        )]
         args: Vec<String>,
     },
     /// Print the registry's pointer file for the app at DIR: the origin
@@ -95,11 +122,38 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
             seed,
             tape,
             screen,
-            args,
+            mut args,
+            mut deny,
+            events,
+            keys,
+            options,
         } => {
+            let (dir, options) = split_dir(dir, options);
+            // Flags of `dev test` after the first option of the app,
+            // before a `--`: ours.
+            let mut flags: Vec<OsString> = Vec::new();
+            let mut json = common.json;
+            let mut words = options.into_iter();
+            while let Some(w) = words.next() {
+                let (name, inline) = match w.split_once('=') {
+                    Some((n, v)) if n.starts_with("--") => (n.to_string(), Some(v.to_string())),
+                    _ => (w.clone(), None),
+                };
+                let mut value = || inline.clone().or_else(|| words.next()).unwrap_or_default();
+                match name.as_str() {
+                    "--" => {
+                        args.extend(words.by_ref());
+                    }
+                    "--json" if inline.is_none() => json = true,
+                    "--arg" => args.push(value()),
+                    "--deny" => deny.push(value()),
+                    "--size" | "--for" | "--at" | "--seed" | "--tape" | "--screen" | "--event"
+                    | "--key" => flags.extend([name.clone().into(), value().into()]),
+                    _ => args.push(w),
+                }
+            }
             let dir = here(dir);
             is_dir(&dir)?;
-            let mut flags: Vec<OsString> = Vec::new();
             let mut flag = |name: &str, v: Option<OsString>| {
                 if let Some(v) = v {
                     flags.extend([name.into(), v]);
@@ -111,14 +165,50 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
             flag("--seed", seed.map(|s| s.to_string().into()));
             flag("--tape", tape.map(Into::into));
             flag("--screen", screen.map(Into::into));
-            app::test(app::TestOpts { dir, args, flags })
+            for e in events {
+                flag("--event", Some(e.into()));
+            }
+            for k in keys {
+                flag("--key", Some(k.into()));
+            }
+            if json {
+                flags.push("--json".into());
+            }
+            let deny = deny.iter().flat_map(|d| d.split(',')).map(str::trim);
+            let deny = deny.filter(|d| !d.is_empty()).map(str::to_owned).collect();
+            app::test(app::TestOpts {
+                dir,
+                args,
+                deny,
+                flags,
+            })
         }
         Dev::Run { dir, args } => {
+            let (dir, args) = split_dir(dir, args);
             let dir = here(dir);
             is_dir(&dir)?;
             app::run(common, &dir, &args)
         }
         Dev::Entry { dir, remote } => entry(&dir.unwrap_or_else(|| ".".into()), remote),
+    }
+}
+
+/// The directory and the options: a first word that is an option
+/// (`--rate`, `rate=1`) is not the directory.
+fn split_dir(dir: Option<PathBuf>, mut words: Vec<String>) -> (Option<PathBuf>, Vec<String>) {
+    // `--` ends the flags of ptyrc; what follows is the app's.
+    if words.first().is_some_and(|w| w == "--") {
+        words.remove(0);
+    }
+    match dir {
+        Some(d)
+            if d.to_str()
+                .is_some_and(|d| d.starts_with('-') || d.contains('=')) =>
+        {
+            words.insert(0, d.to_string_lossy().into_owned());
+            (None, words)
+        }
+        d => (d, words),
     }
 }
 
@@ -148,8 +238,15 @@ fn check(dir: &Path) -> Result<ExitCode, Fail> {
                 Err(e) if !rust => vec![e],
                 _ => {
                     let a = &ok.manifest.app;
+                    let asks: Vec<&str> = (ok.manifest.permissions.iter())
+                        .map(|p| p.name.as_str())
+                        .collect();
+                    let asks = match asks.is_empty() {
+                        true => "asks no permission".to_string(),
+                        false => format!("asks {}", asks.join(", ")),
+                    };
                     println!(
-                        "ok: {} {}: {} files, {} bytes",
+                        "ok: {} {}: {} files, {} bytes; {asks}",
                         a.id,
                         a.version,
                         ok.files.len(),

@@ -4,6 +4,7 @@
 //! The driver calls `tick` then `compose` after every screen update, and
 //! `tick` alone at `next_wake`; a `compose` is then due when `take_dirty`.
 
+mod compose;
 mod effect;
 pub mod grid;
 mod raster;
@@ -11,17 +12,18 @@ mod spec;
 #[cfg(test)]
 mod tests;
 
+pub use compose::Composer;
 pub use effect::{Effect, EffectFactory, Looks, Rng, Under, Warmth, confetti, sparkle};
-pub use raster::Canvas;
+pub use raster::{Canvas, MAX_CELLS};
 pub use spec::*;
 
 use crate::frames::HeatView;
 use crate::types::{
     FrameId, FramePos, FrameSel, OwnerId, RAW, SpriteId, SurfaceInfo, Surfaces, TextQuery,
 };
+use compose::each_glyph;
 use ptyrc_vt::palette::{self, Rgb};
 use ptyrc_vt::{Attrs, Cell, Color, Grid, Rect, Style};
-use raster::Slot;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
@@ -40,6 +42,9 @@ const LOOK_STEP: Duration = Duration::from_micros(16_500);
 /// A text anchor keeps its match when one is found this close (rows).
 const TEXT_STICKY_ROWS: i64 = 3;
 
+/// Rows of a patch, decoded: all in one buffer, each `(y, its bytes)`.
+type GridRows = (Vec<u8>, Vec<(u16, std::ops::Range<usize>)>);
+
 const FRAME_NAMES: [&str; 5] = ["raw", "active", "largest", "quietest", "idle"];
 
 struct Anim {
@@ -56,6 +61,8 @@ struct Anim {
     /// The `style` and `opaque` of a content, for `rows` of a patch.
     base: StyleSpec,
     opaque: bool,
+    /// Per row of `frames[0]`: the `Scene::rev` of its last `rows` patch.
+    row_rev: Vec<u64>,
 }
 
 /// The style a content is given: its `style`, else that of its first run.
@@ -137,6 +144,9 @@ struct Sprite {
     clip: Rect,
     /// Its owner is hidden, since then: not ticked, not drawn.
     hidden: Option<Duration>,
+    /// The `Scene::rev` of the last change of what it draws, its place
+    /// aside (`Composer`).
+    rev: u64,
 }
 
 impl Sprite {
@@ -259,6 +269,8 @@ pub struct Scene {
     layers: BTreeMap<String, i32>,
     /// Owners whose sprites are hidden (`hide_owner`).
     hidden: BTreeSet<OwnerId>,
+    /// Count of the changes to what sprites draw: `Sprite::rev`.
+    rev: u64,
 }
 
 impl Default for Scene {
@@ -281,6 +293,7 @@ impl Scene {
             host: HostColors::default(),
             layers: BTreeMap::new(),
             hidden: BTreeSet::new(),
+            rev: 0,
         };
         scene.register_effect("confetti", Box::new(confetti));
         scene.register_effect("sparkle", Box::new(sparkle));
@@ -381,6 +394,11 @@ impl Scene {
         std::mem::take(&mut self.dirty)
     }
 
+    fn bump(&mut self) -> u64 {
+        self.rev += 1;
+        self.rev
+    }
+
     fn body(
         &self,
         content: &Option<Content>,
@@ -398,6 +416,7 @@ impl Scene {
                 style: first_style(content),
                 base: content.style.unwrap_or_default(),
                 opaque: content.opaque,
+                row_rev: Vec::new(),
             }),
             (None, Some(list)) if !list.is_empty() => Ok(Anim {
                 frames: list
@@ -412,6 +431,7 @@ impl Scene {
                 style: first_style(&list[0].content),
                 base: StyleSpec::default(),
                 opaque: false,
+                row_rev: Vec::new(),
             }),
             (None, Some(_)) => Err(SceneError::BadParams("frames is empty".into())),
             _ => Err(SceneError::BadParams(
@@ -477,8 +497,9 @@ impl Scene {
                     .effects
                     .get(&fx.name)
                     .ok_or_else(|| SceneError::BadParams(format!("unknown effect: {}", fx.name)))?;
-                let effect = make(&fx.params).map_err(SceneError::BadParams)?;
                 let [w, h] = spec.size.unwrap_or([0, 0]);
+                raster::check_cells(w, h, "size")?;
+                let effect = make(&fx.params).map_err(SceneError::BadParams)?;
                 Body::Fx(Box::new(Fx {
                     name: fx.name.clone(),
                     effect,
@@ -526,6 +547,7 @@ impl Scene {
             screen: None,
             clip: Rect::default(),
             hidden: self.hidden.contains(&owner).then_some(now),
+            rev: self.bump(),
         };
         let at = self
             .sprites
@@ -587,6 +609,40 @@ impl Scene {
             Some(rows) => Some(self.grid_rows(index, rows, &patch)?),
             None => None,
         };
+        // Exhaustive: a new member is either a change of what the sprite
+        // draws or said not to be.
+        let SpritePatch {
+            frame: f0,
+            anchor: f1,
+            content: f2,
+            frames: f3,
+            looping: f4,
+            effect: f5,
+            layer: f6,
+            blend: f7,
+            panel: f8,
+            alpha: f9,
+            z: f10,
+            ttl_ms: f11,
+            persist: f12,
+            motion: f13,
+            rows: _,
+        } = &patch;
+        let only_rows = f0.is_none()
+            && f1.is_none()
+            && f2.is_none()
+            && f3.is_none()
+            && f4.is_none()
+            && f5.is_none()
+            && f6.is_none()
+            && f7.is_none()
+            && f8.is_none()
+            && f9.is_none()
+            && f10.is_none()
+            && f11.is_none()
+            && f12.is_none()
+            && f13.is_none();
+        let rev = self.bump();
         let body = if patch.content.is_some() || patch.frames.is_some() {
             let looping = patch.looping.unwrap_or_default();
             let mut anim = self.body(&patch.content, &patch.frames, looping)?;
@@ -596,6 +652,9 @@ impl Scene {
             None
         };
         let sprite = &mut self.sprites[index];
+        if !only_rows {
+            sprite.rev = rev;
+        }
         if let Some((name, effect)) = started {
             let size = match &sprite.body {
                 Body::Fx(old) => old.size,
@@ -628,10 +687,12 @@ impl Scene {
             }
             sprite.anchor = anchor;
         }
-        if let (Some(rows), Body::Anim(anim)) = (rows, &mut sprite.body) {
+        if let (Some((all, rows)), Body::Anim(anim)) = (rows, &mut sprite.body) {
             let canvas = &mut anim.frames[0];
-            for (y, cells) in rows {
-                canvas.grid_row(y, &cells, &anim.base, anim.opaque);
+            anim.row_rev.resize(canvas.height() as usize, 0);
+            for (y, at) in rows {
+                canvas.grid_row(y, &all[at], &anim.base, anim.opaque);
+                anim.row_rev[y as usize] = rev;
             }
         }
         match (body, &mut sprite.body) {
@@ -696,7 +757,7 @@ impl Scene {
         index: usize,
         rows: &BTreeMap<u16, String>,
         patch: &SpritePatch,
-    ) -> Result<Vec<(u16, Vec<u8>)>, SceneError> {
+    ) -> Result<GridRows, SceneError> {
         let bad = |what: &str| Err(SceneError::BadParams(format!("rows: {what}")));
         if patch.content.is_some() || patch.frames.is_some() || patch.effect.is_some() {
             return bad("excludes content, frames and effect");
@@ -705,19 +766,22 @@ impl Scene {
             Body::Anim(anim) if !anim.timed && anim.frames.len() == 1 => &anim.frames[0],
             _ => return bad("the sprite shows no content"),
         };
+        // All the rows in one buffer, each decoded in one reused.
+        let mut all = Vec::with_capacity(rows.len() * canvas.width() as usize * grid::CELL);
         let mut out = Vec::with_capacity(rows.len());
+        let mut cells = Vec::new();
         for (&y, text) in rows {
             if y >= canvas.height() {
                 return bad(&format!("{y}: past the last row"));
             }
-            let mut cells = Vec::new();
             grid::decode_row(text, &mut cells)?;
             if cells.len() / grid::CELL > canvas.width() as usize {
                 return bad(&format!("{y}: wider than the content"));
             }
-            out.push((y, cells));
+            out.push((y, all.len()..all.len() + cells.len()));
+            all.extend_from_slice(&cells);
         }
-        Ok(out)
+        Ok((all, out))
     }
 
     pub fn remove(&mut self, id: SpriteId) -> bool {
@@ -942,6 +1006,7 @@ impl Scene {
         // A frame of an animation or a lifetime ended.
         let mut looked = false;
         let mut dead: Vec<SpriteId> = Vec::new();
+        let mut rev = self.rev;
 
         // Spots held by auto sprites, for `taken`.
         let mut spots: Vec<(SpriteId, FrameId, Rect)> = self
@@ -1018,6 +1083,8 @@ impl Scene {
                         anim.since = end;
                         dirty = true;
                         looked = true;
+                        rev += 1;
+                        sprite.rev = rev;
                     }
                     if ended {
                         looked = true;
@@ -1071,7 +1138,11 @@ impl Scene {
                             fx.next = now + fx.effect.period().max(Duration::from_millis(1));
                         }
                         // The same picture again: nothing to repaint.
-                        dirty |= !fx.canvas.same_as(&fx.before);
+                        if !fx.canvas.same_as(&fx.before) {
+                            dirty = true;
+                            rev += 1;
+                            sprite.rev = rev;
+                        }
                     }
                 }
             }
@@ -1205,6 +1276,7 @@ impl Scene {
             self.sprites.retain(|s| !dead.contains(&s.id));
             dirty = true;
         }
+        self.rev = rev;
         self.dirty |= dirty;
         if looked {
             self.looked = now;
@@ -1242,331 +1314,6 @@ impl Scene {
             }
         }
         wake
-    }
-
-    /// The app grid with the sprites on it: the back layers seen through
-    /// the cells the app left without ink, the app, the front layers.
-    /// Uses the anchor state of the last `tick` and the surfaces as they
-    /// are now: a scroll between the two moves frame-anchored sprites.
-    pub fn compose(&self, base: &Grid, surfaces: &dyn Surfaces) -> Grid {
-        let mut out = base.clone();
-        if self.sprites.is_empty() {
-            return out;
-        }
-        let cursor = surfaces.cursor();
-        let front = self.sprites.partition_point(|s| s.layer < 0);
-        let mut back = Back::new(base, self.host);
-        for sprite in &self.sprites[..front] {
-            let tint = sprite.blend == Blend::Tint;
-            let cover = sprite.panel.is_some();
-            each_glyph(sprite, base, surfaces, cursor, |x, y, glyph| {
-                back.paint(x, y, glyph, tint, sprite.alpha * glyph.alpha(), cover)
-            });
-        }
-        back.resolve(base, &mut out);
-        for sprite in &self.sprites[front..] {
-            let tint = sprite.blend == Blend::Tint;
-            each_glyph(sprite, base, surfaces, cursor, |x, y, glyph| {
-                let alpha = sprite.alpha * glyph.alpha();
-                if alpha < 1.0 {
-                    paint_alpha(&mut out, x, y, glyph, tint, alpha, &self.host)
-                } else {
-                    paint(&mut out, x, y, glyph, tint)
-                }
-            });
-        }
-        out
-    }
-}
-
-/// Call `f` with every glyph of `sprite` that is inside its view, at its
-/// screen cell.
-fn each_glyph<'a>(
-    sprite: &'a Sprite,
-    base: &Grid,
-    surfaces: &dyn Surfaces,
-    cursor: (u16, u16),
-    mut f: impl FnMut(u16, u16, &'a raster::Glyph),
-) {
-    if sprite.hidden.is_some() {
-        return;
-    }
-    let Some(info) = sprite.frame.and_then(|id| surfaces.info(id)) else {
-        return;
-    };
-    if !info.usable {
-        return;
-    }
-    let Some((left, top)) = sprite.locate(&info, cursor) else {
-        return;
-    };
-    let clip = info.rect.intersect(&base.rect());
-    if clip.is_empty() {
-        return;
-    }
-    let canvas = sprite.canvas();
-    for cy in 0..canvas.height() {
-        let sy = top + cy as i64;
-        if sy < clip.y as i64 || sy >= clip.bottom() as i64 {
-            continue;
-        }
-        for cx in 0..canvas.width() {
-            let Slot::Glyph(glyph) = canvas.slot(cx, cy) else {
-                continue;
-            };
-            let sx = left + cx as i64;
-            let width = glyph.cell.width as i64;
-            if sx < clip.x as i64 || sx + width > clip.right() as i64 {
-                continue;
-            }
-            if let Some(panel) = sprite.panel
-                && !(sx..sx + width.max(1))
-                    .all(|x| base.cell(x as u16, sy as u16).backdrop() == panel)
-            {
-                continue;
-            }
-            f(sx as u16, sy as u16, glyph);
-        }
-    }
-}
-
-/// What the back layers put in one cell.
-#[derive(Clone, Default)]
-struct BackCell<'a> {
-    /// Text and width of the glyph, in its sprite; `None`: a colour only.
-    glyph: Option<&'a Cell>,
-    /// Right half of the wide glyph before it.
-    spacer: bool,
-    fg: Option<Color>,
-    /// Opacity of `fg`, when the sprite has an `alpha`.
-    fade: Option<f32>,
-    /// Opaque colour.
-    bg: Option<Color>,
-    /// `bg` is laid on the app's panel: it replaces the backdrop.
-    cover: bool,
-    /// Translucent colours laid over `bg`: their sum, premultiplied, and
-    /// its opacity.
-    glaze: Option<([f32; 3], f32)>,
-    attrs: Attrs,
-}
-
-impl BackCell<'_> {
-    /// Lay the colour `bg` at opacity `alpha` over what is there.
-    fn lay(&mut self, bg: Color, alpha: f32, cover: bool, host: &HostColors) {
-        if alpha >= 1.0 {
-            self.bg = Some(bg);
-            self.cover = cover;
-            self.glaze = None;
-            return;
-        }
-        let over = palette::rgb(bg, host.bg);
-        let (sum, opacity) = self.glaze.unwrap_or(([0.0; 3], 0.0));
-        let rest = 1.0 - alpha;
-        self.glaze = Some((
-            [0, 1, 2].map(|i| over[i] as f32 * alpha + sum[i] * rest),
-            alpha + opacity * rest,
-        ));
-    }
-
-    /// The glaze seen on `under`.
-    fn glazed(&self, under: Rgb) -> Option<Color> {
-        let (sum, opacity) = self.glaze?;
-        let ch = |i: usize| (under[i] as f32 * (1.0 - opacity) + sum[i]).round() as u8;
-        Some(Color::Rgb(ch(0), ch(1), ch(2)))
-    }
-}
-
-/// The back layers, flattened. Allocated at the first glyph.
-struct Back<'a> {
-    cols: u16,
-    rows: u16,
-    cells: Vec<Option<BackCell<'a>>>,
-    host: HostColors,
-}
-
-impl<'a> Back<'a> {
-    fn new(base: &Grid, host: HostColors) -> Back<'a> {
-        Back {
-            cols: base.cols(),
-            rows: base.rows(),
-            cells: Vec::new(),
-            host,
-        }
-    }
-
-    fn at(&mut self, x: u16, y: u16) -> &mut BackCell<'a> {
-        if self.cells.is_empty() {
-            self.cells = vec![None; self.cols as usize * self.rows as usize];
-        }
-        self.cells[y as usize * self.cols as usize + x as usize].get_or_insert_default()
-    }
-
-    /// Take the glyph out of `(x, y)` and out of its other half; the
-    /// colour stays.
-    fn cut(&mut self, x: u16, y: u16) {
-        let i = y as usize * self.cols as usize + x as usize;
-        if self.cells.get(i).is_none_or(|cell| cell.is_none()) {
-            // Nothing was laid here.
-            return;
-        }
-        let cell = self.at(x, y);
-        let other = if cell.spacer && x > 0 {
-            Some(x - 1)
-        } else if cell.glyph.is_some_and(|g| g.width == 2) && x + 1 < self.cols {
-            Some(x + 1)
-        } else {
-            None
-        };
-        for x in other.into_iter().chain([x]) {
-            let cell = self.at(x, y);
-            cell.glyph = None;
-            cell.spacer = false;
-            cell.fg = None;
-            cell.fade = None;
-            cell.attrs = Attrs::default();
-        }
-    }
-
-    fn paint(
-        &mut self,
-        x: u16,
-        y: u16,
-        glyph: &'a raster::Glyph,
-        tint: bool,
-        alpha: f32,
-        cover: bool,
-    ) {
-        let wide = glyph.cell.width == 2;
-        let host = self.host;
-        if !tint {
-            self.cut(x, y);
-            let cell = self.at(x, y);
-            cell.glyph = Some(&glyph.cell);
-            cell.fg = glyph.fg;
-            cell.fade = (alpha < 1.0).then_some(alpha);
-            cell.attrs = glyph.attrs;
-            if wide {
-                self.cut(x + 1, y);
-                self.at(x + 1, y).spacer = true;
-            }
-        }
-        // Behind the app a tint is a colour of background.
-        if let Some(bg) = glyph.bg {
-            for x in x..=x + wide as u16 {
-                self.at(x, y).lay(bg, alpha, cover, &host);
-            }
-        }
-    }
-
-    /// Put the app on top: `out` is `base` with the back layers seen
-    /// through it.
-    ///
-    /// - A back glyph shows where the app cell has no ink (both cells of
-    ///   a wide glyph).
-    /// - A back colour shows where the app's backdrop is the default
-    ///   one. Another backdrop (a panel, a bar, inverse video) is the
-    ///   app's: it stays, and a back glyph is seen on it.
-    /// - An app cell with ink keeps its glyph and its style; only its
-    ///   default background gives way to a back colour. A wide glyph
-    ///   takes the colour behind its head.
-    /// - A back colour with an `alpha` is mixed with the backdrop the
-    ///   app chose, or with the opaque back colour or the host's default
-    ///   where it chose none. Inverse cells stay the app's.
-    fn resolve(&self, base: &Grid, out: &mut Grid) {
-        if self.cells.is_empty() {
-            return;
-        }
-        let host = self.host;
-        let no_ink = |x: u16, y: u16| !base.cell(x, y).has_ink();
-        for y in 0..self.rows {
-            for x in 0..self.cols {
-                let i = y as usize * self.cols as usize + x as usize;
-                let Some(back) = &self.cells[i] else {
-                    continue;
-                };
-                // Background the back layers give the cell `(x, y)`;
-                // `None`: the app's.
-                let ground = |x: u16| -> Option<Color> {
-                    let own = self.cells[y as usize * self.cols as usize + x as usize].as_ref()?;
-                    let app = base.cell(x, y);
-                    if app.style.attrs.contains(Attrs::INVERSE) {
-                        return None;
-                    }
-                    if app.style.bg == Color::Default || (own.cover && own.bg.is_some()) {
-                        let under = palette::rgb(own.bg.unwrap_or(Color::Default), host.bg);
-                        own.glazed(under).or(own.bg)
-                    } else {
-                        own.glazed(palette::rgb(app.style.bg, host.bg))
-                    }
-                };
-                // Style of the back glyph `ink` seen in the cell `(x, y)`.
-                let seen = |x: u16, ink: &BackCell| {
-                    let app = base.cell(x, y);
-                    let mut style = if is_open(app) {
-                        Style {
-                            fg: ink.fg.unwrap_or(app.style.fg),
-                            bg: ground(x).unwrap_or(Color::Default),
-                            attrs: ink.attrs,
-                            ..Style::default()
-                        }
-                    } else {
-                        let below = Style {
-                            bg: ground(x).unwrap_or(app.style.bg),
-                            ..app.style
-                        };
-                        on_backdrop(below, ink.fg, None, ink.attrs)
-                    };
-                    if let (Some(alpha), Some(fg)) = (ink.fade, ink.fg) {
-                        if style.attrs.contains(Attrs::INVERSE) {
-                            // Inverse: the glyph is drawn in `bg`, on the
-                            // app's foreground.
-                            let ground = palette::rgb(style.fg, host.fg);
-                            let [r, g, b] = palette::mix(ground, palette::rgb(fg, host.fg), alpha);
-                            style.bg = Color::Rgb(r, g, b);
-                        } else {
-                            style.fg = faded(style.bg, fg, alpha, &host);
-                        }
-                    }
-                    style
-                };
-                // A wide glyph needs two cells without ink, and one
-                // style: both halves on the same backdrop.
-                let glyph = back.glyph.filter(|g| {
-                    no_ink(x, y)
-                        && (g.width != 2
-                            || (x + 1 < self.cols
-                                && no_ink(x + 1, y)
-                                && seen(x, back) == seen(x + 1, back)))
-                });
-                match glyph {
-                    Some(g) => {
-                        out.put(
-                            x,
-                            y,
-                            Cell {
-                                text: g.text.clone(),
-                                width: g.width,
-                                style: seen(x, back),
-                            },
-                        );
-                    }
-                    // The half of a wide glyph just put: `Grid::put`
-                    // made it.
-                    None if back.spacer && out.cell(x, y).width == 0 && no_ink(x, y) => {}
-                    // A colour only. A wide glyph of the app has one
-                    // style: its head decides for both halves.
-                    None => {
-                        let app = base.cell(x, y);
-                        if let (true, Some(bg)) = (app.width != 0, ground(x)) {
-                            out.cell_mut(x, y).style.bg = bg;
-                            if app.width == 2 && x + 1 < self.cols {
-                                out.cell_mut(x + 1, y).style.bg = bg;
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 

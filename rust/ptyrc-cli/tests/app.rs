@@ -155,3 +155,93 @@ fn run_with_apps_from_the_start() {
     let out = run(&path, &["run", "--headless", "--bogus", "true"]);
     assert_eq!(out.status.code(), Some(2), "{out:?}");
 }
+
+/// A stand-in for `ptyrc-app` that declares `shape` and `text`; run, it
+/// does `run` (sh), as the same process.
+fn declaring(dir: &Path, run: &str) {
+    std::fs::create_dir_all(dir).unwrap();
+    let app = dir.join("ptyrc-app");
+    let script = format!(
+        "#!/bin/sh\nif [ \"$1\" = --declares ]; then\n\
+         echo '{{\"permissions\": {{\"shape\": \"a\", \"text\": \"b\"}}}}'; exit 0; fi\n{run}\n"
+    );
+    std::fs::write(&app, script).unwrap();
+    std::fs::set_permissions(&app, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[test]
+fn a_foreground_app_is_enrolled_and_held_to_its_answers() {
+    let sb = Sandbox::new("enrol");
+    let _driver = sb.headless("e", "40x4", &["sh", "-c", "echo SECRET; exec cat"]);
+    let mut client = sb.client("e");
+    client
+        .call("screen.wait", serde_json::json!({"pattern": "SECRET"}))
+        .unwrap();
+    let bin = sb.dir.join("bin");
+    declaring(&bin, &format!("exec {} text", common::BIN));
+    let path = format!("{}:/usr/bin:/bin", bin.display());
+    // Headless, no answer in the file: what it declares.
+    assert!(app(&sb, &sb.dir, &path, &["app", "peek"]).contains("SECRET"));
+    // A no in the file: its answers cut, in the same form.
+    let dir = sb.config().join("ptyrc");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("permissions.toml"),
+        "[app.\"native/peek\"]\nallow = [\"shape\"]\ndeny = [\"text\"]\n",
+    )
+    .unwrap();
+    let cut = app(&sb, &sb.dir, &path, &["app", "peek"]);
+    assert!(!cut.contains("SECRET") && !cut.trim().is_empty(), "{cut}");
+    // Gone with its connection.
+    common::wait_for(
+        || {
+            let apps = client.call("app.list", serde_json::json!({})).unwrap();
+            !apps.to_string().contains("peek")
+        },
+        "the app gone",
+    );
+}
+
+#[test]
+fn the_token_of_an_enrolled_app_is_its_own() {
+    let sb = Sandbox::new("enrol-token");
+    let _driver = sb.headless("e", "40x4", &["cat"]);
+    let bin = sb.dir.join("bin");
+    let token = sb.dir.join("token");
+    declaring(
+        &bin,
+        &format!(
+            "echo \"$PTYRC_TOKEN\" > {}.new; mv {0}.new {0}; exec sleep 30",
+            token.display()
+        ),
+    );
+    let mut child = common::Proc(
+        sb.ptyrc()
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .args(["app", "steal"])
+            .spawn()
+            .unwrap(),
+    );
+    common::wait_for(|| token.exists(), "the token");
+    let token = std::fs::read_to_string(&token).unwrap();
+    let mut client = sb.client("e");
+    let apps = client.call("app.list", serde_json::json!({})).unwrap();
+    let app = &apps["apps"][0];
+    assert_eq!(
+        (&app["name"], &app["kind"]),
+        (&"steal".into(), &"client".into())
+    );
+    assert_eq!(app["foreground"], true);
+    // Another process: refused, then closed.
+    let stolen = ptyrc_proto::Client::connect_as(&sb.socket("e"), Some(token.trim()));
+    let Err(ptyrc_proto::ClientError::Rpc(error)) = stolen else {
+        panic!("a token of another process accepted");
+    };
+    assert_eq!(error.code.as_str(), "denied");
+    // Stopped as a client is: its process.
+    let id = app["id"].clone();
+    client
+        .call("app.stop", serde_json::json!({"app": id}))
+        .unwrap();
+    assert_ne!(child.wait_exit(), 0);
+}

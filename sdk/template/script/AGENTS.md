@@ -52,12 +52,22 @@ export function stop() {}          // optional; 500 ms to end
 ptyrc dev check            the manifest, the licence, the sizes: what the store checks
 ./test.sh                  ptyrc dev test against expected.txt
 ./test.sh --update         after a change meant to change the screen
-ptyrc dev test . --size 80x24 --for 3s --at 0,1s,3s [--screen F | --tape F] [--seed N] [--arg NAME=VALUE]
-ptyrc dev run              in a live session (ptyrc run -- $SHELL), restarted on save
+ptyrc dev test . --size 80x24 --for 3s --at 0,1s,3s [--screen F | --tape F] [--seed N] [--NAME VALUE]
+ptyrc dev test . --deny shape --key 500:up --event 1s:TOPIC:JSON    a no, a key, an event
+ptyrc dev run [--NAME VALUE]   in a live session (ptyrc run -- $SHELL), restarted on save
 ```
 
 `ptyrc dev test` prints the screen at each time (`--- T ms`), then
-`refused at T ms: METHOD (CODE)`, `limit met: NAME`, `ended: ...`.
+`refused at T ms: METHOD (CODE)`, `lowered at T ms: METHOD, to the
+degree D`, `dropped at T ms: ...` (a key or an event that reached
+nobody), `not declared: NAME; the line of the manifest ...`, `limit
+met: NAME`, `ended: ...`; `--json`: the same as one JSON value.
+
+The app holds what `[permissions]` declares; `--deny` answers a no, as
+the driver does: a reading cut to a lesser degree (`"degree"` in the
+answer), an act `denied`. Options of `[options]`: `--NAME VALUE`,
+`--NAME`, `--no-NAME`, as `ptyrc app` takes them; after `--` when a
+name is one of ptyrc's.
 The app's log goes to stderr.
 
 ## Errors

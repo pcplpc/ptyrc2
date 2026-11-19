@@ -149,6 +149,33 @@ pub fn store_app(name: &str) -> Option<Result<storeapp::StoreApp, Fail>> {
     (storeapp::is_origin(name) || !native()).then_some(found)
 }
 
+/// When the native app `name` hides installed store apps of that id:
+/// a line naming both, and how to start the store one.
+pub fn shadowed(name: &str) -> Option<String> {
+    if storeapp::is_origin(name) {
+        return None;
+    }
+    let origins: Vec<String> = (storeapp::installed().into_iter())
+        .filter(|a| a.manifest.app.id == name)
+        .map(|a| a.installed.origin)
+        .collect();
+    if origins.is_empty() || catalog::load().is_none_or(|c| c.app(name).is_none()) {
+        return None;
+    }
+    shadow_note(name, &origins)
+}
+
+fn shadow_note(name: &str, origins: &[String]) -> Option<String> {
+    let first = origins.first()?;
+    let store = match origins.len() {
+        1 => format!("the store app {name} ({first})"),
+        _ => format!("the store apps {name} ({})", origins.join(", ")),
+    };
+    Some(format!(
+        "{name}: the native app; {store} goes by its origin: ptyrc app {first}"
+    ))
+}
+
 /// The name an app goes by: of one run by `ptyrc-app`, its first word
 /// (`bricks`); of a store app, its id; else the name the driver has.
 pub fn label(info: &Value) -> String {
@@ -421,6 +448,9 @@ pub fn ls(common: &Common) -> Result<ExitCode, Fail> {
 
 fn start_verb(common: &Common, cmd: bool, words: Vec<String>) -> Result<ExitCode, Fail> {
     // An installed store app, unless a native app has the name.
+    if !cmd && let Some(note) = shadowed(&words[0]) {
+        eprintln!("ptyrc: note: {note}");
+    }
     if !cmd && let Some(found) = store_app(&words[0]) {
         let Some(params) = storeapp::start_params(&found?, &words[1..])? else {
             return Err("--help: ptyrc app APP --help".into());
@@ -756,6 +786,23 @@ fn log(common: &Common, word: &str) -> Result<ExitCode, Fail> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_native_app_hides_a_store_one() {
+        assert_eq!(shadow_note("sand", &[]), None);
+        let one = ["example.org/a/sand".to_string()];
+        assert_eq!(
+            shadow_note("sand", &one).unwrap(),
+            "sand: the native app; the store app sand (example.org/a/sand) goes by its \
+             origin: ptyrc app example.org/a/sand"
+        );
+        let two = [one[0].clone(), "example.org/b/sand".to_string()];
+        assert!(
+            shadow_note("sand", &two)
+                .unwrap()
+                .contains("(example.org/a/sand, example.org/b/sand)")
+        );
+    }
 
     #[test]
     fn names_and_options() {

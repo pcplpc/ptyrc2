@@ -113,14 +113,20 @@ fn expand(row: &mut Vec<u8>) -> Result<(), SceneError> {
     if cells == row.len() / CELL {
         return Ok(());
     }
-    let mut out = Vec::with_capacity(cells * CELL);
-    for c in row.chunks_exact(CELL) {
-        for _ in 0..=count(c) {
-            out.extend_from_slice(&c[..14]);
-            out.extend_from_slice(&[0, 0]);
+    // In place, from the end: a cell is read before its place is written.
+    let sent = row.len() / CELL;
+    row.resize(cells * CELL, 0);
+    let mut end = cells;
+    for i in (0..sent).rev() {
+        let mut c = [0u8; CELL];
+        c.copy_from_slice(&row[i * CELL..(i + 1) * CELL]);
+        let n = 1 + count(&c);
+        c[14..].fill(0);
+        for at in end - n..end {
+            row[at * CELL..(at + 1) * CELL].copy_from_slice(&c);
         }
+        end -= n;
     }
-    *row = out;
     Ok(())
 }
 

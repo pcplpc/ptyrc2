@@ -3226,3 +3226,316 @@ fn grid_content_and_rows() {
     let both = spec(json!({"content": {"grid": [], "rows": ["a"]}}));
     assert_eq!(scene.add(1, both, ms(0)).unwrap_err().code(), "bad-params");
 }
+
+/// A composition kept across frames (`compose_with`) equals a whole one
+/// after any sequence of edits: of the scene, the app grid, the frames,
+/// the cursor, the host colours, the clock.
+#[test]
+fn kept_compose_equals_whole() {
+    let seed = std::cell::Cell::new(0x2545_f491_4f6c_dd1du64);
+    let rnd = |n: u64| {
+        let mut s = seed.get();
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        seed.set(s);
+        s % n
+    };
+    let texts = [
+        "ab",
+        "世x",
+        "  z ",
+        "e\u{301}f",
+        "█▓",
+        "",
+        "x\u{7}y",
+        "界界界",
+    ];
+    let colors = ["red", "#102030", "default", "blue"];
+    for round in 0..24 {
+        let mut mock = Mock::new();
+        let mut grid = Grid::new(20, 6);
+        let mut scene = Scene::new();
+        let mut kept = Composer::new();
+        let mut ids: Vec<SpriteId> = Vec::new();
+        let mut now = 0u64;
+        for step in 0..300 {
+            let style = || {
+                let mut s = serde_json::Map::new();
+                if rnd(2) == 0 {
+                    s.insert("fg".into(), colors[rnd(4) as usize].into());
+                }
+                if rnd(2) == 0 {
+                    s.insert("bg".into(), colors[rnd(4) as usize].into());
+                }
+                if rnd(4) == 0 {
+                    s.insert("inverse".into(), true.into());
+                }
+                serde_json::Value::Object(s)
+            };
+            let content = || match rnd(3) {
+                0 => json!({"rows": [texts[rnd(8) as usize], texts[rnd(8) as usize]],
+                            "opaque": rnd(2) == 0}),
+                1 => json!({"cells": [[{"t": texts[rnd(8) as usize], "style": style()}],
+                                      [{"t": texts[rnd(8) as usize]}]]}),
+                _ => {
+                    let mut rows = Vec::new();
+                    for _ in 0..1 + rnd(3) {
+                        let mut b = vec![0u8; (1 + rnd(5) as usize) * grid::CELL];
+                        for c in b.chunks_exact_mut(grid::CELL) {
+                            let v = [0, 0x41, 0x20, 0x4e16, 0x301, 7][rnd(6) as usize] as u32;
+                            c[..4].copy_from_slice(&v.to_le_bytes());
+                            c[4] = rnd(4) as u8;
+                            c[5] = rnd(256) as u8;
+                            c[8] = rnd(4) as u8;
+                            c[9] = rnd(256) as u8;
+                            c[12] = rnd(32) as u8;
+                        }
+                        let mut s = String::new();
+                        grid::encode_row(&b, rnd(2) == 0, &mut s);
+                        rows.push(s);
+                    }
+                    json!({"grid": rows, "opaque": rnd(2) == 0})
+                }
+            };
+            let place = || {
+                let mut v = serde_json::Map::new();
+                let at = [rnd(24) as i64 - 3, rnd(9) as i64 - 3];
+                v.insert(
+                    "anchor".into(),
+                    match rnd(4) {
+                        0 => json!({"at": at, "space": "view"}),
+                        1 => json!({"cursor": {"dx": at[0] % 3, "dy": at[1] % 2}}),
+                        _ => json!({"at": at}),
+                    },
+                );
+                v.insert(
+                    "frame".into(),
+                    if rnd(2) == 0 {
+                        json!("raw")
+                    } else {
+                        json!(PANE)
+                    },
+                );
+                v.insert("layer".into(), [-2, -1, 1, 2][rnd(4) as usize].into());
+                v.insert("z".into(), (rnd(3) as i32).into());
+                if rnd(3) == 0 {
+                    v.insert("blend".into(), "tint".into());
+                }
+                if rnd(3) == 0 {
+                    v.insert("alpha".into(), 0.5.into());
+                }
+                if rnd(6) == 0 {
+                    v.insert("panel".into(), "blue".into());
+                }
+                v
+            };
+            match rnd(14) {
+                0 | 1 => {
+                    let mut v = place();
+                    if rnd(5) == 0 {
+                        // Frames of one size: only the clock tells.
+                        v.insert(
+                            "frames".into(),
+                            json!([{"rows": ["ab", "c "], "ms": 30},
+                                   {"rows": ["xy", "z "], "ms": 50}]),
+                        );
+                    } else if rnd(5) == 0 {
+                        v.insert("frames".into(), json!([content(), content()]));
+                    } else if rnd(6) == 0 {
+                        v.insert("effect".into(), json!({"name": "sparkle"}));
+                        v.insert("size".into(), json!([4, 2]));
+                    } else {
+                        v.insert("content".into(), content());
+                    }
+                    if rnd(5) == 0 {
+                        v.insert("ttl_ms".into(), (rnd(200) + 1).into());
+                    }
+                    if rnd(6) == 0 {
+                        v.insert(
+                            "motion".into(),
+                            json!({"vx": 20.0, "vy": 10.0, "bounce": true}),
+                        );
+                    }
+                    let owner = rnd(2) + 1;
+                    if let Ok(id) = scene.add(owner, spec(serde_json::Value::Object(v)), ms(now)) {
+                        ids.push(id);
+                    }
+                }
+                2 | 3 if !ids.is_empty() => {
+                    let id = ids[rnd(ids.len() as u64) as usize];
+                    let mut v = serde_json::Map::new();
+                    match rnd(4) {
+                        0 => v = place(),
+                        1 => {
+                            v.insert("content".into(), content());
+                        }
+                        _ => {
+                            let mut b = vec![0u8; (1 + rnd(3) as usize) * grid::CELL];
+                            for c in b.chunks_exact_mut(grid::CELL) {
+                                c[0] = [0, b'q', b' '][rnd(3) as usize];
+                                c[4] = 3;
+                                c[5] = rnd(256) as u8;
+                            }
+                            let mut s = String::new();
+                            grid::encode_row(&b, true, &mut s);
+                            v.insert("rows".into(), json!({rnd(2).to_string(): s}));
+                        }
+                    }
+                    let patch: SpritePatch = serde_json::from_value(v.into()).unwrap();
+                    let _ = scene.update(id, patch, ms(now));
+                }
+                4 if !ids.is_empty() => {
+                    let id = ids.swap_remove(rnd(ids.len() as u64) as usize);
+                    scene.remove(id);
+                }
+                5 => {
+                    let text = texts[rnd(8) as usize];
+                    let (x, y) = (rnd(20) as u16, rnd(6) as u16);
+                    let st = Style {
+                        bg: [Color::Default, Color::Indexed(4), Color::Rgb(1, 2, 3)]
+                            [rnd(3) as usize],
+                        attrs: {
+                            let mut a = Attrs::default();
+                            if rnd(4) == 0 {
+                                a.insert(Attrs::INVERSE);
+                            }
+                            a
+                        },
+                        ..Style::default()
+                    };
+                    let mut col = x;
+                    for ch in text.chars().filter(|c| !c.is_control()) {
+                        let w = ptyrc_vt::char_width(ch) as u8;
+                        if w > 0 && col < 20 {
+                            grid.put(col, y, Cell::glyph(ch, w, st));
+                            col += w as u16;
+                        }
+                    }
+                }
+                6 => grid.scroll_up(0, 6, 1, &Cell::default()),
+                7 => mock.cursor = (rnd(20) as u16, rnd(6) as u16),
+                8 => {
+                    let pane = mock.pane();
+                    match rnd(3) {
+                        0 => pane.origin.y += rnd(3) as i64 - 1,
+                        1 => pane.rect = Rect::new(rnd(12) as u16, rnd(3) as u16, 8, 3),
+                        _ => pane.usable = !pane.usable,
+                    }
+                }
+                9 => {
+                    let owner = rnd(2) + 1;
+                    let hidden = scene.owner_hidden(owner);
+                    scene.hide_owner(owner, !hidden, ms(now));
+                }
+                10 if rnd(8) == 0 => scene.set_host_colors(HostColors {
+                    fg: [rnd(256) as u8, 1, 2],
+                    bg: [3, rnd(256) as u8, 5],
+                }),
+                11 if rnd(10) == 0 => {
+                    scene.clear(Some(rnd(2) + 1));
+                }
+                _ => {}
+            }
+            now += rnd(50);
+            if rnd(3) > 0 {
+                scene.tick_on(ms(now), &grid, &mock);
+            }
+            let whole = scene.compose(&grid, &mock);
+            let again = scene.compose_with(&grid, &mock, &mut kept);
+            assert!(
+                *again == whole,
+                "round {round}, step {step}:\n{:?}\n{:?}",
+                again.text(),
+                whole.text()
+            );
+        }
+    }
+}
+
+/// What changed is composed again, and no more.
+#[test]
+fn kept_compose_redoes_the_rows_that_changed() {
+    let mock = Mock::new();
+    let mut grid = Grid::new(20, 6);
+    let mut scene = Scene::new();
+    let mut kept = Composer::new();
+    let row = |c: u8| {
+        let mut b = vec![0u8; 4 * grid::CELL];
+        b.chunks_exact_mut(grid::CELL).for_each(|cell| cell[0] = c);
+        let mut s = String::new();
+        grid::encode_row(&b, false, &mut s);
+        s
+    };
+    let content = json!({"grid": [row(b'a'), row(b'b'), row(b'c')]});
+    let id = scene
+        .add(
+            1,
+            spec(json!({"anchor": {"at": [2, 1]}, "frame": "raw", "content": content})),
+            ms(0),
+        )
+        .unwrap();
+    let mut step = |scene: &mut Scene, grid: &Grid| {
+        scene.tick_on(ms(0), grid, &mock);
+        scene.compose_with(grid, &mock, &mut kept);
+        assert!(*kept.grid() == scene.compose(grid, &mock));
+        kept.recomposed()
+    };
+    assert_eq!(step(&mut scene, &grid), 6);
+    assert_eq!(step(&mut scene, &grid), 0);
+    let patch = serde_json::from_value(json!({"rows": {"1": row(b'x')}})).unwrap();
+    scene.update(id, patch, ms(0)).unwrap();
+    assert_eq!(step(&mut scene, &grid), 1);
+    assert_eq!(scene.compose(&grid, &mock).row_text(2).trim_end(), "  xxxx");
+    grid.put(0, 5, Cell::narrow("q", Style::default()));
+    assert_eq!(step(&mut scene, &grid), 1);
+    // Moved: where it was and where it is.
+    let patch = serde_json::from_value(json!({"anchor": {"at": [2, 2]}})).unwrap();
+    scene.update(id, patch, ms(0)).unwrap();
+    assert_eq!(step(&mut scene, &grid), 4);
+    scene.remove(id);
+    assert_eq!(step(&mut scene, &grid), 3);
+}
+
+/// A sprite holds `MAX_CELLS` at most: width times height, the widest
+/// row setting the width.
+#[test]
+fn sprite_cells_are_capped() {
+    let mut scene = Scene::new();
+    let long = "x".repeat(4096);
+    let mut rows = vec![String::new(); 256];
+    rows[0] = long.clone();
+    scene
+        .add(1, spec(json!({"content": {"rows": rows}})), ms(0))
+        .unwrap();
+    rows.push(String::new());
+    let e = scene
+        .add(1, spec(json!({"content": {"rows": rows}})), ms(0))
+        .unwrap_err();
+    assert!(e.to_string().contains("4096x257 is 1052672 cells"), "{e}");
+    // Repeats: a few bytes a row, a large canvas.
+    let mut cell = vec![0u8; grid::CELL];
+    cell[0] = b'x';
+    cell[14..16].copy_from_slice(&4095u16.to_le_bytes());
+    let mut one = String::new();
+    grid::encode(&cell, &mut one);
+    let rows = vec![one; 60_000];
+    let e = scene
+        .add(1, spec(json!({"content": {"grid": rows}})), ms(0))
+        .unwrap_err();
+    assert!(e.to_string().contains("over 1048576 a sprite"), "{e}");
+    let e = scene.add(
+        1,
+        spec(json!({"content": {"cells": [[{"t": long}], [], [], []]}, "frames": null})),
+        ms(0),
+    );
+    assert!(e.is_ok());
+    let e = scene
+        .add(
+            1,
+            spec(json!({"effect": {"name": "sparkle"}, "size": [4096, 4096]})),
+            ms(0),
+        )
+        .unwrap_err();
+    assert!(e.to_string().starts_with("size: 4096x4096"), "{e}");
+}

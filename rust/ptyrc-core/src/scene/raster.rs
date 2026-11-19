@@ -42,6 +42,25 @@ pub(crate) fn char_width(c: char) -> u8 {
 /// Longest text of one cell, in bytes: what the emulator stores.
 const CELL_BYTES: usize = 32;
 
+/// Most cells of a canvas, width times height: four times a 512x512
+/// screen, 64 MiB of slots.
+pub const MAX_CELLS: usize = 1 << 20;
+
+/// `w` by `h` within `MAX_CELLS`.
+pub(crate) fn check_cells(w: u16, h: u16, what: &str) -> Result<(), SceneError> {
+    let cells = w as usize * h as usize;
+    if cells <= MAX_CELLS {
+        return Ok(());
+    }
+    let why = match what {
+        "content" => "the widest row sets the width of all; draw it as several sprites",
+        _ => "draw it as several sprites",
+    };
+    Err(SceneError::BadParams(format!(
+        "{what}: {w}x{h} is {cells} cells, over {MAX_CELLS} a sprite: {why}"
+    )))
+}
+
 /// A rectangle of slots. Effects draw on it as their canvas.
 #[derive(Clone, Debug, Default)]
 pub struct Canvas {
@@ -109,6 +128,11 @@ impl Canvas {
 
     pub(crate) fn slot(&self, x: u16, y: u16) -> &Slot {
         &self.slots[y as usize * self.w as usize + x as usize]
+    }
+
+    /// The slot of index `i`: `y * width + x`.
+    pub(crate) fn slot_at(&self, i: u32) -> &Slot {
+        &self.slots[i as usize]
     }
 
     fn set(&mut self, x: u16, y: u16, slot: Slot) {
@@ -225,19 +249,35 @@ impl Canvas {
         let (base_fg, base_bg, base_attrs) =
             (base.fg.map(|c| c.0), base.bg.map(|c| c.0), base.attrs());
         let n = (cells.len() / grid::CELL).min(w);
+        // The bytes of the last cell read and its slot, when narrow: a
+        // repeat is that slot again.
+        let mut last: Option<(&[u8], usize)> = None;
         let mut x = 0usize;
         while x < w {
             let at = x;
             x += 1;
-            let slot = match cells.get(at * grid::CELL..(at + 1) * grid::CELL) {
-                Some(b) if at < n => grid_slot(b, at + 1 < w, base_fg, base_bg, base_attrs, opaque),
-                _ => Slot::Empty,
-            };
+            if at >= n {
+                self.replace(start + at, Slot::Empty);
+                continue;
+            }
+            let b = &cells[at * grid::CELL..at * grid::CELL + 14];
+            if let Some((bytes, i)) = last
+                && bytes == b
+            {
+                let slot = self.slots[i].clone();
+                self.replace(start + at, slot);
+                last = Some((b, start + at));
+                continue;
+            }
+            let slot = grid_slot(b, at + 1 < w, base_fg, base_bg, base_attrs, opaque);
             let wide = matches!(&slot, Slot::Glyph(g) if g.cell.width == 2);
             self.replace(start + at, slot);
             if wide {
                 self.replace(start + x, Slot::Spacer);
                 x += 1;
+                last = None;
+            } else {
+                last = Some((b, start + at));
             }
         }
     }
@@ -245,10 +285,10 @@ impl Canvas {
     /// Slot `i` replaced; the index is noted when it was empty, so that
     /// `drawn` holds each slot once.
     fn replace(&mut self, i: usize, slot: Slot) {
-        if self.slots[i] == Slot::Empty && slot != Slot::Empty {
+        let drawn = !matches!(slot, Slot::Empty);
+        if matches!(std::mem::replace(&mut self.slots[i], slot), Slot::Empty) && drawn {
             self.drawn.push(i as u32);
         }
-        self.slots[i] = slot;
     }
 
     /// Rasterize a content.
@@ -260,17 +300,20 @@ impl Canvas {
                     "content: rows, cells and grid are exclusive".into(),
                 ));
             }
+            let h = clamp_h(rows.len())?;
             let mut bytes = Vec::new();
             let mut decoded = Vec::with_capacity(rows.len());
             let mut w = 0;
             for row in rows {
                 grid::decode_row(row, &mut bytes)?;
                 w = w.max(bytes.len() / grid::CELL);
+                // Before the rows are held: repeats make them large.
+                check_cells(w.min(u16::MAX as usize) as u16, h, "content")?;
                 decoded.push(std::mem::take(&mut bytes));
             }
             let w = u16::try_from(w)
                 .map_err(|_| SceneError::BadParams("content: grid: too wide".into()))?;
-            let mut canvas = Canvas::new(w, clamp_h(rows.len())?);
+            let mut canvas = Canvas::new(w, h);
             for (y, row) in decoded.iter().enumerate() {
                 canvas.grid_row(y as u16, row, &base, content.opaque);
             }
@@ -283,7 +326,9 @@ impl Canvas {
                     .map(|r| Canvas::text_width(r))
                     .max()
                     .unwrap_or(0);
-                let mut canvas = Canvas::new(w, clamp_h(rows.len())?);
+                let h = clamp_h(rows.len())?;
+                check_cells(w, h, "content")?;
+                let mut canvas = Canvas::new(w, h);
                 for (y, row) in rows.iter().enumerate() {
                     canvas.draw(0, y as i32, row, &base, content.opaque, 255);
                 }
@@ -297,7 +342,9 @@ impl Canvas {
                         .min(u16::MAX as u32) as u16
                 };
                 let w = cells.iter().map(width).max().unwrap_or(0);
-                let mut canvas = Canvas::new(w, clamp_h(cells.len())?);
+                let h = clamp_h(cells.len())?;
+                check_cells(w, h, "content")?;
+                let mut canvas = Canvas::new(w, h);
                 for (y, runs) in cells.iter().enumerate() {
                     let mut x = 0;
                     for run in runs {
@@ -342,13 +389,19 @@ fn grid_slot(
     if v == 0 {
         return Slot::Empty;
     }
-    let Some(mut ch) = ptyrc_vt::drawn(char::from_u32(v).unwrap_or(' ')) else {
-        return Slot::Empty;
+    let (ch, width) = if (0x20..0x7f).contains(&v) {
+        // Printable ASCII: `drawn` keeps it, one column.
+        (v as u8 as char, 1)
+    } else {
+        let Some(ch) = ptyrc_vt::drawn(char::from_u32(v).unwrap_or(' ')) else {
+            return Slot::Empty;
+        };
+        match char_width(ch) {
+            0 => (' ', 1),
+            2 if !room => (' ', 1),
+            width => (ch, width),
+        }
     };
-    let mut width = char_width(ch);
-    if width == 0 || (width == 2 && !room) {
-        (ch, width) = (' ', 1);
-    }
     let bg = grid_color(&b[8..12]).or(base_bg);
     if ch == ' ' && bg.is_none() && !opaque {
         return Slot::Empty;

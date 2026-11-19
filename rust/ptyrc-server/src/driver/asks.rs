@@ -13,7 +13,8 @@ use serde_json::{Value, json};
 
 /// What the answer lets go on.
 pub(super) enum Then {
-    /// `app.start`, `app.restart`: the request, made again once answered.
+    /// `app.start`, `app.enrol`, `app.restart`: the request, made again
+    /// once answered.
     Call { method: String, params: Value },
     /// `app.permissions`: the grants of the app, changed.
     Review { id: u64 },
@@ -109,6 +110,10 @@ impl Driver {
             .and_then(Value::as_str);
         let named = member("name").and_then(Value::as_str);
         let name = match method {
+            "app.enrol" => match named {
+                Some(name) => name.to_string(),
+                None => return Ok(false),
+            },
             "app.start" => match (named, argv) {
                 (Some(name), _) => name.to_string(),
                 (None, Some(program)) => file_name(program),

@@ -25,6 +25,8 @@ const EXITED_KEPT: usize = 16;
 pub(crate) const ENV_APP: &str = "PTYRC_APP";
 /// Set for a child: the secret its connections present (`auth`).
 pub(crate) const ENV_TOKEN: &str = "PTYRC_TOKEN";
+/// An enrolled process presents its token within this, or not at all.
+pub(crate) const ENROL_WITHIN: Duration = Duration::from_secs(30);
 
 /// A secret for one run of one child: 128 bits, hex.
 fn new_token() -> Result<String, String> {
@@ -106,6 +108,19 @@ pub(crate) struct App {
     /// Forgotten when it ends (the hotkey's).
     ephemeral: bool,
     log: Option<PathBuf>,
+    /// Of a client enrolled by `app.enrol`: a foreground app.
+    enrolled: Option<Enrolment>,
+}
+
+/// Where an enrolled process is with its token.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Enrolment {
+    /// Not presented yet; accepted until then.
+    Waits(Duration),
+    /// Accepted once: for the life of the process.
+    Bound,
+    /// Not presented in time: never accepted.
+    Lapsed,
 }
 
 impl App {
@@ -144,6 +159,7 @@ impl App {
             "log": self.log.as_ref().map(|p| p.to_string_lossy()),
             "declares": self.declares.is_some(),
             "store": self.store(),
+            "foreground": self.enrolled.is_some(),
         })
     }
 }
@@ -270,6 +286,7 @@ impl Apps {
             again: false,
             ephemeral,
             log: Some(log),
+            enrolled: None,
         };
         self.entries.insert(id, app);
         self.changed.insert(id);
@@ -291,10 +308,15 @@ impl Apps {
             .and_then(|pid| getpgid(Some(pid)).ok())
             .map(|g| g.as_raw_nonzero().get() as u32);
         let live = |a: &&mut App| a.state != State::Exited;
+        // An enrolled process, or one of its group when it leads one.
+        let enrolled =
+            |a: &&mut App| a.enrolled.is_some() && (a.pid == peer || Some(a.pid) == group);
         let of_group = |a: &&mut App| a.kind == Kind::Child && Some(a.pid) == group;
         let of_pid = |a: &&mut App| !child_only && a.kind == Kind::Client && a.pid == peer;
-        let mut entries = self.entries.values_mut();
-        let found = entries.find(|a| live(a) && (of_group(a) || of_pid(a)));
+        let found = match self.entries.values_mut().find(|a| live(a) && enrolled(a)) {
+            Some(app) => Some(app),
+            None => (self.entries.values_mut()).find(|a| live(a) && (of_group(a) || of_pid(a))),
+        };
         let id = match found {
             Some(app) => {
                 app.conns.insert(conn);
@@ -326,6 +348,7 @@ impl Apps {
                     again: false,
                     ephemeral: false,
                     log: None,
+                    enrolled: None,
                 };
                 self.entries.insert(id, app);
                 id
@@ -335,15 +358,85 @@ impl Apps {
         Some(id)
     }
 
-    /// The child whose token `conn` presents. The token alone is not
-    /// enough: the connection is one of that child already, matched at
-    /// accept by the process group of its peer. A token read by another
-    /// process is of no use to it.
-    pub fn auth(&self, conn: ConnId, token: &str) -> Option<&App> {
-        let app = self.get(self.of_conn(conn)?)?;
-        let live = app.kind == Kind::Child && app.state != State::Exited;
+    /// The child, or the enrolled process, whose token `conn` presents.
+    /// The token alone is not enough: the connection is one of that app
+    /// already, matched at accept by its peer (`attach`). A token read
+    /// by another process is of no use to it. An enrolled one: first
+    /// presented within `ENROL_WITHIN`.
+    pub fn auth(&mut self, conn: ConnId, token: &str, now: Duration) -> Option<&App> {
+        let id = self.of_conn(conn)?;
+        let app = self.entries.get_mut(&id)?;
+        let live = app.state != State::Exited
+            && match app.enrolled {
+                None => app.kind == Kind::Child,
+                Some(Enrolment::Waits(until)) => now <= until,
+                Some(Enrolment::Bound) => true,
+                Some(Enrolment::Lapsed) => false,
+            };
         let known = app.token.as_deref().is_some_and(|t| same(t, token));
-        (live && known).then_some(app)
+        if !(live && known) {
+            return None;
+        }
+        if app.enrolled.is_some() {
+            app.enrolled = Some(Enrolment::Bound);
+        }
+        Some(app)
+    }
+
+    /// `app.enrol`: the process `pid`, which asks, enrolled as the
+    /// foreground app `name`: a client of the table with a token, for
+    /// `exec` of the app in its place. Its token: in `token_of`.
+    pub fn enrol(
+        &mut self,
+        pid: u32,
+        name: String,
+        argv: Vec<String>,
+        now: Duration,
+    ) -> Result<u64, Refused> {
+        if self
+            .iter()
+            .any(|a| a.pid == pid && a.state != State::Exited)
+        {
+            return Err(Refused::NotUsable(format!(
+                "process {pid} is in the table already"
+            )));
+        }
+        let token = new_token().map_err(Refused::Spawn)?;
+        let id = self.next_id;
+        self.next_id += 1;
+        let app = App {
+            id,
+            kind: Kind::Client,
+            name: name.clone(),
+            argv,
+            pid,
+            state: State::Running,
+            status: None,
+            runs: 1,
+            since: now,
+            conns: BTreeSet::new(),
+            identity: Some(Identity::Native(name)),
+            grants: Grants::whole(),
+            declares: None,
+            token: Some(token),
+            child: None,
+            kill_at: None,
+            again: false,
+            ephemeral: false,
+            log: None,
+            enrolled: Some(Enrolment::Waits(now + ENROL_WITHIN)),
+        };
+        self.entries.insert(id, app);
+        self.changed.insert(id);
+        Ok(id)
+    }
+
+    /// The token of an enrolled app, for the one that enrolled it.
+    pub fn token_of(&self, id: u64) -> Option<&str> {
+        self.get(id)
+            .filter(|a| a.enrolled.is_some())?
+            .token
+            .as_deref()
     }
 
     /// A connection closed. A client without one leaves the table.
@@ -354,7 +447,9 @@ impl Apps {
         let app = self.entries.get_mut(&id).expect("found");
         app.conns.remove(&conn);
         self.changed.insert(id);
-        if app.kind == Kind::Client && app.conns.is_empty() {
+        // An enrolled one waits for its token until `tick`.
+        let waits = matches!(app.enrolled, Some(Enrolment::Waits(_)));
+        if app.kind == Kind::Client && app.conns.is_empty() && !waits {
             self.remove(id);
         }
     }
@@ -576,11 +671,25 @@ impl Apps {
 
     /// When `tick` is next due.
     pub fn due(&self) -> Option<Duration> {
-        self.iter().filter_map(|a| a.kill_at).min()
+        let waits = self.iter().filter_map(|a| match a.enrolled {
+            Some(Enrolment::Waits(until)) => Some(until),
+            _ => None,
+        });
+        self.iter().filter_map(|a| a.kill_at).chain(waits).min()
     }
 
-    /// Kill the apps that stayed after they were asked to end.
+    /// Kill the apps that stayed after they were asked to end; forget
+    /// the enrolled ones whose token did not come in time.
     pub fn tick(&mut self, now: Duration) {
+        let late = |a: &App| matches!(a.enrolled, Some(Enrolment::Waits(until)) if until <= now);
+        let late: Vec<u64> = self.iter().filter(|a| late(a)).map(|a| a.id).collect();
+        for id in late {
+            let app = self.entries.get_mut(&id).expect("found");
+            app.enrolled = Some(Enrolment::Lapsed);
+            if app.conns.is_empty() {
+                self.remove(id);
+            }
+        }
         for app in self.entries.values_mut() {
             if app.kill_at.is_some_and(|at| at <= now) {
                 app.kill_at = None;
@@ -852,30 +961,81 @@ mod tests {
         let me = std::process::id();
         apps.attach(ConnId(3), Some(me), false, T0);
         // Its own token, on its own connection.
-        let app = apps.auth(ConnId(1), &of_a).unwrap();
+        let app = apps.auth(ConnId(1), &of_a, T0).unwrap();
         assert_eq!(app.id, a);
         assert_eq!(app.identity.as_ref().unwrap().key(), "native/a");
-        assert_eq!(apps.auth(ConnId(2), &of_b).unwrap().id, b);
+        assert_eq!(apps.auth(ConnId(2), &of_b, T0).unwrap().id, b);
         // Not another's, not from elsewhere, not a guess.
-        assert!(apps.auth(ConnId(2), &of_a).is_none());
-        assert!(apps.auth(ConnId(3), &of_a).is_none());
-        assert!(apps.auth(ConnId(9), &of_a).is_none());
-        assert!(apps.auth(ConnId(1), "").is_none());
-        assert!(apps.auth(ConnId(1), &of_a[1..]).is_none());
+        assert!(apps.auth(ConnId(2), &of_a, T0).is_none());
+        assert!(apps.auth(ConnId(3), &of_a, T0).is_none());
+        assert!(apps.auth(ConnId(9), &of_a, T0).is_none());
+        assert!(apps.auth(ConnId(1), "", T0).is_none());
+        assert!(apps.auth(ConnId(1), &of_a[1..], T0).is_none());
         // A new run, a new token; the name is the identity.
         apps.restart(a, None, Some("c".into()), T0).unwrap();
         wait(&mut apps, T0, |apps| apps.get(a).unwrap().runs == 2);
         assert_ne!(token(&apps, a), of_a);
         apps.attach(ConnId(4), Some(pid(&apps, a)), true, T0);
-        assert!(apps.auth(ConnId(4), &of_a).is_none());
-        let app = apps.auth(ConnId(4), &token(&apps, a)).unwrap();
+        assert!(apps.auth(ConnId(4), &of_a, T0).is_none());
+        let app = apps.auth(ConnId(4), &token(&apps, a), T0).unwrap();
         assert_eq!(app.identity.as_ref().unwrap().key(), "native/c");
         // An exited child has none.
         apps.stop(b, T0).unwrap();
         wait(&mut apps, T0, |apps| {
             apps.get(b).unwrap().state == State::Exited
         });
-        assert!(apps.auth(ConnId(2), &of_b).is_none());
+        assert!(apps.auth(ConnId(2), &of_b, T0).is_none());
+        apps.finish();
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn an_enrolled_process_is_bound_by_its_pid() {
+        let (mut apps, dir) = apps("enrol");
+        let me = std::process::id();
+        let id = apps
+            .enrol(me, "cat".into(), vec!["cat".into()], T0)
+            .unwrap();
+        assert!(apps.enrol(me, "cat".into(), Vec::new(), T0).is_err());
+        let token = apps.token_of(id).unwrap().to_string();
+        let info = apps.info(id, T0, None, &none).unwrap();
+        assert_eq!(
+            (&info["kind"], &info["foreground"]),
+            (&json!("client"), &json!(true))
+        );
+        assert_eq!(apps.due(), Some(ENROL_WITHIN));
+        // A connection of the process, at accept: its entry.
+        assert_eq!(apps.attach(ConnId(1), Some(me), true, T0), Some(id));
+        // Not from another process; not late.
+        let other = apps.start(sh("sleep 60"), None, false, T0).unwrap();
+        let pid = apps.get(other).unwrap().pid;
+        apps.attach(ConnId(2), Some(pid), true, T0);
+        assert!(apps.auth(ConnId(2), &token, T0).is_none());
+        assert!(
+            apps.auth(ConnId(1), &token, ENROL_WITHIN + secs(1))
+                .is_none()
+        );
+        let app = apps.auth(ConnId(1), &token, secs(1)).unwrap();
+        assert_eq!(app.identity.as_ref().unwrap().key(), "native/cat");
+        // Bound: for the life of the process, then gone with its
+        // connections.
+        apps.attach(ConnId(3), Some(me), true, T0);
+        assert!(apps.auth(ConnId(3), &token, secs(99)).is_some());
+        assert_eq!(apps.due(), None);
+        apps.detach(ConnId(1));
+        apps.detach(ConnId(3));
+        assert!(apps.get(id).is_none());
+        // Not presented in time: forgotten, and never accepted.
+        let id = apps.enrol(me, "cat".into(), Vec::new(), T0).unwrap();
+        let token = apps.token_of(id).unwrap().to_string();
+        apps.attach(ConnId(4), Some(me), true, T0);
+        apps.tick(ENROL_WITHIN);
+        assert!(apps.auth(ConnId(4), &token, T0).is_none());
+        apps.detach(ConnId(4));
+        assert!(apps.get(id).is_none());
+        let id = apps.enrol(me, "cat".into(), Vec::new(), T0).unwrap();
+        apps.tick(ENROL_WITHIN);
+        assert!(apps.get(id).is_none());
         apps.finish();
         fs::remove_dir_all(dir).unwrap();
     }

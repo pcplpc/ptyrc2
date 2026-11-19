@@ -134,7 +134,12 @@ fn new_app(tag: &str, rust: bool) -> PathBuf {
     ] {
         assert!(app.join(f).is_file(), "{f}");
     }
-    assert!(ok(&ptyrc(&app, &["dev", "check"])).starts_with("ok: clock 0.1.0"));
+    let checked = ok(&ptyrc(&app, &["dev", "check"]));
+    assert!(checked.starts_with("ok: clock 0.1.0"), "{checked}");
+    assert!(
+        checked.trim_end().ends_with("; asks no permission"),
+        "{checked}"
+    );
     ok(&sh(&app, "test.sh"));
     assert!(!app.join("actual.txt").exists());
     app
@@ -209,7 +214,7 @@ fn test_options_and_screens() {
     assert_eq!(out.status.code(), Some(2));
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
-        err.contains("nope: no such option") && err.contains("[options]: label"),
+        err.contains("nope: no such option") && err.contains("[options]: --label"),
         "{err}"
     );
     let out = ptyrc(&app, &["dev", "test", "--tape", "t", "--size", "9x9"]);
@@ -262,6 +267,16 @@ fn examples() {
         .collect();
     dirs.sort();
     assert!(dirs.len() >= 2, "{dirs:?}");
+    // The twins print the same text.
+    for js in dirs.iter().filter(|d| d.starts_with(root().join("sdk/js"))) {
+        let rs = root()
+            .join("sdk/rust/examples")
+            .join(js.file_name().unwrap());
+        let read = |d: &Path| std::fs::read_to_string(d.join("expected.txt")).ok();
+        if let (Some(a), Some(b)) = (read(js), read(&rs)) {
+            assert_eq!(a, b, "{} and its twin", js.display());
+        }
+    }
     for dir in dirs {
         ok(&ptyrc(&dir, &["dev", "check"]));
         let rust = dir.join("Cargo.toml").is_file();
@@ -327,11 +342,21 @@ fn run_restarts_on_change() {
     )
     .unwrap();
     shows("u = ");
-    let _ = run.0.kill();
-    let _ = run.0.wait();
+    // SIGTERM: the runner stopped too, what it drew removed.
+    let pid = rustix::process::Pid::from_raw(run.0.id() as i32).unwrap();
+    rustix::process::kill_process(pid, rustix::process::Signal::TERM).unwrap();
+    let status = run.0.wait().unwrap();
+    assert!(status.success(), "{status}");
+    wait_for(
+        || {
+            let list = sb.client("s").call("draw.list", json!({})).unwrap();
+            list["sprites"].as_array().is_some_and(|s| s.is_empty())
+        },
+        "the app's sprites removed",
+    );
     let said = std::fs::read_to_string(&log).unwrap();
     assert!(
-        said.contains("ptyrc-app.toml changed: starting again"),
+        said.contains("ptyrc-app.toml changed: starting again") && said.contains("ptyrc: stopped"),
         "{said}"
     );
     wait_for(
@@ -339,4 +364,115 @@ fn run_restarts_on_change() {
         "the session",
     );
     let _ = driver.0.kill();
+}
+
+/// A script app over a scratch directory.
+fn script_app(tag: &str, permissions: &str, js: &str) -> PathBuf {
+    let dir = scratch(tag);
+    let manifest = format!(
+        "[app]\nid = \"probe\"\nversion = \"0.1.0\"\nsummary = \"A probe.\"\n\
+         license = \"GPL-3.0-or-later\"\napi = 1\nscript = \"app.js\"\n\
+         [options]\nwide = {{ type = \"bool\", default = false, doc = \"wide\" }}\n\
+         n = {{ type = \"int\", default = 1, doc = \"a number\" }}\n{permissions}"
+    );
+    std::fs::write(dir.join("ptyrc-app.toml"), manifest).unwrap();
+    std::fs::write(dir.join("app.js"), js).unwrap();
+    dir
+}
+
+const PROBE: &str = r#"
+import { call, Canvas, style } from "ptyrc";
+const S = style({});
+let c;
+const lines = [];
+function show(t) {
+  lines.push(t);
+  c.clear();
+  lines.forEach((l, i) => c.text(0, i, l, S));
+  c.present({ anchor: { at: [0, 0], space: "view" } });
+}
+export function init(args) {
+  c = new Canvas(30, 6);
+  show(`args ${args.wide} ${args.n}`);
+  show(`text ${call("screen.text").degree ?? "whole"}`);
+  call("subscribe", { topics: ["size", "input"] });
+  try { call("input.grab", { keys: ["up"] }); show("grab"); }
+  catch (e) { show(`grab ${e.code}`); }
+}
+export function event(topic, data) { show(`${topic} ${data.key ?? data.size}`); }
+"#;
+
+/// The app holds what it declares; `--deny` answers a no; keys and
+/// events at a session time; `--json`.
+#[test]
+fn grants_keys_events() {
+    if !has_js() {
+        return;
+    }
+    let perms = "[permissions]\nshape = \"walls\"\nkeys-arrows = \"steer\"\n";
+    let app = script_app("grants", perms, PROBE);
+    let base = ["dev", "test", "--size", "30x6", "--for", "300ms"];
+    let run = |more: &[&str]| ok(&ptyrc(&app, &[&base[..], more].concat()));
+    let out = run(&[
+        "--wide",
+        "--n",
+        "3",
+        "--key",
+        "200:up",
+        "--event",
+        "100:size:{\"size\":[9,9]}",
+    ]);
+    assert_eq!(
+        out,
+        "--- 300 ms\nargs true 3\ntext shape\ngrab\nsize 9,9\ninput up\n\
+         lowered at 0 ms: screen.text, to the degree shape\n\
+         not declared: text; the line of the manifest that would ask for it: \
+         [permissions] text = \"...\"\n\
+         not declared: keys-read; the line of the manifest that would ask for it: \
+         [permissions] keys-read = \"...\"\n"
+    );
+    // The old forms, and `--` before the options.
+    let old = run(&["--arg", "n=3", "--", "--wide"]);
+    assert!(old.starts_with("--- 300 ms\nargs true 3\n"), "{old}");
+    // A no, as JSON.
+    let out = run(&["--json", "--deny", "shape,keys-arrows", "--key", "200:up"]);
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let rows = &v["screens"][0]["rows"];
+    assert_eq!(
+        rows,
+        &json!(["args false 1", "text none", "grab denied"]),
+        "{v}"
+    );
+    assert_eq!(
+        v["refused"],
+        json!([{"t": 0, "method": "input.grab", "code": "denied"}])
+    );
+    assert_eq!(v["lowered"][0]["degree"], "none");
+    assert_eq!(
+        v["dropped"][0]["what"],
+        "key up: to the program, not grabbed"
+    );
+    let lacks: Vec<&str> = (v["lacks"].as_array().unwrap().iter())
+        .map(|l| l["line"].as_str().unwrap())
+        .collect();
+    for line in [
+        "denied: shape, declared and answered no",
+        "denied: keys-arrows, declared and answered no",
+    ] {
+        assert!(lacks.contains(&line), "{line}: {v}");
+    }
+    assert!(v["end"].is_null() && v["limits"] == json!([]));
+    let out = ptyrc(&app, &["dev", "test", "--deny", "typing"]);
+    assert_eq!(out.status.code(), Some(2));
+    let out = ptyrc(&app, &["dev", "test", "--key", "5:nokey"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("not a key"));
+    // Nothing declared: nothing held, and `check` says so.
+    let app = script_app("none", "", PROBE);
+    std::fs::copy(root().join("LICENSE.txt"), app.join("LICENSE.txt")).unwrap();
+    let out = ok(&ptyrc(&app, &["dev", "test", "--for", "0"]));
+    assert!(out.contains("text none\ngrab denied\n"), "{out}");
+    assert!(out.contains("not declared: keys-arrows"), "{out}");
+    let said = ok(&ptyrc(&app, &["dev", "check"]));
+    assert!(said.contains("asks no permission"), "{said}");
 }

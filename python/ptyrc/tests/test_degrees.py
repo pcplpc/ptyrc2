@@ -36,7 +36,9 @@ def table(name: str) -> list[str]:
 PROBE = """
 import json, sys, time
 from ptyrc import Pilot, PtyrcError
-out, methods, topics, params = sys.argv[1], *map(json.loads, sys.argv[2:5])
+out = sys.argv[1]
+with open(sys.argv[2]) as f:
+    methods, topics, params = json.load(f)
 pilot = Pilot()
 said = {"hello": pilot.hello, "answers": {}, "events": []}
 def ask(name, method, **given):
@@ -104,8 +106,17 @@ def probe(shell: Pilot, tmp_path: Path, declares: dict[str, Any]) -> dict[str, A
     out = tmp_path / "said.json"
     methods, topics = table("METHODS"), table("TOPICS")
     assert "screen.text" in methods and "text" in topics
-    argv = [sys.executable, "-c", PROBE, str(out)]
-    argv += [json.dumps(methods), json.dumps(topics), json.dumps(PARAMS)]
+    # Another's sprite: not listed to it, not touched by it.
+    other = shell.draw(["OTHERS"], at=(1, 14), space="view")
+    more = {
+        "update another's": ["draw.update", {"id": other.id, "z": 3}],
+        "remove another's": ["draw.remove", {"id": other.id}],
+    }
+    params = {**PARAMS, "more": {**PARAMS["more"], **more}}
+    # Not in its argv: it reads its own entry (`app.list`).
+    asked = tmp_path / "asked.json"
+    asked.write_text(json.dumps([methods, topics, params]))
+    argv = [sys.executable, "-c", PROBE, str(out), str(asked)]
     app = shell.app_start(argv, name="probe", declares=declares)
     until(lambda: "PROBE READY" in "\n".join(shell.shown()))
     # While it listens: the text changes, the cursor moves.
@@ -116,15 +127,25 @@ def probe(shell: Pilot, tmp_path: Path, declares: dict[str, Any]) -> dict[str, A
     state = next(a for a in shell.apps() if a["id"] == app["id"])["state"]
     assert state == "running"
     shell.app_stop(app["id"])
+    # It sees its own (design: Permissions, Its own).
+    answers = said["answers"]
+    assert [a["id"] for a in answers["app.list"]["apps"]] == [app["id"]]
+    assert answers["app.list"]["apps"][0]["me"]
+    assert other.id not in [s["id"] for s in answers["draw.list"]["sprites"]]
+    for name in ("update another's", "remove another's"):
+        code, message, hint = answers[name]["error"]
+        assert (code, hint) == ("no-sprite", None), name
+        assert message == answers["draw.remove"]["error"][1].replace(
+            "99999", str(other.id)
+        )
+    assert other.id in [s["id"] for s in shell.call("draw.list")["sprites"]]
+    other.remove()
     return said
 
 
 def leaks(said: dict[str, Any], *more: str) -> list[str]:
     """The secrets, and the words of `more`, in what was said."""
-    # `app.list` tells the argv of every app, the probe's own: an app
-    # is not held to its own objects yet (design: "Not told apart").
-    answers = {k: v for k, v in said["answers"].items() if k != "app.list"}
-    whole = json.dumps({**said, "answers": answers}).lower()
+    whole = json.dumps(said).lower()
     return [s for s in (*SECRETS, "PS1", *more) if s.lower() in whole]
 
 
@@ -180,9 +201,8 @@ def test_an_app_that_reads_nothing(shell: Pilot, tmp_path: Path) -> None:
     code, _, hint = answers["input.grab"]["error"]
     assert code == "denied" and "`keys-grab`" in hint
     assert answers["input.send"]["error"][0] == "denied"
-    # A hint lists no frame.
-    code, _, hint = answers["draw.put"]["error"]
-    assert code == "no-frame" and hint is None
+    # Whatever frame it names, it draws on its surface.
+    assert "id" in answers["draw.put"]
     results = answers["batch"]["results"]
     assert results[0]["result"]["lines"] == [""] * rows
     assert results[1]["result"]["matches"] == []
@@ -216,6 +236,9 @@ def test_an_app_that_reads_the_shape(shell: Pilot, tmp_path: Path) -> None:
         if topic == "frames":
             assert all(f["key"] is None for f in data["frames"])
     assert "host_colors" in answers["session.info"]
+    # A hint lists no frame.
+    code, _, hint = answers["draw.put"]["error"]
+    assert code == "no-frame" and hint is None
 
 
 def test_the_declared_words_do_not_add_up(shell: Pilot, tmp_path: Path) -> None:

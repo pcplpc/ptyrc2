@@ -32,6 +32,17 @@ export function init(args) {
   ask("app.start", { argv: ["true"] });
   ask("tape.start", { path: "/tmp/x" });
   ask("draw.put", { content: { rows: ["probe"] }, at: [0, 0] });
+  log("apps=" + call("app.list", {}).apps.length);
+  log("sprites=" + call("draw.list", {}).sprites.length);
+  const hud = call("draw.put", { content: { rows: ["h"] }, at: [0, 1], layer: "hud" });
+  const mine = call("draw.list", {}).sprites.find((s) => s.id == hud.id);
+  log("layer=" + mine.layer + " app=" + call("app.list", {}).apps[0].id);
+  let put = 2, error = "";
+  for (; put < 300; put++) {
+    try { call("draw.put", { content: { rows: ["."] }, at: [1, 1] }); }
+    catch (e) { error = e.code + ": " + e.message; break; }
+  }
+  log("put=" + put + " " + error);
   log("word=" + args.word);
   period(0);
 }
@@ -261,13 +272,26 @@ fn a_store_app_from_a_repository_to_the_screen() {
         "the probe has asked",
     );
     let log = log_of(&mut client, probe_id);
-    for method in ["input.send", "app.list", "app.start", "tape.start"] {
+    for method in ["input.send", "app.start", "tape.start"] {
         assert!(
             log.contains(&format!("{method}: denied")),
             "{method}: {log}"
         );
     }
     assert!(log.contains("draw.put: allowed"), "{log}");
+    // Its own entry, its own sprite: not the others'.
+    assert!(
+        log.contains("app.list: allowed") && log.contains("apps=1"),
+        "{log}"
+    );
+    assert!(log.contains("sprites=1"), "{log}");
+    // Its own band, behind: `hud` is not its; the limit of sprites.
+    let layer = format!("layer={} app={probe_id}", -(2 + (probe_id % 97) as i64));
+    assert!(log.contains(&layer), "{log}");
+    assert!(
+        log.contains("put=256 not-usable: draw.put: 256 sprites at most"),
+        "{log}"
+    );
     assert!(log.contains("word=fish"), "{log}");
     let screen = client.call("screen.text", json!({})).unwrap();
     assert!(!screen.to_string().contains("pwned"), "{screen}");

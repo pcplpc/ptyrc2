@@ -6,6 +6,7 @@ pub mod abi;
 pub mod core;
 mod engine;
 pub mod error;
+pub mod grants;
 pub mod headless;
 pub mod live;
 pub mod runner;

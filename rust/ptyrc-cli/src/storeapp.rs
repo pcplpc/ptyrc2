@@ -96,14 +96,17 @@ fn usage(app: &StoreApp) -> String {
 /// `--NAME VALUE`, `--NAME=VALUE`; of a yes-or-no option `--NAME`,
 /// `--no-NAME`: the `args` of `app.start {store}`. `Ok(None)`: `--help`.
 pub fn parse_options(app: &StoreApp, words: &[String]) -> Result<Option<Value>, Fail> {
-    let options = &app.manifest.options;
+    let hint = format!("ptyrc app {} --help lists the options", app.manifest.app.id);
+    parse_words(&app.manifest, words, &hint)
+}
+
+/// `parse_options` of a manifest; `hint`: that of every error.
+pub fn parse_words(m: &Manifest, words: &[String], hint: &str) -> Result<Option<Value>, Fail> {
+    let options = &m.options;
     let bad = |message: String| Fail {
         status: 2,
         message,
-        hint: Some(format!(
-            "ptyrc app {} --help lists the options",
-            app.manifest.app.id
-        )),
+        hint: Some(hint.to_string()),
     };
     let mut args = Map::new();
     let mut words = words.iter();
@@ -111,7 +114,9 @@ pub fn parse_options(app: &StoreApp, words: &[String]) -> Result<Option<Value>, 
         if word == "--help" || word == "-h" {
             return Ok(None);
         }
-        let Some(flag) = word.strip_prefix("--") else {
+        // `NAME=VALUE`: the form of `dev run`, kept.
+        let bare = word.contains('=') && !word.starts_with('-');
+        let Some(flag) = word.strip_prefix("--").or(bare.then_some(word.as_str())) else {
             return Err(bad(format!("{word}: an option is wanted, as --NAME VALUE")));
         };
         let (name, mut inline) = match flag.split_once('=') {
@@ -257,6 +262,10 @@ mod tests {
             Some(json!({"rate": 3, "loud": true, "word": "fish"}))
         );
         assert_eq!(parsed("--no-loud").unwrap(), Some(json!({"loud": false})));
+        assert_eq!(
+            parsed("rate=3 loud=true --word w=x").unwrap(),
+            Some(json!({"rate": 3, "loud": true, "word": "w=x"}))
+        );
         assert_eq!(parsed("--rate 3 --help").unwrap(), None);
         assert!(parsed("--rate x").is_err());
         assert!(parsed("--rate").is_err());

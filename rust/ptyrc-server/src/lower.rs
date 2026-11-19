@@ -249,7 +249,8 @@ fn ink(c: char, out: &mut String) {
 }
 
 /// A frame info for an app below `text`: an id and a rectangle. No
-/// key, no support; below `shape`, idle, and nothing remembered.
+/// key, no support; below `shape`, idle, nothing remembered, never
+/// scrolled (`origin` at 0, 0).
 pub(crate) fn frame_info(info: &mut Value, degree: Degree) {
     let Some(object) = info.as_object_mut() else {
         return;
@@ -262,13 +263,12 @@ pub(crate) fn frame_info(info: &mut Value, degree: Degree) {
     if degree < Degree::Shape {
         object.insert("idle".into(), json!(1.0));
         object.insert("is_idle".into(), json!(true));
-        let top = object.get("origin").and_then(|o| o.get(1)).cloned();
         let rows = object.get("rect").and_then(|r| r.get(3)).cloned();
-        if let (Some(top), Some(rows)) = (
-            top.as_ref().and_then(Value::as_i64),
-            rows.as_ref().and_then(Value::as_i64),
-        ) {
-            object.insert("extent".into(), json!([top, top + (rows - 1).max(0)]));
+        if object.contains_key("origin") {
+            object.insert("origin".into(), json!([0, 0]));
+        }
+        if let Some(rows) = rows.as_ref().and_then(Value::as_i64) {
+            object.insert("extent".into(), json!([0, (rows - 1).max(0)]));
         }
     }
 }
@@ -635,7 +635,8 @@ mod tests {
             (&frame["is_idle"], &frame["idle"]),
             (&json!(true), &json!(1.0))
         );
-        assert_eq!(frame["extent"], json!([40, 49]));
+        assert_eq!(frame["extent"], json!([0, 9]));
+        assert_eq!(frame["origin"], json!([0, 0]));
         assert_eq!(cut["layout"], 7);
         assert!(!cut.to_string().contains("ranger"));
     }

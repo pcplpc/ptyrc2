@@ -12,6 +12,8 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitCode, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 const BOX: &str = "ptyrc-box";
@@ -58,43 +60,32 @@ fn option_json(v: &OptionValue) -> Value {
     }
 }
 
-/// The argument of `init`: the defaults of `[options]`, then each
-/// `NAME=VALUE`, of the type of its default.
+/// The argument of `init`: the defaults of `[options]`, then the words
+/// given, as `ptyrc app` reads them (`--NAME VALUE`, `--NAME=VALUE`,
+/// `--NAME`, `--no-NAME`) or as `NAME=VALUE`.
 fn init_args(m: &Manifest, given: &[String]) -> Result<Value, Fail> {
     let mut args: Map<String, Value> = m
         .options
         .iter()
         .map(|o| (o.name.clone(), option_json(&o.default)))
         .collect();
-    let names = || {
-        let n: Vec<&str> = m.options.iter().map(|o| o.name.as_str()).collect();
+    let names = {
+        let n: Vec<String> = m
+            .options
+            .iter()
+            .map(|o| format!("--{} ({}): {}", o.name, o.default.type_name(), o.doc))
+            .collect();
         if n.is_empty() {
             "the manifest has no [options]".to_string()
         } else {
-            format!("[options]: {}", n.join(", "))
+            format!("[options]: {}", n.join("; "))
         }
     };
-    for arg in given {
-        let Some((name, text)) = arg.split_once('=') else {
-            return Err(Fail::usage(format!("{arg}: not NAME=VALUE"), names()));
-        };
-        let Some(opt) = m.options.iter().find(|o| o.name == name) else {
-            return Err(Fail::usage(format!("{name}: no such option"), names()));
-        };
-        let value = match &opt.default {
-            OptionValue::Int(_) => text.parse::<i64>().ok().map(Value::from),
-            OptionValue::Float(_) => text.parse::<f64>().ok().map(Value::from),
-            OptionValue::Bool(_) => text.parse::<bool>().ok().map(Value::from),
-            OptionValue::Str(_) => Some(Value::from(text)),
-        };
-        let value = value.ok_or_else(|| {
-            Fail::usage(
-                format!("{name}={text}: not a {}", opt.default.type_name()),
-                format!("{name}: {}", opt.doc),
-            )
-        })?;
-        args.insert(name.to_string(), value);
-    }
+    let parsed = crate::storeapp::parse_words(m, given, &names)?;
+    let Some(Value::Object(parsed)) = parsed else {
+        return Err(Fail::usage("--help: the options of the manifest", names));
+    };
+    args.extend(parsed);
     Ok(Value::Object(args))
 }
 
@@ -171,19 +162,50 @@ fn status_of(status: std::process::ExitStatus) -> ExitCode {
 pub struct TestOpts {
     pub dir: PathBuf,
     pub args: Vec<String>,
+    /// Permissions declared and denied.
+    pub deny: Vec<String>,
     /// `ptyrc-box --headless` flags, as given.
     pub flags: Vec<OsString>,
+}
+
+/// The flags of `ptyrc-box` that hold the app to what its manifest
+/// declares, less `deny`.
+fn grants(m: &Manifest, deny: &[String]) -> Result<Vec<OsString>, Fail> {
+    let declared: Vec<&str> = m.permissions.iter().map(|p| p.name.as_str()).collect();
+    for d in deny {
+        if !manifest::PERMISSIONS.contains(&d.as_str()) {
+            return Err(Fail::usage(
+                format!("--deny {d}: not a permission"),
+                format!("permissions: {}", manifest::PERMISSIONS.join(", ")),
+            ));
+        }
+        if !declared.contains(&d.as_str()) {
+            eprintln!("ptyrc: note: --deny {d}: not declared, never held");
+        }
+    }
+    let words = m.permissions.iter().flat_map(|p| p.words.iter());
+    let words: Vec<&str> = words.map(String::as_str).collect();
+    let mut flags: Vec<OsString> = vec!["--grant".into(), declared.join(",").into()];
+    if !deny.is_empty() {
+        flags.extend(["--deny".into(), deny.join(",").into()]);
+    }
+    if !words.is_empty() {
+        flags.extend(["--words".into(), words.join(",").into()]);
+    }
+    Ok(flags)
 }
 
 pub fn test(o: TestOpts) -> Result<ExitCode, Fail> {
     let m = manifest_of(&o.dir)?;
     let args = init_args(&m, &o.args)?;
+    let grants = grants(&m, &o.deny)?;
     let program = runner()?;
     let status = Command::new(&program)
         .arg("--headless")
         .args(guest(&o.dir, &m)?)
         .arg(args.to_string())
         .args(&o.flags)
+        .args(grants)
         .stdin(Stdio::null())
         .status()
         .map_err(|e| Fail::from(format!("{}: {}", program.display(), io_text(&e))))?;
@@ -243,12 +265,39 @@ fn start(program: &Path, socket: &Path, guest: &[OsString], args: &Value) -> Res
         .map_err(|e| Fail::from(format!("{}: {}", program.display(), io_text(&e))))
 }
 
+/// SIGTERM to the runner: the guest's `stop` (500 ms), then the end;
+/// killed past a second.
+fn stop(child: &mut Child) {
+    if let Ok(None) = child.try_wait() {
+        let pid = rustix::process::Pid::from_raw(child.id() as i32);
+        if let Some(pid) = pid {
+            let _ = rustix::process::kill_process(pid, rustix::process::Signal::TERM);
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while std::time::Instant::now() < deadline {
+            if let Ok(Some(_)) = child.try_wait() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 /// `dev run`: the app in the session; started again when a file of
-/// the tree changes. Ends with Ctrl-C.
+/// the tree changes. Ends with SIGINT (Ctrl-C) or SIGTERM, the app
+/// stopped first.
 pub fn run(common: &Common, dir: &Path, given: &[String]) -> Result<ExitCode, Fail> {
     let program = runner()?;
     let socket = socket(common)?;
+    let term = Arc::new(AtomicBool::new(false));
+    for signal in [signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT] {
+        signal_hook::flag::register(signal, term.clone())
+            .map_err(|e| Fail::from(format!("signals: {}", io_text(&e))))?;
+    }
     let poll = Duration::from_millis(300);
+    let step = Duration::from_millis(50);
     let mut seen = BTreeMap::new();
     snapshot(dir, &mut seen, 0);
     loop {
@@ -269,7 +318,17 @@ pub fn run(common: &Common, dir: &Path, given: &[String]) -> Result<ExitCode, Fa
             }
         };
         loop {
-            std::thread::sleep(poll);
+            let slept = std::time::Instant::now();
+            while slept.elapsed() < poll && !term.load(Ordering::Relaxed) {
+                std::thread::sleep(step);
+            }
+            if term.load(Ordering::Relaxed) {
+                if let Some(c) = &mut child {
+                    stop(c);
+                }
+                eprintln!("ptyrc: stopped");
+                return Ok(ExitCode::SUCCESS);
+            }
             if let Some(c) = &mut child
                 && let Ok(Some(status)) = c.try_wait()
             {
@@ -294,8 +353,7 @@ pub fn run(common: &Common, dir: &Path, given: &[String]) -> Result<ExitCode, Fa
         }
         if let Some(mut c) = child {
             // The connection closes: the driver removes what it drew.
-            let _ = c.kill();
-            let _ = c.wait();
+            stop(&mut c);
         }
     }
 }

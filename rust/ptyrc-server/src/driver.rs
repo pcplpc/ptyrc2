@@ -42,6 +42,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 mod asks;
+mod own;
 
 /// Upper bounds of a burst (design: "Coalescing").
 const BURST_MAX_BYTES: usize = 1 << 20;
@@ -279,6 +280,8 @@ struct Driver {
     handoff_kill: Option<Duration>,
     /// Starts held by the pop-up, the one shown first (`asks.rs`).
     asks: VecDeque<asks::Asking>,
+    /// The sprites each narrowed connection put (`own`).
+    drawn: HashMap<ConnId, HashSet<u64>>,
     /// The answers of the pop-up for the start it lets go on.
     given: Option<Entry>,
 }
@@ -510,6 +513,7 @@ impl Driver {
             handoff: false,
             handoff_kill: None,
             asks: VecDeque::new(),
+            drawn: HashMap::new(),
             given: None,
         })
     }
@@ -575,6 +579,7 @@ impl Driver {
             handoff: false,
             handoff_kill: None,
             asks: VecDeque::new(),
+            drawn: HashMap::new(),
             given: None,
         })
     }
@@ -1578,7 +1583,7 @@ impl Driver {
         &mut self,
         conn: ConnId,
         method: &str,
-        params: Value,
+        mut params: Value,
         engine: &mut dyn Engine,
         in_batch: bool,
     ) -> Option<Result<Value, RpcError>> {
@@ -1596,11 +1601,39 @@ impl Driver {
         }
         // The check: every request of an app, the calls of a batch one
         // by one. A connection without a token is the user's.
-        let lower = match self.verdict(conn, method, &params) {
-            Verdict::Allow => false,
-            Verdict::Lower(_) => true,
-            Verdict::Denied(why) => return Some(Err(grants::denied(method, why))),
-        };
+        if let Verdict::Denied(why) = self.verdict(conn, method, &params) {
+            return Some(Err(grants::denied(method, why)));
+        }
+        // An app that does not hold the whole session sees its own.
+        let own = self.own(conn);
+        if let Some(own) = &own {
+            let now = self.now();
+            if let Err(e) = self.own_params(own, method, &mut params) {
+                return Some(Err(e));
+            }
+            if let Err(e) = self.own_limits(conn, own, method, &params, engine, now) {
+                return Some(Err(e));
+            }
+            let answer = self.cut_answer(conn, method, params, engine, in_batch);
+            return answer.map(|answer| {
+                let mut answer = answer.map_err(lower::scrub)?;
+                self.own_answer(conn, own, method, &mut answer);
+                Ok(answer)
+            });
+        }
+        self.cut_answer(conn, method, params, engine, in_batch)
+    }
+
+    /// `answer`, cut to the degree of an app below `text`.
+    fn cut_answer(
+        &mut self,
+        conn: ConnId,
+        method: &str,
+        params: Value,
+        engine: &mut dyn Engine,
+        in_batch: bool,
+    ) -> Option<Result<Value, RpcError>> {
+        let lower = matches!(self.verdict(conn, method, &params), Verdict::Lower(_));
         // An app below `text`: its answers cut to its degree.
         let Some((degree, words)) = self.cut_of(conn) else {
             return self.answer(conn, method, params, engine, in_batch);
@@ -1742,12 +1775,17 @@ impl Driver {
             .get("token")
             .and_then(Value::as_str)
             .ok_or_else(|| RpcError::bad_params("token: a string"))?;
-        let app = self.apps.as_ref().and_then(|apps| apps.auth(conn, token));
+        let now = self.now();
+        let app = self
+            .apps
+            .as_mut()
+            .and_then(|apps| apps.auth(conn, token, now));
         let Some((id, who)) = app.and_then(|a| Some((a.id, a.identity.as_ref()?.key()))) else {
             return Err(
                 RpcError::new(ErrorCode::Denied, "auth: token not known").with_hint(
-                    "a token is of one app the driver started, for its own connections \
-                     ($PTYRC_TOKEN, with $PTYRC_SOCKET); without one a connection is the user's",
+                    "a token is of one app the driver started or enrolled, for its own \
+                     connections ($PTYRC_TOKEN, with $PTYRC_SOCKET); without one a connection \
+                     is the user's",
                 ),
             );
         };
@@ -2036,9 +2074,10 @@ impl Driver {
         params: &Value,
         engine: &mut dyn Engine,
     ) -> Result<Value, RpcError> {
-        const METHODS: [&str; 8] = [
+        const METHODS: [&str; 9] = [
             "app.list",
             "app.start",
+            "app.enrol",
             "app.stop",
             "app.pause",
             "app.resume",
@@ -2064,6 +2103,7 @@ impl Driver {
         let members: &[&str] = match method {
             "app.list" => &[],
             "app.start" => &["argv", "name", "declares", "store", "args"],
+            "app.enrol" => &["name", "argv", "declares"],
             "app.restart" => &["app", "argv", "name", "declares"],
             "app.move" => &["app", "frame"],
             _ => &["app"],
@@ -2123,7 +2163,24 @@ impl Driver {
                     RpcError::bad_params("store: an origin, or the id of an app")
                 })?),
             };
-        let id = if let (true, Some(store)) = (method == "app.start", store) {
+        let id = if method == "app.enrol" {
+            // The process that asks, by the credentials of its socket.
+            let stream = self.conns.get(&conn).map(|c| &c.stream);
+            let cred = stream.and_then(|s| rustix::net::sockopt::socket_peercred(s).ok());
+            let pid = cred
+                .map(|c| c.pid.as_raw_nonzero().get() as u32)
+                .ok_or_else(|| RpcError::new(ErrorCode::Gone, "app.enrol: no peer"))?;
+            let name = name.ok_or_else(|| {
+                RpcError::bad_params("name: the app's name").with_hint(r#"as in {"name": "cat"}"#)
+            })?;
+            let id = apps
+                .enrol(pid, name, argv.unwrap_or_default(), now)
+                .map_err(|e| refused(apps, 0, e))?;
+            Self::grant(apps, id, declares, headless, given);
+            let token = apps.token_of(id).map(str::to_string);
+            let info = self.app_info(id, Some(conn), engine);
+            return Ok(json!({"app": info, "token": token}));
+        } else if let (true, Some(store)) = (method == "app.start", store) {
             // The driver finds the tree and the runner: no program, no
             // name, no declaration is the client's to give.
             if argv.is_some() || name.is_some() || declares.is_some() {
@@ -2676,6 +2733,7 @@ impl Driver {
         }
         for id in dead {
             self.conns.remove(&id);
+            self.drawn.remove(&id);
             if let Some(apps) = &mut self.apps {
                 apps.detach(id);
             }
