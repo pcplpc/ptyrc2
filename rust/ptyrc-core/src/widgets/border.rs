@@ -3,7 +3,7 @@
 //! widget's cells (border, title, content).
 
 use crate::scene::{ColorSpec, Content, Run, StyleSpec};
-use ptyrc_vt::{Color, char_width};
+use ptyrc_vt::{Color, char_width, drawn};
 use serde::{Deserialize, Serialize};
 
 /// Where the title sits along its edge.
@@ -236,7 +236,10 @@ impl BorderSpec {
             return Ok(());
         }
         let single = |what: &str, s: &str| -> Result<(), String> {
-            match s.chars().find(|c| c.is_control() || char_width(*c) != 1) {
+            match s
+                .chars()
+                .find(|c| drawn(*c) != Some(*c) || char_width(*c) != 1)
+            {
                 Some(c) => Err(format!("border {what}: {c:?} is not a glyph of one cell")),
                 None => Ok(()),
             }
@@ -403,13 +406,13 @@ fn merge(base: &StyleSpec, over: &StyleSpec) -> StyleSpec {
 
 /// Lay `text` from column `x` of `row`, at most up to column `end`
 /// (excluded). A wide glyph that does not fit is a blank; a combining
-/// mark joins the glyph before it; a control character is a blank.
+/// mark joins the glyph before it; a control character is a blank, a
+/// hidden one is dropped (`ptyrc_vt::drawn`).
 /// Returns the column after the last glyph.
 fn lay(row: &mut [Option<Slot>], mut x: usize, end: usize, text: &str, style: StyleSpec) -> usize {
     let end = end.min(row.len());
     let mut last: Option<usize> = None;
-    for ch in text.chars() {
-        let ch = if ch.is_control() { ' ' } else { ch };
+    for ch in text.chars().filter_map(drawn) {
         let w = char_width(ch);
         if w == 0 {
             if let Some(Some(slot)) = last.map(|i| &mut row[i]) {
@@ -442,9 +445,7 @@ fn lay(row: &mut [Option<Slot>], mut x: usize, end: usize, text: &str, style: St
 
 /// Width in cells of `text`.
 fn width(text: &str) -> usize {
-    text.chars()
-        .map(|c| if c.is_control() { 1 } else { char_width(c) })
-        .sum()
+    text.chars().filter_map(drawn).map(char_width).sum()
 }
 
 /// `text` cut to `room` cells, `…` last when it is cut.
@@ -454,8 +455,8 @@ fn cut(text: &str, room: usize) -> String {
     }
     let mut out = String::new();
     let mut used = 0;
-    for ch in text.chars() {
-        let w = if ch.is_control() { 1 } else { char_width(ch) };
+    for ch in text.chars().filter_map(drawn) {
+        let w = char_width(ch);
         if used + w > room.saturating_sub(1) {
             break;
         }

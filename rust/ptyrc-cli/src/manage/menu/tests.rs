@@ -934,3 +934,27 @@ fn a_form_opens_as_last_given() {
         [Action::Restart { .. }]
     ));
 }
+
+#[test]
+fn names_are_glyphs_only() {
+    let mut m = Menu::new("s\x1b]0;t\x07", 7);
+    let mut argv = vec!["/usr/bin/\x1b]52;c;eA==\x07x\u{202e}".to_string()];
+    argv.push("-a\u{9b}2J\r\n".into());
+    m.apps(vec![
+        AppInfo::from_json(&json!({
+            "id": 1, "kind": "child", "name": "x\x1b]8;;u\x1b\\", "argv": argv, "pid": 1,
+            "state": "running", "status": null, "runs": 1, "since": 1.0, "conns": [],
+            "sprites": 0, "widgets": 0,
+        }))
+        .unwrap(),
+    ]);
+    for (w, h) in [(48, 13), (78, 22)] {
+        let text = shown(&m, w, h);
+        assert!(
+            !text
+                .chars()
+                .any(|c| (c.is_control() && c != '\n') || ptyrc_vt::is_hidden(c)),
+            "{text:?}"
+        );
+    }
+}

@@ -102,7 +102,7 @@ impl Term {
         for (i, row) in rows.iter().enumerate() {
             for piece in row {
                 out.push_str(&sgr(piece.style));
-                out.push_str(&piece.text);
+                out.push_str(&ptyrc_vt::glyphs_only(&piece.text));
             }
             out.push_str("\x1b[0m\x1b[K");
             if i + 1 < rows.len() {

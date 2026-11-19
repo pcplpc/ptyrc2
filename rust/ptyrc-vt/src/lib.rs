@@ -16,4 +16,4 @@ pub use palette::Rgb;
 pub use repair::{render_ansi, repair};
 pub use sgr::write_sgr;
 pub use vt::{Charset, Link, Modes, Vt};
-pub use width::{char_width, str_width};
+pub use width::{char_width, drawn, glyphs_only, is_hidden, str_width};

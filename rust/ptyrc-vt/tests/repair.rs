@@ -451,3 +451,56 @@ fn blanks_under_a_coloured_pen_are_erased() {
         "A\x1b[C\x1b[2X\x1b[2CE\x1b[2X\x1b[3C\x1b[K\x1b[2;2H\x1b[2X\x1b[1;1H"
     );
 }
+
+/// The second belt: a cell whose text holds a control or a hidden
+/// character, put there without the scene, is painted as glyphs only.
+#[test]
+fn repair_prints_glyphs_only() {
+    let texts = [
+        "\x1b]52;c;SGVsbG8=\x07",
+        "\x1b",
+        "\x07",
+        "\u{9b}",
+        "\u{9d}",
+        "a\x1b[2J",
+        "a\u{9c}",
+        "\u{202e}",
+        "a\u{202e}",
+        "e\u{301}\u{200d}",
+        "\u{ad}",
+        "\u{2764}\u{fe0f}",
+    ];
+    for text in texts {
+        let mut host = Vt::new(10, 2);
+        let mut want = host.grid().clone();
+        want.put(1, 0, Cell::narrow(text, Style::default()));
+        let mut out = Vec::new();
+        repair(&mut host, &want, &mut out);
+        let s = String::from_utf8(out).unwrap();
+        // The painter's CSI sequences out, nothing else may control.
+        let mut body = String::new();
+        let mut chars = s.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' && chars.peek() == Some(&'[') {
+                chars.next();
+                while chars
+                    .next_if(|c| c.is_ascii_digit() || *c == ';' || *c == '?')
+                    .is_some()
+                {}
+                assert!(matches!(
+                    chars.next(),
+                    Some('H' | 'C' | 'G' | 'K' | 'X' | 'm' | 'h' | 'l')
+                ));
+            } else {
+                body.push(c);
+            }
+        }
+        assert!(
+            !body
+                .chars()
+                .any(|c| c.is_control() || ptyrc_vt::is_hidden(c)),
+            "{text:?}: {s:?}"
+        );
+        assert!(host.title().is_empty() && !host.take_events().contains(&ptyrc_vt::VtEvent::Bell));
+    }
+}

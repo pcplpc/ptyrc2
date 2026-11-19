@@ -130,7 +130,8 @@ impl Canvas {
     }
 
     /// Draw `text` from `(x, y)` to the right. Outside cells are dropped;
-    /// a space is drawn as a blank.
+    /// a space is drawn as a blank; a control character is a space, a
+    /// hidden character is dropped.
     pub fn put(&mut self, x: i32, y: i32, text: &str, style: &StyleSpec) {
         self.draw(x, y, text, style, true, 255);
     }
@@ -155,10 +156,10 @@ impl Canvas {
         let mut last: Option<(u16, u16)> = None;
         let inside_row = y >= 0 && y < self.h as i32;
         let (fg, bg, attrs) = (style.fg.map(|c| c.0), style.bg.map(|c| c.0), style.attrs());
-        for ch in text.chars() {
-            // A control character has no cell of its own on a terminal:
-            // it is drawn as a space.
-            let ch = if ch.is_control() { ' ' } else { ch };
+        // The entry of every glyph of a sprite: the text is untrusted. A
+        // control character (C0, DEL, C1) is drawn as a space, a hidden
+        // one (`ptyrc_vt::is_hidden`: bidi, joiners, ...) is dropped.
+        for ch in text.chars().filter_map(ptyrc_vt::drawn) {
             let width = char_width(ch);
             if width == 0 {
                 // Combining mark: joins the glyph before it.
@@ -208,13 +209,8 @@ impl Canvas {
     /// Width in cells of a string.
     pub fn text_width(text: &str) -> u16 {
         text.chars()
-            .map(|c| {
-                if c.is_control() {
-                    1
-                } else {
-                    char_width(c) as u32
-                }
-            })
+            .filter_map(ptyrc_vt::drawn)
+            .map(|c| char_width(c) as u32)
             .sum::<u32>()
             .min(u16::MAX as u32) as u16
     }

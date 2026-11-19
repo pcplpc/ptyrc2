@@ -55,9 +55,15 @@ pub struct Run {
 
 pub type Row = Vec<Run>;
 
+/// A run of glyphs only: names and log lines are untrusted
+/// (`ptyrc_vt::glyphs_only`).
 fn run(text: impl Into<String>, style: Style) -> Run {
+    let text = text.into();
     Run {
-        text: text.into(),
+        text: match ptyrc_vt::glyphs_only(&text) {
+            std::borrow::Cow::Borrowed(_) => text,
+            std::borrow::Cow::Owned(clean) => clean,
+        },
         style,
     }
 }

@@ -5,17 +5,21 @@
 use crate::grid::{Attrs, Cell, Color, Grid, Style};
 use crate::sgr::{push_num, write_sgr, write_sgr_from};
 use crate::vt::{Charset, Vt};
+use crate::width::is_hidden;
+use std::borrow::Cow;
 use std::io::Write;
 use unicode_width::UnicodeWidthChar;
 
 /// Glyph of a cell as it can be printed: its text when the emulator would
 /// store it back in one cell of that width (a base character of the cell's
-/// width, then zero-width ones), spaces otherwise.
-fn glyph(cell: &Cell) -> &str {
+/// width, then zero-width ones), spaces otherwise. Hidden characters
+/// (`is_hidden`) are left out. No control character is ever printed: a
+/// cell's text is untrusted (a sprite's, a widget's).
+fn glyph(cell: &Cell) -> Cow<'_, str> {
     let text = cell.text.as_str();
     let mut chars = text.chars();
     let ok = match chars.next() {
-        Some(c) if !c.is_control() => {
+        Some(c) if !c.is_control() && !is_hidden(c) => {
             let w = if c.is_ascii() {
                 1
             } else {
@@ -23,25 +27,27 @@ fn glyph(cell: &Cell) -> &str {
             };
             w == cell.width as usize
                 && text.len() <= 32
-                && chars.all(|c| !c.is_control() && c.width() == Some(0))
+                && chars.all(|c| !c.is_control() && (is_hidden(c) || c.width() == Some(0)))
         }
         _ => false,
     };
-    if ok {
-        text
-    } else if cell.width == 2 {
-        "  "
+    if !ok {
+        Cow::Borrowed(if cell.width == 2 { "  " } else { " " })
+    } else if text.chars().any(is_hidden) {
+        Cow::Owned(text.chars().filter(|&c| !is_hidden(c)).collect())
     } else {
-        " "
+        Cow::Borrowed(text)
     }
 }
 
+/// OSC 8 for link `id` of `vt`; a link that holds a control character
+/// closes instead.
 fn write_link(out: &mut Vec<u8>, vt: &Vt, id: u32) {
     match vt.link(id) {
-        Some(link) => {
+        Some(link) if !(link.params.chars().chain(link.uri.chars())).any(char::is_control) => {
             let _ = write!(out, "\x1b]8;{};{}\x1b\\", link.params, link.uri);
         }
-        None => out.extend_from_slice(b"\x1b]8;;\x1b\\"),
+        _ => out.extend_from_slice(b"\x1b]8;;\x1b\\"),
     }
 }
 
