@@ -76,7 +76,7 @@ impl Driver {
             {
                 return Ok(false);
             }
-            let Ok(found) = crate::store::find(store, member("args")) else {
+            let Ok(found) = crate::store::find(store, member("args"), member("files")) else {
                 return Ok(false);
             };
             let key = Identity::Store(found.origin.clone()).key();

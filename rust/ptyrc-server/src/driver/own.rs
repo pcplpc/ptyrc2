@@ -7,6 +7,7 @@
 //! draw put on its frame, or nowhere); the limits of the driver.
 
 use super::Driver;
+use crate::apps::Given;
 use crate::engine::{ConnId, Engine};
 use crate::grants::{Degree, Permission, Surface};
 use ptyrc_proto::{ErrorCode, RpcError};
@@ -88,6 +89,8 @@ pub(super) struct Own {
     pub front_widget: bool,
     pub surface: Option<Surface>,
     pub screen_wide: bool,
+    /// The launcher's options of a store app.
+    pub given: Given,
 }
 
 impl Own {
@@ -133,7 +136,25 @@ impl Driver {
                 || app.grants.holds(Permission::FrontWidget)),
             surface: app.surface,
             screen_wide: app.grants.holds(Permission::ScreenWide),
+            given: Given {
+                files: Vec::new(),
+                ..app.given.clone()
+            },
         })
+    }
+
+    /// The file `handle` of the app `conn` is bound to: its path, its
+    /// kind, whether it may be written. `None`: no app, or not one of
+    /// its handles. For `file.*`.
+    #[allow(dead_code)]
+    pub(super) fn file_of(
+        &self,
+        conn: ConnId,
+        handle: &str,
+    ) -> Option<(std::path::PathBuf, ptyrc_store::FileKind, bool)> {
+        let id = self.conns.get(&conn)?.app?;
+        let named = self.apps.as_ref()?.get(id)?.file(handle)?;
+        Some((named.path.to_path_buf(), named.kind, named.writable))
     }
 
     /// Before the request: a sprite of another, absent; `draw.clear
@@ -162,26 +183,56 @@ impl Driver {
             object.remove("all");
         }
         // A store app names no layer: its band; in front with the
-        // permission, else behind (the lesser form).
+        // permission, else behind (the lesser form); `--front`,
+        // `--back`: as the user said.
         if own.store {
             let asked = object.get("layer").filter(|l| !l.is_null()).cloned();
             let front = asked.as_ref().is_some_and(in_front);
             let modal = object.get("modal") == Some(&Value::Bool(true));
+            let by_hand = own.given.front;
+            let new = matches!(method, "draw.put")
+                || (method == "draw.ext" && !object.contains_key("id"));
             let layer = match method {
-                "draw.put" => Some(band(own.app, front && own.front)),
-                "draw.ext" if !object.contains_key("id") => Some(band(own.app, front && own.front)),
+                _ if new => Some(by_hand.unwrap_or(front && own.front)),
                 "draw.update" | "draw.ext" if asked.is_some() => {
-                    Some(band(own.app, front && own.front))
+                    Some(by_hand.unwrap_or(front && own.front))
                 }
+                "widget.show" if by_hand.is_some() => by_hand,
                 "widget.show" if asked.is_some() || modal => {
-                    Some(band(own.app, (front || modal) && own.front_widget))
+                    Some((front || modal) && own.front_widget)
                 }
                 // Not raised by the focus above the text.
-                "widget.show" if !own.front_widget => Some(band(own.app, false)),
+                "widget.show" if !own.front_widget => Some(false),
                 _ => None,
             };
-            if let Some(layer) = layer {
-                object.insert("layer".into(), json!(layer));
+            if let Some(front) = layer {
+                object.insert("layer".into(), json!(band(own.app, front)));
+            }
+            // `--alpha`: the opacity of its sprites, multiplied.
+            if let Some(alpha) = own.given.alpha {
+                let asked = object.get("alpha").and_then(Value::as_f64);
+                if new || (asked.is_some() && matches!(method, "draw.update" | "draw.ext")) {
+                    object.insert("alpha".into(), json!(alpha * asked.unwrap_or(1.0)));
+                }
+            }
+            // `--prefer`: of its widgets, of an anchor placed by the heat.
+            if let Some(prefer) = &own.given.prefer {
+                if method == "widget.show" {
+                    object.insert("prefer".into(), json!(prefer));
+                }
+                let auto = (object.get_mut("anchor"))
+                    .and_then(|a| a.get_mut("auto"))
+                    .and_then(Value::as_object_mut);
+                if let Some(auto) = auto {
+                    auto.insert("prefer".into(), json!(prefer));
+                }
+            }
+            // `--border`: of its widgets.
+            if let Some(border) = &own.given.border {
+                let declared = method == "widget.declare" && object.contains_key("border");
+                if method == "widget.show" || declared {
+                    object.insert("border".into(), json!(border));
+                }
             }
         }
         // The driver's looks: lowered, not refused.

@@ -13,7 +13,7 @@ hint }`: `message` says what was refused (manifest errors as
 ## Manifest
 
 - `manifest::parse(&str)`, `manifest::parse_bytes(&[u8])` -> `Manifest
-  { app, permissions, limits, options }`.
+  { app, permissions, limits, options, args }`.
 - `App { id, version, summary, license, api, entry: Entry::Script |
   Entry::Rust, rustc, assets, surface, tape }`; `surface` absent:
   `Widget`.
@@ -24,8 +24,42 @@ hint }`: `message` says what was refused (manifest errors as
   `manifest::LIMITS`; a value exceeds its default, not its ceiling (the
   runner's). Granted by `limit-memory` or `limit-time`
   (`limit_permission`), never declared in `[permissions]`.
-- `AppOption { name, default: OptionValue, doc }`; the type is the
-  default's. Names in `RESERVED_OPTIONS` are ptyrc's.
+- `AppOption { name, ty: OptionType, default: Option<OptionValue>,
+  doc, short, choices, list, needs, write, regex }`; `[args]`:
+  `Positional { option, min, max }`, one list. Types `int`, `float`,
+  `bool`, `string`, `word`, `pattern`, `file`, `dir`. Refused at
+  parse: a name in `RESERVED_OPTIONS` or `no-NAME`; a short twice or
+  `h`; `choices` but of a `string`, a default outside them; a list of
+  `bool`, a default of a list but a plain file name; `write` but of a
+  `file`, `regex` but of a `pattern`; a `needs` name not in
+  `[permissions]`; a `file` or `dir` without `files`, `write` without
+  `files-write`.
+
+## Options
+
+`options`: one reader of a command line, one check of what reaches
+the driver.
+
+- `read(manifest, words, cwd) -> Option<Launch>`: the launcher's
+  options (`Launcher { frame, front, prefer, alpha, border, wait }`),
+  then the app's: `--NAME VALUE`, `--NAME=VALUE`, `-S VALUE`, `-SVALUE`,
+  `-abc` of bools, `--no-NAME`, `NAME=VALUE`; positionals for
+  `[args]`, all after `--`. Files: `name_path` (absolute, canonical; a
+  regular file or a directory; a file to write may be absent, its
+  directory not), a handle each (`f0`, ...), the default file of the
+  working directory when none is named. `None`: `--help`. Checked by
+  `resolve` before it returns. `Launch::params(store)`: the params of
+  `app.start`.
+- `resolve(manifest, args, files) -> Resolved { init, needs, words,
+  patterns, files }`: each value of its type and rule (a `word` by
+  the rule of `words`, a `pattern` 1 to 256 bytes, 16 a run), each
+  handle given once and of its kind; the defaults filled in; `needs`
+  of what was given (`files` for a default file, `files-write` for a
+  file to write). `Resolved::asked(manifest)`: the permissions
+  declared for that run. `check_named(path, kind, write)`: the
+  driver's check of a path again.
+- `help(manifest, program)`: `--help` of a store app.
+- Errors: `ErrorKind::Usage`.
 
 ## Origin
 

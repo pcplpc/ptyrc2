@@ -1163,7 +1163,7 @@ not kept, nor the child of the hotkey once it has ended.
 |---|---|---|
 | `app.list` | | `{"apps":[info,...]}`, by id |
 | `app.start` | `argv`: `[program, arg...]`, `name`, `declares` (Permissions) | `{"app":info}`, once the pop-up is answered when it asks; `bad-params` with the reason when it does not start; `cancelled` |
-| `app.start` | `store`: an origin or the id of an installed app, `args`: `{OPTION: VALUE}` | the same; see Store apps |
+| `app.start` | `store`: an origin or the id of an installed app, `args`: `{OPTION: VALUE}`, `files`, `frame`, `front`, `prefer`, `alpha`, `border` | the same; see Store apps |
 | `app.enrol` | `name`, `argv`, `declares` | `{"app":info,"token":hex}`, as `app.start`: the pop-up, the file, the headless rule; see Permissions, Foreground apps |
 | `app.stop` | `app`: id | `{"app":info}`; SIGTERM, SIGCONT when paused, SIGKILL after 2 s. A child: its group; a client: its pid. An exited child: nothing |
 | `app.pause` | `app` | `{"app":info}`; see Pause |
@@ -1184,11 +1184,39 @@ Store apps. `app.start {store}` starts an installed app
   reads `apps.lock` and the tree itself (`ptyrc_store::install::locate`,
   the XDG directories of its own environment); not installed, a Rust
   app, no runner: `not-usable`, the hint the cure.
-- `args`: checked against `[options]` of the manifest (a name not
-  declared, a value of another type: `bad-params`); the defaults
-  filled in; the whole given to `init`.
+- `args`: checked against `[options]` and `[args]` of the manifest
+  (`ptyrc_store::options::resolve`: a name not declared, a value of
+  another type or outside its rule, a handle not in `files` or named
+  twice: `bad-params`); the defaults filled in (`null` without one,
+  `[]` for a list); the whole given to `init`. The launchers read a
+  command line with `options::read` (`ptyrc app`, `manage`, `dev`).
+- `files`: `[{"handle": "f0", "path", "kind": "file" | "dir",
+  "write", "default"}]`, the paths made absolute and canonical by the
+  launcher; checked again at the start: canonical, a regular file or
+  a directory, a file to write absent but its directory canonical.
+  The value of the option in `args` is `{"file": HANDLE, "name"}`.
+  Kept with the entry (a restart keeps it), in no file. A handle is
+  writable when the manifest says `write` and `files-write` is held
+  (`App::file`).
+- What it declares for the run: `[permissions]`, but a permission
+  named by some option's `needs` only when that option is given (a
+  bool: true), `files` only for a default file, `files-write` only
+  for a file to write. The pop-up shows what has no answer: the
+  difference alone. A restart resolves the same anew.
+- The user's words (`word`) and patterns (`pattern`) ride with the
+  declaration (`Declared::hand`, `Grants::hand`): a word is found by
+  `screen.find`, `screen.wait` at any degree and shown in
+  `screen.shape` from `shape`; a pattern, exactly as given (and its
+  `regex`), is answered as under `text`, `known` too.
 - `frame`: the frame it is clipped to (Permissions, A store app);
   resolved as any frame name, `no-frame` as any; absent: `active`.
+- The launcher's options, kept with the entry, never told to the app:
+  `front` (true, false: its band in front or behind, whatever it asks;
+  absent: its permissions), `prefer` (one of the nine sides or `any`:
+  `prefer` of its `widget.show` and of `anchor {auto}`), `alpha`
+  (`0..=1`, multiplies the `alpha` of its sprites), `border` (a border
+  of `widget.borders`: of its `widget.show` and `widget.declare`).
+  With `argv`: `bad-params`.
 - The child is the runner: `ptyrc-box --manifest JSON --script
   TREE/SCRIPT ARGS` (`$PTYRC_BOX`, else beside `ptyrc`, else of
   `PATH`), with its token. Its identity is the origin

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The event loop: app pty, host terminal, signals, clients, one timer.
 
-use crate::apps::{Apps, Refused, State};
+use crate::apps::{Apps, Given, Refused, State};
 use crate::conn::Conn;
 use crate::engine::{ConnId, Ctx, Effects, Engine, Reply, SessionInfo, Token};
 use crate::grab::{self, Grab};
@@ -308,6 +308,55 @@ fn held_names(grants: &Grants) -> Vec<&'static str> {
     all.filter(|p| grants.holds(**p))
         .map(|p| p.name())
         .collect()
+}
+
+/// `front`, `prefer`, `alpha`, `border` of `app.start {store}`: the
+/// launcher's options (principle 4).
+fn launched(params: &Value) -> Result<Given, RpcError> {
+    let member = |name: &str| params.get(name).filter(|v| !v.is_null());
+    let front = match member("front") {
+        None => None,
+        Some(v) => Some(
+            v.as_bool()
+                .ok_or_else(|| RpcError::bad_params("front: true (in front) or false (behind)"))?,
+        ),
+    };
+    let prefer = match member("prefer") {
+        None => None,
+        Some(v) => Some(
+            v.as_str()
+                .filter(|p| ptyrc_store::options::PREFER.contains(p))
+                .ok_or_else(|| {
+                    RpcError::bad_params("prefer: a side")
+                        .with_hint(ptyrc_store::options::PREFER.join(", "))
+                })?
+                .to_string(),
+        ),
+    };
+    let alpha = match member("alpha") {
+        None => None,
+        Some(v) => Some(
+            v.as_f64()
+                .filter(|a| (0.0..=1.0).contains(a))
+                .ok_or_else(|| RpcError::bad_params("alpha: a number of 0 to 1"))?,
+        ),
+    };
+    let border = match member("border") {
+        None => None,
+        Some(v) => Some(
+            v.as_str()
+                .filter(|b| ptyrc_store::options::is_border_name(b))
+                .ok_or_else(|| RpcError::bad_params("border: a border name"))?
+                .to_string(),
+        ),
+    };
+    Ok(Given {
+        front,
+        prefer,
+        alpha,
+        border,
+        files: Vec::new(),
+    })
 }
 
 /// Granted without an answer (no screen to ask: the headless rule,
@@ -1727,10 +1776,10 @@ impl Driver {
     ) -> Option<Result<Value, RpcError>> {
         let lower = matches!(self.verdict(conn, method, &params), Verdict::Lower(_));
         // An app below `text`: its answers cut to its degree.
-        let Some((degree, words)) = self.cut_of(conn) else {
+        let Some((degree, words, hand)) = self.cut_of(conn) else {
             return self.answer(conn, method, params, engine, in_batch);
         };
-        let answer = match lower::plan(method, &params, degree, &words) {
+        let answer = match lower::plan(method, &params, degree, &words, &hand) {
             // Fail closed: lowered by the table, not planned.
             Plan::Pass if lower => Some(Err(grants::denied(method, Why::Unlisted))),
             Plan::Pass => self.answer(conn, method, params, engine, in_batch),
@@ -1754,9 +1803,9 @@ impl Driver {
 
     /// The degree and the words of `conn` when its answers are cut: an
     /// app that holds less than `text`.
-    fn cut_of(&self, conn: ConnId) -> Option<(Degree, Vec<String>)> {
+    fn cut_of(&self, conn: ConnId) -> Option<(Degree, Vec<String>, grants::Hand)> {
         let (_, held) = self.asker(conn).ok()??;
-        Some((held.cut()?, held.words.clone()))
+        Some((held.cut()?, held.words.clone(), held.hand.clone()))
     }
 
     /// Answer a request that passed the check.
@@ -2013,7 +2062,7 @@ impl Driver {
             for topic in topics.iter().filter(|t| !silent.contains(t)) {
                 let state = self.topic_state(topic, engine, false);
                 let state = state.into_iter().map(|data| match &cut {
-                    Some((degree, _)) => lower::event(topic, data, *degree),
+                    Some((degree, _, _)) => lower::event(topic, data, *degree),
                     None => data,
                 });
                 let events = state.map(|data| event(topic, data));
@@ -2210,7 +2259,10 @@ impl Driver {
         }
         let members: &[&str] = match method {
             "app.list" => &[],
-            "app.start" => &["argv", "name", "declares", "store", "args", "frame"],
+            "app.start" => &[
+                "argv", "name", "declares", "store", "args", "frame", "files", "front", "prefer",
+                "alpha", "border",
+            ],
             "app.enrol" => &["name", "argv", "declares"],
             "app.restart" => &["app", "argv", "name", "declares"],
             "app.move" => &["app", "frame"],
@@ -2298,7 +2350,20 @@ impl Driver {
                 return Err(RpcError::bad_params("app.start: store, or argv: not both")
                     .with_hint(r#"a store app: {"store": ORIGIN, "args": {OPTION: VALUE}}"#));
             }
-            let found = crate::store::find(store, member("args"))?;
+            let found = crate::store::find(store, member("args"), member("files"))?;
+            let mut hand = launched(params)?;
+            hand.files = found.files.clone();
+            if let Some(border) = &hand.border {
+                let known = self.answer(conn, "widget.borders", json!({}), engine, false);
+                let known = known.and_then(Result::ok).unwrap_or_default();
+                let names = known["borders"].as_array().cloned().unwrap_or_default();
+                if !names.iter().any(|n| n.as_str() == Some(border.as_str())) {
+                    return Err(RpcError::bad_params(format!(
+                        "border: {border:?}: no such border"
+                    ))
+                    .with_hint("ptyrc widget borders lists them"));
+                }
+            }
             // The frame it is clipped to: the one given, else the active.
             let frame = member("frame").cloned().unwrap_or(json!("active"));
             let frame = self.frame_id(conn, frame, engine)?;
@@ -2321,14 +2386,18 @@ impl Driver {
                 apps.note(id, &format!("permission `{name}`: not known, not held"));
             }
             apps.set_surface(id, Surface::of(found.surface, frame));
+            apps.set_given(id, hand);
             warnings.extend(unasked(&resolved, headless));
             apps.grant(id, Some((found.declared.clone(), resolved.grants)));
             found.started();
             id
         } else if method == "app.start" {
-            if member("args").is_some() {
-                return Err(RpcError::bad_params("app.start: args: of a store app")
-                    .with_hint("the arguments of a program are in argv"));
+            let store_only = ["args", "files", "front", "prefer", "alpha", "border"];
+            if let Some(m) = store_only.iter().find(|m| member(m).is_some()) {
+                return Err(
+                    RpcError::bad_params(format!("app.start: {m}: of a store app"))
+                        .with_hint("the arguments of a program are in argv"),
+                );
             }
             let argv = argv.ok_or_else(|| {
                 RpcError::bad_params("argv: [program, arg...]")

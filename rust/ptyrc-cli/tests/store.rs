@@ -446,8 +446,18 @@ fn rm_purge() {
     assert!(!d.app(&origin).exists());
 }
 
+/// A Rust app that does not build: refused, `rustc`'s errors said,
+/// nothing installed. Skipped without `rustc` and its wasm target.
 #[test]
-fn rust_app_not_built_yet() {
+fn rust_app_that_does_not_build() {
+    if let Err(e) = ptyrc_store::build::Toolchain::find() {
+        assert!(
+            std::env::var_os("PTYRC_REQUIRE_RUSTC").is_none_or(|v| v != "1"),
+            "PTYRC_REQUIRE_RUSTC=1: {e}"
+        );
+        eprintln!("SKIPPED: {e}");
+        return;
+    }
     let r = Root::new("rust");
     let m = manifest("crab", "0.1.0").replace(
         "script = \"app.js\"",
@@ -455,10 +465,14 @@ fn rust_app_not_built_yet() {
     );
     let (remote, _) = r.bare(
         "remote.git",
-        &[("ptyrc-app.toml", &m), ("LICENSE", GPL), ("src/lib.rs", "")],
+        &[
+            ("ptyrc-app.toml", &m),
+            ("LICENSE", GPL),
+            ("src/lib.rs", "fn broken(\n"),
+        ],
     );
     r.ptyrc(&["store", "add", "--yes", remote.to_str().unwrap()])
-        .fails(2, "Rust apps are not built yet", "script");
+        .fails(2, "src/lib.rs: the build failed", "the errors of rustc");
     assert!(r.lock().is_empty());
 }
 

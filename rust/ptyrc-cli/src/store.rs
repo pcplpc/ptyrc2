@@ -751,7 +751,7 @@ fn show(dirs: &Dirs, name: &str) -> Result<ExitCode, Fail> {
         if !m.options.is_empty() {
             println!("options");
             for o in &m.options {
-                println!("  {} ({}): {}", o.name, o.default.type_name(), o.doc);
+                println!("  {} ({}): {}", o.name, o.type_name(), o.doc);
             }
         }
     }

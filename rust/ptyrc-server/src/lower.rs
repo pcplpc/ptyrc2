@@ -4,7 +4,7 @@
 //! what to ask the engine in place of the request, and what to make of
 //! its answer.
 
-use crate::grants::Degree;
+use crate::grants::{Degree, Hand};
 use ptyrc_core::RAW;
 use ptyrc_proto::{ErrorCode, RpcError};
 use ptyrc_vt::char_width;
@@ -47,18 +47,53 @@ pub(crate) enum Cut {
 }
 
 /// The plan of `method` for an app that holds `degree` and the words
-/// `held` (empty below `words`). `Pass` for what the degree opens whole
-/// and for what the degrees do not rule.
-pub(crate) fn plan(method: &str, params: &Value, degree: Degree, held: &[String]) -> Plan {
+/// `held` (empty below `words`), the user having given `hand`. `Pass`
+/// for what the degree opens whole and for what the degrees do not
+/// rule.
+pub(crate) fn plan(
+    method: &str,
+    params: &Value,
+    degree: Degree,
+    held: &[String],
+    hand: &Hand,
+) -> Plan {
     if degree >= Degree::Text {
         return Plan::Pass;
     }
-    let held: &[String] = match degree >= Degree::Words {
-        true => held,
-        false => &[],
-    };
-    let shape = degree >= Degree::Shape;
     let has = |member: &str| params.get(member).is_some_and(|v| !v.is_null());
+    // The user's pattern, exactly: answered as under `text`.
+    if let ("screen.find" | "screen.wait", Some(pattern)) =
+        (method, params.get("pattern").and_then(Value::as_str))
+    {
+        let regex = params.get("regex") == Some(&Value::Bool(true));
+        if hand
+            .patterns
+            .iter()
+            .any(|(p, r)| p == pattern && *r == regex)
+        {
+            let mut out = params.as_object().cloned().unwrap_or_default();
+            if degree < Degree::Layout {
+                out.remove("frame");
+            }
+            let method = match method {
+                "screen.find" => "screen.find",
+                _ => "screen.wait",
+            };
+            return Plan::Ask(method, Value::Object(out), Cut::Mark);
+        }
+    }
+    let shape = degree >= Degree::Shape;
+    // The user's words: found at any degree, shown from `shape`.
+    let mut found: Vec<String> = match degree >= Degree::Words {
+        true => held.to_vec(),
+        false => Vec::new(),
+    };
+    found.extend(hand.words.iter().cloned());
+    let shown: Vec<String> = match shape {
+        true => found.clone(),
+        false => Vec::new(),
+    };
+    let held: &[String] = &shown;
     // Below `layout` there is one frame: the surface.
     let frame = |out: &mut Map<String, Value>| {
         if degree >= Degree::Layout && has("frame") {
@@ -127,7 +162,7 @@ pub(crate) fn plan(method: &str, params: &Value, degree: Degree, held: &[String]
         }
         "frame.heat" if !shape => Plan::Ask("frame.heat", only_frame(), Cut::Cold),
         "frame.idle" if !shape => Plan::Answer(still()),
-        "screen.find" => match word_query(params, held) {
+        "screen.find" => match word_query(params, &found) {
             Some(query) => {
                 let mut out = query;
                 frame(&mut out);
@@ -138,7 +173,7 @@ pub(crate) fn plan(method: &str, params: &Value, degree: Degree, held: &[String]
             }
             None => Plan::Answer(json!({"matches": []})),
         },
-        "screen.wait" if has("pattern") => match word_query(params, held) {
+        "screen.wait" if has("pattern") => match word_query(params, &found) {
             Some(query) => {
                 let mut out = query;
                 frame(&mut out);
@@ -415,7 +450,7 @@ mod tests {
     }
 
     fn ask(method: &str, params: Value, degree: Degree) -> Plan {
-        plan(method, &params, degree, &words())
+        plan(method, &params, degree, &words(), &Hand::default())
     }
 
     #[test]
@@ -548,6 +583,70 @@ mod tests {
             assert_eq!(ask(method, json!({}), Shape), Plan::Pass, "{method}");
         }
         assert_eq!(ask("screen.wait", json!({"idle": true}), Shape), Plan::Pass);
+    }
+
+    #[test]
+    fn the_users_pattern_opens_itself_alone() {
+        let hand = Hand {
+            words: vec!["Rose".into()],
+            patterns: vec![("TODO:".into(), false), (r"\d+ ms".into(), true)],
+        };
+        let ask = |method: &str, params: Value, degree| plan(method, &params, degree, &[], &hand);
+        let none = Plan::Answer(json!({"matches": []}));
+        for degree in [Nothing, Layout, Shape, Words] {
+            // Exactly the pattern given, `known` too: as under `text`.
+            let given = json!({"pattern": "TODO:", "known": true, "ignore_case": true, "frame": 2});
+            let Plan::Ask("screen.find", asked, Cut::Mark) = ask("screen.find", given, degree)
+            else {
+                panic!("{degree:?}")
+            };
+            assert_eq!(asked["pattern"], "TODO:");
+            assert_eq!(asked["known"], true);
+            assert_eq!(asked.get("frame").is_some(), degree >= Layout);
+            let regex = json!({"pattern": r"\d+ ms", "regex": true, "timeout_ms": 5});
+            assert!(matches!(
+                ask("screen.wait", regex, degree),
+                Plan::Ask("screen.wait", _, Cut::Mark)
+            ));
+            // Anything else: as before. Not a regex of the literal, not
+            // the literal of the regex, not a piece of it, not the rest
+            // of the screen.
+            for other in [
+                json!({"pattern": "TODO:", "regex": true}),
+                json!({"pattern": r"\d+ ms"}),
+                json!({"pattern": "TODO"}),
+                json!({"pattern": ".*", "regex": true}),
+                json!({"pattern": "password"}),
+            ] {
+                assert_eq!(ask("screen.find", other.clone(), degree), none, "{other}");
+            }
+            // The user's word: found whole, at any degree.
+            let Plan::Ask("screen.find", asked, Cut::Mark) =
+                ask("screen.find", json!({"pattern": "rose"}), degree)
+            else {
+                panic!()
+            };
+            assert_eq!(asked["pattern"], r"\brose\b");
+            // The text itself stays cut.
+            assert_ne!(ask("screen.text", json!({}), degree), Plan::Pass);
+        }
+        // Shown in the shape from `shape`; not at `none`.
+        assert_eq!(
+            ask("screen.shape", json!({"words": ["rose"]}), Shape),
+            Plan::Pass
+        );
+        assert_ne!(
+            ask("screen.shape", json!({"words": ["fish"]}), Shape),
+            Plan::Pass
+        );
+        let Plan::Ask("screen.shape", asked, _) = ask("screen.text", json!({}), Shape) else {
+            panic!()
+        };
+        assert_eq!(asked["words"], json!(["Rose"]));
+        let Plan::Ask("screen.shape", asked, _) = ask("screen.text", json!({}), Nothing) else {
+            panic!()
+        };
+        assert!(asked.get("words").is_none());
     }
 
     #[test]

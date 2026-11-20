@@ -40,8 +40,8 @@ fn good() {
     assert_eq!(m.limits[0].name, "memory-mib");
     assert_eq!(m.limits[0].value, 128);
     assert_eq!(m.options[0].name, "rate");
-    assert_eq!(m.options[0].default, OptionValue::Int(20));
-    assert_eq!(m.options[1].default, OptionValue::Float(0.5));
+    assert_eq!(m.options[0].default, Some(OptionValue::Int(20)));
+    assert_eq!(m.options[1].default, Some(OptionValue::Float(0.5)));
 }
 
 #[test]

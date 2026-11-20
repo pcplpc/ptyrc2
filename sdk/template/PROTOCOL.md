@@ -172,15 +172,18 @@ calls a second), `headless`.
 
 ## Headless (`ptyrc dev test`)
 
-- Answers `draw.put`, `draw.update`, `draw.remove`, `draw.clear`,
+- Answers `batch`, `draw.put`, `draw.update`, `draw.remove`,
+  `draw.clear`, `draw.list`, `draw.ext`, `draw.exts`,
   `widget.declare`, `widget.show`, `widget.set`, `widget.hide`,
-  `subscribe`, `input.grab`, `input.release`, `session.info`,
-  `screen.text`, `screen.shape`, `screen.cells`, `screen.find`,
-  `screen.wait`, `screen.cursor`, `frame.list`, `frame.get`,
-  `frame.at`, `frame.idle`, `frame.text`, `frame.heat`, cut as the
-  driver cuts them. `screen.wait` is answered
+  `widget.ask`, `widget.release`, `widget.list`, `widget.borders`,
+  `app.list` (its own entry, `pid` null), `subscribe`, `input.grab`,
+  `input.release`, `session.info`, `screen.text`, `screen.shape`,
+  `screen.cells`, `screen.find`, `screen.wait`, `screen.cursor`,
+  `frame.list`, `frame.get`, `frame.at`, `frame.idle`, `frame.text`,
+  `frame.heat`, cut as the driver cuts them. `screen.wait` is answered
   at once: no session time passes in a call; not true now,
-  `{"matched": false}`. Another method of the table above: `headless`
+  `{"matched": false}`, in a `batch` `bad-request` (the driver would
+  wait). Another method of the table above: `headless`
   (the hint says so; a session answers it, `ptyrc dev run`). A name
   not in it: `unknown-method`, with the nearest.
 - The permissions are those the manifest declares (`[limits]`:
@@ -217,9 +220,18 @@ surface = "screen"         # "widget" (default), "frame", "screen": where it is 
 # assets = "assets/"; tape = "demo.tape"
 # wait = true            # `ptyrc app ID` waits for its result (app.result)
 
-[options]                  # each: --NAME VALUE, --NAME, --no-NAME; init(args).NAME
-size = { type = "int", default = 20, doc = "one line" }   # int, float, bool, string
-# reserved: alpha, back, frame, front, help, no-wait, prefer, wait
+[options]                  # --NAME VALUE, --NAME=VALUE, -S VALUE; a bool --NAME, --no-NAME
+size = { type = "int", default = 20, doc = "one line" }
+grab = { type = "bool", default = false, short = "g", needs = ["keys-arrows"], doc = "..." }
+season = { type = "string", default = "auto", choices = ["auto", "spring"], doc = "..." }
+word = { type = "word", doc = "..." }                   # the user's word
+mark = { type = "pattern", list = true, doc = "..." }    # repeated; regex = true
+stop = { type = "file", doc = "..." }                    # or "dir"; write = true
+# types: int, float, bool, string, word, pattern, file, dir
+# reserved: alpha, back, border, frame, front, help, no-wait, prefer, wait; no-NAME
+
+[args]                     # one list of positionals, init(args).NAME
+patterns = { type = "pattern", min = 1, max = 16, doc = "..." }
 
 [permissions]              # NAME = "why, one line, 200 at most"
 shape = "to stand on the text"
@@ -228,6 +240,29 @@ words = { list = ["food", "fish"], why = "to find them" }  # 1..32 words, 3..32 
 [limits]                   # above the default, up to the ceiling (Limits)
 memory-mib = 128
 ```
+
+- `init(args)`: every option, its default when not given (`null`
+  when it has none; `[]` for a list), the positionals under their name.
+- `default`: required of `int`, `float`, `bool`, `string`; none of a
+  list. Of a `file` or `dir`: a plain name of the working directory,
+  used when none is named, asked as `files`.
+- `needs`: permissions asked only when the option is given (a bool:
+  true); each in `[permissions]`. The pop-up then shows them alone.
+- `word`: 3 to 32 letters or digits, else refused at the start. Found
+  by `screen.find` and `screen.wait` whatever the degree, shown in
+  `screen.shape` from `shape`; not counted in the 32 of `words`.
+- `pattern`: 1 to 256 bytes, 16 a run. `screen.find`, `screen.wait`
+  with exactly that pattern (and its `regex`) are answered as under
+  `text`, `known` too; any other pattern as before.
+- `file`, `dir`: require `files` in `[permissions]`; `write = true`
+  (a file only) requires `files-write`. The guest gets `{"file":
+  "f0", "name": "TODO.md"}`, never a path; reading is granted by the
+  naming; a file to write asks `files-write`. Regular files and
+  directories only; 16 a run.
+- ptyrc's own options, the same for every app and never told to it:
+  `--frame F`, `--front`, `--back`, `--prefer SIDE`, `--alpha A` (the
+  opacity of its sprites), `--border B` (of its widgets), `--wait`.
+- `--help` is made from the manifest; `ptyrc dev check` checks it.
 
 At `init`, `args["ptyrc:manifest"]`: `{"id", "version", "permissions":
 [{"name", "words"?}], "granted": [name], "limits": {KEY: N}}`, the

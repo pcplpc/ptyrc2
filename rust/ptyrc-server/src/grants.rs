@@ -141,6 +141,15 @@ impl Surface {
     }
 }
 
+/// What the user gave at the start (principle 4): words held for the
+/// run whatever the degree, patterns `screen.find` is held to.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Hand {
+    pub words: Vec<String>,
+    /// `(pattern, regex)`.
+    pub patterns: Vec<(String, bool)>,
+}
+
 /// What an identity holds.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Grants {
@@ -149,6 +158,8 @@ pub(crate) struct Grants {
     held: BTreeSet<Permission>,
     /// The words of `words`, as declared.
     pub words: Vec<String>,
+    /// The user's words and patterns.
+    pub hand: Hand,
 }
 
 impl Grants {
@@ -158,6 +169,7 @@ impl Grants {
             whole: true,
             held: BTreeSet::new(),
             words: Vec::new(),
+            hand: Hand::default(),
         }
     }
 
@@ -168,6 +180,7 @@ impl Grants {
             whole: false,
             held: held.into_iter().collect(),
             words: Vec::new(),
+            hand: Hand::default(),
         }
     }
 

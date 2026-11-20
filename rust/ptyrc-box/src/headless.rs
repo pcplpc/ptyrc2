@@ -24,14 +24,23 @@ const OWNER: u64 = 1;
 
 /// The methods a headless run answers.
 pub const SERVED: &[&str] = &[
+    "batch",
     "draw.put",
     "draw.update",
     "draw.remove",
     "draw.clear",
+    "draw.list",
+    "draw.ext",
+    "draw.exts",
     "widget.declare",
     "widget.show",
     "widget.set",
     "widget.hide",
+    "widget.ask",
+    "widget.release",
+    "widget.list",
+    "widget.borders",
+    "app.list",
     "subscribe",
     "input.grab",
     "input.release",
@@ -306,6 +315,14 @@ pub struct Headless {
     rows: Option<Vec<String>>,
     /// Session time of the last change of the screen, ms.
     changed: u64,
+    exts: Vec<Box<dyn DrawExt>>,
+    /// In a `batch`: what the driver would leave pending is refused.
+    in_batch: bool,
+    /// Per widget that asks: its escape and close keys; empty: none.
+    escapes: BTreeMap<u64, (String, String)>,
+    /// `app.list`: the app's name and origin.
+    pub name: String,
+    pub store: Option<String>,
 }
 
 /// A frame at the last look: rect, origin, the text of its rows.
@@ -331,7 +348,8 @@ impl Headless {
         let clamp = |n: u32| n.clamp(1, 4096) as u16;
         let mut scene = Scene::new();
         let mut widgets = Widgets::new(WidgetConfig::default());
-        for ext in draw_ext() {
+        let exts = draw_ext();
+        for ext in &exts {
             for (name, make) in ext.effects() {
                 scene.register_effect(name, make);
             }
@@ -365,6 +383,11 @@ impl Headless {
             shown: BTreeMap::new(),
             rows: None,
             changed: 0,
+            exts,
+            in_batch: false,
+            escapes: BTreeMap::new(),
+            name: "app".into(),
+            store: None,
         };
         h.observe();
         h
@@ -662,6 +685,37 @@ impl Headless {
                     Err(CallError::new("no-sprite", format!("no widget {id}")))
                 }
             }
+            "draw.list" => {
+                let list = self.scene.list_on(self.vt.grid(), &self.frames);
+                let mut v = json!({"sprites": list});
+                own_items(&mut v, "sprites");
+                Ok(v)
+            }
+            "draw.exts" => {
+                let exts: Vec<Value> = (self.exts.iter())
+                    .map(|e| json!({"name": e.name(), "functions": e.functions()}))
+                    .collect();
+                Ok(json!({"exts": exts, "effects": self.scene.effects()}))
+            }
+            "draw.ext" => self.draw_ext_call(params),
+            "widget.ask" => self.widget_ask(&params),
+            "widget.release" => {
+                members(&params, &["id"])?;
+                let id = widget_id(&params)?;
+                if !self.widgets.release(OWNER, id) {
+                    return Err(CallError::new("no-sprite", format!("no widget {id}")));
+                }
+                self.escapes.remove(&id);
+                self.settle();
+                Ok(json!({}))
+            }
+            "widget.list" => {
+                let mut v = json!({"widgets": self.widgets.list()});
+                own_items(&mut v, "widgets");
+                Ok(v)
+            }
+            "widget.borders" => Ok(json!({"borders": self.widgets.borders()})),
+            "app.list" => Ok(json!({"apps": [self.app_info()]})),
             "subscribe" => {
                 let topics = params.get("topics").and_then(Value::as_array);
                 let topics: Vec<&str> = topics
@@ -820,12 +874,16 @@ impl Headless {
                     ));
                 }
                 let mut out = json!({"matched": true, "match": null});
-                // No session time passes in a call: true now, or a timeout.
-                let timeout = json!({"matched": false});
+                // No session time passes in a call: true now, or a timeout;
+                // in a batch, what would wait is refused, as the driver.
+                let timeout = match self.in_batch {
+                    true => Err(not_in_batch(method)),
+                    false => Ok(json!({"matched": false})),
+                };
                 if let Some(ms) = params.get("stable_ms").and_then(Value::as_u64)
                     && self.now < self.changed + ms
                 {
-                    return Ok(timeout);
+                    return timeout;
                 }
                 if idle {
                     match self.frames.idle(id, now).filter(|i| i.idle) {
@@ -833,7 +891,7 @@ impl Headless {
                             out["frame"] = json!(id);
                             out["idle"] = json!(i);
                         }
-                        None => return Ok(timeout),
+                        None => return timeout,
                     }
                 }
                 if has("pattern") {
@@ -844,7 +902,7 @@ impl Headless {
                     match (found.first(), gone) {
                         (Some(m), false) => out["match"] = match_json(m),
                         (None, true) => {}
-                        _ => return Ok(timeout),
+                        _ => return timeout,
                     }
                 }
                 Ok(out)
@@ -1359,7 +1417,12 @@ impl Headless {
         let widgets = sprites || g.holds("front-widget");
         let (layer, lacks) = match method {
             "draw.put" => (Some(band(front && sprites)), front && !sprites),
-            "draw.update" if asked.is_some() => (Some(band(front && sprites)), front && !sprites),
+            "draw.ext" if !object.contains_key("id") => {
+                (Some(band(front && sprites)), front && !sprites)
+            }
+            "draw.update" | "draw.ext" if asked.is_some() => {
+                (Some(band(front && sprites)), front && !sprites)
+            }
             "widget.show" if asked.is_some() || modal => {
                 (Some(band((front || modal) && widgets)), front && !widgets)
             }
@@ -1380,12 +1443,218 @@ impl Headless {
     }
 }
 
+/// The items of `member` of the app's own (`ptyrc-server`, `own_answer`).
+fn own_items(v: &mut Value, member: &str) {
+    if let Some(Value::Array(items)) = v.get_mut(member) {
+        items.retain(|i| i.get("owner").and_then(Value::as_u64) == Some(OWNER));
+    }
+}
+
+/// Refused unless every member of `params` is in `known`
+/// (`ptyrc-server`, `focus::members`).
+fn members(params: &Value, known: &[&str]) -> Result<(), CallError> {
+    let unknown =
+        (params.as_object()).and_then(|o| o.keys().find(|k| !known.contains(&k.as_str())));
+    match unknown {
+        Some(key) => Err(CallError {
+            hint: Some(format!("members: {}", known.join(", "))),
+            ..CallError::new("bad-params", format!("unknown member: {key}"))
+        }),
+        None => Ok(()),
+    }
+}
+
+fn widget_id(params: &Value) -> Result<u64, CallError> {
+    match params.get("id") {
+        None | Some(Value::Null) => Err(CallError::new("bad-params", "id: required")),
+        Some(id) => id
+            .as_u64()
+            .ok_or_else(|| CallError::new("bad-params", "id: a widget id")),
+    }
+}
+
+/// What the driver leaves pending, in a `batch`.
+fn not_in_batch(method: &str) -> CallError {
+    CallError::new("bad-request", format!("{method}: not allowed in a batch"))
+}
+
+/// A key of `widget.ask`: a named key that is not text; `false`: none.
+fn ask_key(params: &Value, member: &str, default: &str, hint: &str) -> Result<String, CallError> {
+    let named = |key: &str| {
+        let ok = key_bytes(key).is_some() && key.chars().count() > 1 && key != "space";
+        match ok {
+            true => Ok(key.to_owned()),
+            false => Err(format!("{member}: not a key: {key}")),
+        }
+    };
+    match params.get(member) {
+        None | Some(Value::Null) => named(default),
+        Some(Value::Bool(false)) => Ok(String::new()),
+        Some(Value::String(key)) => named(key),
+        Some(_) => Err(format!("{member}: a key name, or false")),
+    }
+    .map_err(|e| CallError {
+        hint: Some(hint.into()),
+        ..CallError::new("bad-params", e)
+    })
+}
+
+impl Headless {
+    /// `draw.ext {name, function, params, ...}`: the sprite the
+    /// extension draws, the other members laid over it
+    /// (`ptyrc-server`, `rpc::draw_ext`).
+    fn draw_ext_call(&mut self, params: Value) -> Result<Value, CallError> {
+        let Value::Object(mut fields) = params else {
+            return Err(CallError::new("bad-params", "an object is required"));
+        };
+        let mut take = |k: &str| fields.remove(k).and_then(|v| v.as_str().map(String::from));
+        let (name, function) = (take("name"), take("function"));
+        let (Some(name), Some(function)) = (name, function) else {
+            return Err(CallError::new(
+                "bad-params",
+                "name and function are required",
+            ));
+        };
+        let ext_params = fields.remove("params").unwrap_or_else(|| json!({}));
+        let ext = (self.exts.iter().find(|e| e.name() == name))
+            .ok_or_else(|| CallError::new("bad-params", format!("no draw extension {name}")))?;
+        let spec = ext
+            .draw(&function, &ext_params)
+            .map_err(|e| CallError::new("bad-params", e))?;
+        let mut merged = serde_json::to_value(&spec).map_err(bad)?;
+        let update = fields.contains_key("id");
+        if let Value::Object(target) = &mut merged {
+            target.retain(|_, v| !v.is_null());
+            if update {
+                target
+                    .retain(|k, _| matches!(k.as_str(), "content" | "frames" | "loop" | "effect"));
+            }
+            target.extend(fields);
+        }
+        if update {
+            let id = merged["id"].clone();
+            self.answer("draw.update", &merged)?;
+            return Ok(json!({"id": id}));
+        }
+        self.answer("draw.put", &merged)
+    }
+
+    /// `widget.ask {id, quiet, escape, close}` (`ptyrc-server`,
+    /// `focus::widget_ask`).
+    fn widget_ask(&mut self, params: &Value) -> Result<Value, CallError> {
+        members(params, &["id", "quiet", "escape", "close"])?;
+        let id = widget_id(params)?;
+        let quiet = match params.get("quiet") {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(q)) => *q,
+            Some(_) => return Err(CallError::new("bad-params", "quiet: true or false")),
+        };
+        let escape = ask_key(
+            params,
+            "escape",
+            "esc",
+            "a named key that is not text, as esc or f12; false: none",
+        )?;
+        let close = ask_key(
+            params,
+            "close",
+            "ctrl+x",
+            "a named key that is not text, as ctrl+x or f10; false: none",
+        )?;
+        if !close.is_empty() && close == escape {
+            return Err(CallError {
+                hint: Some("the close key differs from the escape key".into()),
+                ..CallError::new("bad-params", format!("close: the escape key: {close}"))
+            });
+        }
+        if self.widgets.ask(OWNER, id, quiet).is_err() {
+            return Err(CallError::new("no-sprite", format!("no widget {id}")));
+        }
+        self.escapes.insert(id, (escape, close));
+        self.settle();
+        Ok(json!({"widget": self.widgets.info(id)}))
+    }
+
+    /// The app's entry of `app.list`, as the driver's (`apps::info`):
+    /// no process, `pid` null.
+    fn app_info(&self) -> Value {
+        let sprites = (self.scene.list_on(self.vt.grid(), &self.frames).iter())
+            .filter(|s| s.owner == OWNER)
+            .count();
+        let widgets = (self.widgets.list().iter())
+            .filter(|w| w.owner == OWNER)
+            .count();
+        json!({
+            "id": OWNER, "kind": "child", "name": self.name, "argv": [],
+            "pid": null, "state": "running", "status": null, "runs": 1,
+            "since": self.now as f64 / 1000.0, "conns": [OWNER], "log": null,
+            "declares": self.grants.is_some(), "store": self.store,
+            "foreground": false, "result": null,
+            "sprites": sprites, "widgets": widgets, "frames": [], "me": true,
+        })
+    }
+
+    /// `batch {calls}`: each call as alone, checked one by one; what
+    /// would be pending refused (`ptyrc-server`, `Driver::batch`).
+    fn batch(&mut self, params: &Value) -> Result<Value, CallError> {
+        let Some(calls) = params.get("calls").and_then(Value::as_array).cloned() else {
+            return Err(CallError::new(
+                "bad-params",
+                "calls: array of {method, params}",
+            ));
+        };
+        let mut results = Vec::with_capacity(calls.len());
+        for call in calls {
+            let method = call
+                .get("method")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            let result = match method {
+                None => Err(CallError::new("bad-request", "missing field `method`")),
+                Some(m) if m == "batch" => Err(CallError::new("bad-request", "batch inside batch")),
+                Some(m) => {
+                    let params = call.get("params").cloned().unwrap_or(Value::Null);
+                    self.in_batch = true;
+                    let r = self.call(&m, params);
+                    self.in_batch = false;
+                    r
+                }
+            };
+            results.push(match result {
+                Ok(value) => json!({"result": value}),
+                Err(e) => {
+                    let mut error = json!({"code": e.code, "message": e.message});
+                    if let Some(h) = e.hint {
+                        error["hint"] = json!(h);
+                    }
+                    json!({"error": error})
+                }
+            });
+        }
+        Ok(json!({"results": results}))
+    }
+}
+
 fn shape_lines(h: &Headless, words: &Words) -> Vec<String> {
     shape(h.vt.grid(), h.vt.grid().rect(), words)
 }
 
 impl Host for Headless {
     fn call(&mut self, method: &str, mut params: Value) -> Result<Value, CallError> {
+        if method == "batch" && !self.in_batch {
+            // The calls are told each as alone; the batch, when refused.
+            let answer = self.batch(&params);
+            if let Err(e) = &answer {
+                self.requests.push(Request {
+                    t: self.now,
+                    method: method.into(),
+                    params: json!({}),
+                    refused: Some(e.code.clone()),
+                    lowered: None,
+                });
+            }
+            return answer;
+        }
         let (answer, lowered) = self.checked(method, &params);
         if method.starts_with("draw.")
             && let Some(p) = params.as_object_mut()
@@ -1837,6 +2106,10 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
     };
     let mut host = Headless::new(size, options.seed);
     host.set_grants(options.grants.clone());
+    let manifest = options.args.get(crate::manifest::MEMBER);
+    if let Some(id) = manifest.and_then(|m| m.get("id")).and_then(Value::as_str) {
+        host.name = id.to_owned();
+    }
     let mut texts: Vec<(u64, &str)> = match &options.under {
         Under::Text(text) => vec![(0, text.as_str())],
         Under::Screens(s) => s.iter().map(|(t, text)| (*t, text.as_str())).collect(),
@@ -2035,7 +2308,9 @@ mod tests {
     #[test]
     fn known_unknown_and_served() {
         let mut h = host(&["text"], &[]);
-        let e = h.call("draw.list", json!({})).unwrap_err();
+        let e = Headless::new((4, 1), 1)
+            .call("session.colors", json!({}))
+            .unwrap_err();
         assert_eq!(e.code, "headless");
         assert!(e.hint.unwrap().contains("ptyrc dev run"));
         let e = h.call("screen.txt", json!({})).unwrap_err();
@@ -2249,5 +2524,96 @@ mod tests {
         assert_eq!(h.dropped.len(), 2);
         assert_eq!(key_bytes("ctrl+c"), Some(vec![3]));
         assert_eq!(key_bytes("nope"), None);
+    }
+    #[test]
+    fn a_batch_as_the_driver() {
+        let mut h = host(&["shape"], &[]);
+        let put = json!({"content": {"rows": ["x"]}, "anchor": {"at": [0, 0]}});
+        let b = h
+            .call(
+                "batch",
+                json!({"calls": [
+                    {"method": "draw.put", "params": put},
+                    {"method": "draw.list"},
+                    {"method": "screen.wait", "params": {"stable_ms": 60000}},
+                    {"method": "screen.wait", "params": {"stable_ms": 0}},
+                    {"method": "storage.get", "params": {"key": "k"}},
+                    {"method": "batch", "params": {"calls": []}},
+                    {"params": {}},
+                ]}),
+            )
+            .unwrap();
+        let r = &b["results"];
+        let id = r[0]["result"]["id"].as_u64().unwrap();
+        assert_eq!(r[1]["result"]["sprites"][0]["id"], id);
+        assert_eq!(r[2]["error"]["code"], "bad-request");
+        assert_eq!(
+            r[2]["error"]["message"],
+            "screen.wait: not allowed in a batch"
+        );
+        assert_eq!(r[3]["result"]["matched"], true);
+        assert_eq!(r[4]["error"]["code"], "denied");
+        assert_eq!(r[5]["error"]["message"], "batch inside batch");
+        assert_eq!(r[6]["error"]["code"], "bad-request");
+        // Each call told as alone; the batch is not.
+        let told: Vec<&str> = h.requests.iter().map(|r| r.method.as_str()).collect();
+        assert_eq!(
+            told,
+            [
+                "draw.put",
+                "draw.list",
+                "screen.wait",
+                "screen.wait",
+                "storage.get"
+            ]
+        );
+        let e = h.call("batch", json!({})).unwrap_err();
+        assert_eq!(e.code, "bad-params");
+        // Not in a batch, a wait not met is a timeout.
+        let w = h.call("screen.wait", json!({"stable_ms": 60000})).unwrap();
+        assert_eq!(w["matched"], false);
+    }
+
+    #[test]
+    fn lists_exts_and_the_ask() {
+        let mut h = host(&[], &[]);
+        let exts = h.call("draw.exts", json!({})).unwrap();
+        assert!(exts["effects"].as_array().unwrap().contains(&json!("sand")));
+        let names: Vec<&str> = (exts["exts"].as_array().unwrap().iter())
+            .filter_map(|e| e["name"].as_str())
+            .collect();
+        assert!(names.contains(&"shapes"), "{names:?}");
+        let e = h
+            .call("draw.ext", json!({"name": "nope", "function": "box"}))
+            .unwrap_err();
+        assert_eq!(e.message, "no draw extension nope");
+        let b = h.call("widget.borders", json!({})).unwrap();
+        assert!(!b["borders"].as_array().unwrap().is_empty());
+        let w = json!({"widgets": [{"tag": "w", "name": "small", "size": [5, 1],
+                                     "content": {"rows": ["hello"]}}]});
+        h.call("widget.declare", w).unwrap();
+        let w = h.call("widget.show", json!({"tag": "w"})).unwrap();
+        let id = w["widget"]["id"].as_u64().unwrap();
+        // Behind the text, without `front-widget`.
+        let list = h.call("widget.list", json!({})).unwrap();
+        assert_eq!(list["widgets"][0]["id"], id);
+        let e = h
+            .call("widget.ask", json!({"id": id, "escape": "a"}))
+            .unwrap_err();
+        assert_eq!(e.message, "escape: not a key: a");
+        let e = h
+            .call("widget.ask", json!({"id": id, "close": "esc"}))
+            .unwrap_err();
+        assert_eq!(e.message, "close: the escape key: esc");
+        let e = h.call("widget.ask", json!({"id": id, "x": 1})).unwrap_err();
+        assert_eq!(e.message, "unknown member: x");
+        let a = h.call("widget.ask", json!({"id": id})).unwrap();
+        assert!(!a["widget"]["asks"].is_null(), "{a}");
+        assert!(h.call("widget.release", json!({"id": id})).is_ok());
+        let e = h.call("widget.release", json!({"id": 999})).unwrap_err();
+        assert_eq!(e.code, "no-sprite");
+        let apps = h.call("app.list", json!({})).unwrap();
+        assert_eq!(apps["apps"][0]["widgets"], 1);
+        assert_eq!(apps["apps"][0]["me"], true);
     }
 }

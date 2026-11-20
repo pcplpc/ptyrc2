@@ -6,7 +6,8 @@
 use crate::grants::Permission;
 use crate::permissions::Declared;
 use ptyrc_proto::{ErrorCode, RpcError};
-use ptyrc_store::manifest::{self, AppOption, Entry, OptionValue};
+use ptyrc_store::manifest::{self, Entry};
+use ptyrc_store::options::{self, FileGiven, Handle};
 use ptyrc_store::{Dirs, Origin, StoreLock, install};
 use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
@@ -33,6 +34,8 @@ pub(crate) struct Found {
     pub unknown: Vec<String>,
     /// `[app] surface`.
     pub surface: manifest::Surface,
+    /// The files named at the start, by handle.
+    pub files: Vec<Handle>,
     /// This commit has not started yet.
     first: bool,
 }
@@ -62,60 +65,51 @@ fn runner() -> Result<PathBuf, RpcError> {
     })
 }
 
-/// The argument of `init`: the defaults of `[options]`, then `args`.
-/// A name not declared, a value of another type: `bad-params`.
-pub(crate) fn init_args(options: &[AppOption], args: Option<&Value>) -> Result<Value, RpcError> {
-    let json = |v: &OptionValue| match v {
-        OptionValue::Int(n) => Value::from(*n),
-        OptionValue::Float(x) => Value::from(*x),
-        OptionValue::Bool(b) => Value::from(*b),
-        OptionValue::Str(s) => Value::from(s.as_str()),
-    };
-    let mut out: Map<String, Value> = options
-        .iter()
-        .map(|o| (o.name.clone(), json(&o.default)))
-        .collect();
-    let Some(args) = args else {
-        return Ok(Value::Object(out));
-    };
-    let names = || {
-        let names: Vec<&str> = options.iter().map(|o| o.name.as_str()).collect();
-        match names.is_empty() {
-            true => "the app has no option".to_string(),
-            false => format!("options: {}", names.join(", ")),
+/// `args` and `files` of `app.start`, checked against the manifest
+/// (`options::resolve`); each file checked again on the disk: absolute,
+/// canonical, a regular file or a directory. `bad-params` else.
+pub(crate) fn resolve(
+    m: &manifest::Manifest,
+    args: Option<&Value>,
+    files: Option<&Value>,
+) -> Result<options::Resolved, RpcError> {
+    let bad = |e: ptyrc_store::Error| {
+        let error = RpcError::bad_params(e.message);
+        match e.hint {
+            Some(hint) => error.with_hint(hint),
+            None => error,
         }
     };
-    let given = args
-        .as_object()
-        .ok_or_else(|| RpcError::bad_params("args: an object, {OPTION: VALUE}"))?;
-    for (name, value) in given {
-        let option = options.iter().find(|o| &o.name == name).ok_or_else(|| {
-            RpcError::bad_params(format!("args: no option `{name}`")).with_hint(names())
+    let files: Vec<FileGiven> = match files {
+        None => Vec::new(),
+        Some(Value::Array(list)) => (list.iter())
+            .map(FileGiven::from_wire)
+            .collect::<Result<_, _>>()
+            .map_err(RpcError::bad_params)?,
+        Some(_) => {
+            return Err(RpcError::bad_params("files: an array")
+                .with_hint(r#"[{"handle": "f0", "path": "/abs", "kind": "file"}]"#));
+        }
+    };
+    for f in &files {
+        options::check_named(&f.path, f.kind, f.write).map_err(|why| {
+            RpcError::bad_params(format!("files: {why}"))
+                .with_hint("a path made absolute and canonical by the launcher")
         })?;
-        let fits = match option.default {
-            OptionValue::Int(_) => value.is_i64(),
-            OptionValue::Float(_) => value.is_number(),
-            OptionValue::Bool(_) => value.is_boolean(),
-            OptionValue::Str(_) => value.is_string(),
-        };
-        if !fits {
-            return Err(RpcError::bad_params(format!(
-                "args: {name}: {} wanted",
-                option.default.type_name()
-            )));
-        }
-        out.insert(name.clone(), value.clone());
     }
-    Ok(Value::Object(out))
+    options::resolve(m, args, &files).map_err(bad)
 }
 
-/// What `[permissions]` and `[limits]` declare, and the names not
-/// known here. A limit is asked as its permission (`limit-memory`,
-/// `limit-time`), without a reason: the pop-up shows the figures.
-fn declared(manifest: &manifest::Manifest) -> (Declared, Vec<String>) {
+/// What `[permissions]` and `[limits]` declare for this run (an option
+/// tied to a permission by `needs`: only when given), the user's words
+/// and patterns, and the names not known here. A limit is asked as its
+/// permission (`limit-memory`, `limit-time`), without a reason: the
+/// pop-up shows the figures.
+fn declared(manifest: &manifest::Manifest, run: &options::Resolved) -> (Declared, Vec<String>) {
     let mut declared = Declared::default();
     let mut unknown = Vec::new();
-    for p in &manifest.permissions {
+    let asked = run.asked(manifest);
+    for p in (manifest.permissions.iter()).filter(|p| asked.contains(&p.name.as_str())) {
         match Permission::parse(&p.name) {
             Some(permission) => {
                 declared.permissions.insert(permission, p.why.clone());
@@ -132,6 +126,10 @@ fn declared(manifest: &manifest::Manifest) -> (Declared, Vec<String>) {
         declared.permissions.entry(permission).or_default();
         declared.limits.push((l.name.clone(), l.value));
     }
+    declared.hand.words = run.words.clone();
+    declared.hand.patterns = (run.patterns.iter())
+        .map(|p| (p.pattern.clone(), p.regex))
+        .collect();
     (declared, unknown)
 }
 
@@ -186,6 +184,7 @@ fn of_tree(
     installed: &install::Installed,
     tree: &Path,
     args: Option<&Value>,
+    files: Option<&Value>,
 ) -> Result<Found, RpcError> {
     let source = std::fs::read(tree.join(MANIFEST)).map_err(|e| {
         RpcError::new(
@@ -211,8 +210,9 @@ fn of_tree(
             "store: an origin may not begin with native/",
         ));
     }
-    let init = init_args(&manifest.options, args)?;
-    let (declared, unknown) = declared(&manifest);
+    let run = resolve(&manifest, args, files)?;
+    let (declared, unknown) = declared(&manifest, &run);
+    let init = Value::Object(run.init);
     let commit: String = installed.commit.chars().take(10).collect();
     Ok(Found {
         origin: installed.origin.clone(),
@@ -223,12 +223,18 @@ fn of_tree(
         declared,
         unknown,
         surface: manifest.app.surface,
+        files: run.files,
         first: !installed.started,
     })
 }
 
-/// The installed app `name` (an id or an origin) with `args`.
-pub(crate) fn find(name: &str, args: Option<&Value>) -> Result<Found, RpcError> {
+/// The installed app `name` (an id or an origin) with `args` and
+/// `files` of `app.start`.
+pub(crate) fn find(
+    name: &str,
+    args: Option<&Value>,
+    files: Option<&Value>,
+) -> Result<Found, RpcError> {
     let dirs = Dirs::from_env().map_err(refused)?;
     let (installed, tree) = install::locate(&dirs, name).map_err(|e| {
         let error = refused(e);
@@ -237,7 +243,7 @@ pub(crate) fn find(name: &str, args: Option<&Value>) -> Result<Found, RpcError> 
             None => error.with_hint("ptyrc store ls lists what is installed"),
         }
     })?;
-    of_tree(&installed, &tree, args)
+    of_tree(&installed, &tree, args, files)
 }
 
 impl Found {
@@ -269,41 +275,97 @@ impl Found {
 mod tests {
     use super::*;
 
-    fn options() -> Vec<AppOption> {
-        vec![
-            AppOption {
-                name: "rate".into(),
-                default: OptionValue::Int(20),
-                doc: String::new(),
-            },
-            AppOption {
-                name: "word".into(),
-                default: OptionValue::Str("a".into()),
-                doc: String::new(),
-            },
-        ]
+    const HEAD: &str = "[app]\nid = \"a\"\nversion = \"1\"\nsummary = \"s\"\n\
+                        license = \"GPL-3.0-or-later\"\napi = 1\nscript = \"app.js\"\n";
+
+    fn manifest(rest: &str) -> manifest::Manifest {
+        manifest::parse(&format!("{HEAD}{rest}")).unwrap()
     }
+
+    const SNAKE: &str = "[permissions]\nshape = \"walls\"\nkeys-arrows = \"steer\"\n\
+        words = { list = [\"food\"], why = \"eat\" }\n\
+        [options]\nrate = { type = \"int\", default = 20, doc = \"r\" }\n\
+        grab = { type = \"bool\", default = false, needs = [\"keys-arrows\"], doc = \"g\" }\n\
+        word = { type = \"word\", doc = \"w\" }\n\
+        mark = { type = \"pattern\", list = true, doc = \"m\" }\n";
 
     #[test]
     fn defaults_then_args() {
+        let m = manifest(SNAKE);
+        let init = |args: Value| Value::Object(resolve(&m, Some(&args), None).unwrap().init);
         assert_eq!(
-            init_args(&options(), None).unwrap(),
-            json!({"rate": 20, "word": "a"})
+            init(json!({})),
+            json!({"rate": 20, "grab": false, "word": null, "mark": []})
         );
-        assert_eq!(
-            init_args(&options(), Some(&json!({"rate": 3}))).unwrap(),
-            json!({"rate": 3, "word": "a"})
-        );
+        assert_eq!(init(json!({"rate": 3}))["rate"], json!(3));
+        let e = resolve(&m, Some(&json!({"speed": 3})), None).unwrap_err();
+        assert_eq!(e.hint.as_deref(), Some("options: grab, mark, rate, word"));
+        assert!(resolve(&m, Some(&json!({"rate": "3"})), None).is_err());
+        assert!(resolve(&m, Some(&json!([1])), None).is_err());
+        assert!(resolve(&m, None, Some(&json!({}))).is_err());
+        let e = resolve(&manifest(""), Some(&json!({"x": 1})), None).unwrap_err();
+        assert_eq!(e.hint.as_deref(), Some("the app has no option"));
     }
 
     #[test]
-    fn an_option_not_declared_or_of_another_type() {
-        let e = init_args(&options(), Some(&json!({"speed": 3}))).unwrap_err();
-        assert_eq!(e.hint.as_deref(), Some("options: rate, word"));
-        assert!(init_args(&options(), Some(&json!({"rate": "3"}))).is_err());
-        assert!(init_args(&options(), Some(&json!([1]))).is_err());
-        let e = init_args(&[], Some(&json!({"x": 1}))).unwrap_err();
-        assert_eq!(e.hint.as_deref(), Some("the app has no option"));
+    fn a_permission_by_option() {
+        let m = manifest(SNAKE);
+        let names = |args: Value| {
+            let run = resolve(&m, Some(&args), None).unwrap();
+            let (d, _) = declared(&m, &run);
+            let names: Vec<&str> = d.permissions.keys().map(|p| p.name()).collect();
+            names.join(" ")
+        };
+        assert_eq!(names(json!({})), "shape words");
+        assert_eq!(names(json!({"grab": true})), "shape words keys-arrows");
+        assert_eq!(names(json!({"grab": false})), "shape words");
+        // The rest answered: the pop-up asks the difference alone.
+        let run = resolve(&m, Some(&json!({"grab": true})), None).unwrap();
+        let (d, _) = declared(&m, &run);
+        let entry = crate::permissions::Entry {
+            allow: [Permission::Shape, Permission::Words].into(),
+            deny: Default::default(),
+        };
+        let r = crate::permissions::resolve(&d, Some(&entry), false);
+        assert_eq!(r.missing, [Permission::KeysArrows]);
+        let (d, _) = declared(&m, &resolve(&m, None, None).unwrap());
+        assert!(
+            crate::permissions::resolve(&d, Some(&entry), false)
+                .missing
+                .is_empty()
+        );
+        let run = resolve(&m, Some(&json!({"word": "Fish", "mark": ["a b"]})), None).unwrap();
+        let (d, _) = declared(&m, &run);
+        assert_eq!(d.words, ["food"]);
+        assert_eq!(d.hand.words, ["Fish"]);
+        assert_eq!(d.hand.patterns, [("a b".to_string(), false)]);
+    }
+
+    #[test]
+    fn files_checked_again() {
+        let m = manifest(
+            "[permissions]\nfiles = \"f\"\n[options]\nstop = { type = \"file\", doc = \"d\" }\n",
+        );
+        let args = json!({"stop": {"file": "f0", "name": "x"}});
+        let file = |path: &str, kind: &str| json!([{"handle": "f0", "path": path, "kind": kind}]);
+        let here =
+            std::fs::canonicalize(concat!(env!("CARGO_MANIFEST_DIR"), "/src/store.rs")).unwrap();
+        let here = here.to_string_lossy();
+        let run = resolve(&m, Some(&args), Some(&file(&here, "file"))).unwrap();
+        assert_eq!(run.files[0].path.to_string_lossy(), here);
+        assert!(!run.files[0].write);
+        for (path, kind) in [
+            ("/dev/null", "file"),
+            ("/nothing/here", "file"),
+            ("/tmp/../etc/passwd", "file"),
+            (&*here, "dir"),
+            ("relative", "file"),
+        ] {
+            assert!(
+                resolve(&m, Some(&args), Some(&file(path, kind))).is_err(),
+                "{path}"
+            );
+        }
     }
 
     #[test]
@@ -315,7 +377,7 @@ mod tests {
              [limits]\nmemory-mib = 128\nlog-mib = 2\ntick-ms = 100\n",
         )
         .unwrap();
-        let (d, unknown) = declared(&m);
+        let (d, unknown) = declared(&m, &options::resolve(&m, None, &[]).unwrap());
         assert!(unknown.is_empty());
         let names: Vec<&str> = d.permissions.keys().map(|p| p.name()).collect();
         assert_eq!(names, ["shape", "limit-memory", "limit-time"]);

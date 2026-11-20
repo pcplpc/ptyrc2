@@ -78,6 +78,22 @@ pub(crate) enum Refused {
     Spawn(String),
 }
 
+/// The options of the launcher for a store app (principle 4), and the
+/// files the user named: the user's hand, never told to the app.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Given {
+    /// `--front`, `--back`: its band, whatever it asks.
+    pub front: Option<bool>,
+    /// `--prefer`: of its widgets and of `anchor {auto}`.
+    pub prefer: Option<String>,
+    /// `--alpha`: multiplies the opacity of its sprites.
+    pub alpha: Option<f64>,
+    /// `--border`: of its widgets.
+    pub border: Option<String>,
+    /// The handles of `app.start {files}`.
+    pub files: Vec<ptyrc_store::options::Handle>,
+}
+
 pub(crate) struct App {
     pub id: u64,
     pub kind: Kind,
@@ -98,6 +114,9 @@ pub(crate) struct App {
     pub grants: Grants,
     /// Of a store app: where it draws.
     pub surface: Option<Surface>,
+    /// Of a store app: what the user gave at its start, kept across a
+    /// restart.
+    pub given: Given,
     /// What it declared at its start (`app.start {declares}`).
     pub declares: Option<Declared>,
     /// When its present run began: 0 of its session time.
@@ -129,7 +148,27 @@ enum Enrolment {
     Lapsed,
 }
 
+/// A file the user named at the start, as `file.*` serves it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Named<'a> {
+    pub path: &'a std::path::Path,
+    pub kind: ptyrc_store::FileKind,
+    /// `write` in the manifest, and `files-write` held.
+    pub writable: bool,
+}
+
 impl App {
+    /// The file `handle` names for this app; `None`: not one of its
+    /// handles (`no-file`).
+    pub fn file(&self, handle: &str) -> Option<Named<'_>> {
+        let f = self.given.files.iter().find(|f| f.handle == handle)?;
+        Some(Named {
+            path: &f.path,
+            kind: f.kind,
+            writable: f.write && self.grants.holds(crate::grants::Permission::FilesWrite),
+        })
+    }
+
     fn signal(&self, signal: Signal) {
         let Some(pid) = Pid::from_raw(self.pid as i32) else {
             return;
@@ -290,6 +329,7 @@ impl Apps {
             identity: Some(identity.unwrap_or_else(|| Identity::Native(name.clone()))),
             grants: Grants::whole(),
             surface: None,
+            given: Given::default(),
             declares: None,
             started: now,
             result: None,
@@ -355,6 +395,7 @@ impl Apps {
                     identity: None,
                     grants: Grants::whole(),
                     surface: None,
+                    given: Given::default(),
                     declares: None,
                     started: now,
                     result: None,
@@ -434,6 +475,7 @@ impl Apps {
             identity: Some(Identity::Native(name)),
             grants: Grants::whole(),
             surface: None,
+            given: Given::default(),
             declares: None,
             started: now,
             result: None,
@@ -496,6 +538,12 @@ impl Apps {
     pub fn set_result(&mut self, id: u64, value: Value, status: u8) {
         if let Some(app) = self.entries.get_mut(&id) {
             app.result = Some((value, status));
+        }
+    }
+
+    pub fn set_given(&mut self, id: u64, given: Given) {
+        if let Some(app) = self.entries.get_mut(&id) {
+            app.given = given;
         }
     }
 
@@ -861,6 +909,42 @@ mod tests {
         let gone = apps.take_gone(secs(5));
         assert_eq!(gone[0]["state"], "gone");
         assert!(!dir.join("s.app-1.log").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_files_named_kept_across_a_restart() {
+        use crate::grants::Permission;
+        use ptyrc_store::options::Handle;
+        let (mut apps, dir) = apps("files");
+        let id = apps.start(sh("exec sleep 60"), None, false, T0).unwrap();
+        let handle = |h: &str, write: bool| Handle {
+            handle: h.into(),
+            path: dir.join(h),
+            kind: ptyrc_store::FileKind::File,
+            write,
+        };
+        apps.set_given(
+            id,
+            Given {
+                files: vec![handle("f0", false), handle("f1", true)],
+                ..Given::default()
+            },
+        );
+        let held = |p: &[Permission]| Some((Declared::default(), Grants::of(p.to_vec())));
+        apps.grant(id, held(&[]));
+        let app = apps.get(id).unwrap();
+        assert_eq!(app.file("f0").unwrap().path, dir.join("f0"));
+        assert!(!app.file("f0").unwrap().writable);
+        assert!(!app.file("f1").unwrap().writable, "files-write not held");
+        assert_eq!(app.file("f2"), None);
+        assert_eq!(app.file("/etc/passwd"), None);
+        apps.grant(id, held(&[Permission::FilesWrite]));
+        let app = apps.get(id).unwrap();
+        assert!(app.file("f1").unwrap().writable && !app.file("f0").unwrap().writable);
+        apps.restart(id, None, None, secs(1)).unwrap();
+        assert!(apps.get(id).unwrap().file("f1").is_some());
+        apps.stop(id, secs(2)).unwrap();
         fs::remove_dir_all(dir).unwrap();
     }
 

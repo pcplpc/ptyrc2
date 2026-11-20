@@ -7,7 +7,7 @@ use crate::{Common, Fail};
 use ptyrc_proto::session;
 use ptyrc_store::build;
 use ptyrc_store::manifest::{self, MANIFEST};
-use ptyrc_store::{Checked, DirTree, Entry, ErrorKind, Manifest, OptionValue, check};
+use ptyrc_store::{Checked, DirTree, Entry, ErrorKind, Manifest, check, options};
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -51,42 +51,26 @@ fn manifest_of(dir: &Path) -> Result<Manifest, Fail> {
     Ok(manifest::parse(&text)?)
 }
 
-fn option_json(v: &OptionValue) -> Value {
-    match v {
-        OptionValue::Int(n) => json!(n),
-        OptionValue::Float(f) => json!(f),
-        OptionValue::Bool(b) => json!(b),
-        OptionValue::Str(s) => json!(s),
-    }
-}
-
-/// The argument of `init`: the defaults of `[options]`, then the words
-/// given, as `ptyrc app` reads them (`--NAME VALUE`, `--NAME=VALUE`,
-/// `--NAME`, `--no-NAME`) or as `NAME=VALUE`.
+/// The argument of `init`: the words given read as `ptyrc app` reads
+/// them (`ptyrc_store::options::read`), or as `NAME=VALUE`; the
+/// defaults of `[options]` filled in (`options::resolve`).
 fn init_args(m: &Manifest, given: &[String]) -> Result<Value, Fail> {
-    let mut args: Map<String, Value> = m
-        .options
-        .iter()
-        .map(|o| (o.name.clone(), option_json(&o.default)))
-        .collect();
-    let names = {
-        let n: Vec<String> = m
-            .options
-            .iter()
-            .map(|o| format!("--{} ({}): {}", o.name, o.default.type_name(), o.doc))
-            .collect();
-        if n.is_empty() {
-            "the manifest has no [options]".to_string()
-        } else {
-            format!("[options]: {}", n.join("; "))
+    let names = match m.options.is_empty() {
+        true => "the manifest has no [options]".to_string(),
+        false => {
+            let each = (m.options.iter())
+                .map(|o| format!("--{} ({}): {}", o.name, o.type_name(), o.doc));
+            format!("[options]: {}", each.collect::<Vec<_>>().join("; "))
         }
     };
-    let parsed = crate::storeapp::parse_words(m, given, &names)?;
-    let Some(Value::Object(parsed)) = parsed else {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let read = options::read(m, given, &cwd)
+        .map_err(|e| Fail::usage(e.message, e.hint.unwrap_or(names.clone())))?;
+    let Some(launch) = read else {
         return Err(Fail::usage("--help: the options of the manifest", names));
     };
-    args.extend(parsed);
-    Ok(Value::Object(args))
+    let args = Value::Object(launch.args);
+    Ok(Value::Object(options::resolve(m, Some(&args), &launch.files)?.init))
 }
 
 /// The arguments of `ptyrc-box` that name the guest: `--script APP.js`,

@@ -5,9 +5,11 @@
 
 use crate::manage::catalog::{self, Kind, Opt};
 use crate::{Common, Fail};
-use ptyrc_store::manifest::{self, Manifest, OptionValue};
+use ptyrc_store::manifest;
+use ptyrc_store::options::{self, OptionType};
 use ptyrc_store::{Dirs, Installed, install};
-use serde_json::{Map, Value, json};
+use ptyrc_store::{Launch, Manifest, OptionValue};
+use serde_json::Value;
 use std::io::IsTerminal;
 use std::process::ExitCode;
 
@@ -61,116 +63,46 @@ pub fn installed() -> Vec<StoreApp> {
         .collect()
 }
 
+/// `--help`: the manifest's (`options::help`), its origin, tier and
+/// commit.
 fn usage(app: &StoreApp) -> String {
     let m = &app.manifest;
-    let mut text = format!(
-        "usage: ptyrc app {} [OPTION...]\n\n{}\n{} {}, {} {}\n",
-        m.app.id,
-        m.app.summary,
+    let mut text = options::help(m, &format!("ptyrc app {}", m.app.id));
+    let told = format!(
+        "{} {}, {} {}\n",
         app.installed.origin,
         m.app.version,
         app.installed.tier.as_str(),
         app.installed.commit.chars().take(10).collect::<String>(),
     );
-    if !m.options.is_empty() {
-        text.push_str("\noptions:\n");
-    }
-    for o in &m.options {
-        let (value, default) = match &o.default {
-            OptionValue::Bool(b) => (String::new(), b.to_string()),
-            OptionValue::Int(n) => (" N".into(), n.to_string()),
-            OptionValue::Float(x) => (" X".into(), x.to_string()),
-            OptionValue::Str(s) => (" TEXT".into(), format!("{s:?}")),
-        };
-        let flag = format!("--{}{value}", o.name);
-        text.push_str(&format!("  {flag:<20} {} [default: {default}]\n", o.doc));
-    }
-    if m.options
-        .iter()
-        .any(|o| matches!(o.default, OptionValue::Bool(_)))
-    {
-        text.push_str("  --no-NAME            a yes-or-no option, off\n");
-    }
-    text.push_str(&format!(
-        "\n  --wait, --no-wait    wait for its end, print its result [default: {}]\n",
-        if m.app.wait { "--wait" } else { "--no-wait" }
-    ));
+    // After the summary: `usage: ...\n\nSUMMARY\n`.
+    let summary_end = text.find("\n\n").map_or(0, |i| i + 2) + m.app.summary.len() + 1;
+    text.insert_str(summary_end.min(text.len()), &told);
     text
 }
 
-/// `--NAME VALUE`, `--NAME=VALUE`; of a yes-or-no option `--NAME`,
-/// `--no-NAME`: the `args` of `app.start {store}`. `Ok(None)`: `--help`.
-pub fn parse_options(app: &StoreApp, words: &[String]) -> Result<Option<Value>, Fail> {
-    let hint = format!("ptyrc app {} --help lists the options", app.manifest.app.id);
-    parse_words(&app.manifest, words, &hint)
-}
-
-/// `parse_options` of a manifest; `hint`: that of every error.
-pub fn parse_words(m: &Manifest, words: &[String], hint: &str) -> Result<Option<Value>, Fail> {
-    let options = &m.options;
-    let bad = |message: String| Fail {
-        status: 2,
-        message,
-        hint: Some(hint.to_string()),
-    };
-    let mut args = Map::new();
-    let mut words = words.iter();
-    while let Some(word) = words.next() {
-        if word == "--help" || word == "-h" {
-            return Ok(None);
+/// The words after `ptyrc app ID`, read against the manifest
+/// (`ptyrc_store::options::read`), paths against the working directory.
+/// `Ok(None)`: `--help`.
+pub fn parse_options(app: &StoreApp, words: &[String]) -> Result<Option<Launch>, Fail> {
+    let cwd = std::env::current_dir().map_err(|e| Fail {
+        status: 5,
+        message: format!("the working directory: {e}"),
+        hint: None,
+    })?;
+    options::read(&app.manifest, words, &cwd).map_err(|e| {
+        let hint = format!("ptyrc app {} --help lists the options", app.manifest.app.id);
+        Fail {
+            status: 2,
+            message: e.message,
+            hint: Some(e.hint.unwrap_or(hint)),
         }
-        // `NAME=VALUE`: the form of `dev run`, kept.
-        let bare = word.contains('=') && !word.starts_with('-');
-        let Some(flag) = word.strip_prefix("--").or(bare.then_some(word.as_str())) else {
-            return Err(bad(format!("{word}: an option is wanted, as --NAME VALUE")));
-        };
-        let (name, mut inline) = match flag.split_once('=') {
-            Some((name, value)) => (name, Some(value.to_string())),
-            None => (flag, None),
-        };
-        let found = |name: &str| options.iter().find(|o| o.name == name);
-        let (option, off) = match (found(name), name.strip_prefix("no-").and_then(found)) {
-            (Some(option), _) => (option, false),
-            (None, Some(option)) if matches!(option.default, OptionValue::Bool(_)) => {
-                (option, true)
-            }
-            _ => return Err(bad(format!("--{name}: no such option"))),
-        };
-        let mut value = |what: &str| {
-            inline
-                .take()
-                .or_else(|| words.next().cloned())
-                .ok_or_else(|| bad(format!("--{name}: {what} is wanted")))
-        };
-        let parsed = match &option.default {
-            OptionValue::Bool(_) => match inline.take().as_deref() {
-                None => json!(!off),
-                Some("true" | "yes" | "on") => json!(!off),
-                Some("false" | "no" | "off") => json!(off),
-                Some(v) => return Err(bad(format!("--{name}={v}: true or false"))),
-            },
-            OptionValue::Int(_) => {
-                let v = value("an integer")?;
-                json!(
-                    v.parse::<i64>()
-                        .map_err(|_| bad(format!("--{name} {v}: an integer")))?
-                )
-            }
-            OptionValue::Float(_) => {
-                let v = value("a number")?;
-                let x = v.parse::<f64>().ok().filter(|x| x.is_finite());
-                json!(x.ok_or_else(|| bad(format!("--{name} {v}: a number")))?)
-            }
-            OptionValue::Str(_) => json!(value("a text")?),
-        };
-        args.insert(option.name.clone(), parsed);
-    }
-    Ok(Some(Value::Object(args)))
+    })
 }
 
 /// The params of `app.start` for `app` with the option words `words`.
 pub fn start_params(app: &StoreApp, words: &[String]) -> Result<Option<Value>, Fail> {
-    Ok(parse_options(app, words)?.map(|args| json!({"store": app.installed.origin, "args": args})))
+    Ok(parse_options(app, words)?.map(|launch| launch.params(&app.installed.origin)))
 }
 
 /// `ptyrc app ID|ORIGIN [--wait|--no-wait] [OPTION...]`: the driver
@@ -178,19 +110,12 @@ pub fn start_params(app: &StoreApp, words: &[String]) -> Result<Option<Value>, F
 /// yet. Waiting (`[app] wait = true`: by default): until it exits, its
 /// result printed, the command's status that of the result.
 pub fn run(common: &Common, app: &StoreApp, words: &[String]) -> Result<ExitCode, Fail> {
-    let mut wait = app.manifest.app.wait;
-    let mut rest = Vec::with_capacity(words.len());
-    for word in words {
-        match word.as_str() {
-            "--wait" => wait = true,
-            "--no-wait" => wait = false,
-            _ => rest.push(word.clone()),
-        }
-    }
-    let Some(params) = start_params(app, &rest)? else {
+    let Some(launch) = parse_options(app, words)? else {
         print!("{}", usage(app));
         return Ok(ExitCode::SUCCESS);
     };
+    let wait = launch.launcher.wait.unwrap_or(app.manifest.app.wait);
+    let params = launch.params(&app.installed.origin);
     let mut client = crate::connect(common)?;
     let info = crate::manage::start_with(&mut client, params)?;
     if !wait {
@@ -265,28 +190,18 @@ pub fn catalog_apps(names: &[&str]) -> Vec<catalog::App> {
             true => app.installed.origin.clone(),
             false => id.clone(),
         };
-        let options = (m.options.iter())
-            .map(|o| Opt {
-                flags: vec![format!("--{}", o.name)],
-                kind: match o.default {
-                    OptionValue::Bool(_) => Kind::Flag,
-                    _ => Kind::Value,
-                },
-                choices: Vec::new(),
-                default: match &o.default {
-                    OptionValue::Bool(_) => None,
-                    OptionValue::Int(n) => Some(n.to_string()),
-                    OptionValue::Float(x) => Some(x.to_string()),
-                    OptionValue::Str(s) => Some(s.clone()),
-                },
-                help: o.doc.clone(),
+        let options = catalog_rows(app);
+        let positionals = (m.args.iter())
+            .map(|p| catalog::Pos {
+                name: p.option.name.to_uppercase(),
+                help: p.option.doc.clone(),
             })
             .collect();
         out.push(catalog::App {
             name,
             help: format!("store, {}: {}", app.installed.tier.as_str(), m.app.summary),
             options,
-            positionals: Vec::new(),
+            positionals,
             random: Vec::new(),
             widgets: false,
         });
@@ -294,9 +209,67 @@ pub fn catalog_apps(names: &[&str]) -> Vec<catalog::App> {
     out
 }
 
+/// The menu rows of `app`: its options, then the launcher's.
+fn catalog_rows(app: &StoreApp) -> Vec<Opt> {
+    let m = &app.manifest;
+    let mut options: Vec<Opt> = (m.options.iter())
+        .map(|o| Opt {
+            flags: o
+                .short
+                .map(|c| format!("-{c}"))
+                .into_iter()
+                .chain([format!("--{}", o.name)])
+                .collect(),
+            kind: match (o.ty, o.choices.is_empty()) {
+                (OptionType::Bool, _) => Kind::Flag,
+                (_, false) => Kind::Choice,
+                _ => Kind::Value,
+            },
+            choices: o.choices.clone(),
+            default: match &o.default {
+                None | Some(OptionValue::Bool(_)) => None,
+                Some(d) => Some(d.text()),
+            },
+            help: o.doc.clone(),
+        })
+        .collect();
+    options.extend(launcher_rows());
+    options
+}
+
+/// The rows of the launcher's options, the same for every store app.
+fn launcher_rows() -> Vec<Opt> {
+    let row = |flags: &[&str], kind: Kind, choices: &[&str], help: &str| Opt {
+        flags: flags.iter().map(|f| f.to_string()).collect(),
+        kind,
+        choices: choices.iter().map(|c| c.to_string()).collect(),
+        default: None,
+        help: help.to_string(),
+    };
+    vec![
+        row(&["--front"], Kind::Flag, &[], "in front of the text"),
+        row(&["--back"], Kind::Flag, &[], "behind the text"),
+        row(&["--frame"], Kind::Value, &[], "the frame it draws on"),
+        row(
+            &["--prefer"],
+            Kind::Choice,
+            options::PREFER,
+            "where its widgets go",
+        ),
+        row(
+            &["--alpha"],
+            Kind::Value,
+            &[],
+            "the opacity of what it draws, 0 to 1",
+        ),
+        row(&["--border"], Kind::Value, &[], "the border of its widgets"),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn app() -> StoreApp {
         let manifest = manifest::parse(
@@ -325,7 +298,9 @@ mod tests {
     #[test]
     fn options_from_the_manifest() {
         let app = app();
-        let parsed = |text: &str| parse_options(&app, &words(text));
+        let parsed = |text: &str| {
+            parse_options(&app, &words(text)).map(|l| l.map(|l| Value::Object(l.args)))
+        };
         assert_eq!(parsed("").unwrap(), Some(json!({})));
         assert_eq!(
             parsed("--rate 3 --loud --word=fish").unwrap(),
@@ -342,8 +317,24 @@ mod tests {
         assert!(parsed("--speed 3").is_err());
         assert!(parsed("--no-rate").is_err());
         assert!(parsed("fish").is_err());
+        let p = start_params(&app, &words("--front --alpha 0.5 --rate 2"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            p,
+            json!({"store": "example.org/a/sand", "args": {"rate": 2}, "front": true, "alpha": 0.5})
+        );
         let help = usage(&app);
-        assert!(help.contains("--rate N") && help.contains("example.org/a/sand"));
+        assert!(help.contains("--rate N") && help.contains("--front, --back"));
+        assert!(
+            help.contains("Sand.\nexample.org/a/sand 1.0.0, untested 0123456789\n"),
+            "{help}"
+        );
+        let rows = &catalog_rows(&app);
+        assert!(
+            rows.iter()
+                .any(|o| o.flags == ["--prefer"] && o.choices.len() == 10)
+        );
     }
 
     #[test]

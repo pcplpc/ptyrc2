@@ -853,3 +853,164 @@ fn the_pop_up_of_a_store_app_shows_its_limits() {
     let answer = rx.recv_timeout(Duration::from_secs(10)).unwrap();
     assert_eq!(answer, "cancelled");
 }
+
+const OPTIONS_MANIFEST: &str = r#"[app]
+id = "opts"
+version = "0.1.0"
+summary = "Logs what it was given."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+
+[permissions]
+shape = "the walls"
+keys-arrows = "steering"
+files = "the files named"
+
+[options]
+grab = { type = "bool", default = false, short = "g", needs = ["keys-arrows"], doc = "steer" }
+word = { type = "word", doc = "a word" }
+mark = { type = "pattern", list = true, doc = "marked" }
+stop = { type = "file", doc = "words left out" }
+"#;
+
+const OPTIONS: &str = r#"
+import { call, log, period } from "ptyrc";
+let n = 0;
+export function init(args) {
+  log("args=" + JSON.stringify(args));
+  const s = call("draw.put", { content: { rows: ["x"] }, at: [0, 0] });
+  const mine = call("draw.list", {}).sprites.find((x) => x.id == s.id);
+  log("sprite=" + JSON.stringify(mine));
+  period(100);
+}
+export function tick(now) {
+  if (++n != 5) return;
+  const find = (p) => call("screen.find", p).matches.length;
+  log("pattern=" + find({ pattern: "fish xyz" }) + " other=" + find({ pattern: "abc" })
+      + " regex=" + find({ pattern: "fish xyz", regex: true }) + " word=" + find({ pattern: "rose" }));
+  period(0);
+}
+export function event(topic, data) {}
+"#;
+
+#[test]
+fn the_options_of_a_store_app() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let sb = Sandbox::new("options");
+    install(&sb, "opts", OPTIONS_MANIFEST.to_string(), OPTIONS);
+    let stop = sb.dir.join("stop.txt");
+    std::fs::write(&stop, "the\n").unwrap();
+    let mut driver = sb.ptyrc();
+    driver
+        .env("PTYRC_BOX", runner())
+        .env("PTYRC_JS", &js)
+        .args(["run", "--name", "s", "--headless", "--size", "60x16", "--"])
+        .args(["sh", "-c", "printf 'abc fish xyz Rose\\n'; exec cat"])
+        .stdin(std::process::Stdio::null());
+    let _driver = common::Proc(driver.spawn().unwrap());
+    let socket = sb.socket("s");
+    wait_for(
+        || std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "socket",
+    );
+    let mut client = sb.client("s");
+
+    // `--help`: from the manifest, the launcher's options beside.
+    let help = sb.run(&["-s", "s", "app", "opts", "--help"]);
+    let help = String::from_utf8_lossy(&help.stdout).into_owned();
+    assert!(
+        help.contains("-g, --grab") && help.contains("[asks: keys-arrows]"),
+        "{help}"
+    );
+    assert!(help.contains("--front, --back"), "{help}");
+
+    // Refused by the launcher: a word outside the rule.
+    let bad = sb.run(&["-s", "s", "app", "opts", "--word", "a b", "--no-wait"]);
+    assert_eq!(bad.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("a word is"));
+
+    // Given: what `--grab` needs is asked, the rest is the user's hand.
+    let stop_arg = stop.to_string_lossy().into_owned();
+    let run = sb.run(&[
+        "-s",
+        "s",
+        "app",
+        "opts",
+        "-g",
+        "--word",
+        "Rose",
+        "--mark",
+        "fish xyz",
+        "--stop",
+        &stop_arg,
+        "--front",
+        "--alpha",
+        "0.5",
+        "--no-wait",
+    ]);
+    let err = String::from_utf8_lossy(&run.stderr).into_owned();
+    assert!(run.status.success(), "{err}");
+    assert!(
+        err.contains("granted as declared: shape, keys-arrows"),
+        "{err}"
+    );
+    let apps = client.call("app.list", json!({})).unwrap();
+    let app = apps["apps"][0].clone();
+    let id = app["id"].as_u64().unwrap();
+    assert_eq!(told(&app)["granted"], json!(["shape", "keys-arrows"]));
+    wait_slow(|| log_of(&mut client, id).contains("pattern="), "the finds");
+    let log = log_of(&mut client, id);
+    assert!(
+        log.contains(r#""stop":{"file":"f0","name":"stop.txt"}"#),
+        "{log}"
+    );
+    assert!(!log.contains(&stop_arg), "a path reached the guest: {log}");
+    assert!(
+        log.contains(r#""word":"Rose""#) && log.contains(r#""grab":true"#),
+        "{log}"
+    );
+    assert!(log.contains(r#""alpha":0.5"#), "{log}");
+    let layer = log.split(r#""layer":"#).nth(1).unwrap_or_default();
+    assert!(
+        layer.starts_with(|c: char| c.is_ascii_digit()),
+        "in front: {log}"
+    );
+    // The user's pattern, exactly, and the user's word; nothing else.
+    assert!(log.contains("pattern=1 other=0 regex=0 word=1"), "{log}");
+
+    // Restarted: asked anew from the same options, the files kept.
+    let again = client.call("app.restart", json!({"app": id})).unwrap();
+    assert_eq!(
+        told(&again["app"])["granted"],
+        json!(["shape", "keys-arrows"])
+    );
+
+    // Not given: nothing more than the rest.
+    let plain = client.call("app.start", json!({"store": "opts"})).unwrap();
+    assert_eq!(told(&plain["app"])["granted"], json!(["shape"]));
+
+    // The driver's checks.
+    for params in [
+        json!({"argv": ["true"], "front": true}),
+        json!({"store": "opts", "alpha": 2}),
+        json!({"store": "opts", "prefer": "middle"}),
+        json!({"store": "opts", "border": "nope"}),
+        json!({"store": "opts", "args": {"word": "a b"}}),
+        json!({"store": "opts", "args": {"stop": {"file": "f0", "name": "x"}}}),
+        json!({"store": "opts", "args": {"stop": {"file": "f0", "name": "x"}},
+               "files": [{"handle": "f0", "path": "stop.txt", "kind": "file"}]}),
+        json!({"store": "opts", "args": {"stop": {"file": "f0", "name": "x"}},
+               "files": [{"handle": "f0", "path": "/dev/null", "kind": "file"}]}),
+    ] {
+        assert_eq!(
+            code(client.call("app.start", params.clone())),
+            "bad-params",
+            "{params}"
+        );
+    }
+}

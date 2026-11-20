@@ -25,6 +25,8 @@ pub enum ErrorKind {
     Build,
     /// The file system.
     Io,
+    /// A command line, or `args` of `app.start`, against a manifest.
+    Usage,
 }
 
 /// What was refused (`message`) and the cure (`hint`).

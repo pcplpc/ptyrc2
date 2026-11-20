@@ -386,6 +386,7 @@ mod tests {
                 .collect(),
             words: vec!["food".into(), "fish".into(), "toy".into()],
             limits: Vec::new(),
+            hand: Default::default(),
         }
     }
 

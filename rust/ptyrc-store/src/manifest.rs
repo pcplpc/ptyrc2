@@ -124,7 +124,7 @@ pub fn limit_permission(name: &str) -> &'static str {
 
 /// Option names reserved to ptyrc's launcher (principle 4).
 pub const RESERVED_OPTIONS: &[&str] = &[
-    "alpha", "back", "frame", "front", "help", "no-wait", "prefer", "wait",
+    "alpha", "back", "border", "frame", "front", "help", "no-wait", "prefer", "wait",
 ];
 
 /// Bounds on `words`: count, and characters per word.
@@ -140,6 +140,8 @@ pub struct Manifest {
     pub limits: Vec<Limit>,
     /// Sorted by name.
     pub options: Vec<AppOption>,
+    /// `[args]`: the positionals.
+    pub args: Option<Positional>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -208,38 +210,13 @@ pub struct Limit {
     pub value: u64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct AppOption {
-    pub name: String,
-    pub default: OptionValue,
-    pub doc: String,
-}
-
-/// An option's type is that of its default.
-#[derive(Debug, Clone, PartialEq)]
-pub enum OptionValue {
-    Int(i64),
-    Float(f64),
-    Bool(bool),
-    Str(String),
-}
-
-impl OptionValue {
-    pub fn type_name(&self) -> &'static str {
-        match self {
-            OptionValue::Int(_) => "int",
-            OptionValue::Float(_) => "float",
-            OptionValue::Bool(_) => "bool",
-            OptionValue::Str(_) => "string",
-        }
-    }
-}
+pub use crate::options::{AppOption, OptionType, OptionValue, Positional};
 
 const APP_KEYS: &[&str] = &[
     "api", "assets", "id", "license", "rust", "rustc", "script", "summary", "surface", "tape",
     "version", "wait",
 ];
-const SECTIONS: &[&str] = &["app", "limits", "options", "permissions"];
+const SECTIONS: &[&str] = &["app", "args", "limits", "options", "permissions"];
 
 /// Parses raw bytes: UTF-8, at most [`MAX_MANIFEST`].
 pub fn parse_bytes(bytes: &[u8]) -> Result<Manifest> {
@@ -295,7 +272,7 @@ pub fn parse(src: &str) -> Result<Manifest> {
             "[app] with id, version, summary, license, api, script",
         ));
     };
-    Ok(Manifest {
+    let m = Manifest {
         app: cx.app(app)?,
         permissions: match table(doc, "permissions") {
             Some(t) => cx.permissions(t)?,
@@ -309,7 +286,16 @@ pub fn parse(src: &str) -> Result<Manifest> {
             Some(t) => cx.options(t)?,
             None => Vec::new(),
         },
-    })
+        args: match table(doc, "args") {
+            Some(t) => Some(cx.positional(t)?),
+            None => None,
+        },
+    };
+    crate::options::check_across(&m).map_err(|why| {
+        Error::new(ErrorKind::Manifest, format!("{MANIFEST}: {why}"))
+            .with_hint("the options of the manifest: sdk/template/PROTOCOL.md, Manifest")
+    })?;
+    Ok(m)
 }
 
 fn table<'a, 'i>(doc: &'a DeTable<'i>, key: &str) -> Option<&'a DeTable<'i>> {
@@ -324,16 +310,21 @@ type Field<'a, 'i> = (
     &'a Spanned<DeValue<'i>>,
 );
 
-fn field<'a, 'i>(t: &'a DeTable<'i>, key: &str) -> Option<Field<'a, 'i>> {
+pub(crate) fn field<'a, 'i>(t: &'a DeTable<'i>, key: &str) -> Option<Field<'a, 'i>> {
     t.get_key_value(key)
 }
 
-struct Cx<'s> {
+pub(crate) struct Cx<'s> {
     src: &'s str,
 }
 
 impl Cx<'_> {
-    fn err(&self, span: Range<usize>, msg: impl AsRef<str>, hint: impl Into<String>) -> Error {
+    pub(crate) fn err(
+        &self,
+        span: Range<usize>,
+        msg: impl AsRef<str>,
+        hint: impl Into<String>,
+    ) -> Error {
         let line = line_of(self.src, span.start);
         Error::new(
             ErrorKind::Manifest,
@@ -342,7 +333,7 @@ impl Cx<'_> {
         .with_hint(hint)
     }
 
-    fn unknown(&self, t: &DeTable<'_>, section: &str, known: &[&str]) -> Result<()> {
+    pub(crate) fn unknown(&self, t: &DeTable<'_>, section: &str, known: &[&str]) -> Result<()> {
         for k in t.keys() {
             if !known.contains(&k.get_ref().as_ref()) {
                 return Err(self.err(
@@ -355,7 +346,7 @@ impl Cx<'_> {
         Ok(())
     }
 
-    fn string(
+    pub(crate) fn string(
         &self,
         t: &DeTable<'_>,
         section: &str,
@@ -385,7 +376,7 @@ impl Cx<'_> {
         })
     }
 
-    fn span(&self, t: &DeTable<'_>, key: &str) -> Range<usize> {
+    pub(crate) fn span(&self, t: &DeTable<'_>, key: &str) -> Range<usize> {
         field(t, key).map(|(_, v)| v.span()).unwrap_or(0..0)
     }
 
@@ -739,96 +730,10 @@ impl Cx<'_> {
         }
         Ok(out)
     }
-
-    fn options(&self, t: &DeTable<'_>) -> Result<Vec<AppOption>> {
-        let mut out = Vec::new();
-        let hint =
-            |name: &str| format!("{name} = {{ type = \"int\", default = 20, doc = \"...\" }}");
-        for (k, v) in t.iter() {
-            let name = k.get_ref().as_ref();
-            if !is_name(name, 32) {
-                return Err(self.err(
-                    k.span(),
-                    format!("[options] {name:?}: not a name"),
-                    "lower-case letters, digits and `-`, a letter first, 32 at most",
-                ));
-            }
-            if RESERVED_OPTIONS.contains(&name) {
-                return Err(self.err(
-                    k.span(),
-                    format!("[options] {name}: an option of ptyrc's own"),
-                    format!("another name; reserved: {}", RESERVED_OPTIONS.join(", ")),
-                ));
-            }
-            let DeValue::Table(o) = v.get_ref() else {
-                return Err(self.err(
-                    v.span(),
-                    format!("[options] {name}: not a table"),
-                    hint(name),
-                ));
-            };
-            let section = format!("options.{name}");
-            self.unknown(o, &section, &["default", "doc", "type"])?;
-            let ty = self.string(o, &section, "type", "\"int\"")?;
-            let doc = self.string(o, &section, "doc", "\"what it does\"")?;
-            let (Some(ty), Some(doc), Some((_, dv))) = (ty, doc, field(o, "default")) else {
-                return Err(self.err(
-                    v.span(),
-                    format!("[options] {name}: type, default and doc are wanted"),
-                    hint(name),
-                ));
-            };
-            if doc.is_empty() || doc.chars().count() > 200 || doc.chars().any(char::is_control) {
-                return Err(self.err(
-                    v.span(),
-                    format!("[options] {name}.doc: empty, longer than 200 characters, or a control character"),
-                    "one line",
-                ));
-            }
-            let default = match (ty.as_str(), dv.get_ref()) {
-                ("int", DeValue::Integer(i)) => i64::from_str_radix(i.as_str(), i.radix())
-                    .ok()
-                    .map(OptionValue::Int),
-                ("float", DeValue::Float(f)) => f.as_str().parse().ok().map(OptionValue::Float),
-                ("float", DeValue::Integer(i)) => i64::from_str_radix(i.as_str(), i.radix())
-                    .ok()
-                    .map(|x| OptionValue::Float(x as f64)),
-                ("bool", DeValue::Boolean(b)) => Some(OptionValue::Bool(*b)),
-                ("string", DeValue::String(s)) => Some(OptionValue::Str(s.to_string())),
-                ("int" | "float" | "bool" | "string", _) => {
-                    return Err(self.err(
-                        dv.span(),
-                        format!("[options] {name}.default: not of type {ty}"),
-                        "a default of the type named",
-                    ));
-                }
-                _ => {
-                    return Err(self.err(
-                        self.span(o, "type"),
-                        format!("[options] {name}.type: {ty:?}"),
-                        "type = \"int\", \"float\", \"bool\" or \"string\"",
-                    ));
-                }
-            };
-            let Some(default) = default else {
-                return Err(self.err(
-                    dv.span(),
-                    format!("[options] {name}.default: out of range"),
-                    hint(name),
-                ));
-            };
-            out.push(AppOption {
-                name: name.to_string(),
-                default,
-                doc,
-            });
-        }
-        Ok(out)
-    }
 }
 
 /// `[a-z][a-z0-9-]*`, at most `max` bytes.
-fn is_name(s: &str, max: usize) -> bool {
+pub(crate) fn is_name(s: &str, max: usize) -> bool {
     let b = s.as_bytes();
     !b.is_empty()
         && b.len() <= max

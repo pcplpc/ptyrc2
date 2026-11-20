@@ -15,7 +15,7 @@
 //! identity (`Identity::key`), `allow` and `deny` as arrays of strings
 //! on one line, `#` comments.
 
-use crate::grants::{Grants, Permission};
+use crate::grants::{Grants, Hand, Permission};
 use ptyrc_proto::RpcError;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -36,6 +36,8 @@ pub(crate) struct Declared {
     pub permissions: BTreeMap<Permission, String>,
     pub words: Vec<String>,
     pub limits: Vec<(String, u64)>,
+    /// The user's words and patterns, given at the start: not asked.
+    pub hand: Hand,
 }
 
 impl Declared {
@@ -144,6 +146,7 @@ pub(crate) fn resolve(declared: &Declared, entry: Option<&Entry>, headless: bool
     if words {
         grants.words = declared.words.clone();
     }
+    grants.hand = declared.hand.clone();
     Resolved { grants, missing }
 }
 
@@ -354,6 +357,7 @@ mod tests {
                 .collect(),
             words: vec!["fish".into()],
             limits: Vec::new(),
+            hand: Default::default(),
         }
     }
 
