@@ -4,8 +4,10 @@
 // One request: a sprite whose content is the effect `sand` of the
 // driver. The simulation runs there; it reads the text under it as its
 // walls at each render and answers nothing (`plan/store-model.md`,
-// principle 2). The app holds no permission and then only waits. The
-// twin of `sdk/rust/examples/sand`.
+// principle 2). `--hover`, `--bomb`: the driver tells the effect the
+// pointer (`pointer`, `bomb` in its params); the app is told nothing.
+// It holds no permission but `clicks-grab` (`--bomb`), and then only
+// waits. The twin of `sdk/rust/examples/sand`.
 
 import { call, exit, log, random } from "ptyrc";
 
@@ -18,6 +20,8 @@ export function init(args) {
   let rate = 60;
   if (Number.isFinite(args.rate) && args.rate > 0) rate = Math.min(args.rate, 1000);
   const params = { rate, cursor: args.cursor === true, seed: u32() };
+  if (args.hover === true) params.pointer = true;
+  if (args.bomb === true) params.bomb = true;
   try {
     call("draw.put", { effect: { name: "sand", params } });
   } catch (e) {

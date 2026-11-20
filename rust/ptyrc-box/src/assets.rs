@@ -80,10 +80,11 @@ impl Assets {
                 };
                 read_answer(bytes, params, "asset.read")
             }
-            _ => Err(CallError::new(
-                "unknown-method",
-                format!("unknown method: {method}"),
-            )),
+            // As the driver answers a store app a method not listed.
+            _ => Err(CallError {
+                hint: Some("not open to apps; asset.list, asset.read".into()),
+                ..CallError::new("denied", format!("{method}: denied"))
+            }),
         }
     }
 }
@@ -257,6 +258,11 @@ mod tests {
     #[test]
     fn read_and_list() {
         let mut a = Assets::default();
+        let e = a.call("asset.write", &json!({})).unwrap_err();
+        assert_eq!(
+            (e.code.as_str(), e.message.as_str()),
+            ("denied", "asset.write: denied")
+        );
         a.files.insert("p/ship.pic".into(), b"hello\xff".to_vec());
         let l = a.call("asset.list", &json!({})).unwrap();
         assert_eq!(l, json!({"assets": [{"name": "p/ship.pic", "size": 6}]}));

@@ -229,14 +229,20 @@ calls a second), `headless`.
   permission it lacked; one not declared is fine if intended: an app
   that declares less is asked less.
 - Drawing as the driver draws: in front only with `front` (a widget:
-  or `front-widget`); else behind the text.
-- Events: `size` on a tape's resize; `screen` and `text` when the
-  screen changes (a tape, a `--screen T:FILE`); `input` for a grabbed
+  or `front-widget`); else behind the text. `draw.list` tells where an
+  anchor landed at the degree that finds it; `screen.text`,
+  `screen.cells {sprites: true}` compose the app's own sprites.
+- Events: `size` on a tape's resize or a `--resize MS:CxR`; `screen` and `text` when the
+  screen changes (a tape, a `--screen T:FILE`); `idle` as the driver
+  tells it (a frame's idleness changed; a screen nothing was written
+  on is idle from the start); `input` for a grabbed
   key given by `--key MS:NAME` (`ctrl+t` releases); any topic by
   `--event MS:TOPIC:JSON`, delivered when subscribed and held;
-  `hover` (`--pointer MS:X,Y`) and `mouse` (`--click MS:X,Y`: press,
-  release) on the app's sprite under the cell, heard as the driver
-  hears them; `--focus MS:TAG` gives the keys to its widget that asks,
+  `hover` (`--pointer MS:X,Y`) and `mouse` (`--press MS:X,Y`,
+  `--release MS:X,Y`; `--click MS:X,Y` both at once) on the app's
+  sprite under the cell, heard as the driver hears them, a release of
+  the sprite pressed; the same moves and clicks told to an effect put
+  with `pointer`, `bomb` as the driver tells them; `--focus MS:TAG` gives the keys to its widget that asks,
   then `--key` goes to it (its escape and close keys too) and
   `--paste MS:TEXT`; `widgets` when a widget is laid out.
 - The screen: `--screen [T:]FILE`, again for each change (text: the
@@ -261,9 +267,11 @@ script = "app.js"          # or rust = "src/lib.rs", rustc = "1.85"
 surface = "screen"         # "widget" (default), "frame", "screen": where it is clipped
 # assets = "assets/"; tape = "demo.tape"
 # wait = true            # `ptyrc app ID` waits for its result (app.result)
+# random = [[], ["--grab"]]  # the draws of the menu's random app: words of
+#                            # [options], each checked by dev check; [] never
 
 [options]                  # --NAME VALUE, --NAME=VALUE, -S VALUE; a bool --NAME, --no-NAME
-size = { type = "int", default = 20, doc = "one line" }
+size = { type = "int", default = 20, min = 1, max = 99, doc = "one line" }
 grab = { type = "bool", default = false, short = "g", needs = ["keys-arrows"], doc = "..." }
 season = { type = "string", default = "auto", choices = ["auto", "spring"], doc = "..." }
 word = { type = "word", doc = "..." }                   # the user's word
@@ -273,7 +281,7 @@ stop = { type = "file", doc = "..." }                    # or "dir"; write = tru
 # reserved: alpha, back, border, frame, front, help, no-wait, prefer, wait; no-NAME
 
 [args]                     # one list of positionals, init(args).NAME
-patterns = { type = "pattern", min = 1, max = 16, doc = "..." }
+patterns = { type = "pattern", min = 1, max = 16, doc = "..." }  # min, max: how many
 
 [permissions]              # NAME = "why, one line, 200 at most"
 shape = "to stand on the text"
@@ -286,7 +294,12 @@ memory-mib = 128
 - `init(args)`: every option, its default when not given (`null`
   when it has none; `[]` for a list), the positionals under their name.
 - `default`: required of `int`, `float`, `bool`, `string`; none of a
-  list. Of a `file` or `dir`: a plain name of the working directory,
+  list.
+- `min`, `max`: of an `int` or `float` in `[options]`, numbers of its
+  type, inclusive, `min <= max`, the default within; each value (each
+  of a list) outside is refused at the start, naming the option and
+  the bound; `--help` and the menu show them. In `[args]`, `min`,
+  `max` count the positionals (0 to 16), never bound a value. Of a `file` or `dir`: a plain name of the working directory,
   used when none is named, asked as `files`.
 - `needs`: permissions asked only when the option is given (a bool:
   true); each in `[permissions]`. The pop-up then shows them alone.

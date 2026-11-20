@@ -298,13 +298,16 @@ impl Backend for Session {
     }
 
     fn restart(&mut self, id: u64, argv: Option<&[String]>) -> Result<(), Fail> {
-        let params = match argv {
-            Some(argv) => match super::declares(argv) {
-                Some(declares) => json!({"app": id, "argv": argv, "declares": declares}),
-                None => json!({"app": id, "argv": argv}),
-            },
-            None => json!({"app": id}),
-        };
+        let mut params = json!({"app": id});
+        if let Some(argv) = argv {
+            params["argv"] = json!(argv);
+            if let Some(declares) = super::declares(argv) {
+                params["declares"] = declares;
+            }
+            if let Some(frame) = super::frame_in(argv) {
+                params["frame"] = frame;
+            }
+        }
         self.call("app.restart", params).map(|_| ())
     }
 

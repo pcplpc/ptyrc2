@@ -1,0 +1,4 @@
+# test_sand_survives_a_resize: a pile under the spout; the host narrows
+# at 2 s: the pile is kept but for what was cut off, a new stream pours
+# from the new middle.
+--size 60x8 --for 3s --at 2s,2100ms,3s --rate 400 --now --resize 2s:40x8

@@ -12,6 +12,7 @@ pub mod headless;
 pub mod hostfn;
 pub mod live;
 pub mod manifest;
+mod nozzle;
 pub mod profile;
 pub mod runner;
 pub mod script;

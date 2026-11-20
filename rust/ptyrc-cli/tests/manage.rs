@@ -325,3 +325,135 @@ fn apps_are_started_paused_moved_restarted_stopped() {
     let (status, stdout, _) = manage(&[]);
     assert_eq!((status, stdout.lines().count()), (0, 2));
 }
+
+/// Three panes, bars at columns 19 and 39.
+const PANES: &str = r#"printf '\033[2J\033[H'
+i=1
+while [ $i -le 16 ]; do
+  printf '\033[%d;1Hleft\033[%d;20H│\033[%d;21Hmid\033[%d;40H│\033[%d;41Hright' $i $i $i $i $i
+  i=$((i+1))
+done
+exec sleep 1000
+"#;
+
+/// A native app below `layout` (it declares `clock`): one sprite on the
+/// frame of its argv; told `move`, one more there. It asks to move
+/// itself, and another. Every line it is sent noted in `$LOG.<pid>`.
+const BLIND: &str = r#"
+import json, os, socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.connect(os.environ["PTYRC_SOCKET"])
+def send(n, method, params):
+    s.sendall((json.dumps({"id": n, "method": method, "params": params}) + "\n").encode())
+me = int(os.environ["PTYRC_APP"])
+send(0, "auth", {"token": os.environ["PTYRC_TOKEN"]})
+send(1, "draw.put", {"content": {"rows": ["HELLO"]}, "frame": sys.argv[1],
+                     "anchor": {"at": [4, 1], "space": "view"}})
+send(2, "subscribe", {"topics": ["move"]})
+send(3, "app.move", {"app": me, "frame": 0})
+send(4, "app.move", {"app": 1, "frame": 0})
+with open(os.environ["LOG"] + "." + str(os.getpid()), "a") as log:
+    for line in s.makefile():
+        log.write(line)
+        log.flush()
+        if json.loads(line).get("event") == "move":
+            send(5, "draw.put", {"content": {"rows": ["AGAIN"]}, "frame": 7,
+                                 "anchor": {"at": [4, 3], "space": "view"}})
+            send(6, "frame.list", {})
+"#;
+
+#[test]
+fn a_native_app_below_layout_is_where_the_user_puts_it() {
+    let sb = Sandbox::new("blind");
+    let script = sb.dir.join("blind.py");
+    std::fs::write(&script, BLIND).unwrap();
+    let script = script.to_str().unwrap();
+    let log = sb.dir.join("log");
+    let mut driver = sb.ptyrc();
+    driver
+        .env("LOG", &log)
+        .args(["run", "--name", "b", "--headless", "--size", "60x16"])
+        .args(["--", "sh", "-c", PANES])
+        .stdin(Stdio::null());
+    let _driver = common::Proc(driver.spawn().unwrap());
+    wait_for(|| Client::connect(&sb.socket("b")).is_ok(), "the socket");
+    let mut client = sb.client("b");
+    client.call("session.info", json!({})).unwrap();
+    let pane = |client: &mut Client, x: u64| {
+        let frames = client.call("frame.list", json!({})).unwrap();
+        (frames["frames"].as_array().unwrap().iter())
+            .find(|f| f["kind"] == "pane" && f["rect"][0] == x && f["state"] == "stable")
+            .map(|f| f["id"].as_u64().unwrap())
+    };
+    let (mut mid, mut right) = (0, 0);
+    wait_for(
+        || {
+            let found = (pane(&mut client, 20), pane(&mut client, 40));
+            found
+                .0
+                .zip(found.1)
+                .map(|(m, r)| (mid, right) = (m, r))
+                .is_some()
+        },
+        "the panes",
+    );
+    let log_of = |pid: &Value| {
+        std::fs::read_to_string(format!("{}.{pid}", log.display())).unwrap_or_default()
+    };
+    let answers = |pid: &Value, id: u64| -> Vec<Value> {
+        (log_of(pid).lines())
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter(|m| m["id"] == id)
+            .collect()
+    };
+    let declares = json!({"permissions": {"clock": "the time"}});
+    let start = |client: &mut Client, frame: Option<u64>| {
+        let mut params = json!({"argv": ["python3", script, "largest"], "declares": declares});
+        if let Some(frame) = frame {
+            params["frame"] = json!(frame);
+        }
+        let started = client.call("app.start", params).unwrap();
+        started["app"]["id"].as_u64().unwrap()
+    };
+
+    // Started with no frame: whatever it names, frame 0.
+    let id = start(&mut client, None);
+    wait_for(|| app(&mut client, id)["sprites"] == 1, "the sprite");
+    assert_eq!(app(&mut client, id)["frames"], json!([0]));
+    let pid = app(&mut client, id)["pid"].clone();
+    // It may move neither itself nor another.
+    wait_for(|| answers(&pid, 4).len() == 1, "its asks answered");
+    for asked in [3, 4] {
+        let answer = &answers(&pid, asked)[0];
+        assert!(answer["error"].is_object(), "{answer}");
+    }
+    assert_eq!(app(&mut client, 1)["frames"], json!([]));
+    assert_eq!(app(&mut client, id)["frames"], json!([0]));
+
+    // Moved by the user: its sprite goes along; what it draws after,
+    // on that frame; it is told one frame.
+    let moved = client
+        .call("app.move", json!({"app": id, "frame": mid}))
+        .unwrap();
+    assert_eq!(moved["frame"], mid);
+    wait_for(|| app(&mut client, id)["sprites"] == 2, "drawn again");
+    assert_eq!(app(&mut client, id)["frames"], json!([mid]));
+    wait_for(|| answers(&pid, 6).len() == 1, "frame.list");
+    let listed = &answers(&pid, 6)[0]["result"]["frames"];
+    assert_eq!(listed.as_array().map(Vec::len), Some(1), "{listed}");
+    let text = shown(&mut client);
+    let line = |y: usize| text.lines().nth(y).unwrap_or_default().to_string();
+    assert!(
+        line(1).starts_with("left               │mid HELLO"),
+        "{text}"
+    );
+    assert!(
+        line(3).starts_with("left               │mid AGAIN"),
+        "{text}"
+    );
+
+    // Started on a frame: its surface.
+    let other = start(&mut client, Some(right));
+    wait_for(|| app(&mut client, other)["sprites"] == 1, "the sprite");
+    assert_eq!(app(&mut client, other)["frames"], json!([right]));
+}

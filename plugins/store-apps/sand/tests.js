@@ -2,7 +2,7 @@
 // The unit tests of sand: `ptyrc dev test --unit`.
 
 import { assertEqual } from "ptyrc";
-import { bomb, options } from "./app.js";
+import { options } from "./app.js";
 
 export function test_options() {
   const o = options({ rate: 60, cursor: false, hover: false, bomb: false, now: false, all: false });
@@ -13,10 +13,4 @@ export function test_options() {
   assertEqual(options({ all: true }).hover, false);
   assertEqual(options({ rate: 5000 }).rate, 1000);
   assertEqual(options({ rate: -1 }).rate, 60);
-}
-
-export function test_bomb() {
-  assertEqual(bomb([3, 4], 200, [10, 5], [10, 5]), [3, 4, 200]);
-  assertEqual(bomb([3, 4], 9000, [10, 5], [12, 4]), [3, 4, 1500, 2, -1]);
-  assertEqual(bomb([3, 4], 100, null, null), [3, 4, 100]);
 }

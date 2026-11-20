@@ -352,14 +352,40 @@ pub fn declares(argv: &[String]) -> Option<Value> {
     (status.success() && value.is_object()).then_some(value)
 }
 
-/// The params of `app.start`: `argv`, `name`, and `declares` when it
-/// declares.
+/// The params of `app.start`: `argv`, `name`, `declares` when it
+/// declares, `frame` when the user gave one.
 pub fn start_params(argv: &[String], name: &str) -> Value {
     let mut params = json!({"argv": argv, "name": name});
     if let Some(declares) = declares(argv) {
         params["declares"] = declares;
     }
+    if let Some(frame) = frame_in(argv) {
+        params["frame"] = frame;
+    }
     params
+}
+
+/// The frame of `-f`, `--frame` or `--frame=` among the options of
+/// `ptyrc-app NAME`, the last one: an id or a name, for `app.start` and
+/// `app.restart`. The driver holds it as the user's.
+pub fn frame_in(argv: &[String]) -> Option<Value> {
+    let first = app_word(argv)? + 2;
+    let mut words = argv[first..].iter();
+    let mut frame = None;
+    while let Some(word) = words.next() {
+        let given = match word.as_str() {
+            "-f" | "--frame" => words.next().cloned(),
+            w if w.starts_with("--frame=") => Some(w["--frame=".len()..].to_string()),
+            w if w.starts_with("-f") && !w.starts_with("--") => Some(w[2..].to_string()),
+            _ => continue,
+        };
+        frame = given.or(frame);
+    }
+    let frame = frame.filter(|f| !f.is_empty())?;
+    Some(match frame.parse::<u64>() {
+        Ok(id) => json!(id),
+        Err(_) => json!(frame),
+    })
 }
 
 /// The `argv` and the name of `ptyrc-app WORDS`.
@@ -658,6 +684,9 @@ fn restart_all(
         if let Some(argv) = argv {
             params["argv"] = json!(argv);
             params["name"] = app["name"].clone();
+            if let Some(frame) = frame_in(argv) {
+                params["frame"] = frame;
+            }
         }
         infos.push(client.call("app.restart", params)?["app"].take());
     }
@@ -901,6 +930,20 @@ mod tests {
             with_frame(&run, "3"),
             argv(&["python3", "-f", "/bin/ptyrc-app", "cat", "-f", "3"])
         );
+    }
+
+    #[test]
+    fn the_frame_given_is_found() {
+        let argv = |words: &[&str]| words.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+        let app = |tail: &[&str]| argv(&[&["/bin/ptyrc-app", "clock"], tail].concat());
+        assert_eq!(frame_in(&app(&[])), None);
+        assert_eq!(frame_in(&app(&["-a", "-f", "3"])), Some(json!(3)));
+        assert_eq!(frame_in(&app(&["--frame", "idle"])), Some(json!("idle")));
+        assert_eq!(frame_in(&app(&["--frame=2", "-f1"])), Some(json!(1)));
+        // Not of `ptyrc-app`, or before its name: none.
+        assert_eq!(frame_in(&argv(&["python3", "-f", "3"])), None);
+        let run = argv(&["python3", "-f", "4", "/bin/ptyrc-app", "cat"]);
+        assert_eq!(frame_in(&run), None);
     }
 
     #[test]

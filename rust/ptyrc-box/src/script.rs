@@ -5,6 +5,7 @@
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// Member of the `init` JSON: an object, file name to text.
 pub const SOURCES: &str = "ptyrc:sources";
@@ -159,11 +160,19 @@ impl crate::Host for Bench {
     }
 }
 
+/// A unit test, and `init` loading the file, at most: the author's code
+/// on the author's machine, not an app's frame.
+pub const UNIT_TEST: Duration = Duration::from_secs(10);
+/// The tests of a file, in all, at most: checked before each.
+pub const UNIT_FILE: Duration = Duration::from_secs(60);
+
 /// Unit tests of a script: `init` (`args` with `UNIT`) loads the main
 /// file and names its `test_*` exports; each runs in its own `event`,
-/// under the limits of an event. The lines of the report, and the
+/// under `limits` (`ptyrc-box --unit`: those of an event but time,
+/// `UNIT_TEST`), `UNIT_FILE` in all. The lines of the report, and the
 /// status: 0 all passed, 1 one failed or the run ended.
 pub fn unit(wasm: &[u8], args: &Value, limits: crate::Limits) -> (Vec<String>, u8) {
+    let started = std::time::Instant::now();
     let mut args = args.clone();
     if let Value::Object(o) = &mut args {
         o.insert(UNIT.to_owned(), Value::Bool(true));
@@ -196,6 +205,14 @@ pub fn unit(wasm: &[u8], args: &Value, limits: crate::Limits) -> (Vec<String>, u
         return (out, status);
     }
     for i in 0..=count {
+        if i < count && started.elapsed() > UNIT_FILE {
+            let passed = out.iter().filter(|l| l.starts_with("ok   ")).count();
+            out.push(format!(
+                "ended: past {} s in all; {passed} passed, the rest not run",
+                UNIT_FILE.as_secs()
+            ));
+            return (out, 1);
+        }
         runner.resume();
         let mark = out.len();
         let done = runner.event(UNIT, &Value::Null, 0);

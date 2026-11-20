@@ -79,8 +79,6 @@ export function test_bursts() {
   assertEqual(times.size, 3);
   assert([...times].every((t) => t >= 0 && t < PERIOD));
   assert(apart(log.map(([, s]) => origin(s))));
-  assertEqual(options({ bursts: 11 }), null);
-  assertEqual(options({ bursts: 0 }), null);
 }
 
 export function test_party() {

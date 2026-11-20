@@ -1,7 +1,7 @@
 --- 500 ms
 ab cd ef gh ij kl mn   ·*  · ❋
 ab cd ef gh ij kl mn❋ · ✦*✦ ·
-ab cd ef gh ij kl*mn✦ * ·❋❋✦··
+ab cd ef gh ij kl*mn✦·* ·❋❋✦··
 ab cd ef gh ij✦kl✦mn❋*❋✦*· ❋❋❋
 ab·cd ef gh ij✦kl✦mn·* ··❋✦ ·
 ab cd ef gh ij❋kl mn❋❋✦· ✦✦*❋❋
@@ -12,8 +12,8 @@ ab*cd ef gh ij kl mn
 --- 1000 ms
 ab cd ef gh ij kl mn
 ab cd ef gh ij kl mn
-ab cd ef gh ij kl mn ❋   *
-ab cd ef gh ij kl mn     ·
+ab cd ef gh ij kl mn ✦   ✦
+ab cd ef gh ij kl mn     *
 ab cd ef gh ij kl mn
 ab cd ef gh ij kl mn
 ab cd ef gh ij kl mn
@@ -23,8 +23,8 @@ ab cd ef gh ij kl mn
 --- 1500 ms
 ab cd ef gh ij kl mn
 ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn     ·
 ab cd ef gh ij kl mn     *
-ab cd ef gh ij kl mn     ✦
 ab cd ef gh ij kl mn
 ab cd ef gh ij kl mn
 ab cd ef gh ij kl mn

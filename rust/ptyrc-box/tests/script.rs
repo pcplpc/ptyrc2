@@ -934,3 +934,61 @@ fn host_functions_from_memory() {
         "{r}"
     );
 }
+
+/// The scene steps on its own clock, as the driver's: the screen at T
+/// is the same whatever other times are asked.
+#[test]
+fn the_screen_at_t_whatever_else_is_asked() {
+    let Some(wasm) = interpreter() else { return };
+    let text = r#"
+        import { call } from "ptyrc";
+        export function init(args) {
+          call("draw.put", { effect: { name: "sand", params: { rate: 200, seed: 7 } } });
+        }"#;
+    let mut o = options(&[("app.js", text)], json!({}));
+    o.duration_ms = 1500;
+    o.at = vec![1500];
+    let alone = run(wasm, &o).unwrap();
+    o.at = vec![100, 250, 700, 1100, 1500];
+    let many = run(wasm, &o).unwrap();
+    assert_eq!(alone.screens[0], many.screens[4], "{alone}");
+    assert!(alone.screens[0].1.iter().any(|r| !r.trim().is_empty()));
+}
+
+/// Topic `idle`, as the driver tells it: a blank screen idle from the
+/// start; a screen written, once still long enough.
+#[test]
+fn idle_told() {
+    let Some(wasm) = interpreter() else { return };
+    let text = r#"
+        import { call, log } from "ptyrc";
+        export function init(args) { call("subscribe", { topics: ["idle"] }); }
+        export function event(topic, data) { log(`${topic} ${data.idle} ${data.frame}`); }"#;
+    let mut o = options(&[("app.js", text)], json!({}));
+    o.duration_ms = 12_000;
+    // `(ms, idle)` of each event, from the log: `MS idle IDLE FRAME`.
+    let told = |r: &Report| -> Vec<(u64, bool)> {
+        (r.log.iter())
+            .filter_map(|l| {
+                let w: Vec<&str> = l.split_whitespace().collect();
+                (w.get(1) == Some(&"idle")).then(|| (w[0].parse().unwrap(), w[2] == "true"))
+            })
+            .collect()
+    };
+    let blank = run(wasm, &o).unwrap();
+    assert_eq!(told(&blank), [(0, true), (0, true)], "{blank:?}");
+    // A pane full of text, written again at 1 s: idle 10 s later.
+    let full = |w: &str| format!("{}\n", w.repeat(4)).repeat(9);
+    o.under = ptyrc_box::headless::Under::Screens(vec![
+        (0, full("busy pane ")),
+        (1000, full("pane busy ")),
+    ]);
+    let written = run(wasm, &o).unwrap();
+    let t = told(&written);
+    assert!(
+        !t.is_empty()
+            && t.iter()
+                .all(|&(ms, idle)| idle && (10_000..=11_500).contains(&ms)),
+        "{t:?}"
+    );
+}

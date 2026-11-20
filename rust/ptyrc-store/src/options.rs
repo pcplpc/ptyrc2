@@ -166,6 +166,10 @@ pub struct AppOption {
     pub write: bool,
     /// `pattern` only: a regular expression.
     pub regex: bool,
+    /// `int` or `float` of `[options]` only: the bounds of a value, of
+    /// its type, inclusive. Not the `min`, `max` of `[args]` (a count).
+    pub min: Option<OptionValue>,
+    pub max: Option<OptionValue>,
 }
 
 impl AppOption {
@@ -175,6 +179,35 @@ impl AppOption {
             true => format!("{} list", self.ty.as_str()),
             false => self.ty.as_str().to_string(),
         }
+    }
+
+    /// The bounds as shown: `1 to 10`, `at least 1`, `at most 10`.
+    pub fn range(&self) -> Option<String> {
+        match (&self.min, &self.max) {
+            (Some(a), Some(b)) => Some(format!("{} to {}", a.text(), b.text())),
+            (Some(a), None) => Some(format!("at least {}", a.text())),
+            (None, Some(b)) => Some(format!("at most {}", b.text())),
+            (None, None) => None,
+        }
+    }
+
+    /// `v` within the bounds, else why not.
+    fn within(&self, v: &OptionValue) -> std::result::Result<(), String> {
+        let out = self.min.as_ref().is_some_and(|m| below(v, m))
+            || self.max.as_ref().is_some_and(|m| below(m, v));
+        match (out, self.range()) {
+            (true, Some(r)) => Err(format!("{}: {r}", v.text())),
+            _ => Ok(()),
+        }
+    }
+}
+
+/// `a < b`, of two numbers of one type.
+fn below(a: &OptionValue, b: &OptionValue) -> bool {
+    match (a, b) {
+        (OptionValue::Int(a), OptionValue::Int(b)) => a < b,
+        (OptionValue::Float(a), OptionValue::Float(b)) => a < b,
+        _ => false,
     }
 }
 
@@ -187,7 +220,7 @@ pub struct Positional {
 }
 
 const OPTION_KEYS: &[&str] = &[
-    "choices", "default", "doc", "list", "needs", "regex", "short", "type", "write",
+    "choices", "default", "doc", "list", "max", "min", "needs", "regex", "short", "type", "write",
 ];
 const ARGS_KEYS: &[&str] = &[
     "choices", "default", "doc", "max", "min", "needs", "regex", "type", "write",
@@ -432,6 +465,45 @@ impl Cx<'_> {
                 "type = \"pattern\", regex = true",
             ));
         }
+        let int = |i: &toml::de::DeInteger<'_>| i64::from_str_radix(i.as_str(), i.radix());
+        let bound = |key: &str| -> Result<Option<OptionValue>> {
+            let Some((_, v)) = field(o, key).filter(|_| !positional) else {
+                return Ok(None);
+            };
+            let value = match (ty, v.get_ref()) {
+                (OptionType::Int, DeValue::Integer(i)) => int(i).ok().map(OptionValue::Int),
+                (OptionType::Float, DeValue::Integer(i)) => {
+                    int(i).ok().map(|n| OptionValue::Float(n as f64))
+                }
+                (OptionType::Float, DeValue::Float(f)) => (f.as_str().parse::<f64>().ok())
+                    .filter(|x| x.is_finite())
+                    .map(OptionValue::Float),
+                _ => None,
+            };
+            match (ty, value) {
+                (OptionType::Int | OptionType::Float, Some(value)) => Ok(Some(value)),
+                (OptionType::Int | OptionType::Float, None) => Err(self.err(
+                    v.span(),
+                    format!("[{section}] {key}: not a number of type {}", ty.as_str()),
+                    format!("{key} = 1, of the type of the option"),
+                )),
+                _ => Err(self.err(
+                    v.span(),
+                    format!("[{section}] {key}: of an int or a float only"),
+                    "type = \"int\", min = 1, max = 10; [args] min, max count values",
+                )),
+            }
+        };
+        let (min, max) = (bound("min")?, bound("max")?);
+        if let (Some(a), Some(b)) = (&min, &max)
+            && below(b, a)
+        {
+            return Err(self.err(
+                at.clone(),
+                format!("[{section}]: min {} above max {}", a.text(), b.text()),
+                "min <= max",
+            ));
+        }
         let default = match field(o, "default") {
             None => None,
             Some((_, dv)) => {
@@ -442,7 +514,6 @@ impl Cx<'_> {
                         "a default of the type named",
                     )
                 };
-                let int = |i: &toml::de::DeInteger<'_>| i64::from_str_radix(i.as_str(), i.radix());
                 let value = match (ty, dv.get_ref()) {
                     (OptionType::Int, DeValue::Integer(i)) => {
                         OptionValue::Int(int(i).map_err(|_| {
@@ -480,9 +551,18 @@ impl Cx<'_> {
             needs,
             write,
             regex,
+            min,
+            max,
         };
         if let Some(d) = &option.default {
             let span = self.span(o, "default");
+            if let Err(why) = option.within(d) {
+                return Err(self.err(
+                    span,
+                    format!("[{section}] default: {why}"),
+                    "a default within min, max",
+                ));
+            }
             if list && !ty.named() {
                 return Err(self.err(
                     span,
@@ -591,8 +671,14 @@ pub fn is_word(s: &str) -> bool {
 fn item(o: &AppOption, v: &Value) -> std::result::Result<Value, String> {
     let wanted = || format!("{} wanted", o.ty.as_str());
     match o.ty {
-        OptionType::Int if v.is_i64() => Ok(v.clone()),
-        OptionType::Float if v.as_f64().is_some_and(f64::is_finite) => Ok(v.clone()),
+        OptionType::Int if let Some(n) = v.as_i64() => {
+            o.within(&OptionValue::Int(n))?;
+            Ok(v.clone())
+        }
+        OptionType::Float if let Some(x) = v.as_f64().filter(|x| x.is_finite()) => {
+            o.within(&OptionValue::Float(x))?;
+            Ok(v.clone())
+        }
         OptionType::Bool if v.is_boolean() => Ok(v.clone()),
         OptionType::String => {
             let s = v.as_str().ok_or_else(wanted)?;
@@ -1301,6 +1387,9 @@ pub fn help(m: &Manifest, program: &str) -> String {
         if !o.choices.is_empty() {
             doc.push_str(&format!(" ({})", o.choices.join(", ")));
         }
+        if let Some(r) = o.range() {
+            doc.push_str(&format!(" ({r})"));
+        }
         match &o.default {
             Some(OptionValue::Bool(false)) | None => {}
             Some(d) => doc.push_str(&format!(" [default: {}]", d.text())),
@@ -1437,6 +1526,12 @@ mod tests {
             ("[args]\na = { type = \"word\", doc = \"d\" }\nb = { type = \"word\", doc = \"d\" }".into(), "one entry"),
             ("[args]\na = { type = \"word\", min = 3, max = 2, doc = \"d\" }".into(), "min 3 above max 2"),
             ("[args]\na = { type = \"word\", max = 17, doc = \"d\" }".into(), "0 to 16"),
+            (opt("n = { type = \"int\", default = 1, min = 1.5, doc = \"d\" }"), "min: not a number of type int"),
+            (opt("x = { type = \"float\", default = 1.0, max = \"2\", doc = \"d\" }"), "max: not a number of type float"),
+            (opt("s = { type = \"string\", default = \"a\", min = 1, doc = \"d\" }"), "min: of an int or a float only"),
+            (opt("n = { type = \"int\", default = 5, min = 10, max = 1, doc = \"d\" }"), "min 10 above max 1"),
+            (opt("n = { type = \"int\", default = 0, min = 1, max = 10, doc = \"d\" }"), "default: 0: 1 to 10"),
+            (opt("x = { type = \"float\", default = 2.5, max = 2, doc = \"d\" }"), "default: 2.5: at most 2"),
             (
                 "[options]\na = { type = \"int\", default = 1, doc = \"d\" }\n[args]\na = { type = \"word\", doc = \"d\" }".into(),
                 "the name of an option",
@@ -1679,6 +1774,48 @@ mod tests {
             "{h}"
         );
         assert!(h.contains("--front, --back"));
+        let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    #[test]
+    fn the_bounds_of_a_value() {
+        let m = manifest(
+            "[options]\n\
+             bursts = { type = \"int\", default = 3, min = 1, max = 10, doc = \"how many\" }\n\
+             speed = { type = \"float\", default = 1, min = 0.5, doc = \"how fast\" }\n\
+             at = { type = \"int\", list = true, max = 9, doc = \"where\" }\n",
+        );
+        let bursts = m.options.iter().find(|o| o.name == "bursts").unwrap();
+        assert_eq!(
+            (bursts.min.clone(), bursts.max.clone()),
+            (Some(OptionValue::Int(1)), Some(OptionValue::Int(10)))
+        );
+        let cwd = scratch("bounds");
+        let read = |text: &str| read(&m, &words(text), &cwd);
+        let args = |text: &str| Value::Object(read(text).unwrap().unwrap().args);
+        assert_eq!(
+            args("--bursts 1 --bursts=10 --speed 0.5 --at 9 --at -3"),
+            json!({"bursts": 10, "speed": 0.5, "at": [9, -3]})
+        );
+        for (bad, said) in [
+            ("--bursts 0", "bursts: 0: 1 to 10"),
+            ("--bursts 11", "bursts: 11: 1 to 10"),
+            ("--speed 0.25", "speed: 0.25: at least 0.5"),
+            ("--at 1 --at 10", "at: 10: at most 9"),
+        ] {
+            let message = read(bad).unwrap_err().message;
+            assert!(message.contains(said), "{bad}: {message}");
+        }
+        let r = resolve(&m, Some(&json!({"bursts": 12})), &[]);
+        assert!(r.unwrap_err().message.contains("bursts: 12: 1 to 10"));
+        let h = help(&m, "ptyrc app a");
+        for said in [
+            "how many (1 to 10) [default: 3]",
+            "how fast (at least 0.5)",
+            "where (at most 9)",
+        ] {
+            assert!(h.contains(said), "{said}: {h}");
+        }
         let _ = std::fs::remove_dir_all(&cwd);
     }
 

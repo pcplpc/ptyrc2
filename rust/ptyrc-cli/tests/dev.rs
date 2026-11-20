@@ -607,3 +607,116 @@ fn the_run_asks_what_its_options_need() {
     assert_eq!(out.status.code(), Some(2), "{out:?}");
     assert!(String::from_utf8_lossy(&out.stderr).contains("nope: not a file or directory option"));
 }
+
+/// An option of the app named as a flag of `dev test`: the flag is
+/// `dev test`'s before `--`, the app's after; `check` and `test` say so.
+#[test]
+fn an_option_named_as_a_flag_of_dev_test() {
+    let js =
+        r#"import { log } from "ptyrc"; export function init(args) { log(`seed ${args.seed}`); }"#;
+    let more = "seed = { type = \"int\", default = 0, doc = \"the app's\" }\n";
+    let dir = script_app("shadow", more, js);
+    std::fs::copy(root().join("LICENSE.txt"), dir.join("LICENSE.txt")).unwrap();
+    // `check` runs no `dev test`: nothing to say.
+    let out = ptyrc(&dir, &["dev", "check"]);
+    assert!(out.status.success(), "{out:?}");
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(!said.contains("--seed"), "{said}");
+    let out = ptyrc(
+        &dir,
+        &[
+            "dev", "test", "--for", "0", "--seed", "4", "--", "--seed", "7",
+        ],
+    );
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("note: --seed 4: taken by dev test, not the app") && said.contains("seed 7"),
+        "{said}"
+    );
+    // The app's alone, after `--`: nothing to say.
+    let out = ptyrc(&dir, &["dev", "test", "--for", "0", "--", "--seed", "7"]);
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(!said.contains("note") && said.contains("seed 7"), "{said}");
+}
+
+/// `dev check`: each draw of `[app] random` read as `ptyrc app` reads it.
+#[test]
+fn check_reads_the_random_draws() {
+    let js = "export function init(args) {}\n";
+    let dir = script_app("random", "", js);
+    std::fs::copy(root().join("LICENSE.txt"), dir.join("LICENSE.txt")).unwrap();
+    let toml = std::fs::read_to_string(dir.join("ptyrc-app.toml")).unwrap();
+    let with = |draws: &str| {
+        let t = toml.replace(
+            "script = \"app.js\"\n",
+            &format!("script = \"app.js\"\nrandom = {draws}\n"),
+        );
+        std::fs::write(dir.join("ptyrc-app.toml"), t).unwrap();
+        ptyrc(&dir, &["dev", "check"])
+    };
+    assert!(with("[[], [\"--wide\", \"--n\", \"3\"]]").status.success());
+    let out = with("[[\"--n\", \"x\"], [\"--slow\"]]");
+    assert_eq!(out.status.code(), Some(1));
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("[app] random: [\"--slow\"]") && said.contains("2 problems"),
+        "{said}"
+    );
+    assert!(said.contains("random = [] never drawn"), "{said}");
+    // A positional required, `random` absent: the bare draw never
+    // drawn, a note; `random = []` says it, silent.
+    let args = format!(
+        "{toml}[permissions]\nfiles = \"the one named\"\n\
+         [args]\nfile = {{ type = \"file\", min = 1, max = 1, doc = \"a file\" }}\n"
+    );
+    std::fs::write(dir.join("ptyrc-app.toml"), &args).unwrap();
+    let out = ptyrc(&dir, &["dev", "check"]);
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{said}");
+    assert!(
+        said.contains(
+            "note: [app] random: the bare draw (random absent: [[]]) is not a command line"
+        ) && said.contains("random = [] says so"),
+        "{said}"
+    );
+    let never = args.replace(
+        "script = \"app.js\"\n",
+        "script = \"app.js\"\nrandom = []\n",
+    );
+    std::fs::write(dir.join("ptyrc-app.toml"), never).unwrap();
+    let out = ptyrc(&dir, &["dev", "check"]);
+    assert!(out.status.success(), "{out:?}");
+    assert!(
+        !String::from_utf8_lossy(&out.stderr).contains("random"),
+        "{out:?}"
+    );
+}
+
+/// `--zone` with the clock held, and with it denied: accepted both
+/// times; denied, the zone unused, said.
+#[test]
+fn a_zone_with_the_clock_denied() {
+    if !has_js() {
+        return;
+    }
+    let js = r#"import { now, result } from "ptyrc";
+export function init() { const w = now(); result(`${w.zone} ${w.offsetS}`, 0); }
+"#;
+    let dir = script_app("zone", "[permissions]\nclock = \"the time\"\n", js);
+    let run = |zone: &str, more: &[&str]| {
+        let base = ["dev", "test", "--for", "0", "--zone", zone];
+        ptyrc(&dir, &[&base[..], more].concat())
+    };
+    let held = ok(&run("Asia/Tokyo", &[]));
+    assert!(
+        held.contains("result: Asia/Tokyo 32400 (status 0)"),
+        "{held}"
+    );
+    let out = run("Asia/Tokyo", &["--deny", "clock"]);
+    let said = ok(&out);
+    assert!(said.contains("result: UTC 0 (status 0)"), "{said}");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("--zone Asia/Tokyo: clock not held"), "{err}");
+    let out = run("Nowhere/City", &["--deny", "clock"]);
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+}

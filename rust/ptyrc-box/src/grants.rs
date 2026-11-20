@@ -353,6 +353,40 @@ pub fn manifest_line(name: &str, words: &[String]) -> String {
     }
 }
 
+/// Of an app's own sprite in `draw.list` below `text`: where an anchor
+/// placed by what the app may not read landed, hidden below the degree
+/// that would have told it, as a sprite not placed yet; `frame` 0 below
+/// `layout` (`ptyrc-server`, `own::landing`; held to it by
+/// `tests/protocol.rs`). The degree it needed, when hidden.
+pub fn landing(item: &mut serde_json::Value, grants: &Grants) -> Option<Degree> {
+    use serde_json::{Value, json};
+    let degree = grants.degree();
+    let anchor = &item["anchor"];
+    let among = |list: &[String], text: &str| list.iter().any(|w| w.eq_ignore_ascii_case(text));
+    let needs = if let Some(text) = anchor.get("text").and_then(Value::as_str) {
+        let literal = anchor.get("regex") != Some(&Value::Bool(true));
+        match () {
+            _ if literal && among(&grants.words, text) => Degree::Words,
+            _ if literal && among(&grants.user_words, text) => Degree::Shape,
+            _ => Degree::Text,
+        }
+    } else if anchor.get("cursor").is_some() || anchor.get("auto").is_some() {
+        Degree::Shape
+    } else {
+        Degree::None
+    };
+    if degree < Degree::Layout {
+        item["frame"] = json!(0);
+    }
+    if degree >= needs {
+        return None;
+    }
+    item["screen"] = Value::Null;
+    item["visible"] = json!(false);
+    item["covered"] = json!(0.0);
+    Some(needs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -377,6 +411,47 @@ mod tests {
         assert_eq!(g(&["text"], &[]).degree(), Degree::Text);
         assert!(g(&["shape", "words"], &[]).holds_word("FISH"));
         assert!(!g(&["shape"], &[]).holds_word("fish"));
+    }
+
+    // The cases of the driver's `own.rs`,
+    // `where_an_anchor_landed_is_told_at_its_degree`.
+    #[test]
+    fn where_an_anchor_landed() {
+        let sprite = |anchor: serde_json::Value| {
+            json!({"anchor": anchor, "screen": [3, 4], "visible": true, "covered": 0.5,
+                   "frame": 2})
+        };
+        let held = |degree: &str| {
+            let ladder = ["layout", "shape", "words", "text"];
+            let upto = ladder
+                .iter()
+                .position(|d| *d == degree)
+                .map_or(0, |i| i + 1);
+            let mut g = Grants::new(&ladder[..upto], &[], &["fish"]);
+            g.user_words = vec!["Rose".into()];
+            g
+        };
+        let told = |anchor: serde_json::Value, degree: &str| {
+            let mut item = sprite(anchor);
+            let hidden = landing(&mut item, &held(degree));
+            assert_eq!(hidden.is_some(), item["screen"].is_null());
+            (
+                item["screen"] != serde_json::Value::Null,
+                item["frame"].clone(),
+            )
+        };
+        let text = |t: &str| json!({"text": t});
+        assert_eq!(told(text("fish"), "shape"), (false, json!(2)));
+        assert_eq!(told(text("fish"), "words"), (true, json!(2)));
+        assert!(!told(text("cat"), "words").0);
+        assert!(told(text("cat"), "text").0);
+        assert!(!told(json!({"text": "fish", "regex": true}), "words").0);
+        assert!(told(text("rose"), "shape").0);
+        let cursor = json!({"cursor": {"dx": 1}});
+        assert_eq!(told(cursor.clone(), "none"), (false, json!(0)));
+        assert!(told(cursor, "shape").0);
+        assert!(!told(json!({"auto": {}}), "layout").0);
+        assert_eq!(told(json!({"at": [1, 1]}), "none"), (true, json!(0)));
     }
 
     #[test]

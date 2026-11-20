@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The surface follows its pane: when the frame of a store app's
-//! surface leaves the screen, the pane that took its place is its frame
+//! The surface follows its pane: when the frame of an app's surface
+//! leaves the screen, the pane that took its place is its frame
 //! (`heir`); its sprites go along; the app is told (`move`, `size`).
+//! So when the user moves it (`app.move`). A surface: of a store app;
+//! of a native app below `layout`, the frame the user gave it.
 
 use super::Driver;
+use crate::apps::App;
 use crate::engine::{Ctx, Effects, Engine, Reply, Token};
-use crate::grants::Surface;
+use crate::grants::{Degree, Surface};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
@@ -23,6 +26,12 @@ fn rect(info: &Value) -> Option<[f64; 4]> {
     let r = info.get("rect")?.as_array()?;
     let v = |i: usize| r.get(i)?.as_f64();
     Some([v(0)?, v(1)?, v(2)?, v(3)?])
+}
+
+/// A native app narrowed below `layout`: it knows one frame, so a frame
+/// the user gives it is its surface.
+fn blind(app: &App) -> bool {
+    app.store().is_none() && app.grants.narrowed() && app.grants.degree() < Degree::Layout
 }
 
 fn size(info: &Value) -> Option<[f64; 2]> {
@@ -108,6 +117,41 @@ impl Driver {
         self.follow
             .settled
             .retain(|id, _| (self.apps.as_ref()).is_some_and(|apps| apps.get(*id).is_some()));
+    }
+
+    /// The frame the user gave `app` (`app.start {frame}`,
+    /// `app.restart {frame}`): its surface, of a store app or of a
+    /// native app narrowed below `layout`; for another, nothing.
+    pub(super) fn give_frame(&mut self, app: u64, frame: u32) {
+        let Some(apps) = self.apps.as_mut() else {
+            return;
+        };
+        let Some(entry) = apps.get(app) else {
+            return;
+        };
+        match entry.surface {
+            Some(surface) => apps.set_surface(app, surface.moved(frame)),
+            None if blind(entry) => apps.set_surface(app, Surface::Frame(frame)),
+            None => {}
+        }
+    }
+
+    /// `app.move` by the user: as `give_frame`, its sprites going along
+    /// as to an heir. True: it has a surface, moved.
+    pub(super) fn move_surface(&mut self, app: u64, to: u32, engine: &mut dyn Engine) -> bool {
+        let Some(entry) = self.apps.as_ref().and_then(|apps| apps.get(app)) else {
+            return false;
+        };
+        let from = match entry.surface {
+            Some(Surface::Frame(frame) | Surface::Screen(frame)) => frame,
+            Some(Surface::Widget) => return false,
+            // Its frame so far: the one all it names is put on.
+            None if blind(entry) => 0,
+            None => return false,
+        };
+        self.give_frame(app, from);
+        self.rehome(app, from, to, engine);
+        true
     }
 
     /// The surface of `app` from frame `from` to `to`: its sprites

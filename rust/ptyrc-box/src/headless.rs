@@ -8,6 +8,7 @@ use crate::core::{CallError, Host, Limits};
 use crate::error::Error;
 use crate::grants::{self, Degree, Gate, Grants};
 use crate::hostfn::{self, HostFns, Named};
+use crate::nozzle::{self, Nozzles};
 use crate::runner::Runner;
 use ptyrc_core::frames::{FrameConfig, FrameEvent, Frames, ScreenInput};
 use ptyrc_core::plugin::DrawExt;
@@ -99,14 +100,23 @@ pub enum Inject {
     Key(String),
     /// The host mouse moved to a cell, no button down: `hover`.
     Pointer(u16, u16),
-    /// A left click on a cell: `mouse`, press then release.
+    /// A left click on a cell: `Press`, then `Release` at once.
     Click(u16, u16),
+    /// The left button down on a cell: `mouse`; told to an effect that
+    /// asked `bomb`.
+    Press(u16, u16),
+    /// The left button up on a cell: `mouse`, of the sprite pressed;
+    /// `bomb` to the effect pressed, held since the press.
+    Release(u16, u16),
     /// The user gives the keys to the app's widget of this tag, when
     /// it asks (`widget.ask`), as the hotkey does.
     Focus(String),
     /// Text pasted: the focused widget's; under a grab of every key,
     /// key by key.
     Paste(String),
+    /// The host resized, columns and rows: the screen resized, then
+    /// `size` (a tape's resize, without the tape).
+    Resize(u16, u16),
 }
 
 /// The draw extensions of the driver (`ptyrc-cli`, `plugins.rs`).
@@ -336,6 +346,11 @@ pub struct Headless {
     escapes: BTreeMap<u64, (String, String)>,
     /// The sprite the pointer is on, last told (`hover`).
     hovered: Option<Value>,
+    /// The press on a sprite, its event and whether it is heard without
+    /// `clicks`, until its release.
+    mouse_held: Option<(Value, bool)>,
+    /// The effects told the pointer (`nozzle`).
+    nozzles: Nozzles,
     /// `app.list`: the app's name and origin.
     pub name: String,
     pub store: Option<String>,
@@ -344,6 +359,14 @@ pub struct Headless {
     pub assets: Option<Assets>,
     /// The launcher's options of the run.
     pub launcher: Launcher,
+    /// Topic `idle` (`ptyrc-server`, `watch_idle`): heard, the next
+    /// look, the last, the frames seen idle.
+    idle_watch: bool,
+    idle_due: Option<u64>,
+    idle_looked: u64,
+    idle_seen: BTreeMap<FrameId, bool>,
+    /// Bytes of the program fed: else the screen is blank, idle.
+    fed: bool,
 }
 
 /// The launcher's options (`ptyrc app ... --front`): applied to the
@@ -359,6 +382,10 @@ pub struct Launcher {
     /// `--border B`: of its widgets.
     pub border: Option<String>,
 }
+
+/// `ptyrc-server`, `screen.rs`: `IDLE_PERIOD`, `IDLE_STEP`.
+const IDLE_PERIOD_MS: u64 = 250;
+const IDLE_STEP_MS: u64 = 20;
 
 /// A frame at the last look: rect, origin, the text of its rows.
 type Shown = ([u16; 4], [i64; 2], Vec<String>);
@@ -422,11 +449,18 @@ impl Headless {
             in_batch: false,
             escapes: BTreeMap::new(),
             hovered: None,
+            mouse_held: None,
+            nozzles: Nozzles::default(),
             name: "app".into(),
             store: None,
             fns: HostFns::default(),
             assets: None,
             launcher: Launcher::default(),
+            idle_watch: false,
+            idle_due: None,
+            idle_looked: 0,
+            idle_seen: BTreeMap::new(),
+            fed: false,
         };
         h.observe();
         h
@@ -443,6 +477,7 @@ impl Headless {
 
     /// Bytes of the wrapped program.
     pub fn feed(&mut self, bytes: &[u8]) {
+        self.fed = true;
         self.vt.feed(bytes);
         self.observe();
     }
@@ -493,6 +528,7 @@ impl Headless {
     /// What the user does, now.
     pub fn inject(&mut self, what: &Inject) {
         match what {
+            Inject::Resize(c, r) => self.resize(*c, *r),
             Inject::Event(topic, data) => {
                 let why = match () {
                     _ if !self.topics.contains(topic) => "not subscribed",
@@ -505,8 +541,22 @@ impl Headless {
                 self.dropped
                     .push((self.now, format!("event {topic}: {why}")));
             }
-            Inject::Pointer(x, y) => self.pointer("hover", *x, *y),
-            Inject::Click(x, y) => self.pointer("mouse", *x, *y),
+            Inject::Pointer(x, y) => self.hover(*x, *y),
+            Inject::Press(x, y) | Inject::Release(x, y) => {
+                let press = matches!(what, Inject::Press(..));
+                if let Some(why) = self.button(press, *x, *y) {
+                    let what = if press { "press" } else { "release" };
+                    self.dropped
+                        .push((self.now, format!("{what} {x},{y}: {why}")));
+                }
+            }
+            Inject::Click(x, y) => {
+                let why = [self.button(true, *x, *y), self.button(false, *x, *y)];
+                if let Some(why) = why[0].or(why[1]) {
+                    self.dropped
+                        .push((self.now, format!("click {x},{y}: {why}")));
+                }
+            }
             Inject::Focus(tag) => {
                 let id = (self.widgets.list().into_iter())
                     .find(|w| w.owner == OWNER && w.tag == *tag && w.asks.is_some())
@@ -604,52 +654,113 @@ impl Headless {
         Some((data, widget || hit.layer > 0))
     }
 
-    /// `hover` or `mouse` (a left click) at a cell, as the driver tells
-    /// them to a store app: on its own widget or front sprite; else
-    /// with `pointer` (`hover`), `clicks` (`mouse`).
-    fn pointer(&mut self, topic: &str, x: u16, y: u16) {
+    /// A move of the pointer to a cell, no button down: told to the
+    /// effects that asked it; `hover` to the app as the driver tells it
+    /// to a store app: on its own widget or front sprite, else with
+    /// `pointer`.
+    fn hover(&mut self, x: u16, y: u16) {
         self.settle();
+        let (scene, frames) = (&self.scene, &self.frames);
+        let tunes = (self.nozzles).hover(x, y, &|id, x, y| canvas_at(scene, frames, id, x, y));
+        self.tune(tunes);
+        let by_effect = self.nozzles.wants().0;
         let hit = self.sprite_at(x, y);
-        let what = format!(
-            "{} {x},{y}",
-            if topic == "hover" { "pointer" } else { "click" }
-        );
-        let permission = if topic == "hover" {
-            "pointer"
-        } else {
-            "clicks"
-        };
         let heard =
-            |h: &Headless, own: bool| own || h.grants.as_ref().is_none_or(|g| g.holds(permission));
+            |h: &Headless, own: bool| own || h.grants.as_ref().is_none_or(|g| g.holds("pointer"));
         let why = match hit {
-            None if topic == "hover" && self.hovered.take().is_some() => {
+            None if self.hovered.take().is_some() => {
                 let data = json!({"sprite": null, "at": null, "x": x, "y": y,
                                   "frame": null, "pos": null, "mods": []});
-                self.emit(topic, data);
+                self.emit("hover", data);
                 return;
             }
+            None if by_effect => return,
             None => "on no sprite of the app",
-            Some(_) if !self.topics.contains(topic) => "not subscribed",
+            Some(_) if !self.topics.contains("hover") => "not subscribed",
             Some((_, own)) if !heard(self, own) => {
-                self.lack(permission, &[]);
+                self.lack("pointer", &[]);
                 "not held"
             }
             Some((data, _)) => {
-                if topic == "hover" {
-                    self.hovered = Some(data["sprite"].clone());
-                    self.emit(topic, data);
-                } else {
-                    for action in ["press", "release"] {
-                        let mut d = data.clone();
-                        d["button"] = json!("left");
-                        d["action"] = json!(action);
-                        self.emit(topic, d);
-                    }
-                }
+                self.hovered = Some(data["sprite"].clone());
+                self.emit("hover", data);
                 return;
             }
         };
-        self.dropped.push((self.now, format!("{what}: {why}")));
+        self.dropped
+            .push((self.now, format!("pointer {x},{y}: {why}")));
+    }
+
+    /// A press (`press`) or a release of the left button at a cell, as
+    /// the driver tells it (`sort_mouse`): to the effects that asked the
+    /// clicks, the press taken from the program with `clicks-grab`; to
+    /// the app on its own widget or front sprite, else with `clicks`. A
+    /// release after a press on a sprite is of that sprite, `at`,
+    /// `frame`, `pos` null when off it. Why it reached nobody, if so.
+    fn button(&mut self, press: bool, x: u16, y: u16) -> Option<&'static str> {
+        self.settle();
+        let (scene, frames) = (&self.scene, &self.frames);
+        let (tunes, by_effect) = (self.nozzles).click(press, (x, y), self.now, &|id, x, y| {
+            canvas_at(scene, frames, id, x, y)
+        });
+        self.tune(tunes);
+        if press
+            && by_effect
+            && self
+                .grants
+                .as_ref()
+                .is_some_and(|g| !g.holds("clicks-grab"))
+        {
+            // The program has it too.
+            self.lack("clicks-grab", &[]);
+        }
+        let hit = match self.mouse_held.take() {
+            Some((mut held, own)) if !press => match self.sprite_at(x, y) {
+                Some(at) if at.0["sprite"] == held["sprite"] => Some(at),
+                _ => {
+                    held["x"] = json!(x);
+                    held["y"] = json!(y);
+                    for k in ["at", "frame", "pos"] {
+                        held[k] = Value::Null;
+                    }
+                    Some((held, own))
+                }
+            },
+            _ => self.sprite_at(x, y),
+        };
+        if press {
+            self.mouse_held = hit.clone();
+        }
+        let heard =
+            |h: &Headless, own: bool| own || h.grants.as_ref().is_none_or(|g| g.holds("clicks"));
+        match hit {
+            None if by_effect => None,
+            None => Some("on no sprite of the app"),
+            Some(_) if !self.topics.contains("mouse") => Some("not subscribed"),
+            Some((_, own)) if !heard(self, own) => {
+                self.lack("clicks", &[]);
+                Some("not held")
+            }
+            Some((mut data, _)) => {
+                data["button"] = json!("left");
+                data["action"] = json!(if press { "press" } else { "release" });
+                self.emit("mouse", data);
+                None
+            }
+        }
+    }
+
+    /// The driver's tunes of the effects told the pointer; a sprite
+    /// gone is forgotten.
+    fn tune(&mut self, tunes: Vec<(u64, Value)>) {
+        for (id, effect) in tunes {
+            if self
+                .answer("draw.update", &json!({"id": id, "effect": effect}))
+                .is_err()
+            {
+                self.nozzles.forget(id);
+            }
+        }
     }
 
     fn emit(&mut self, topic: &str, data: Value) {
@@ -714,6 +825,9 @@ impl Headless {
         };
         if self.rows.as_ref() != Some(&rows) {
             self.changed = self.now;
+            // A change on screen: the next look at idleness.
+            let at = self.now.max(self.idle_looked + IDLE_PERIOD_MS);
+            self.idle_due = Some(self.idle_due.map_or(at, |due| due.min(at)));
         }
         let mut texts = Vec::new();
         let mut shown = BTreeMap::new();
@@ -758,6 +872,20 @@ impl Headless {
     }
 
     /// Lay the widgets out (topic `widgets`), advance the scene to now.
+    /// Session time the driver would step the scene and the widgets
+    /// next (`ptyrc-server`, `next_wake`), ms; past due: 10 ms on.
+    pub fn next_wake(&self) -> Option<u64> {
+        let scene = self.scene.next_wake().map(|t| t.as_millis() as u64);
+        let widgets = self.widgets.next_wake().map(|t| t.as_millis() as u64);
+        let idle = self.idle_due.filter(|_| self.told("idle"));
+        let wake = [scene, widgets, idle].into_iter().flatten().min()?;
+        Some(if wake <= self.now {
+            self.now + 10
+        } else {
+            wake
+        })
+    }
+
     pub fn settle(&mut self) {
         let now = self.at();
         let cursor = self.vt.cursor();
@@ -769,6 +897,59 @@ impl Headless {
             self.emit("widgets", json!(info));
         }
         self.scene.tick_on(now, self.vt.grid(), &self.frames);
+        self.watch_idle();
+    }
+
+    /// Topic `idle`, as the driver tells it: an event a frame on screen
+    /// whose idleness changed since the last look; the next look when
+    /// the first busy frame can be idle, or at a change on screen. A
+    /// screen nothing was written on is blank: idle from the start.
+    fn watch_idle(&mut self) {
+        let watch = self.told("idle");
+        if watch != self.idle_watch {
+            self.idle_watch = watch;
+            self.idle_due = Some(self.now);
+        }
+        if !watch {
+            self.idle_seen.clear();
+            return;
+        }
+        if self.idle_due.is_none_or(|due| self.now < due) {
+            return;
+        }
+        self.idle_looked = self.now;
+        self.idle_due = None;
+        let now = self.at();
+        let mut seen = BTreeMap::new();
+        let mut events = Vec::new();
+        for info in self.frames.list() {
+            if info.state == ptyrc_core::FrameState::Inactive {
+                continue;
+            }
+            let Some(heat) = self.frames.heat_at(info.id, now) else {
+                continue;
+            };
+            let (idle, score, free) = match self.fed {
+                false => (true, 1.0, 1.0),
+                true => {
+                    let i = heat.idle();
+                    (i.idle, i.score, i.free)
+                }
+            };
+            if let Some(left) = heat.idle_in().filter(|_| self.fed) {
+                let at = self.now + ((left * 1000.0) as u64).max(IDLE_STEP_MS);
+                self.idle_due = Some(self.idle_due.map_or(at, |due| due.min(at)));
+            }
+            if self.idle_seen.get(&info.id).copied().unwrap_or(false) != idle {
+                events.push(json!({"frame": info.id, "idle": idle, "score": score,
+                                   "free": free}));
+            }
+            seen.insert(info.id, idle);
+        }
+        self.idle_seen = seen;
+        for e in events {
+            self.emit("idle", e);
+        }
     }
 
     fn check_frame(&self, sel: &FrameSel) -> Result<(), CallError> {
@@ -949,11 +1130,13 @@ impl Headless {
                 "size": [cols, rows],
                 "headless": true,
             })),
-            "screen.text" => Ok(json!({
-                "lines": self.vt.grid().text(),
-                "size": [cols, rows],
-                "rect": [0, 0, cols, rows],
-            })),
+            "screen.text" => {
+                let lines = match params.get("sprites") == Some(&Value::Bool(true)) {
+                    true => self.own_composed().text(),
+                    false => self.vt.grid().text(),
+                };
+                Ok(json!({"lines": lines, "size": [cols, rows], "rect": [0, 0, cols, rows]}))
+            }
             "screen.shape" => {
                 let words: Vec<String> = params
                     .get("words")
@@ -976,7 +1159,7 @@ impl Headless {
                 let composed;
                 let grid = match sprites {
                     true => {
-                        composed = self.scene.compose(self.vt.grid(), &self.frames);
+                        composed = self.own_composed();
                         &composed
                     }
                     false => self.vt.grid(),
@@ -1174,6 +1357,12 @@ impl Headless {
         })
     }
 
+    /// `screen.text`, `screen.cells {sprites}`: the app's own sprites
+    /// alone over the screen (`ptyrc-server`, `own.rs`: `owners`).
+    fn own_composed(&self) -> Grid {
+        (self.scene).compose_of(self.vt.grid(), &self.frames, &[OWNER])
+    }
+
     /// The screen under the app, the app's sprites and widgets over
     /// it, as text: one string a row, trailing spaces cut.
     pub fn screen(&self) -> Vec<String> {
@@ -1191,6 +1380,25 @@ impl Headless {
     /// The answer as the driver gives it to an app of these grants:
     /// denied, cut to its degree, or whole; the degree when cut.
     fn checked(
+        &mut self,
+        method: &str,
+        params: &Value,
+    ) -> (Result<Value, CallError>, Option<Degree>) {
+        // The pointer told to an effect: the driver's flags.
+        let mut params = params.clone();
+        let flags = nozzle::take_flags(method, &mut params);
+        let (answer, degree) = self.checked_as(method, &params);
+        if let (Some(flags), Ok(answer)) = (flags, &answer) {
+            let id = (params.get("id").and_then(Value::as_u64))
+                .or_else(|| answer.get("id").and_then(Value::as_u64));
+            if let Some(id) = id {
+                self.nozzles.note(id, flags);
+            }
+        }
+        (answer, degree)
+    }
+
+    fn checked_as(
         &mut self,
         method: &str,
         params: &Value,
@@ -1448,6 +1656,26 @@ impl Headless {
                     mark(v, degree)
                 })
             }
+            // Where an anchor landed, at the degree that finds it.
+            "draw.list" => {
+                let mut answer = self.answer(method, params);
+                let mut needs = Vec::new();
+                if let Ok(v) = &mut answer {
+                    for item in (v["sprites"].as_array_mut().into_iter()).flatten() {
+                        if let Some(d) = grants::landing(item, &g) {
+                            let word = item["anchor"]["text"].as_str().map(str::to_owned);
+                            needs.push((d, word));
+                        }
+                    }
+                }
+                for (d, word) in needs {
+                    match (d, word) {
+                        (Degree::Words, Some(w)) => self.lack("words", &[w]),
+                        (d, _) => self.lack(d.name(), &[]),
+                    }
+                }
+                return (answer, None);
+            }
             // Marked; not told as lowered: it lacks only `host_colors`.
             "session.info" => {
                 let answer = self.answer(method, params).map(|mut v| {
@@ -1675,6 +1903,25 @@ impl Headless {
             self.lack(p, &[]);
         }
     }
+}
+
+/// The cell of the canvas of `sprite` at a screen cell, when it is
+/// shown there, in the view of its frame (`ptyrc-server`, `canvas_at`).
+fn canvas_at(scene: &Scene, frames: &Frames, sprite: u64, x: u16, y: u16) -> Option<[i64; 2]> {
+    let list = scene.list();
+    let s = list.iter().find(|s| s.id == sprite)?;
+    let [sx, sy] = s.screen?;
+    let (cx, cy) = (i64::from(x) - sx, i64::from(y) - sy);
+    let [w, h] = s.size;
+    let inside = (0..i64::from(w)).contains(&cx) && (0..i64::from(h)).contains(&cy);
+    let in_view = match s.frame {
+        Some(frame) if frame != RAW => frames.info(frame).is_some_and(|i| {
+            let r = i.rect;
+            i.usable && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h
+        }),
+        _ => true,
+    };
+    (inside && in_view).then_some([cx, cy])
 }
 
 /// The items of `member` of the app's own (`ptyrc-server`, `own_answer`).
@@ -2483,6 +2730,16 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
     let mut ticks = 0;
 
     let mut done = runner.init(&args, 0);
+    // A step after `init`, as the driver's: what it tells (`idle` of a
+    // blank screen) is heard at 0.
+    if done.is_ok() {
+        runner.host_mut().settle();
+        for (topic, data) in runner.host_mut().take_events() {
+            if done.is_ok() {
+                done = runner.event(&topic, &data, 0);
+            }
+        }
+    }
     let mut period = runner.period();
     let mut next_tick = (period > 0).then_some(u64::from(period));
     // At one time: the tape, the events, the tick, the screen.
@@ -2494,6 +2751,9 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
             inject.peek().map(|e| e.0),
             next_tick.filter(|t| *t <= end),
             at.peek().copied(),
+            // The scene steps on its own clock, as the driver's: the
+            // screen at T is the same whatever else is asked.
+            runner.host().next_wake().filter(|t| *t <= end),
         ]
         .into_iter()
         .flatten()
@@ -2535,6 +2795,17 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
             next_tick = (period > 0).then_some(now + u64::from(period));
         }
         runner.host_mut().settle();
+        // What the step told (`idle`, `widgets`): heard at once.
+        let told = runner.host_mut().take_events();
+        let again = !told.is_empty();
+        for (topic, data) in told {
+            if done.is_ok() {
+                done = runner.event(&topic, &data, now);
+            }
+        }
+        if again {
+            runner.host_mut().settle();
+        }
         if at.next_if_eq(&now).is_some() {
             let (rows, runs) = runner.host().shot();
             screens.push((now, rows));
@@ -3083,5 +3354,112 @@ mod tests {
         assert_eq!(e[1].1, json!({"widget": wid, "paste": "pasted"}));
         assert_eq!(e[2].1, json!({"widget": wid, "released": "escape"}));
         assert_eq!(e.len(), 3);
+    }
+
+    #[test]
+    fn the_pointer_told_to_an_effect() {
+        let mut h = host(&["shape"], &[]);
+        let effect = json!({"name": "sand", "params": {"rate": 1, "pointer": true, "bomb": true}});
+        let put = json!({"effect": effect, "size": [10, 5], "anchor": {"at": [2, 1]}});
+        let id = h.call("draw.put", put).unwrap()["id"].as_u64().unwrap();
+        h.settle();
+        assert_eq!(h.nozzles.told(id), Some((None, false)));
+        // No permission: the app is told nothing; nothing is dropped.
+        h.inject(&Inject::Pointer(3, 2));
+        assert_eq!(h.nozzles.told(id), Some((Some([1, 1]), false)));
+        h.inject(&Inject::Pointer(0, 0));
+        assert_eq!(h.nozzles.told(id), Some((None, false)));
+        h.set_now(100);
+        h.inject(&Inject::Press(4, 3));
+        assert_eq!(h.nozzles.told(id), Some((None, true)));
+        h.set_now(400);
+        h.inject(&Inject::Release(6, 3));
+        assert_eq!(h.nozzles.told(id), Some((None, false)));
+        assert!(h.dropped.is_empty(), "{:?}", h.dropped);
+        // Not taken from the program without `clicks-grab`.
+        assert!(h.lacks.iter().any(|l| l.permission == "clicks-grab"));
+        assert!(h.take_events().is_empty());
+        // `bomb` off, `pointer` kept; off both: forgotten.
+        let off = json!({"id": id, "effect": {"name": "sand", "params": {"bomb": false}}});
+        h.call("draw.update", off).unwrap();
+        h.inject(&Inject::Press(4, 3));
+        assert_eq!(h.nozzles.told(id), Some((None, false)));
+        let off = json!({"id": id, "effect": {"name": "sand", "params": {"pointer": false}}});
+        h.call("draw.update", off).unwrap();
+        assert_eq!(h.nozzles.told(id), None);
+    }
+
+    #[test]
+    fn a_press_held_and_released_off_its_sprite() {
+        let mut h = host(&["shape", "clicks"], &[]);
+        h.call("subscribe", json!({"topics": ["mouse"]})).unwrap();
+        let put = json!({"content": {"rows": ["xx"]}, "anchor": {"at": [3, 1]}});
+        let id = h.call("draw.put", put).unwrap()["id"].as_u64().unwrap();
+        h.settle();
+        h.inject(&Inject::Press(4, 1));
+        h.inject(&Inject::Release(9, 2));
+        let e = h.take_events();
+        assert_eq!(
+            e[0].1,
+            json!({"sprite": id, "at": [1, 0], "x": 4, "y": 1, "frame": 1, "pos": [4, 1],
+                   "mods": [], "button": "left", "action": "press"})
+        );
+        assert_eq!(
+            e[1].1,
+            json!({"sprite": id, "at": null, "x": 9, "y": 2, "frame": null, "pos": null,
+                   "mods": [], "button": "left", "action": "release"})
+        );
+        // A release with no press on a sprite: nobody's.
+        h.inject(&Inject::Release(9, 2));
+        assert!(h.take_events().is_empty());
+        assert_eq!(
+            h.dropped.last().unwrap().1,
+            "release 9,2: on no sprite of the app"
+        );
+    }
+
+    #[test]
+    fn where_an_anchor_landed_and_own_sprites_alone() {
+        let at = |held: &[&str]| {
+            let mut h = Headless::new((20, 5), 1);
+            h.feed(b"a fish and a cat");
+            h.set_grants(Some(Grants::new(held, &[], &["fish"])));
+            h
+        };
+        let mut h = at(&["shape", "words"]);
+        let put = |text: &str| json!({"content": {"rows": ["^"]}, "anchor": {"text": text, "side": "below"}});
+        h.call("draw.put", put("cat")).unwrap();
+        h.call("draw.put", put("fish")).unwrap();
+        h.settle();
+        let list = h.call("draw.list", json!({})).unwrap();
+        let s = list["sprites"].as_array().unwrap();
+        assert_eq!(
+            (s[0]["screen"].clone(), s[0]["visible"].clone()),
+            (Value::Null, json!(false))
+        );
+        assert!(s[1]["screen"].is_array(), "{}", s[1]);
+        assert!(h.lacks.iter().any(|l| l.permission == "text"));
+        // `text` held: the sprites of the app alone, composed.
+        let mut h = at(&["shape", "words", "text"]);
+        h.call("draw.put", put("cat")).unwrap();
+        let other = serde_json::from_value(json!({"content": {"rows": ["OTHER"]},
+                                                   "anchor": {"at": [0, 3]}}))
+        .unwrap();
+        h.scene.add(OWNER + 1, other, h.at()).unwrap();
+        h.settle();
+        let shown = |h: &mut Headless, sprites: bool| {
+            let t = h.call("screen.text", json!({"sprites": sprites})).unwrap();
+            let c = h.call("screen.cells", json!({"sprites": sprites})).unwrap();
+            (
+                t["lines"][1].clone(),
+                t["lines"][3].clone(),
+                c["rows"][1].clone(),
+            )
+        };
+        let (fish, other, cells) = shown(&mut h, true);
+        assert_eq!((fish, other), (json!("              ^"), json!("")));
+        assert!(cells.to_string().contains('^'), "{cells}");
+        assert_eq!(shown(&mut h, false).0, json!(""));
+        assert!(h.screen()[3].starts_with("OTHER"));
     }
 }

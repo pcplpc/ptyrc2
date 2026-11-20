@@ -277,7 +277,10 @@ fn catalog_rows(app: &StoreApp) -> Vec<Opt> {
                 None | Some(OptionValue::Bool(_)) => None,
                 Some(d) => Some(d.text()),
             },
-            help: o.doc.clone(),
+            help: match o.range() {
+                Some(r) => format!("{} ({r})", o.doc),
+                None => o.doc.clone(),
+            },
         })
         .collect();
     options.extend(launcher_rows());
@@ -322,7 +325,7 @@ mod tests {
         let manifest = manifest::parse(
             "[app]\nid = \"sand\"\nversion = \"1.0.0\"\nsummary = \"Sand.\"\n\
              license = \"GPL-3.0-or-later\"\napi = 1\nscript = \"app.js\"\n\
-             [options]\nrate = { type = \"int\", default = 20, doc = \"grains\" }\n\
+             [options]\nrate = { type = \"int\", default = 20, min = 1, max = 99, doc = \"grains\" }\n\
              loud = { type = \"bool\", default = false, doc = \"noise\" }\n\
              word = { type = \"string\", default = \"a\", doc = \"a word\" }\n",
         )
@@ -361,6 +364,7 @@ mod tests {
         );
         assert_eq!(parsed("--rate 3 --help").unwrap(), None);
         assert!(parsed("--rate x").is_err());
+        assert!(parsed("--rate 0").is_err());
         assert!(parsed("--rate").is_err());
         assert!(parsed("--speed 3").is_err());
         assert!(parsed("--no-rate").is_err());
@@ -383,6 +387,7 @@ mod tests {
             rows.iter()
                 .any(|o| o.flags == ["--prefer"] && o.choices.len() == 10)
         );
+        assert!(rows.iter().any(|o| o.help == "grains (1 to 99)"));
     }
 
     #[test]

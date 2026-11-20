@@ -40,6 +40,20 @@ fn build_runner() {
     assert!(built.success(), "cargo build -p ptyrc-box");
 }
 
+/// The runner the cases use: `target/release/ptyrc-box` when it was
+/// built after the debug one (a start compiles the interpreter: some
+/// 2 s of processor time against 7 s), else the debug one beside
+/// `ptyrc`. `PTYRC_BOX` set: that one.
+fn runner() -> Option<PathBuf> {
+    if let Some(named) = std::env::var_os("PTYRC_BOX") {
+        return Some(named.into());
+    }
+    let debug = Path::new(BIN).with_file_name("ptyrc-box");
+    let release = debug.parent()?.parent()?.join("release/ptyrc-box");
+    let built = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    (built(&release)? > built(&debug)?).then_some(release)
+}
+
 /// `ptyrc ARGS` in `dir`, `ptyrc` first on `PATH`.
 fn ptyrc(dir: &Path, args: &[String]) -> Output {
     let bin = Path::new(BIN).parent().unwrap();
@@ -47,8 +61,11 @@ fn ptyrc(dir: &Path, args: &[String]) -> Output {
         std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
     ))
     .unwrap();
-    Command::new(BIN)
-        .args(args)
+    let mut c = Command::new(BIN);
+    if let Some(r) = runner() {
+        c.env("PTYRC_BOX", r);
+    }
+    c.args(args)
         .current_dir(dir)
         .env("PATH", path)
         .env_remove("PTYRC")

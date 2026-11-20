@@ -78,7 +78,8 @@ has "the keyboard is the menu's" 'm call session.info | grep -q "\"grabbed\": tr
 picture "the menu"
 
 keys s
-sees "s: the apps to start" "clock     one clock in a quiet"
+# The name column is as wide as the longest name, shipped store apps among them.
+sees "s: the apps to start" "one clock in a"
 picture "start"
 keys Down Enter
 sees "the form" "start clock: options"

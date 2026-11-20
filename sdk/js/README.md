@@ -117,7 +117,8 @@ invalid sequence a U+FFFD.
 APP.js`): FILE (`tests.js`) of the app's tree loaded with `"ptyrc:unit":
 true` in `init`; `init` of the app is not called. Each export `test_*`,
 in the order of the names, runs in an `event` of its own, under its
-limits; `ok   NAME` or `FAIL NAME` and the error as logged
+limits but time: 10 s a test (and for loading FILE), 60 s the file in
+all (the rest not run); `ok   NAME` or `FAIL NAME` and the error as logged
 (`file:line:col`); then `P passed, F failed`. A test ended by the
 runner (`time`, `stack`): the rest not run. Status 0 when all passed.
 No session: `call` answers `not-usable`. `assert`, `assertEqual`

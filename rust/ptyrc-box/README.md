@@ -10,7 +10,8 @@ ptyrc-box --headless [--no-profile] [--manifest JSON] [--script] MODULE [ARGS] [
           [--grant NAME,...] [--deny NAME,...] [--words WORD,...]
           [--user-word WORD]... [--user-pattern TEXT]... [--user-regex RE]...
           [--front | --back] [--prefer P] [--alpha A] [--border B]
-          [--event T:TOPIC:JSON]... [--key T:KEY]...
+          [--event T:TOPIC:JSON]... [--key T:KEY]... [--pointer T:X,Y]...
+          [--click T:X,Y]... [--press T:X,Y]... [--release T:X,Y]...
 ```
 
 Runs `MODULE` (a binary module; with `--script`, `APP.js`) in the
@@ -34,6 +35,10 @@ that of `exit`, or 70.
   the driver checks a store app (`grants.rs`): a reading above the
   degree held is cut to it, marked `"degree"`; an act not held, a
   method closed to apps: `denied`, the hint naming the permission.
+  `draw.list` below `text`: where an anchor landed told at the degree
+  that finds it (`grants::landing`, the driver's `own::landing`).
+  `screen.text`, `screen.cells {sprites: true}`: the app's own sprites
+  composed alone.
   `--deny` alone: every permission but these. Neither: the whole
   session. `--user-word`: a word the user gave, found at any degree,
   shown from `shape`; `--user-pattern`, `--user-regex`: a pattern the
@@ -46,7 +51,8 @@ that of `exit`, or 70.
   `--clock ISO` the wall time at 0 (default `2000-01-01T00:00:00Z`),
   advancing with session time; `--zone NAME` the local zone (a name of
   the system database, or a POSIX rule; default `UTC`); the database is
-  read whole before the profile when `clock` is held. `--storage DIR`:
+  read whole before the profile when `clock` is held; else the zone
+  alone, checked, unused (a note). `--storage DIR`:
   the values, a file a key, never written back. `--file NAME=PATH`: a
   file or a directory read once, its handle (`f0`, ...) given to
   `init` under `NAME` (a handle there already is kept); read only.
@@ -63,10 +69,17 @@ that of `exit`, or 70.
   app when it grabbed it (`input.grab`); `ctrl+t` releases the grab.
   `--pointer T:X,Y`, `--click T:X,Y`: `hover`, `mouse` on the app's
   sprite at the cell (topmost, no effect), heard on its widget or a
-  sprite in front, else with `pointer`, `clicks`. `--focus T:TAG`: its
+  sprite in front, else with `pointer`, `clicks`. `--press T:X,Y`,
+  `--release T:X,Y`: the left button down, up (`--click`: both at
+  once); a release after a press on a sprite is of that sprite, `at`,
+  `frame`, `pos` null off it. An effect put with `"pointer": true`,
+  `"bomb": true` in its params is tuned as the driver tunes it
+  (`nozzle.rs`): `hover`, `bomb` `[x, y, ms]` or `[x, y, ms, dx, dy]`;
+  no permission; a press on it without `clicks-grab`: `lacks`. `--focus T:TAG`: its
   widget that asks is focused; keys then go to it (`{"key", "bytes",
   "widget"}`), its escape and close keys end it (`released`);
-  `--paste T:TEXT`: `{"widget", "paste"}`.
+  `--paste T:TEXT`: `{"widget", "paste"}`. `--resize T:CxR`: the host
+  resized, as a tape's resize: the screen first, then `size`.
 
 ## OS profile
 
@@ -252,7 +265,11 @@ print!("{report}");
 ```
 
 - `headless::run`: session time an argument, `random` from a seed: the
-  same report every time. Lateness is wall time: a guest near 50 ms a
+  same report every time. The scene and the widgets step when the
+  driver would (`Headless::next_wake`), between the times asked: the
+  screen at `T` does not depend on the other times of `at`. A step
+  follows `init`. Topic `idle` as the driver's `watch_idle`; a screen
+  nothing was written on (`Empty`) is idle from the start. Lateness is wall time: a guest near 50 ms a
   tick may differ.
 - The screen: `Options::under`: `Empty`; `Text` (written from the top
   left, `\n` a line, escapes read); `Tape` (`Tape::parse`, the format

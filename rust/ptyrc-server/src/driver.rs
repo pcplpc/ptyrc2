@@ -2243,13 +2243,12 @@ impl Driver {
             );
         }
         let frame = self.frame_id(conn, frame.clone(), engine)?;
-        // A store app is clipped to the frame it is moved to.
-        let apps = self.apps.as_mut().expect("checked by the caller");
-        if let Some(surface) = apps.get(id).and_then(|a| a.surface) {
-            apps.set_surface(id, surface.moved(frame));
-        }
-        for mover in movers {
-            self.send_event(mover, "move", json!({"frame": frame}));
+        // An app with a surface is clipped to the frame it is moved to,
+        // its sprites along, told; another is told.
+        if !self.move_surface(id, frame, engine) {
+            for mover in movers {
+                self.send_event(mover, "move", json!({"frame": frame}));
+            }
         }
         Ok(json!({"app": self.app_info(id, Some(conn), engine), "frame": frame}))
     }
@@ -2349,7 +2348,7 @@ impl Driver {
                 "alpha", "border",
             ],
             "app.enrol" => &["name", "argv", "declares"],
-            "app.restart" => &["app", "argv", "name", "declares"],
+            "app.restart" => &["app", "argv", "name", "declares", "frame"],
             "app.move" => &["app", "frame"],
             _ => &["app"],
         };
@@ -2488,15 +2487,30 @@ impl Driver {
                 RpcError::bad_params("argv: [program, arg...]")
                     .with_hint(r#"as in {"argv": ["ptyrc-app", "clock"]}"#)
             })?;
+            // The frame the user gave: told to the app in its argv;
+            // resolved here for the surface of one below `layout`.
+            let frame = match member("frame") {
+                Some(frame) => Some(self.frame_id(conn, frame.clone(), engine)?),
+                None => None,
+            };
+            let apps = self.apps.as_mut().expect("checked above");
             let id = apps
                 .start(argv, name, false, now)
                 .map_err(|e| refused(apps, 0, e))?;
             Self::grant(apps, id, declares, headless, given);
+            if let Some(frame) = frame {
+                self.give_frame(id, frame);
+            }
             id
         } else {
             let id = member("app")
                 .and_then(Value::as_u64)
                 .ok_or_else(|| RpcError::bad_params("app: the id of an app"))?;
+            let frame = match member("frame") {
+                Some(frame) => Some(self.frame_id(conn, frame.clone(), engine)?),
+                None => None,
+            };
+            let apps = self.apps.as_mut().expect("checked above");
             if apps.get(id).is_none() {
                 return Err(refused(apps, id, Refused::Unknown));
             }
@@ -2549,6 +2563,9 @@ impl Driver {
                 _ => e.with_hint(format!("start it again: ptyrc manage restart {id}")),
             };
             let paused = done.map_err(|e| hint(refused(apps, id, e)))?;
+            if let Some(frame) = frame.filter(|_| verb == "restart") {
+                self.give_frame(id, frame);
+            }
             if let Some(paused) = paused {
                 self.set_paused(id, paused, engine);
             }

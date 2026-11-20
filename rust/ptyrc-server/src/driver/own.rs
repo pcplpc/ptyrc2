@@ -87,6 +87,8 @@ pub(super) struct Own {
     pub store: bool,
     pub front: bool,
     pub front_widget: bool,
+    /// Of a store app; of a native app below `layout`, the frame the
+    /// user gave.
     pub surface: Option<Surface>,
     pub screen_wide: bool,
     /// The launcher's options of a store app.
@@ -134,7 +136,9 @@ impl Driver {
             front: app.grants.holds(Permission::Front),
             front_widget: (app.grants.holds(Permission::Front)
                 || app.grants.holds(Permission::FrontWidget)),
-            surface: app.surface,
+            // Of a native app: the frame the user gave, below `layout`.
+            surface: (app.surface)
+                .filter(|_| app.store().is_some() || app.grants.degree() < Degree::Layout),
             screen_wide: app.grants.holds(Permission::ScreenWide),
             given: Given {
                 files: Vec::new(),
@@ -274,7 +278,7 @@ impl Driver {
             }
         }
         // Its surface: clipped, never refused, nothing told.
-        if own.store {
+        if own.surface.is_some() {
             let named = object.get("frame").is_some_and(|f| !f.is_null());
             let clip = match method {
                 "draw.put" => own.clip(false),

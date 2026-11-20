@@ -8,9 +8,15 @@ api = 1
 script = "app.js"
 surface = "frame"
 
-# No permission: the effect `sand` of the driver looks at the text and
-# answers nothing; the app learns nothing of the screen.
+# The effect `sand` of the driver looks at the text and answers nothing;
+# the app learns nothing of the screen. The driver tells the effect the
+# pointer (`--hover`, `--bomb`): the app is told nothing of it.
+
+[permissions]
+clicks-grab = "the clicks on the pile do not reach the program (--bomb)"
 
 [options]
 rate = { type = "float", default = 60.0, doc = "grains a second" }
 cursor = { type = "bool", default = false, doc = "pour over the cursor's column" }
+hover = { type = "bool", default = false, doc = "the pointer takes the sand it is over" }
+bomb = { type = "bool", default = false, needs = ["clicks-grab"], doc = "a click on the pile blows it up, the longer held the stronger" }

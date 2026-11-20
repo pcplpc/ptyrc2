@@ -17,10 +17,10 @@
 // (`frame.heat`, `shape`; without it, cold everywhere) and aims at a
 // cold cell, away from the previous ones.
 
-import { call, exit, log, period } from "ptyrc";
+import { call, exit, period } from "ptyrc";
 
 export const PERIOD = 3000;
-export const MAX_BURSTS = 10;
+export const MAX_BURSTS = 10; // the max of --bursts in the manifest
 /** The pops of a burst: bright green, magenta, blue, yellow. */
 export const COLORS = [10, 13, 12, 11];
 /** The pop of the first ptyrc, frame by frame. */
@@ -179,7 +179,7 @@ export function spot(classes, rnd, avoid = [], reach = 3) {
   return cells[cells.length - 1];
 }
 
-/** The options of `init`, `--all` spread; `null`: `bursts` out of range. */
+/** The options of `init`, `--all` spread; `bursts` 1 to `MAX_BURSTS` by the manifest. */
 export function options(args) {
   const o = {
     bursts: Number.isInteger(args.bursts) ? args.bursts : 1,
@@ -192,7 +192,7 @@ export function options(args) {
     duration: Number.isFinite(args.duration) && args.duration > 0 ? Math.min(args.duration, 30) : 3,
   };
   if (args.all === true) o.fancy = o.random = o.fireworks = o.sparkle = true;
-  return o.bursts >= 1 && o.bursts <= MAX_BURSTS ? o : null;
+  return o;
 }
 
 /** The show: rounds of shots queued at their time, run by `step(now)`.
@@ -310,10 +310,6 @@ function heat() {
 
 export function init(args) {
   const o = options(args);
-  if (o === null) {
-    log(`confetti: --bursts: between 1 and ${MAX_BURSTS}`);
-    exit(2);
-  }
   const put = (sprite) => call("draw.put", sprite);
   show = new Show(o, { put, heat, rnd: Math.random }, Date.now());
   show.sparkle();

@@ -20,8 +20,15 @@ use std::time::{Duration, SystemTime};
 
 const BOX: &str = "ptyrc-box";
 
-/// The program that runs apps: beside this one, else on `PATH`.
+/// The program that runs apps: `$PTYRC_BOX`, as the driver; else
+/// beside this one; else on `PATH`.
 fn runner() -> Result<PathBuf, Fail> {
+    let named = std::env::var_os("PTYRC_BOX")
+        .map(PathBuf::from)
+        .filter(|p| p.is_file());
+    if let Some(p) = named {
+        return Ok(p);
+    }
     let beside = std::env::current_exe()
         .ok()
         .and_then(|e| Some(e.parent()?.join(BOX)))
@@ -138,6 +145,22 @@ fn file_words(m: &Manifest, files: &[String], words: &mut Vec<String>) -> Result
     }
     words.extend(positional.into_iter().map(|(_, p)| p.to_string()));
     Ok(())
+}
+
+/// The flags of `dev test` that take a value or stand alone.
+pub const TEST_FLAGS: &[&str] = &[
+    "size", "for", "at", "seed", "tape", "screen", "styles", "unit", "arg", "deny", "event", "key",
+    "clock", "zone", "storage", "file", "probe", "pointer", "click", "focus", "paste", "resize",
+    "json",
+];
+
+/// The options of the app named as a flag of `dev test`: given before
+/// `--`, the flag is `dev test`'s.
+pub fn shadowed(m: &Manifest) -> Vec<&str> {
+    (m.options.iter())
+        .map(|o| o.name.as_str())
+        .filter(|n| TEST_FLAGS.contains(n))
+        .collect()
 }
 
 /// The arguments of `ptyrc-box` that name the guest: `--script APP.js`,
@@ -340,6 +363,29 @@ pub fn given(m: &Manifest) -> Value {
 
 pub fn test(o: TestOpts) -> Result<ExitCode, Fail> {
     let m = manifest_of(&o.dir)?;
+    // A flag of `dev test` given that an option of the app shares:
+    // ours, said with the value it took.
+    let shadowed = shadowed(&m);
+    for (i, f) in o.flags.iter().enumerate() {
+        let Some(name) = f.to_str().and_then(|f| f.strip_prefix("--")) else {
+            continue;
+        };
+        if shadowed.contains(&name) {
+            let value = match name {
+                "styles" | "json" => String::new(),
+                _ => format!(
+                    " {}",
+                    o.flags
+                        .get(i + 1)
+                        .map_or("".into(), |v| v.to_string_lossy())
+                ),
+            };
+            eprintln!(
+                "ptyrc: note: --{name}{value}: taken by dev test, not the app; the app's \
+                 --{name} goes after `--` (ptyrc dev test DIR -- --{name} VALUE)"
+            );
+        }
+    }
     let mut words = o.args.clone();
     file_words(&m, &o.files, &mut words)?;
     let (launch, resolved) = read_args(&m, &words)?;

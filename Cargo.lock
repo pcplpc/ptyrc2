@@ -829,6 +829,7 @@ version = "2.0.0"
 dependencies = [
  "ptyrc-vt",
  "regex",
+ "rustix",
  "serde",
  "serde_json",
 ]
@@ -889,6 +890,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ptyrc-probe"
+version = "2.0.0"
+dependencies = [
+ "rustix",
+ "serde_json",
+]
+
+[[package]]
 name = "ptyrc-proto"
 version = "2.0.0"
 dependencies = [
@@ -903,6 +912,7 @@ version = "2.0.0"
 dependencies = [
  "libc",
  "ptyrc-core",
+ "ptyrc-probe",
  "ptyrc-proto",
  "ptyrc-store",
  "ptyrc-vt",
@@ -916,6 +926,7 @@ dependencies = [
 name = "ptyrc-store"
 version = "2.0.0"
 dependencies = [
+ "landlock",
  "rustix",
  "serde",
  "serde_json",

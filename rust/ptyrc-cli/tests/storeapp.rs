@@ -994,6 +994,101 @@ fn the_launchers_prefer_border_back() {
     assert_eq!(widgets["widgets"][0]["border"], json!("heavy"), "{widgets}");
 }
 
+/// One sprite; it asks to move itself and another.
+const MOVED: &str = r#"
+import { call, log, period } from "ptyrc";
+function ask(method, params) {
+  try { call(method, params); log(method + ": allowed"); }
+  catch (e) { log(method + ": " + e.code); }
+}
+export function init(args) {
+  call("subscribe", { topics: ["move"] });
+  call("draw.put", { content: { rows: ["="] }, anchor: { at: [8, 0], space: "view" } });
+  const me = call("app.list", {}).apps[0].id;
+  ask("app.move", { app: me, frame: 0 });
+  ask("app.move", { app: 1, frame: 0 });
+  log("drawn");
+  period(0);
+}
+export function tick(now) {}
+export function event(topic, data) { log(topic + "=" + JSON.stringify(data)); }
+"#;
+
+#[test]
+fn a_store_app_is_where_the_user_moves_it() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let sb = Sandbox::new("moved");
+    install(&sb, "moved", wide_manifest("moved", "frame", ""), MOVED);
+    let mut driver = sb.ptyrc();
+    driver
+        .env("PTYRC_BOX", runner())
+        .env("PTYRC_JS", &js)
+        .args(["run", "--name", "s", "--headless", "--size", "60x16"])
+        .args(["--", "sh", "-c", MERGE])
+        .stdin(std::process::Stdio::null());
+    let _driver = common::Proc(driver.spawn().unwrap());
+    let socket = sb.socket("s");
+    wait_for(
+        || std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "socket",
+    );
+    let mut client = sb.client("s");
+    client.call("session.info", json!({})).unwrap();
+    let pane = |client: &mut Client, x: u64| {
+        let frames = client.call("frame.list", json!({})).unwrap();
+        (frames["frames"].as_array().unwrap().iter())
+            .find(|f| f["kind"] == "pane" && f["rect"][0] == x && f["state"] == "stable")
+            .map(|f| f["id"].as_u64().unwrap())
+    };
+    let (mut left, mut right) = (0, 0);
+    wait_for(
+        || {
+            let found = (pane(&mut client, 0), pane(&mut client, 40));
+            found
+                .0
+                .zip(found.1)
+                .map(|(l, r)| (left, right) = (l, r))
+                .is_some()
+        },
+        "the panes",
+    );
+    let started = client
+        .call("app.start", json!({"store": "moved", "frame": left}))
+        .unwrap();
+    let id = started["app"]["id"].as_u64().unwrap();
+    wait_slow(|| log_of(&mut client, id).contains("drawn"), "drawn");
+    let log = log_of(&mut client, id);
+    // Neither itself nor another: closed to apps.
+    assert_eq!(log.matches("app.move: denied").count(), 2, "{log}");
+    let frame_of_its_sprite = |client: &mut Client| {
+        let list = client.call("draw.list", json!({})).unwrap();
+        (list["sprites"].as_array().unwrap().iter())
+            .find(|s| s["kind"] != "widget")
+            .map(|s| s["frame"].clone())
+    };
+    assert_eq!(frame_of_its_sprite(&mut client), Some(json!(left)));
+
+    // By the user: its sprite goes along; it is told.
+    let moved = client
+        .call("app.move", json!({"app": id, "frame": right}))
+        .unwrap();
+    assert_eq!(moved["frame"], right);
+    assert_eq!(frame_of_its_sprite(&mut client), Some(json!(right)));
+    wait_slow(
+        || log_of(&mut client, id).contains(&format!("move={{\"frame\":{right}}}")),
+        "told",
+    );
+    let text = client
+        .call("screen.text", json!({"sprites": true}))
+        .unwrap();
+    let line = text["lines"][0].as_str().unwrap();
+    assert!(line.ends_with("│right   ="), "{text}");
+}
+
 /// A look-alike of the driver's pop-up: a box of double lines, white on
 /// blue, ` ptyrc ` at its foot, asked on `hud`; a widget with `alert`.
 const FAKE: &str = r#"
@@ -1507,4 +1602,111 @@ fn the_options_of_a_store_app() {
             "{params}"
         );
     }
+}
+
+/// A shipped app through a live driver: `ptyrc/confetti` found without
+/// `store add`, granted as declared with the warning (no screen to
+/// ask), drawn; `confetti`, the id of a native app too: the native one,
+/// the note naming both.
+#[test]
+fn a_shipped_app_through_a_live_driver() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        eprintln!("SKIPPED: no interpreter module; build it: sdk/js/interp/build.sh");
+        return;
+    }
+    let sb = Sandbox::new("shipped");
+    let shipped = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/store-apps");
+    let ptyrc = || {
+        let mut c = sb.ptyrc();
+        c.env("PTYRC_STORE_APPS", shipped.canonicalize().unwrap());
+        c.stdin(std::process::Stdio::null());
+        c
+    };
+    let mut driver = ptyrc();
+    driver
+        .env("PTYRC_BOX", runner())
+        .env("PTYRC_JS", &js)
+        .args([
+            "run",
+            "--name",
+            "s",
+            "--headless",
+            "--size",
+            "60x16",
+            "--",
+            "cat",
+        ]);
+    let _driver = common::Proc(driver.spawn().unwrap());
+    let socket = sb.socket("s");
+    wait_for(
+        || std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "socket",
+    );
+    let mut client = sb.client("s");
+    let ls = ptyrc().args(["store", "ls"]).output().unwrap();
+    assert!(
+        !String::from_utf8_lossy(&ls.stdout).contains("local:"),
+        "nothing added"
+    );
+
+    let run = ptyrc()
+        .args(["-s", "s", "app", "ptyrc/confetti", "--bursts", "3"])
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&run.stderr).into_owned();
+    assert!(run.status.success(), "{err}");
+    assert!(
+        err.contains("ptyrc: warning: no screen to ask: granted as declared: shape"),
+        "{err}"
+    );
+    let entry = |client: &mut Client| {
+        let apps = client.call("app.list", json!({})).unwrap();
+        (apps["apps"].as_array().unwrap().iter())
+            .find(|a| a["store"] == "ptyrc/confetti")
+            .cloned()
+            .expect("ptyrc/confetti in the table")
+    };
+    let id = entry(&mut client)["id"].as_u64().unwrap();
+    assert_eq!(entry(&mut client)["name"], "confetti");
+    wait_slow(
+        || {
+            let me = entry(&mut client);
+            let log = log_of(&mut sb.client("s"), id);
+            assert_ne!(me["state"], "exited", "log: {log}");
+            me["sprites"].as_u64().unwrap_or(0) > 0
+        },
+        "ptyrc/confetti draws",
+    );
+    let log = log_of(&mut client, id);
+    assert!(log.contains("warning: no screen to ask"), "{log}");
+
+    // `confetti`: the native app wins; the note names both.
+    if native_confetti(&ptyrc) {
+        let help = ptyrc()
+            .args(["-s", "s", "app", "confetti", "--help"])
+            .output()
+            .unwrap();
+        let (out, err) = (
+            String::from_utf8_lossy(&help.stdout).into_owned(),
+            String::from_utf8_lossy(&help.stderr).into_owned(),
+        );
+        assert!(
+            err.contains(
+                "ptyrc: note: confetti: the native app; the store app confetti \
+                 (ptyrc/confetti) goes by its origin: ptyrc app ptyrc/confetti"
+            ),
+            "{err}"
+        );
+        assert!(out.contains("usage: ptyrc-app confetti"), "{out}");
+        assert!(!out.contains("ptyrc/confetti"), "{out}");
+    } else {
+        eprintln!("SKIPPED: the native twin: no ptyrc-app with a catalog");
+    }
+}
+
+/// Whether `ptyrc-app`, found as `ptyrc app` finds it, knows `confetti`.
+fn native_confetti(ptyrc: &dyn Fn() -> Command) -> bool {
+    let out = ptyrc().args(["app", "--catalog"]).output();
+    out.is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("\"confetti\""))
 }

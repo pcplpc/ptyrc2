@@ -42,8 +42,9 @@ pub enum Dev {
     /// NAME (ARG#N: the Nth value of [args], from 0), as --NAME PATH.
     /// Also, as ptyrc-box takes them: --clock ISO, --zone NAME,
     /// --storage DIR, --probe
-    /// git=FILE.json, --pointer T:X,Y, --click T:X,Y, --focus T:TAG,
-    /// --paste T:TEXT
+    /// git=FILE.json, --pointer T:X,Y, --click T:X,Y, --press T:X,Y,
+    /// --release T:X,Y, --focus T:TAG,
+    /// --paste T:TEXT, --resize T:CxR
     #[command(allow_hyphen_values = true)]
     Test {
         /// The app's directory [default: .]
@@ -162,6 +163,16 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
             let mut flags: Vec<OsString> = Vec::new();
             let mut files: Vec<String> = Vec::new();
             let mut json = common.json;
+            // The words after a `--` of the command line are the app's,
+            // though the parser took the `--` itself.
+            let mut options = options;
+            let after = std::env::args_os()
+                .skip_while(|a| a != "--")
+                .skip(1)
+                .count();
+            if after > 0 && after <= options.len() && !options.contains(&"--".to_string()) {
+                options.insert(options.len() - after, "--".into());
+            }
             let mut words = options.into_iter();
             while let Some(w) = words.next() {
                 let (name, inline) = match w.split_once('=') {
@@ -180,7 +191,7 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
                     "--file" => files.push(value()),
                     "--size" | "--for" | "--at" | "--seed" | "--tape" | "--screen" | "--event"
                     | "--key" | "--clock" | "--zone" | "--storage" | "--probe" | "--pointer"
-                    | "--click" | "--focus" | "--paste" => {
+                    | "--click" | "--press" | "--release" | "--focus" | "--paste" | "--resize" => {
                         flags.extend([name.clone().into(), value().into()])
                     }
                     _ => args.push(w),
@@ -279,6 +290,37 @@ fn check(dir: &Path) -> Result<ExitCode, Fail> {
                 true => build::sources(&tree, &ok),
                 false => Vec::new(),
             };
+            // `[app] random`: each draw read as `ptyrc app` reads it. The
+            // bare draw (`random` absent: `[[]]`) that does not read is
+            // never drawn (the menu skips it): a note.
+            let mut notes = Vec::new();
+            let bare = ok.manifest.app.random == [Vec::<String>::new()];
+            for draw in &ok.manifest.app.random {
+                let read = ptyrc_store::options::read(&ok.manifest, draw, dir).and_then(|l| {
+                    let l = l.unwrap_or_default();
+                    let args = serde_json::Value::Object(l.args);
+                    ptyrc_store::options::resolve(&ok.manifest, Some(&args), &l.files).map(drop)
+                });
+                let Err(e) = read else { continue };
+                if bare {
+                    notes.push(format!(
+                        "[app] random: the bare draw (random absent: [[]]) is not a command \
+                         line ({}): never drawn; random = [] says so, or draws that read",
+                        e.message
+                    ));
+                } else {
+                    let message = format!("[app] random: {draw:?}: {}", e.message);
+                    problems.push(ptyrc_store::Error {
+                        message,
+                        hint: Some(e.hint.unwrap_or_else(|| {
+                            "each draw: words of the app's options, as ptyrc app takes them; \
+                             random = [] never drawn"
+                                .into()
+                        })),
+                        ..e
+                    });
+                }
+            }
             let mut built = None;
             if rust && problems.is_empty() {
                 match app::build_checked(dir, &tree, &ok) {
@@ -302,11 +344,17 @@ fn check(dir: &Path) -> Result<ExitCode, Fail> {
                     ok.files.len(),
                     ok.size
                 );
+                for n in &notes {
+                    eprintln!("ptyrc: note: {n}");
+                }
                 if let Some(m) = built {
                     let size = std::fs::metadata(&m).map_or(0, |m| m.len());
                     eprintln!("ptyrc: built {}, {size} bytes", m.display());
                 }
                 return Ok(ExitCode::SUCCESS);
+            }
+            for n in &notes {
+                eprintln!("ptyrc: note: {n}");
             }
             problems
         }

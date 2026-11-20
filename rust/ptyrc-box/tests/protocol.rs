@@ -175,3 +175,38 @@ fn the_ceilings_are_the_manifests() {
     }
     assert!(manifest.contains(r#""memory-mib" | "canvas-screens" | "log-mib" => "limit-memory""#));
 }
+
+/// The rules of the driver that `grants::landing`, `headless`
+/// (`own_composed`) and `nozzle` copy: a change there shows here.
+#[test]
+fn the_copies_of_the_drivers_rules() {
+    let own = read("rust/ptyrc-server/src/driver/own.rs");
+    for line in [
+        "_ if literal && among(words, text) => Degree::Words,",
+        "_ if literal && among(&hand.words, text) => Degree::Shape,",
+        "_ => Degree::Text,",
+        "} else if anchor.get(\"cursor\").is_some() || anchor.get(\"auto\").is_some() {",
+        "if degree < Degree::Layout {",
+        "item[\"screen\"] = Value::Null;",
+        "item[\"visible\"] = json!(false);",
+        "item[\"covered\"] = json!(0.0);",
+        "if matches!(method, \"screen.text\" | \"screen.cells\") {",
+        "object.insert(\"owners\".into(), json!(owners));",
+    ] {
+        assert!(own.contains(line), "driver/own.rs: {line}: grants::landing, headless");
+    }
+    let nozzle = read("rust/ptyrc-server/src/driver/nozzle.rs");
+    for line in [
+        "let (pointer, bomb) = (flag(\"pointer\"), flag(\"bomb\"));",
+        "const MAX_HOLD: u128 = 60_000;",
+        "let tune = json!({\"name\": p.name, \"params\": {\"hover\": at}});",
+        "let tune = json!({\"name\": p.name, \"params\": {\"bomb\": bomb}});",
+    ] {
+        assert!(nozzle.contains(line), "driver/nozzle.rs: {line}: nozzle.rs");
+    }
+    let doc = read("sdk/template/PROTOCOL.md");
+    let headless = section(&doc, "Headless (`ptyrc dev test`)");
+    for flag in ["--press", "--release", "--pointer"] {
+        assert!(headless.contains(flag), "PROTOCOL.md, Headless: {flag}");
+    }
+}

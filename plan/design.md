@@ -1162,13 +1162,13 @@ not kept, nor the child of the hotkey once it has ended.
 | method | params | result |
 |---|---|---|
 | `app.list` | | `{"apps":[info,...]}`, by id |
-| `app.start` | `argv`: `[program, arg...]`, `name`, `declares` (Permissions) | `{"app":info}`, once the pop-up is answered when it asks; `bad-params` with the reason when it does not start; `cancelled` |
+| `app.start` | `argv`: `[program, arg...]`, `name`, `declares` (Permissions), `frame`: the frame the user gave (Move) | `{"app":info}`, once the pop-up is answered when it asks; `bad-params` with the reason when it does not start; `cancelled` |
 | `app.start` | `store`: an origin or the id of an installed app, `args`: `{OPTION: VALUE}`, `files`, `frame`, `front`, `prefer`, `alpha`, `border` | the same; see Store apps |
 | `app.enrol` | `name`, `argv`, `declares` | `{"app":info,"token":hex}`, as `app.start`: the pop-up, the file, the headless rule; see Permissions, Foreground apps |
 | `app.stop` | `app`: id | `{"app":info}`; SIGTERM, SIGCONT when paused, SIGKILL after 2 s. A child: its group; a client: its pid. An exited child: nothing |
 | `app.pause` | `app` | `{"app":info}`; see Pause |
 | `app.resume` | `app` | `{"app":info}` |
-| `app.restart` | `app`, `argv`, `name` (both optional: as before), `declares` (with `argv` and without it: the whole session) | `{"app":info}`, at once; stopped as by `app.stop`, started again when it has ended, under the same id; an exited one at once (`bad-params` when it does not start: it stays exited, status 127, the reason in its log). A client: `not-usable` |
+| `app.restart` | `app`, `argv`, `name` (both optional: as before), `declares` (with `argv` and without it: the whole session), `frame` (Move) | `{"app":info}`, at once; stopped as by `app.stop`, started again when it has ended, under the same id; an exited one at once (`bad-params` when it does not start: it stays exited, status 127, the reason in its log). A client: `not-usable` |
 | `app.forget` | `app` | `{}`; an exited child leaves the table; another state: `not-usable` |
 | `app.move` | `app`, `frame`: an id or a name, resolved at the call | `{"app":info,"frame":id}`; see Move |
 
@@ -1273,7 +1273,14 @@ through `Engine::hide_owner(conn, hidden)`.
 An app that can change frame while it runs subscribes to the topic
 `move`: that is its word for it (`moves`). `app.move` sends each such
 connection the event `move`: `{"frame": id}`; the app moves what it
-drew: the driver moves nothing. Not `moves`, paused or exited:
+drew. An app with a surface is moved by the driver besides, as to an
+heir (`driver/heir.rs`): its surface is the frame, its sprites there
+or on `NOWHERE` go along, then `move` and `size` are told. A surface:
+of a store app; of a native app narrowed below `layout`, the frame the
+user gave it (`app.move`, `frame` of `app.start` or `app.restart`;
+`ptyrc manage` sends the `-f` of `ptyrc-app NAME`), which all it names
+is put on: it knows one frame, and the user's hand is not a
+permission. `app.move` is closed to apps. Not `moves`, paused or exited:
 `not-usable`, the hint naming `ptyrc manage move --restart`. The topic
 is sent to the app moved only, never broadcast; it has no snapshot,
 and `ptyrc events` does not ask for it unless named. The frame is
@@ -2015,7 +2022,7 @@ not by removing from the whole.
 | `frame.list`, `frame.get` | `layout` and above | `key` and `support` null |
 | the same, `frame.at` | less than `layout` | one frame, the raw one, whatever was named: the surface; `frame` in every request above is ignored |
 | a frame info | less than `shape` | idle, `origin` 0, 0, `extent` the view |
-| `frame` of any request, `frame.at {name}` | less than `layout`; less than `shape` | the surface; `active`, `quietest`, `idle` (of the cursor, of the heat): `raw` |
+| `frame` of any request, `frame.at {name}` | less than `layout`; less than `shape` | the surface (0; of a native app given a frame by the user, that frame: Move); `active`, `quietest`, `idle` (of the cursor, of the heat): `raw` |
 | `session.info`; `hello` | less than `text` | `protocol`, `server`, `size`, `headless`; `host_colors` from `shape` |
 | event `frames` | `layout` and above | the infos cut as above |
 

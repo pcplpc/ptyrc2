@@ -14,7 +14,8 @@
 //! (`word`, `pattern` options); `--front`, `--back`, `--prefer`,
 //! `--alpha`, `--border`: the launcher's options, applied as the driver
 //! applies them.
-//! `--event`, `--key`, `--pointer`, `--click`, `--focus`, `--paste`:
+//! `--event`, `--key`, `--pointer`, `--click`, `--press`, `--release`,
+//! `--focus`, `--paste`:
 //! what the user does, at a session time.
 //! `--screen [T:]FILE`, again for each: the screen from T on.
 //! `--clock ISO`, `--zone NAME`, `--storage DIR`, `--file NAME=PATH`,
@@ -25,7 +26,8 @@
 //!
 //! `--unit FILE --script APP.js`: the unit tests of a script app:
 //! FILE, a script of the tree of `APP.js` by relative path, its exports
-//! `test_*` run in order, each under the limits of an `event`; no
+//! `test_*` run in order, each under the limits of an `event` but
+//! time (`script::UNIT_TEST`, `UNIT_FILE`); no
 //! session, `call` refused. The report on stdout; status 0 when all
 //! passed, 1 else (`script::unit`).
 //!
@@ -61,7 +63,8 @@ const USAGE: &str =
                  [--tape FILE | --screen [T:]FILE...] [--json] [--styles]
                  [--grant NAME,...] [--deny NAME,...] [--words WORD,...]
                  [--event T:TOPIC:JSON]... [--key T:KEY]... [--pointer T:X,Y]...
-                 [--click T:X,Y]... [--focus T:TAG]... [--paste T:TEXT]...
+                 [--click T:X,Y]... [--press T:X,Y]... [--release T:X,Y]...
+                 [--focus T:TAG]... [--paste T:TEXT]... [--resize T:CxR]...
                  [--clock ISO] [--zone NAME] [--storage DIR] [--file NAME=PATH]...
                  [--write-file NAME=PATH]... [--probe git|system=FILE.json]...
                  [--user-word WORD]... [--user-pattern TEXT]... [--user-regex RE]...
@@ -298,7 +301,7 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
                 }
                 cli.inject.push((t, Inject::Key(key.to_owned())));
             }
-            flag @ ("--pointer" | "--click") => {
+            flag @ ("--pointer" | "--click" | "--press" | "--release") => {
                 let v = string(value(flag)?);
                 let (t, xy) = timed(flag, &v)?;
                 let cell = (xy.split_once(','))
@@ -308,6 +311,8 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
                     t,
                     match flag {
                         "--pointer" => Inject::Pointer(x, y),
+                        "--press" => Inject::Press(x, y),
+                        "--release" => Inject::Release(x, y),
                         _ => Inject::Click(x, y),
                     },
                 ));
@@ -321,6 +326,17 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
                 let v = string(value("--paste")?);
                 let (t, text) = timed("--paste", &v)?;
                 cli.inject.push((t, Inject::Paste(text.to_owned())));
+            }
+            "--resize" => {
+                let v = string(value("--resize")?);
+                let (t, size) = timed("--resize", &v)?;
+                let size = (size.split_once('x'))
+                    .and_then(|(c, r)| Some((c.parse().ok()?, r.parse().ok()?)))
+                    .filter(|&(c, r): &(u16, u16)| {
+                        (1..=4096).contains(&c) && (1..=4096).contains(&r)
+                    });
+                let (c, r) = size.ok_or_else(|| format!("--resize {v}: T:COLSxROWS"))?;
+                cli.inject.push((t, Inject::Resize(c, r)));
             }
             "--tape" => cli.tape = Some(value("--tape")?.into()),
             "--screen" => {
@@ -402,7 +418,8 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
     if headless_only && !cli.headless {
         return Err(
             "--size, --for, --at, --seed, --tape, --screen, --json, --styles, --grant, \
-             --deny, --words, --event, --key, --pointer, --click, --focus, --paste, --clock, \
+             --deny, --words, --event, --key, --pointer, --click, --press, --release, --focus, \
+             --paste, --resize, --clock, \
              --zone, --storage, --file, --write-file, --probe, --user-word, --user-pattern, \
              --user-regex, --front, --back, --prefer, --alpha, --border: with --headless"
                 .into(),
@@ -589,11 +606,17 @@ fn host_fns(cli: &Cli, granted: &[String]) -> Result<HostFns, String> {
         ..HostFns::default()
     };
     // The database read whole, only for an app that holds the clock.
-    if granted.iter().any(|g| g == "clock") {
+    let clock = granted.iter().any(|g| g == "clock");
+    if clock {
         h.zones = Zones::read(&zone::database());
     }
     if let Some(name) = &cli.zone {
-        let zone = match h.zones.get(name) {
+        // Not held: the zone alone, checked, unused.
+        let found = match clock {
+            true => h.zones.get(name),
+            false => zone::load(&zone::database(), name),
+        };
+        let zone = match found {
             Ok(z) => Some(z),
             Err(_) if name == "UTC" => Some(Zone::utc()),
             Err(_) => Zone::posix(name, name),
@@ -601,6 +624,9 @@ fn host_fns(cli: &Cli, granted: &[String]) -> Result<HostFns, String> {
         h.zone = Some(zone.ok_or_else(|| {
             format!("--zone {name}: not a zone of the database, nor a POSIX rule (UTC-2)")
         })?);
+        if !clock {
+            eprintln!("ptyrc-box: note: --zone {name}: clock not held, the zone unused");
+        }
     }
     if let Some(dir) = &cli.storage {
         let list =
@@ -640,7 +666,11 @@ fn unit_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
         return fail(5, e);
     }
     let all: Vec<String> = ALL.iter().map(|s| s.to_string()).collect();
-    let (args, limits) = given(cli, args, &all);
+    let (args, mut limits) = given(cli, args, &all);
+    // The author's code on the author's machine: a bound of its own.
+    limits.hard = limits.hard.max(script::UNIT_TEST);
+    limits.init = limits.init.max(script::UNIT_TEST);
+    limits.late = limits.late.max(script::UNIT_TEST);
     let (lines, status) = script::unit(wasm, &args, limits);
     for line in lines {
         println!("{line}");

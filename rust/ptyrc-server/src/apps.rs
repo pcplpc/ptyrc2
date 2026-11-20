@@ -112,7 +112,8 @@ pub(crate) struct App {
     pub identity: Option<Identity>,
     /// What it holds: the whole session when it declared nothing.
     pub grants: Grants,
-    /// Of a store app: where it draws.
+    /// Of a store app, and of a native app below `layout` given a frame
+    /// by the user: where it draws.
     pub surface: Option<Surface>,
     /// Of a store app: what the user gave at its start, kept across a
     /// restart.

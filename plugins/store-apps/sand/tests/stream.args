@@ -1,4 +1,3 @@
 # test_sand (part), the example's test.sh: a thin stream from the
-# middle piles on the floor. An effect steps at the screens asked only
-# (headless): keep the times of --at as they are.
+# middle piles on the floor.
 --size 40x8 --for 6s --at 1s,3s,6s --rate 120 --now

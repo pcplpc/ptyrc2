@@ -26,16 +26,19 @@ hint }`: `message` says what was refused (manifest errors as
   `manifest::LIMITS`; a value exceeds its default, not its ceiling (the
   runner's). Granted by `limit-memory` or `limit-time`
   (`limit_permission`), never declared in `[permissions]`.
-- `AppOption { name, ty: OptionType, default: Option<OptionValue>,
-  doc, short, choices, list, needs, write, regex }`; `[args]`:
-  `Positional { option, min, max }`, one list. Types `int`, `float`,
-  `bool`, `string`, `word`, `pattern`, `file`, `dir`. Refused at
-  parse: a name in `RESERVED_OPTIONS` or `no-NAME`; a short twice or
-  `h`; `choices` but of a `string`, a default outside them; a list of
-  `bool`, a default of a list but a plain file name; `write` but of a
-  `file`, `regex` but of a `pattern`; a `needs` name not in
-  `[permissions]`; a `file` or `dir` without `files`, `write` without
-  `files-write`.
+- `AppOption { name, ty: OptionType, default: Option<OptionValue>, doc,
+  short, choices, list, needs, write, regex, min, max }`; `min`, `max`
+  bound a value of an `int` or `float` of `[options]`
+  (`AppOption::range`: `1 to 10`). `[args]`: `Positional { option, min,
+  max }`, one list, `min`, `max` the count of values. Types `int`,
+  `float`, `bool`, `string`, `word`, `pattern`, `file`, `dir`. Refused
+  at parse: a name in `RESERVED_OPTIONS` or `no-NAME`; a short twice or
+  `h`; `choices` but of a `string`, a default outside them; `min`, `max`
+  but of an `int` or `float`, not of its type, `min > max`, a default
+  outside; a list of `bool`, a default of a list but a plain file name;
+  `write` but of a `file`, `regex` but of a `pattern`; a `needs` name
+  not in `[permissions]`; a `file` or `dir` without `files`, `write`
+  without `files-write`.
 
 ## Options
 
@@ -54,7 +57,8 @@ the driver.
   `app.start`.
 - `resolve(manifest, args, files) -> Resolved { init, needs, words,
   patterns, files }`: each value of its type and rule (a `word` by
-  the rule of `words`, a `pattern` 1 to 256 bytes, 16 a run), each
+  the rule of `words`, a `pattern` 1 to 256 bytes, 16 a run, a
+  number within `min`, `max`), each
   handle given once and of its kind; the defaults filled in; `needs`
   of what was given (`files` for a default file, `files-write` for a
   file to write). `Resolved::asked(manifest)`: the permissions

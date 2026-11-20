@@ -37,12 +37,20 @@ NAME/
 `tests/CASE.args`: words split on white space, `#` to the end of a
 line a comment, no quoting (write JSON without spaces). Run in the
 tree: paths are relative to it. An app option named as one of `dev
-test` (`--size`, `--seed`, `--at`, ...) goes after `--`. Name the
+test` (`--size`, `--seed`, `--at`, ...) goes after `--`; before it,
+the flag is `dev test`'s (`dev check` and `dev test` say so). Name the
 Python test it carries in the first comment line.
 
-An effect steps at the screens asked only (headless): the screen at
-`T` depends on the other times of `--at`. Keep a case's times as
-blessed.
+The scene steps on its own clock, as the driver's: the screen at `T`
+is the same whatever other times `--at` asks.
+
+The user's hands as the driver hears them: `--pointer MS:X,Y`,
+`--press MS:X,Y`, `--release MS:X,Y` (`--click`: both at once),
+`--key`, `--focus`, `--paste`, `--resize`; screen cells, so that a
+case names no sprite id. `--event` only for what no hand gives. An
+effect that follows the pointer asks the driver (`"pointer": true`,
+`"bomb": true` in its params, `sand`): no pad sprite, no `hover`,
+`mouse` relayed by the app.
 
 ## The harness
 
@@ -51,6 +59,13 @@ cargo test -p ptyrc-cli --test store_apps           # every tree
 PTYRC_STORE_APP=NAME cargo test -p ptyrc-cli --test store_apps
 PTYRC_BLESS=1 ...                                   # rewrite CASE.txt
 ```
+
+A start of the runner compiles the interpreter: some 7 s of processor
+time in a debug build, 2 s in a release one. The cases run on
+`target/release/ptyrc-box` when it was built after the debug one
+(`cargo build --release -p ptyrc-box`; 2026-11-20, two trees: 13 s,
+176 s of processor time, against 4 s, 49 s); `PTYRC_BOX` names
+another (`ptyrc dev test` takes it, as the driver).
 
 Per tree: `ptyrc dev check`; the id its directory; `LICENSE`; each
 draw of `random` read by the options; each case against its `.txt`;
