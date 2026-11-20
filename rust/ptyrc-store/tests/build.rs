@@ -288,3 +288,22 @@ fn probe_no_rustc() {
     assert!(e.message.starts_with("/nonexistent/rustc"), "{e}");
     assert!(e.hint.unwrap().contains("https://rustup.rs"));
 }
+
+/// Two builds at once in one work directory: one after the other, the
+/// same module (`build::lock`).
+#[test]
+fn two_builds_at_once_in_one_work_directory() {
+    let Some(t) = toolchain() else { return };
+    let tree = DirTree::new(examples().join("sand"));
+    let checked = check(&tree).unwrap();
+    let work = common::tmp("twice").join("work");
+    let built: Vec<_> = std::thread::scope(|s| {
+        let all: Vec<_> = (0..3)
+            .map(|_| s.spawn(|| build::build(&tree, &checked, &work, &t, &Options::default())))
+            .collect();
+        all.into_iter()
+            .map(|r| r.join().unwrap().unwrap())
+            .collect()
+    });
+    assert!(built.iter().all(|b| b.wasm == built[0].wasm));
+}

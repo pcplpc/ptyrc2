@@ -171,10 +171,11 @@ pub fn diff(want: &str, got: &str) -> String {
     out
 }
 
-/// `dev test --cases`: each case, a line; a diff under a failure;
-/// status 1 when one fails.
+/// `dev test --cases`: a Rust app built once, then each case, a
+/// line; a diff under a failure; status 1 when one fails.
 pub fn all(dir: &Path, names: &[String], bless: bool) -> Result<ExitCode, Fail> {
     let chosen = cases(dir, names)?;
+    super::app::built(dir)?;
     let program = std::env::current_exe().map_err(|e| Fail::from(format!("this program: {e}")))?;
     let outcomes: Vec<Outcome> = std::thread::scope(|s| {
         let runs: Vec<_> = (chosen.iter())

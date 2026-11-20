@@ -1,0 +1,31 @@
+--- 2000 ms
+
+
+     ╭─────────────────╮
+     │   ⢀⡤⠖⠊⠉⣉⠉⠑⠲⢤⡀   │
+     │ ⢀⡴⠋ ⠁  ⢹  ⠈ ⠙⢦⡀ │
+     │ ⡞⠐     ⢸     ⠂⢳ │
+     │⢸ ⣀     ⢸     ⣀ ⡇│
+     │⢸ ⠉     ⠈⠉⠉⠉⠁ ⠉ ⡇│
+     │ ⢧⠠           ⠄⡼ │
+     │ ⠈⠳⣄ ⡀  ⣀  ⢀ ⣠⠞⠁ │
+     │   ⠈⠓⠦⢄⣀⣩⣀⡠⠴⠚⠁   │
+     ╰────────── clock ╯
+--- 2000 ms, styles
+
+
+     aaaaaaaaaaaaaaaaaaa
+     a   bbbbbcbbbbb   a
+     a bbb b  c  b bbb a
+     a bb     c     bb a
+     ab b     c     b ba
+     ab b     ddddd b ba
+     a bb           bb a
+     a bbb b  b  b bbb a
+     a   bbbbbebbbbb   a
+     aaaaaaaaaaaa     aa
+a: dim
+b: fg=8
+c: fg=13
+d: fg=14
+e: fg=11

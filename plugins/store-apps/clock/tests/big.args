@@ -1,0 +1,4 @@
+# test_clock_big_bottom_left: --big --no-seconds, at the bottom left
+# (`--prefer`, the launcher's); a tick on the wall minute.
+--size 60x16 --for 4s --at 1s,2s,3s,4s --clock 2026-11-13T09:05:58Z
+--big --no-seconds --prefer bottom-left

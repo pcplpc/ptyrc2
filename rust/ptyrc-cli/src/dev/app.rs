@@ -146,9 +146,9 @@ fn file_words(m: &Manifest, files: &[String], words: &mut Vec<String>) -> Result
 
 /// The flags of `dev test` that take a value or stand alone.
 pub const TEST_FLAGS: &[&str] = &[
-    "size", "for", "at", "seed", "tape", "screen", "styles", "unit", "arg", "deny", "event", "key",
-    "clock", "zone", "storage", "file", "probe", "pointer", "click", "focus", "paste", "resize",
-    "json",
+    "size", "for", "at", "seed", "tape", "screen", "styles", "timing", "unit", "arg", "deny",
+    "event", "key", "clock", "zone", "storage", "file", "probe", "pointer", "click", "focus",
+    "paste", "resize", "json",
 ];
 
 /// The options of the app named as a flag of `dev test`: given before
@@ -176,9 +176,12 @@ fn guest(dir: &Path, m: &Manifest) -> Result<Vec<OsString>, Fail> {
 }
 
 /// The build of the store (`build::build`: `rustc` alone, ptyrc's own
-/// `ptyrc-app`) in `DIR/target/ptyrc/`, under the profile where there is
-/// one, else without (the author's own tree; said). `rustc`'s messages
-/// on stderr. The module.
+/// `ptyrc-app`) in `DIR/target/ptyrc/work/`, under the profile where
+/// there is one, else without (the author's own tree; said). `rustc`'s
+/// messages on stderr. The module: `DIR/target/ptyrc/app.wasm`, put by
+/// a rename, kept with `app.stamp` (the sources, `ptyrc-app`, `rustc`):
+/// not built again while they are the same. Under a lock
+/// (`target/ptyrc/app.lock`): two at once in a tree build once.
 pub(super) fn build_checked(
     dir: &Path,
     tree: &DirTree,
@@ -199,23 +202,51 @@ pub(super) fn build_checked(
     for p in build::vendored_differs(tree, checked) {
         eprintln!("ptyrc: note: {p}: not ptyrc's own ptyrc-app, which the build uses");
     }
+    let base = target.join("ptyrc");
+    let module = base.join(build::MODULE);
+    let _held = build::lock(&base.join("app"))?;
+    let stamp = stamp(tree, checked, &toolchain)?;
+    let stamp_file = base.join("app.stamp");
+    let same = std::fs::read_to_string(&stamp_file).is_ok_and(|s| s == stamp);
+    if same && module.is_file() {
+        return Ok(module);
+    }
     let options = build::Options {
         unconfined: true,
         ..build::Options::default()
     };
-    let work = target.join("ptyrc");
-    let built = build::build(tree, checked, &work, &toolchain, &options)?;
+    let built = build::build(tree, checked, &base.join("work"), &toolchain, &options)?;
     if !built.messages.trim().is_empty() {
         eprintln!("{}", built.messages.trim_end());
     }
     if let Some(why) = &built.missing {
         eprintln!("ptyrc: note: built without an OS profile: {why}");
     }
-    Ok(work.join("out").join(build::MODULE))
+    let _ = std::fs::remove_file(&stamp_file);
+    let next = base.join("app.wasm.new");
+    std::fs::write(&next, &built.wasm).map_err(|e| io(&next, e))?;
+    std::fs::rename(&next, &module).map_err(|e| io(&module, e))?;
+    std::fs::write(&stamp_file, &stamp).map_err(|e| io(&stamp_file, e))?;
+    Ok(module)
+}
+
+/// What a module is of: the files of the tree, ptyrc's `ptyrc-app`,
+/// `rustc`, this program; a hash, as text.
+fn stamp(tree: &DirTree, checked: &Checked, t: &build::Toolchain) -> ptyrc_store::Result<String> {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::hash::DefaultHasher::new();
+    env!("CARGO_PKG_VERSION").hash(&mut h);
+    build::PTYRC_APP.hash(&mut h);
+    (&t.rustc, &t.release).hash(&mut h);
+    for f in &checked.files {
+        f.path.hash(&mut h);
+        ptyrc_store::Tree::read(tree, f)?.hash(&mut h);
+    }
+    Ok(format!("{:016x}\n", h.finish()))
 }
 
 /// [`build_checked`] of the tree at `dir`, checked first.
-fn build(dir: &Path) -> Result<PathBuf, Fail> {
+pub(super) fn build(dir: &Path) -> Result<PathBuf, Fail> {
     let tree = DirTree::new(dir);
     let checked = check(&tree).map_err(|e| Fail {
         hint: Some(match &e.hint {
@@ -225,6 +256,15 @@ fn build(dir: &Path) -> Result<PathBuf, Fail> {
         ..Fail::from(e)
     })?;
     Ok(build_checked(dir, &tree, &checked)?)
+}
+
+/// The module of a Rust app at `dir`, built if it is not; a script
+/// app: nothing. `dev test --cases` before its cases.
+pub(super) fn built(dir: &Path) -> Result<(), Fail> {
+    match manifest_of(dir)?.app.entry {
+        Entry::Rust(_) => build(dir).map(drop),
+        Entry::Script(_) => Ok(()),
+    }
 }
 
 fn status_of(status: std::process::ExitStatus) -> ExitCode {
@@ -370,7 +410,7 @@ pub fn test(o: TestOpts) -> Result<ExitCode, Fail> {
         };
         if shadowed.contains(&name) {
             let value = match name {
-                "styles" | "json" => String::new(),
+                "styles" | "timing" | "json" => String::new(),
                 _ => format!(
                     " {}",
                     o.flags

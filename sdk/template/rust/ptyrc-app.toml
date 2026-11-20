@@ -2,12 +2,12 @@
 [app]
 id = "{{id}}"
 version = "0.1.0"
-summary = "A clock in the top right corner."
+summary = "TODO: what the app does, in one line."
 license = "GPL-3.0-or-later"
 api = 1
 rust = "src/lib.rs"
 rustc = "1.85"
-surface = "screen"
+surface = "screen"  # TODO: the least that holds what it draws: "widget", "frame", "screen"
 
 [options]
 label = { type = "string", default = "t", doc = "shown before the time" }

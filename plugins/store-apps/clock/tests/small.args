@@ -1,0 +1,4 @@
+# test_print, test_digits (5x1, 8x1): the line faces; under 9 columns
+# the driver cuts the title (the twin's --print left it out).
+--size 12x6 --for 4s --at 2.5s,3.7s --clock 2026-11-13T09:05:07Z
+--resize 2.6s:10x6

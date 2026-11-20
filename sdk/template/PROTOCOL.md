@@ -152,8 +152,11 @@ Host functions (`clock.*`, `storage.*`, `app.result`, `file.*`,
   not given: `no-file`. `name`: as a `key`. A link in place of the
   file, or of a file of the directory, is not followed: absent. A
   directory moved since it was named: `not-usable`.
-- A tick on the second: `period(1000 - unix_ms % 1000)` once, then
-  `period(1000)`. At `next`, ask `clock.now` again.
+- A tick on the second: at each tick, `clock.now`, then
+  `period(until(unix_ms, 1000))`: `1000 - unix_ms % 1000`, plus 1000
+  when under 33 (a `period` under 33 is 33). Asked each tick, it does
+  not drift. `until`: `ptyrc.d.ts`, `clock::until`. At `next`, the
+  offset changes.
 
 ## Topics
 

@@ -1,0 +1,17 @@
+--- 2000 ms
+
+
+    ╭──────────╮
+    │ 00:00:02 │
+    │Thu 1 Jan │
+    ╰─── clock ╯
+--- 3000 ms
+
+
+    ╭──────────╮
+    │ 00:00:03 │
+    │Thu 1 Jan │
+    ╰─── clock ╯
+lowered at 0 ms: clock.now, to the degree none, 4 times
+lowered at 0 ms: clock.zone, to the degree none, 2 times
+lowered: clock, declared and answered no

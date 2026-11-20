@@ -1,0 +1,3 @@
+# test_reads (clock): bare, the machine's zone (--zone); nothing of the
+# screen read, nothing lowered.
+--size 20x7 --for 1s --at 1s --clock 2026-11-13T00:00:00Z --zone Asia/Tokyo

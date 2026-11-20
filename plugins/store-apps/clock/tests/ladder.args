@@ -1,0 +1,5 @@
+# test_every_face_is_kept: every face drawn at each tick; after a resize
+# (laid out again once the screen is still for 1 s), the face of the new
+# size shows the time of the last tick, between two ticks.
+--size 80x24 --for 8s --at 2.5s,3.7s,5.7s,7.7s --clock 2026-11-13T09:05:07Z
+--resize 2.6s:44x10 --resize 4.6s:36x9 --resize 6.6s:20x7

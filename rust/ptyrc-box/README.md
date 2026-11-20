@@ -6,7 +6,7 @@ canvases. `plan/store-model.md` is the plan; this file is the ABI.
 ```
 ptyrc-box [--no-profile] [--manifest JSON] [--seed N] [--script] MODULE [ARGS]
 ptyrc-box --headless [--no-profile] [--manifest JSON] [--script] MODULE [ARGS] [--size CxR] [--for T]
-          [--at T,...] [--seed N] [--tape FILE | --screen FILE] [--json]
+          [--at T,...] [--seed N] [--tape FILE | --screen FILE] [--json] [--timing]
           [--grant NAME,...] [--deny NAME,...] [--words WORD,...]
           [--user-word WORD]... [--user-pattern TEXT]... [--user-regex RE]...
           [--front | --back] [--prefer P] [--alpha A] [--border B]
@@ -31,6 +31,13 @@ test`) read it: handed to `init` under `ptyrc:manifest`; its
 stdout (`--json`: one JSON value), the log on stderr. `T`: ms, or
 `500ms`, `2s`. Defaults: 80x24, 1 s, the end, seed 1. Status: 0, or
 that of `exit`, or 70.
+
+- `--timing`: a last line, `ticks: N; a tick, wall time: mean M ms,
+  max X ms`: the `tick` calls entered and the wall time of each, host
+  calls in it (what the 50 ms bound measures). Not in the report
+  otherwise: it differs from run to run, and the report is compared
+  whole (`ptyrc dev test --cases`). `--json` has it always: `ticks`,
+  `tick_ms` (`{mean, max}`, null without a tick).
 
 - `--grant`: the permissions declared; `--deny`: those answered no;
   `--words`: the words of `words`. Given, the requests are checked as
@@ -314,7 +321,9 @@ print!("{report}");
   wraps or scrolls; a widget hidden at a screen shown past 1 s: its
   smallest variant, the screen's size). `Report::to_json`,
   `Report::text(styles)`; without styles, a note when a screen holds
-  `inverse`, `hidden` or `underline` cells.
+  `inverse`, `hidden` or `underline` cells. `Report::timing`: the wall
+  time of the ticks (`Timing`: equal to any other, so that two runs
+  compare equal), `Report::timing_line`.
 
 `hello`. The guest gets none: no export, no event. Live, the runner
 reads the driver's `hello` at connect (cut below `text`: `protocol`,

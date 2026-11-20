@@ -204,6 +204,13 @@ declare module "ptyrc" {
     zone: string,
     at?: number | number[],
   ): { zone: string; offsets: { at: number; offsetS: number; abbr: string; next: number | null }[]; degree?: "none" };
+  /**
+   * The `period` to the next multiple of `everyMs` of the wall clock
+   * after `unixMs` (`now().unixMs`), plus `everyMs` while under 33 (a
+   * `period` under 33 is 33). At each tick: `period(until(now().unixMs,
+   * 1000))` ticks on the second. Pure.
+   */
+  export function until(unixMs: number, everyMs: number): number;
   /** The date and time of `unixMs` at `offsetS` east of UTC; `weekday` 0: Sunday. */
   export function civil(
     unixMs: number,
@@ -243,6 +250,14 @@ declare module "ptyrc" {
     /** UTF-8, invalid bytes replaced. @throws PtyrcError `no-file` */
     text(): string;
     bytes(): Uint8Array;
+    /**
+     * `text()` and the mtime it was read at: the `ifMtime` of a `write`
+     * that must not clobber a change made since. @throws PtyrcError
+     * `not-usable`: changed between two pieces of 1 MiB.
+     */
+    textWithMtime(): { text: string; mtimeMs: number };
+    /** `bytes()` and the mtime they were read at. */
+    bytesWithMtime(): { bytes: Uint8Array; mtimeMs: number };
     /** A file absent: `exists: false`. */
     stat(): { exists: boolean; size: number; mtimeMs: number };
     /**
@@ -463,7 +478,11 @@ declare module "ptyrc/deck" {
      * `ctrl+k`, `ctrl+w`, `space`; a character is typed. False: not one.
      */
     key(name: string): boolean;
-    /** `w` cells. Focused: the cursor an inverse cell, scrolled to it; else the start, or `placeholder`, dim. */
+    /**
+     * `w` cells. Focused: the cursor an inverse cell, scrolled to it; else
+     * the start, or `placeholder`, dim. A text report of `dev test` shows
+     * the inverse cell only with `--styles`.
+     */
     render(w: number, focused: boolean, placeholder?: string, style?: StyleSpec): Run[];
   }
 

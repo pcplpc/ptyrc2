@@ -184,8 +184,13 @@ impl Shipped {
     /// ([`build::build`], `unconfined`: ptyrc's own sources) into
     /// [`Shipped::cache`] with a copy of the tree, unless built already
     /// from the tree as it is. Returns the directory to start. `on_build`
-    /// is called before a build.
+    /// is called before a build. Two at once: one builds, the other
+    /// waits for it ([`build::lock`] on the cache) and starts that build.
     pub fn build(&self, dirs: &Dirs, on_build: impl FnOnce(&build::Toolchain)) -> Result<PathBuf> {
+        if let Ok(dir) = self.tree(dirs) {
+            return Ok(dir);
+        }
+        let _held = build::lock(&self.cache(dirs))?;
         if let Ok(dir) = self.tree(dirs) {
             return Ok(dir);
         }

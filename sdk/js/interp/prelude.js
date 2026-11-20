@@ -296,6 +296,13 @@ export function zone(name, at) {
   return out;
 }
 
+export function until(unixMs, everyMs) {
+  const every = Math.max(1, Math.floor(everyMs));
+  let left = every - (((unixMs % every) + every) % every);
+  while (left < 33) left += every;
+  return left;
+}
+
 export function civil(unixMs, offsetS = 0) {
   const d = new Date((Math.floor(unixMs / 1000) + offsetS) * 1000);
   return {
@@ -325,12 +332,16 @@ export const storage = Object.freeze({
   },
 });
 
-// Bytes of `method` whole, by pieces of 1 MiB.
+// Bytes of `method` whole, by pieces of 1 MiB, and the `mtime_ms` of
+// the answers (0: none); `not-usable` if it changes between two pieces.
 function readAll(method, params) {
   const pieces = [];
   let size = 0;
+  let mtime = null;
   for (;;) {
     const r = call(method, { ...params, as: "base64", offset: size, len: PIECE });
+    const m = r.mtime_ms ?? 0;
+    if ((mtime ??= m) !== m) throw new PtyrcError({ code: "not-usable", message: `${method}: changed while read` });
     const b = Uint8Array.fromBase64(r.base64);
     pieces.push(b);
     size += b.length;
@@ -339,20 +350,22 @@ function readAll(method, params) {
   const all = new Uint8Array(size);
   let at = 0;
   for (const b of pieces) all.set(b, at), (at += b.length);
-  return all;
+  return { bytes: all, mtimeMs: mtime };
 }
 
 function readText(method, params) {
   const r = call(method, { ...params, as: "text" });
-  return r.eof !== false ? r.text : new TextDecoder().decode(readAll(method, params));
+  if (r.eof !== false) return { text: r.text, mtimeMs: r.mtime_ms ?? 0 };
+  const { bytes, mtimeMs } = readAll(method, params);
+  return { text: new TextDecoder().decode(bytes), mtimeMs };
 }
 
 export function asset(name) {
-  return readText("asset.read", { name });
+  return readText("asset.read", { name }).text;
 }
 
 export function assetBytes(name) {
-  return readAll("asset.read", { name });
+  return readAll("asset.read", { name }).bytes;
 }
 
 export function assets() {
@@ -370,9 +383,15 @@ class HostFile {
     return this.#child === null ? { file: this.handle } : { file: this.handle, name: this.#child };
   }
   text() {
-    return readText("file.read", this.#params);
+    return readText("file.read", this.#params).text;
   }
   bytes() {
+    return readAll("file.read", this.#params).bytes;
+  }
+  textWithMtime() {
+    return readText("file.read", this.#params);
+  }
+  bytesWithMtime() {
     return readAll("file.read", this.#params);
   }
   stat() {

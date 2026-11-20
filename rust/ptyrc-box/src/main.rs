@@ -23,7 +23,9 @@
 //! `--write-file NAME=PATH` (the manifest's `write = true`),
 //! `--probe git|system=FILE.json`: the host functions (`hostfn`).
 //! `--assets DIR`, live too: `asset.*`, answered by the runner.
-//! `--styles`: under each screen, its styles.
+//! `--styles`: under each screen, its styles. `--timing`: a last line,
+//! the ticks and the wall time of one (`Report::timing_line`); kept out
+//! of the report by default, as it is not the same twice.
 //!
 //! `--unit FILE --script APP.js`: the unit tests of a script app:
 //! FILE, a script of the tree of `APP.js` by relative path, its exports
@@ -62,7 +64,7 @@ const USAGE: &str =
     "usage: ptyrc-box [--no-profile] [--manifest JSON] [--assets DIR] [--seed N] [--script] MODULE [ARGS]
        ptyrc-box --headless [--no-profile] [--manifest JSON] [--assets DIR] [--script] MODULE [ARGS]
                  [--size CxR] [--for T] [--at T,...] [--seed N]
-                 [--tape FILE | --screen [T:]FILE...] [--json] [--styles]
+                 [--tape FILE | --screen [T:]FILE...] [--json] [--styles] [--timing]
                  [--grant NAME,...] [--deny NAME,...] [--words WORD,...]
                  [--event T:TOPIC:JSON]... [--key T:KEY]... [--pointer T:X,Y]...
                  [--click T:X,Y]... [--press T:X,Y]... [--release T:X,Y]...
@@ -138,6 +140,7 @@ struct Cli {
     screen: Vec<(u64, PathBuf)>,
     json: bool,
     styles: bool,
+    timing: bool,
     manifest: Option<manifest::Given>,
     grant: Option<Vec<String>>,
     deny: Vec<String>,
@@ -354,6 +357,7 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
                 });
             }
             "--styles" => cli.styles = true,
+            "--timing" => cli.timing = true,
             "--clock" => {
                 let v = string(value("--clock")?);
                 let ms = iso_ms(&v)
@@ -412,6 +416,7 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
         || !cli.screen.is_empty()
         || cli.json
         || cli.styles
+        || cli.timing
         || cli.grant.is_some()
         || !cli.deny.is_empty()
         || !cli.words.is_empty()
@@ -427,7 +432,7 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
         || cli.surface.is_some();
     if headless_only && !cli.headless {
         return Err(
-            "--size, --for, --at, --tape, --screen, --json, --styles, --grant, \
+            "--size, --for, --at, --tape, --screen, --json, --styles, --timing, --grant, \
              --deny, --words, --event, --key, --pointer, --click, --press, --release, --focus, \
              --paste, --resize, --clock, \
              --zone, --storage, --file, --write-file, --probe, --user-word, --user-pattern, \
@@ -595,6 +600,9 @@ fn headless_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
         println!("{}", report.to_json());
     } else {
         print!("{}", report.text(cli.styles));
+        if cli.timing {
+            println!("{}", report.timing_line());
+        }
     }
     let status = report.result.as_ref().map_or(0, |r| r.1);
     match report.end {

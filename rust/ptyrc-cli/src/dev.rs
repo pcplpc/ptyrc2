@@ -78,6 +78,12 @@ pub enum Dev {
         /// that is not the default, and the legend
         #[arg(long)]
         styles: bool,
+        /// A last line: the ticks run, the mean and the max wall time of
+        /// one, host calls in it (what limit-time bounds). Not in the
+        /// report by default: it is not the same twice. --json: always,
+        /// `ticks`, `tick_ms`
+        #[arg(long)]
+        timing: bool,
         /// The unit tests of a script: the exports `test_*` of FILE, a
         /// script of the app [default: tests.js]; no screen, no session.
         /// Status 1 when one fails
@@ -181,6 +187,7 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
             tape,
             screen,
             styles,
+            timing,
             mut args,
             mut deny,
             events,
@@ -203,6 +210,7 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
                     || tape.is_some()
                     || !screen.is_empty()
                     || styles
+                    || timing
                     || !args.is_empty()
                     || !deny.is_empty()
                     || !events.is_empty()
@@ -251,6 +259,7 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
                     }
                     "--json" if inline.is_none() => json = true,
                     "--styles" if inline.is_none() => flags.push("--styles".into()),
+                    "--timing" if inline.is_none() => flags.push("--timing".into()),
                     "--arg" => args.push(value()),
                     "--deny" => deny.push(value()),
                     "--file" => files.push(value()),
@@ -286,6 +295,9 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
             }
             if styles {
                 flags.push("--styles".into());
+            }
+            if timing {
+                flags.push("--timing".into());
             }
             if json {
                 flags.push("--json".into());

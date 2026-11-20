@@ -1,0 +1,3 @@
+# clock answered no: session time as the epoch, UTC; a tick a second
+# all the same.
+--size 20x7 --for 3s --at 2s,3s --deny clock --tz Asia/Tokyo

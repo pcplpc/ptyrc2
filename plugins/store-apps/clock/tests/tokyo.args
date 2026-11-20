@@ -1,0 +1,5 @@
+# test_zone (--tz Asia/Tokyo), test_reads (clock --tz Europe/Paris): the
+# time of the zone, not of the machine's (--zone); nothing of the
+# screen read, nothing lowered.
+--size 20x7 --for 1s --at 1s --clock 2026-11-13T00:00:00Z --zone Europe/Paris
+--tz Asia/Tokyo

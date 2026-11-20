@@ -11,6 +11,7 @@ use ptyrc_app::{App, Canvas, Cell, Color, Value, attr, json};
 
 const PERIOD: u64 = 3000;
 const STEP: u64 = 100;
+/// The max of `bursts` in the manifest.
 const MAX_BURSTS: u64 = 10;
 /// Bright green, magenta, blue, yellow.
 const COLORS: [u8; 4] = [10, 13, 12, 11];
@@ -121,7 +122,7 @@ impl App for Confetti {
             ptyrc_app::log(&format!("confetti: {e}"));
         }
         let mut app = Confetti {
-            bursts: bursts.clamp(1, MAX_BURSTS),
+            bursts,
             one_shot: flag("one-shot"),
             layer: if flag("front") { "front" } else { "back" },
             size,

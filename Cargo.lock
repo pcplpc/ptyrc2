@@ -788,6 +788,7 @@ dependencies = [
  "ptyrc-draw-shapes",
  "ptyrc-draw-snow",
  "ptyrc-proto",
+ "ptyrc-rules",
  "ptyrc-vt",
  "seccompiler",
  "serde_json",
@@ -808,6 +809,7 @@ dependencies = [
  "ptyrc-draw-sand",
  "ptyrc-draw-shapes",
  "ptyrc-draw-snow",
+ "ptyrc-probe",
  "ptyrc-proto",
  "ptyrc-server",
  "ptyrc-store",
@@ -907,6 +909,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ptyrc-rules"
+version = "2.0.0"
+dependencies = [
+ "ptyrc-core",
+ "ptyrc-proto",
+ "ptyrc-vt",
+ "serde_json",
+]
+
+[[package]]
 name = "ptyrc-server"
 version = "2.0.0"
 dependencies = [
@@ -914,6 +926,7 @@ dependencies = [
  "ptyrc-core",
  "ptyrc-probe",
  "ptyrc-proto",
+ "ptyrc-rules",
  "ptyrc-store",
  "ptyrc-vt",
  "rustix",

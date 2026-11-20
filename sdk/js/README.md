@@ -9,7 +9,7 @@ JavaScript interpreter that is itself a guest of ABI 1
 | `ptyrc.d.ts` | the API, typed: the whole of it. An app is written from this file |
 | `interp/` | the interpreter guest (`ptyrc-js.wasm`): QuickJS-ng and `ptyrc.c` (the natives, the loader), the modules `"ptyrc"` (`prelude.js`) and `"ptyrc/deck"` (`deck.js`), `build.sh`, `NOTICES` |
 | `examples/clockface/` | a deck of widgets: two sizes, a canvas, a key of its widget, unit tests; the model of a deck app |
-| `examples/confetti/` | an app |
+| `examples/confetti/` | paper falling behind the text, `rate` 1 to 200 by the manifest; no test of its own (`rust/ptyrc-cli/tests/storeapp.rs`) |
 | `examples/sand/` | one effect of the driver started, no permission; the twin of `sdk/rust/examples/sand` |
 | `examples/tally/` | storage, the wall clock, `civil`, the result, each denied; the twin of `sdk/rust/examples/tally` |
 | `examples/snake/` | `screen.shape`, `input.grab` of the arrows, each denied in turn; the twin of `sdk/rust/examples/snake` |
@@ -98,12 +98,30 @@ unchanged.
 ## Host functions
 
 In `"ptyrc"`, over `call` (`PROTOCOL.md`, Methods; the same names as
-`ptyrc-app`'s): `now()`, `zone(name, at)`, `civil(unixMs, offsetS)`;
-`storage.get`, `.set`, `.remove`, `.keys`; `asset(name)`,
-`assetBytes(name)`, `assets()`; `file(handle)` and its `text`,
-`bytes`, `stat`, `write`, `list`, `child`; `result(value, status)`.
-Members in camelCase (`unixMs`, `offsetS`, `mtimeMs`); reads by pieces
-of 1 MiB. `Date.now()` stays session time.
+`ptyrc-app`'s): `now()`, `zone(name, at)`, `civil(unixMs, offsetS)`,
+`until(unixMs, everyMs)` (pure); `storage.get`, `.set`, `.remove`,
+`.keys`; `asset(name)`, `assetBytes(name)`, `assets()`; `file(handle)`
+and its `text`, `bytes`, `textWithMtime`, `bytesWithMtime`, `stat`,
+`write`, `list`, `child`; `result(value, status)`. Members in
+camelCase (`unixMs`, `offsetS`, `mtimeMs`); reads by pieces of 1 MiB,
+a file changed between two: `not-usable`. `Date.now()` stays session
+time.
+
+A write that keeps a change made by someone else since the read: the
+mtime of the read guards it; `stat()` after `text()` leaves a window.
+
+```js
+let { text, mtimeMs } = f.textWithMtime();
+// ... the user edits `text`; then:
+try {
+  mtimeMs = f.write(text, { ifMtime: mtimeMs }).mtimeMs; // the guard of the next write
+} catch (e) {
+  if (e.code !== "not-usable") throw e; // changed since: read it again
+}
+```
+
+A tick on the second: at each tick, `period(until(now().unixMs,
+1000))`; asked again each time, it does not drift.
 
 ## Bytes
 
@@ -181,7 +199,8 @@ the errors, the hostile scripts (loops, memory, recursion, a module
 named as the API, the natives asked for, imports outside the tree,
 reserved members as arguments, floods, escape bytes), `manifest()`,
 the example twice. Where the interpreter is not built, they pass and a line `script
-tests SKIPPED` says so.
+tests SKIPPED` says so. `sdk/rust/tests/tests/host.rs`: `textWithMtime`
+and a write guarded by it, `until`, as their Rust twins.
 
 `rust/ptyrc-cli/tests/dev.rs`: `ptyrc dev new`, `check`, `test`, `run`
 on the template; every example passes `dev check` and `dev test`.

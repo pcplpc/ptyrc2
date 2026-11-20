@@ -1,0 +1,4 @@
+# The zone asked again at its `next`: Paris leaves summer time at
+# 01:00 UTC, 03:00 local, and the face goes back to 02:00.
+--size 20x7 --for 3s --at 1s,2s,3s --clock 2026-10-25T00:59:58Z
+--tz Europe/Paris

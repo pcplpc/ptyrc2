@@ -9,12 +9,13 @@ clock is asked.
 
 | | |
 |---|---|
-| `ptyrc-app.toml` | the manifest: id, version, entry, `[options]`, `[permissions]` |
+| `ptyrc-app.toml` | the manifest: id, version, entry, `[options]`, `[permissions]`; replace each `TODO` |
 | `PROTOCOL.md` | the methods, topics, permissions, manifest and limits |
 | `src/lib.rs` | the app, and its modules under `src/` |
 | `vendor/ptyrc-app/` | the guest crate, ptyrc's copy; `README.md` there is the API, whole |
 | `Cargo.toml` | for cargo only (`cargo test`, an editor); the store does not read it |
-| `test.sh`, `expected.txt` | the test: the screen at fixed times |
+| `test.sh` | every case, then the unit tests; status 1 when one fails |
+| `tests/CASE.args`, `tests/CASE.txt` | a case: the words after `ptyrc dev test .`, and its report |
 | `LICENSE.txt` | GPL-3.0-or-later; the only licence accepted |
 
 ## The API
@@ -44,8 +45,13 @@ ptyrc_app::app!(MyApp);
   `clock::civil(unix_ms, offset_s)` (permission `clock`);
   `storage::{get, set, remove, keys}` (`storage`); `asset::{text,
   bytes, list}` (`[app] assets`); `File::of(&args["opt"])`: `text`,
-  `bytes`, `stat`, `write`, `list`, `child` (an option of type `file`
-  or `dir`); `result(value, status)`; `base64::{encode, decode}`.
+  `bytes`, `text_with_mtime`, `stat`, `write(text, if_mtime_ms)`,
+  `list`, `child` (an option of type `file` or `dir`); `result(value,
+  status)`; `base64::{encode, decode}`; `clock::until(unix_ms,
+  every_ms)` (a tick on the second: `PROTOCOL.md`).
+- A write that must not clobber a change made since the read: `let
+  (text, mtime) = f.text_with_mtime()?`, then `f.write(&edited,
+  Some(mtime))`; changed since: `Err` `not-usable`.
 - `call(method, params) -> Result<Value, Error>`: a request of the
   protocol (`PROTOCOL.md`); `Error { code, message, hint }`.
 - JSON is `ptyrc_app::json`, not serde: `json!({"k": [x, 1], "s":
@@ -79,7 +85,8 @@ ptyrc_app::app!(MyApp);
 - `cargo test` runs the tests of `src/` natively (`#[cfg(test)]`, as
   `src/lib.rs` shows): a `Canvas` is cells in memory (`runs()` reads
   them), `call` answers `native` unless `ptyrc_app::native::serve`
-  answers it; the screen is `./test.sh`'s.
+  answers it (`Ok(json!(..))`, `Err(Error::new("denied", "..."))`);
+  the screen is `./test.sh`'s.
 
 ## Commands
 
@@ -87,12 +94,17 @@ ptyrc_app::app!(MyApp);
 rustup target add wasm32-unknown-unknown    once
 ptyrc dev check            what the store checks, and its build
 cargo test                 the unit tests of src/, natively (`dev test --unit` is for scripts)
-./test.sh                  ptyrc dev test (it builds) against expected.txt
-./test.sh --update         after a change meant to change the screen
+./test.sh                  each case (dev test builds), then cargo test
+./test.sh --update         rewrites each tests/CASE.txt: after a change meant to change it
 ptyrc dev test . --size 80x24 --for 3s --at 0,1s,3s [--screen F | --tape F] [--seed N] [--NAME VALUE]
 ptyrc dev test . --deny shape --key 500:up --event 1s:TOPIC:JSON    a no, a key, an event
 ptyrc dev run [--NAME VALUE]   in a live session (ptyrc run -- $SHELL), rebuilt on save
 ```
+
+A case: `tests/NAME.args`, words split on white space, `#` to the end
+of a line a comment, no quoting (JSON without spaces); a new one:
+write the `.args`, then `./test.sh --update`. A report that differs
+is left in `tests/NAME.got`.
 
 `ptyrc dev test` prints the screen at each time (`--- T ms`), then
 `refused at T ms: METHOD (CODE)`, `lowered at T ms: METHOD, to the

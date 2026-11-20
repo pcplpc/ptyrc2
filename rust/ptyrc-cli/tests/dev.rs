@@ -135,7 +135,10 @@ fn new_app(tag: &str, rust: bool) -> PathBuf {
         "AGENTS.md",
         "LICENSE.txt",
         "test.sh",
-        "expected.txt",
+        "tests/clock.args",
+        "tests/clock.txt",
+        "tests/label.args",
+        "tests/label.txt",
         "PROTOCOL.md",
     ] {
         assert!(app.join(f).is_file(), "{f}");
@@ -146,8 +149,45 @@ fn new_app(tag: &str, rust: bool) -> PathBuf {
         checked.trim_end().ends_with("; asks no permission"),
         "{checked}"
     );
+    let said = ok(&sh(&app, "test.sh"));
+    assert!(
+        said.contains("ok   tests/clock\nok   tests/label\n"),
+        "{said}"
+    );
+    assert!(!app.join("tests/clock.got").exists());
+    // A report that differs, a case that fails: status 1, each named.
+    std::fs::write(app.join("tests/label.txt"), "--- 0 ms\n").unwrap();
+    std::fs::write(app.join("tests/bad.args"), "--size nine\n").unwrap();
+    std::fs::write(app.join("tests/bad.txt"), "").unwrap();
+    let out = sh(&app, "test.sh");
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(out.status.code(), Some(1), "{err}");
+    assert!(
+        err.contains("FAIL tests/bad: ptyrc dev test exited 2"),
+        "{err}"
+    );
+    assert!(
+        err.contains("FAIL tests/label: the report differs"),
+        "{err}"
+    );
+    assert!(app.join("tests/label.got").is_file());
+    for f in [
+        "tests/bad.args",
+        "tests/bad.txt",
+        "tests/bad.got",
+        "tests/label.got",
+    ] {
+        std::fs::remove_file(app.join(f)).unwrap();
+    }
+    let update = Command::new(app.join("test.sh"))
+        .arg("--update")
+        .current_dir(&app)
+        .env("PTYRC", Path::new(BIN))
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(update.status.success());
     ok(&sh(&app, "test.sh"));
-    assert!(!app.join("actual.txt").exists());
     app
 }
 
@@ -161,7 +201,7 @@ fn new_script_app() {
     let unit = ok(&ptyrc(&app, &["dev", "test", "--unit"]));
     assert_eq!(unit, "ok   test_sum\n1 passed, 0 failed\n");
     // test.sh compared a run to the template's: the same text again.
-    let expected = std::fs::read_to_string(app.join("expected.txt")).unwrap();
+    let expected = std::fs::read_to_string(app.join("tests/clock.txt")).unwrap();
     assert!(expected.contains("t = 0.5 s"), "{expected}");
     let out = ok(&ptyrc(
         &app,
@@ -613,30 +653,31 @@ fn the_run_asks_what_its_options_need() {
 #[test]
 fn an_option_named_as_a_flag_of_dev_test() {
     let js =
-        r#"import { log } from "ptyrc"; export function init(args) { log(`seed ${args.seed}`); }"#;
-    let more = "seed = { type = \"int\", default = 0, doc = \"the app's\" }\n";
+        r#"import { log } from "ptyrc"; export function init(args) { log(`size ${args.size}`); }"#;
+    let more = "size = { type = \"int\", default = 0, doc = \"the app's\" }\n";
     let dir = script_app("shadow", more, js);
     std::fs::copy(root().join("LICENSE.txt"), dir.join("LICENSE.txt")).unwrap();
     // `check` runs no `dev test`: nothing to say.
     let out = ptyrc(&dir, &["dev", "check"]);
     assert!(out.status.success(), "{out:?}");
     let said = String::from_utf8_lossy(&out.stderr);
-    assert!(!said.contains("--seed"), "{said}");
+    assert!(!said.contains("--size"), "{said}");
     let out = ptyrc(
         &dir,
         &[
-            "dev", "test", "--for", "0", "--seed", "4", "--", "--seed", "7",
+            "dev", "test", "--for", "0", "--size", "40x10", "--", "--size", "7",
         ],
     );
     let said = String::from_utf8_lossy(&out.stderr);
     assert!(
-        said.contains("note: --seed 4: taken by dev test, not the app") && said.contains("seed 7"),
+        said.contains("note: --size 40x10: taken by dev test, not the app")
+            && said.contains("size 7"),
         "{said}"
     );
     // The app's alone, after `--`: nothing to say.
-    let out = ptyrc(&dir, &["dev", "test", "--for", "0", "--", "--seed", "7"]);
+    let out = ptyrc(&dir, &["dev", "test", "--for", "0", "--", "--size", "7"]);
     let said = String::from_utf8_lossy(&out.stderr);
-    assert!(!said.contains("note") && said.contains("seed 7"), "{said}");
+    assert!(!said.contains("note") && said.contains("size 7"), "{said}");
 }
 
 /// `dev check`: each draw of `[app] random` read as `ptyrc app` reads it.

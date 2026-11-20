@@ -1,0 +1,2 @@
+# The clock in the top right corner at 0, 0.5 s and 1 s.
+--size 40x4 --for 1s --at 0,500,1000

@@ -10,6 +10,29 @@ use std::time::{Duration, Instant};
 /// What `stop` is given (plan, Guest ABI).
 pub const STOP: Duration = Duration::from_millis(500);
 
+/// The wall time of the `tick` calls entered, host calls in it.
+/// Equal to any other: wall time is not what two runs compare.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Timing {
+    pub ticks: u64,
+    pub total: Duration,
+    pub max: Duration,
+}
+
+impl PartialEq for Timing {
+    fn eq(&self, _: &Timing) -> bool {
+        true
+    }
+}
+
+impl Timing {
+    /// The mean, `None` without a tick.
+    pub fn mean(&self) -> Option<Duration> {
+        let n = u32::try_from(self.ticks).ok().filter(|n| *n > 0)?;
+        Some(self.total / n)
+    }
+}
+
 /// One app. After an error every call answers that error: a guest that
 /// trapped is not entered again.
 pub struct Runner<H: Host> {
@@ -17,6 +40,7 @@ pub struct Runner<H: Host> {
     late: u32,
     paused: bool,
     ended: Option<Error>,
+    timing: Timing,
 }
 
 impl<H: Host> Runner<H> {
@@ -27,6 +51,7 @@ impl<H: Host> Runner<H> {
             late: 0,
             paused: false,
             ended: None,
+            timing: Timing::default(),
         })
     }
 
@@ -77,7 +102,22 @@ impl<H: Host> Runner<H> {
     /// Not delivered while paused.
     pub fn tick(&mut self, now_ms: u64) -> Result<(), Error> {
         let bound = self.guest.core().limits.hard;
-        self.enter(now_ms, true, |g| g.tick(now_ms, bound))
+        let entered = !self.paused && self.ended.is_none();
+        let start = Instant::now();
+        let done = self.enter(now_ms, true, |g| g.tick(now_ms, bound));
+        if entered {
+            let took = start.elapsed();
+            let t = &mut self.timing;
+            t.ticks += 1;
+            t.total += took;
+            t.max = t.max.max(took);
+        }
+        done
+    }
+
+    /// The `tick` calls entered so far, timed.
+    pub fn timing(&self) -> Timing {
+        self.timing
     }
 
     /// Not delivered while paused.

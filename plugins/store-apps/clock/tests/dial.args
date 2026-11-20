@@ -1,0 +1,3 @@
+# test_dial (in a session): the dial, 17x8, the largest face that fits
+# a screen 14 rows high; at 3:00:30.
+--size 30x14 --for 2s --at 2s --clock 2026-11-13T03:00:28Z --styles

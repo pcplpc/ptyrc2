@@ -1,17 +1,26 @@
 # Plan: store model
 
-Not done. Planned with the owner, 2026-11-17 and 18. Follows
+Planned with the owner, 2026-11-17 and 18. Follows
 `plan/notes-app-permissions.md` (the check, the token, the pop-up, the
 file): this is the sandbox that makes permissions hold, and the way
 apps travel.
 
+Status, 2026-11-20 (`git log 2d0ccb7..`): milestones 0 to 4 built;
+5 built but for the hosting; 6 the runner's profile and the build's
+(`rustc` alone); 7 begun: `confetti`, `sand` moved, 26 apps left
+(`temp/20112026-02-ready/audit/migration-plan.md`). The contract of what
+exists is `plan/design.md`; this file keeps the reasons.
+
 Marks: **[decided]** by the owner; **[proposed]** the plan's choice,
-the owner's to overturn; **[TBD]** left to a later task.
+the owner's to overturn; **[TBD]** left to a later task; **[as
+built]** what the code does, where it adds to the plan or departs from
+it; **[recommended]** taken on the recommendation of a design or an
+audit, told to the owner, not confirmed.
 
 Permissions: the mechanism is [decided] (the screen of checkboxes, yes
-or no, remembered, lowered answers); the list is drafted (Permissions,
-The list), its names and colours [proposed]. To be scheduled as a
-series of tasks; the sandbox does not wait on it.
+or no, remembered, lowered answers) and built; the list is built
+(Permissions, The list), its names and colours confirmed by the owner
+(2026-11-19 and 20).
 
 ## Wanted
 
@@ -52,6 +61,27 @@ app rewrites the file.
   ("no danger").
 - Every shipped app is to become a store app.
 - Where an app may draw follows from its manifest and its permissions.
+
+Decided since (`temp/19112026-01-wrap-up/answers.md`, and the owner's
+word of 2026-11-20 in `temp/20112026-01-store/handover.md`):
+
+- The interpreter: QuickJS-ng, not Boa (4). For users without clang: a
+  build server later; nothing now.
+- A Rust build: `rustc` alone now, cargo a later tier (20);
+  `ptyrc-app` vendored (21).
+- No full OS profile required: the driver starts and logs, every
+  platform, macOS too (19, 24).
+- Headless and a store app: granted as declared, each permission so
+  granted named in a warning (18).
+- `text` red; `clock`, `storage` plain; three colours (17). The names
+  and colours of 6, 7 confirmed as built.
+- The registry stays in this repository for now; `tested` by the
+  `MAINTAINERS` list, never the author; signed tiers later (22).
+- The 2 ms bound for a colour a cell is not reachable: 3 ms accepted
+  (23).
+- `unsafe` allowed in `ptyrc-box`, one module, for a cache of the
+  compiled interpreter (5); not written (QuickJS starts in 0.2 s).
+- The runner's stack: 1 MiB. `min`, `max` on numeric options.
 
 ## Why WebAssembly
 
@@ -98,6 +128,13 @@ driver ──spawn, token──> ptyrc-box (one per app) ──> guest
   runner, so it can change; `wasmi` (an interpreter, pure Rust) where
   wasmtime does not build.
 
+[as built] wasmtime 49, named in `ptyrc-box/src/engine.rs` alone;
+`wasmi`: not done. The check is not in `rpc.rs`: the table and the
+check are `rust/ptyrc-rules` (`grants`), called by `Driver::dispatch`
+and `Driver::subscribe`, applied headless by `ptyrc-box` too. The third
+wall is built for the runner (Landlock, seccomp: `ptyrc-box/src/
+profile.rs`); a platform without it starts and logs (decision 19).
+
 ### Who is asking
 
 - A store app is started by origin, not by argv: `app.start {store:
@@ -112,6 +149,11 @@ driver ──spawn, token──> ptyrc-box (one per app) ──> guest
   child, the grants bound to the connection that presents it.
 - A connection without a token is the user's hand (`ptyrc text`, a
   script, `ptyrc python`): the whole session, as today.
+
+[as built] As planned: `auth` first, the token taken only from the
+child's process group; `app.enrol` binds a foreground `ptyrc app NAME`
+by its pid (30 s to present the token). The hotkey's child holds the
+whole session, asked nothing (`plan/design.md`, Permissions).
 
 ### Guest ABI, version 1
 
@@ -148,6 +190,11 @@ Host-driven: no thread, no blocking, time an argument (as the core).
   holds them.
 - No state survives a restart. What must: `storage` (Permissions).
 
+[as built] `rust/ptyrc-box/README.md` is the ABI. Added: `release(id)`
+(a canvas forgotten); `period` under 33 ms is 33; `random` 65536 bytes
+at most; the manifest given to the guest at `init` (`ptyrc:manifest`;
+`manifest()` in both SDKs).
+
 ### Limits
 
 By the runner, per app; the manifest may ask more, the user grants.
@@ -164,6 +211,14 @@ By the runner, per app; the manifest may ask more, the user grants.
 By the driver, per app: sprites, widgets, subscriptions (numbers with
 the implementation). Past a limit: the request fails, the hint says
 which.
+
+[as built] As the table, and: a `tick` or `event` past 2 s ends the
+app; `stop` 500 ms; the stack 1 MiB (the owner's); a text read by the
+host 4 MiB. Paused: nothing resumes it, the manager is not told (not
+done). `[limits]` (`memory-mib`, `tick-ms`, `init-ms`,
+`calls-per-second`, `canvas-screens`, `log-mib`) asked as
+`limit-memory`, `limit-time`, up to a ceiling a key. The driver: 256
+sprites, 16 widgets, 32 subscriptions; past one, `not-usable`.
 
 ### Never
 
@@ -186,6 +241,12 @@ until then.
   costs the driver under 2 ms a frame and shows no tearing.
 - Animations that need no thought stay effects of the core
   (`effect`, `motion`): started by one `call`, run without the guest.
+
+[as built] Measured (`rust/ptyrc-box/README.md`, Speed): 1.67 to 1.78
+ms a frame with one colour; a colour a cell 2.89 to 3.00 ms after the
+CSI fast path. Under 2 ms is not reached; 3 ms accepted (decision 23).
+The host pen patch (about 0.3 ms more) is not landed: the owner's to
+ask again.
 
 ## Tiers of authoring
 
@@ -219,6 +280,12 @@ back as text.
   for a clock, a game, a few hundred sprites at 30 Hz; cells are
   painted by host calls. A simulation over every cell goes to Rust.
 - The review of `approved` reads what runs.
+
+[as built] The JS stack 352 KiB (a `RangeError` past it). A second
+module, `"ptyrc/deck"`, compiled into the interpreter: widgets kept
+drawn (the agent's choice of a module apart). Unit tests: `ptyrc dev
+test --unit [FILE]`, the exports `test_*` of `tests.js`. 12000 `set`
+in a tick: 8.5 to 8.9 ms; a start 0.18 to 0.20 s.
 
 ### Rust
 
@@ -281,12 +348,23 @@ ptyrc dev entry [DIR]           the file to add to the registry
   line of the manifest that would ask for it.
 - Examples, each in both tiers: `confetti`, `sand`, `snake`.
 
+[as built] All five, and more (`ptyrc dev --help`; `plan/design.md`,
+CLI): `dev test` takes the host functions from memory (`--clock`,
+`--zone`, `--storage`, `--file`, `--probe`), the user's hands
+(`--pointer`, `--click`, `--press`, `--release`, `--focus`, `--paste`,
+`--resize`), the launcher's options, `--screen`, `--styles`; `--unit
+[FILE]` (scripts; a Rust app: `cargo test` natively); `--cases
+[NAME...] [--bless]` (`tests/CASE.args` against `tests/CASE.txt`).
+`dev probe git [DIR]`, `dev probe system`: a fixture for `--probe`.
+`dev index`, `dev registry-check`: the registry's CI. Examples
+`clockface` and `tally` too, in both tiers.
+
 ## Permissions
 
 The mechanism is [decided] (owner, 2026-11-18), as on a phone: asked
 once, a yes or a no per permission, remembered, and a no does not
 break the app. The list follows it; its names and colours are
-[proposed]. Not done: to be scheduled as a series of tasks.
+confirmed (decisions 6, 7, 17). Built: Tasks 1 to 6.
 
 ### Mechanism
 
@@ -386,6 +464,17 @@ unless `--allow`): [TBD] with the registry.
 **Limits.** More than a default limit (memory, time) is declared,
 asked and remembered the same way; a no keeps the default.
 
+[as built] `popup.rs`, `driver/asks.rs`, `permissions.rs`. The pop-up
+hides every app's drawing while up; its mark a double border, bold
+white on blue, ` ptyrc ` below; under 24x8 the start is refused; `esc`
+answers `cancelled` (decisions 8, 9). Ticking a degree ticks those
+below (7). Departs, agents' choices not confirmed: amber rows come
+unticked, ticked by hand a row (the plan: one yes for all); a restart
+keeps the manifest of the start and reads the answers again. Headless
+(decision 18): granted as declared, a warning naming each permission
+so granted, for store apps alone, on the client's stderr and in the
+app's log.
+
 ### Native apps
 
 The shipped Python apps are asked as store apps are, from the first
@@ -402,6 +491,10 @@ the sandbox.
   process of the user: it may connect without its token, read the
   file, or do anything else the account can. Only a store app is
   walled. The README says so.
+
+[as built] As planned: `_catalog.py` declares each app (`ASKS`), held
+by `tests/test_reads.py`. `rain`, `snow`, `sand` declare `layout`, not
+none (they list frames).
 
 ### The list
 
@@ -436,6 +529,15 @@ shown, unticked, ticked by hand.
   (principle 6). No sink exists at first.
 - Every method and topic of the protocol is to be listed with the
   permission that opens it; one not listed is closed to store apps.
+
+[as built] The names and colours of the table
+(`ptyrc_store::manifest::COLOURS`), but `keys-arrows`: plain, as the
+table, against amber in Colours. `limit-*` is `limit-memory`,
+`limit-time`; `keys-arrows` covers the arrows, home, end, page up and
+down, insert, delete, f1 to f12 (decision 6). `files` plain,
+`files-write` red. Every method and topic is listed
+(`ptyrc_rules::grants`: `METHODS`, `TOPICS`), a test ties the table to
+the dispatch. No sink exists.
 
 ### The owner's ideas, 2026-11-18
 
@@ -482,6 +584,15 @@ Drawn from these and from the threat. [proposed]
    | to keep quiet while the user types | gating by idle, in the driver | nothing |
    | to fade where the text is busy | a blend by heat | nothing |
 
+   [as built] Built: an anchor on a word or a pattern (`anchor
+   {text}`), on the cursor, in the frame; `prefer`; the band; the
+   effects that look; the pointer told to an effect (`"params":
+   {"pointer", "bomb"}`, `ptyrc_rules::nozzle`); the surface that
+   follows its pane (`driver/heir.rs`). Not built: following or
+   fleeing the pointer (`anchor {pointer}`, `motion {flee}`), gating
+   by idle (`"when": "idle"`), a blend by heat (`"fade": "heat"`)
+   (`temp/20112026-01-store/design/host-functions.md`, Primitives).
+
 3. **What comes back is read.** An answer of such a primitive (was it
    placed, where, is it hidden) is worth the permission that would
    have told it: without it, no answer. Errors and hints too: a hint
@@ -506,6 +617,14 @@ Drawn from these and from the threat. [proposed]
    app's name) or was asked for. One key of the driver, never an
    app's: hide everything store apps drew, show who drew what. The
    cure for a lie and for a nuisance alike.
+
+[as built] Principle 4: `--front`, `--back`, `--frame`, `--prefer`,
+`--alpha`, `--border` [recommended], `--seed` are the launcher's
+(`ptyrc_store::options`), refused as an app's option. Principle 5: an
+app lists and touches its own objects; `screen.text {sprites}` composes
+its own sprites alone. Principle 7: ctrl+t `h` (`veil.rs`). Principle
+3: `draw.list` tells where an anchor landed at the degree that would
+have found it (`lower::landing`).
 
 ### Degrees: what an app learns of the screen
 
@@ -548,7 +667,10 @@ Drawn from these and from the threat. [proposed]
   `screen.find` held to the declared words, the topics filtered per
   degree, the mark `degree`; colour and heat under `shape`
   (`screen.shape` answers neither); a shape of what the frames
-  remember.
+  remember. [as built] All done (`ptyrc_rules::lower`; the table in
+  `plan/design.md`, The cut answers): `frame.text` under `shape` is
+  each remembered line as its shape; `frame.heat` and the host colours
+  are `shape`'s.
 
 Per shipped app, as measured (`_catalog.READS`, held by
 `tests/test_reads.py`; `layout` is not told apart from none there):
@@ -569,6 +691,12 @@ To lower further:
 - `marks`: the patterns are the user's (principle 4): a `find` held
   to them, not `text`.
 - `flower -a`: runs of ink in place of words: `shape`.
+
+[as built] The means exist for `flower` (`anchor {text}`), `minimap`
+(`frame.text` cut to the shape) and `marks` (the user's patterns found
+under `--deny text,words`: `--user-pattern`, `app.start {store}`); none
+of these apps is moved yet. `marks -e` (a regex given at the run) is
+the owner's (migration-plan, question 5).
 
 ### Degrees: where an app draws
 
@@ -591,6 +719,15 @@ To lower further:
   the keys, not with drawing.
 - Reserved to the driver, never granted: the border `alert`, the mark
   of its pop-ups, the top band.
+
+[as built] A band an app (`driver/own.rs`), behind unless `front` or
+`front-widget` is held or the user put it in front. `surface` enforced
+by a clip, never a refusal (`ptyrc_rules::surface`, headless too): a
+bare sprite of `widget` goes nowhere (decision 14); the surface follows
+its pane, and a frame the user gives (`--frame`, `app.move`) is the
+surface. `[app] frame` names the frame of a start without `--frame`.
+A modal needs `keys-grab`. `persist` for a store app: no rule of its
+own found.
 
 ### Degrees: keys
 
@@ -628,6 +765,12 @@ Its own permissions (owner), apart from the screen and the keys.
   --hunt`, `flock`, `pond`, `shore`, `stars` (hover), unless the
   primitive serves; clicks anywhere: none.
 
+[as built] On its own widget, or its own sprite in front of the text:
+nothing asked (decision 16: a sprite behind is not its own thing).
+`pointer`, `clicks`, `clicks-grab` as the table. The agent's choice,
+not confirmed: an effect told the pointer turns the host mouse on with
+no permission.
+
 ### Ways out, and the rest
 
 - Typing and clicking into the wrapped program (`input.send`,
@@ -640,6 +783,9 @@ Its own permissions (owner), apart from the screen and the keys.
   wall clock, assets.
 - Probes (`probe.git`, `probe.system`): sources about the machine,
   not the screen; degrees of their own.
+
+[as built] Closed to store apps by the table. Probes: `probe-git`,
+`probe-system`, plain (`rust/ptyrc-probe`).
 
 ### Colours
 
@@ -679,6 +825,13 @@ Beside them:
 - `notes-app-permissions.md`: the first notes, aligned on this plan;
   where they differ, this plan holds.
 
+[as built] Tasks 1 to 5: done 2026-11-19. Task 6: done 2026-11-20
+(host functions, the launcher's options, the pointer told to an
+effect), but the primitives Principles names not built. Beside them:
+the names and colours confirmed; the launcher's options taken out of
+the store apps (the Python apps keep theirs until moved); the table of
+methods and topics built.
+
 ### Drawing is not harmless
 
 Milestone 0, before any of this is called safe:
@@ -690,6 +843,11 @@ Milestone 0, before any of this is called safe:
   driver's modal is above every layer; it bears a mark no app can
   draw there. The layer, `surface` and the key that hides all
   (principle 7) keep an app where it was put.
+
+[as built] Done: `ptyrc_vt::drawn` (`plan/design.md`, ptyrc-vt);
+`ptyrc-server/src/glyph_tests.rs` feeds OSC 52, OSC 8, the title, the
+bell, DCS, C1 and bidi to every text member. The pop-up's mark
+(decision 8).
 
 ## Manifest
 
@@ -742,6 +900,16 @@ rate = { type = "int", default = 20, doc = "grains a second" }
 - GPL: `license` is `GPL-3.0-or-later` and the tree holds the licence
   text; else refused by `check`, the install and the registry.
 
+[as built] `ptyrc_store::manifest`; `sdk/template/PROTOCOL.md` for the
+author. Added: `[app] random` (the draws `dev check` reads), `[app]
+wait` (`ptyrc app --wait` the default: the result printed); `[args]`
+(positionals, `min`, `max` a count); option types `int`, `float`,
+`bool`, `string`, `word`, `pattern`, `file`, `dir`, with `short`,
+`choices`, `list`, `needs` (a permission asked only with its option:
+[recommended]), `min`, `max` (the owner's); `default` optional (none:
+`null`, a bool false). A default file allowed, asked as `files`
+[recommended].
+
 ## Install
 
 ```
@@ -773,6 +941,19 @@ ptyrc app ID|ORIGIN [OPTION...]         start it (a native name first)
   an app held at an `approved` commit does not move to an untested
   head unless `--latest`.
 - The old tree is kept until the new one has started once.
+
+[as built] As planned, with `--yes` (an untested version taken
+without asking) and `store sync`, `store registry ls|add|rm`. `update`
+holds any drop of tier unless `--latest`. `<origin>` on disk is one
+name, `%XX` outside `[A-Za-z0-9._-]` (`Origin::dir_name`). Shipped store
+apps (`plugins/store-apps/NAME`): origin `ptyrc/NAME`, tier `shipped`,
+found without `store add`, asked by the pop-up as any app
+[recommended]; a Rust one runs the `app.wasm` installed beside it,
+else built into `<cache>/ptyrc/shipped/NAME/`. An installed app of the
+same id hides a shipped one (the agent's choice). Storage: 64 keys, 1
+MiB an app [recommended], 16 writes a second (`storage.set` and
+`file.write` together); `store rm --purge`
+removes it with the grants.
 
 Where things are:
 
@@ -835,6 +1016,12 @@ tier = "untested"
 [TBD], later: who may say `tested` and what a tester writes down;
 whether tiers are signed.
 
+[as built] In this repository for now (`registry/`: `MAINTAINERS`,
+`apps/`, `ci/check.sh`, `ci/merge.sh`; decision 22): `ptyrc dev entry`,
+`dev index` (`index.json`, `--html` the page), `dev registry-check`
+(the pull request's check), `store sync`, `search`, `show`. Not done:
+the hosting, a CI file, the tape played on the page.
+
 ## Migration
 
 [decided] Every shipped app a store app in the long run. What each
@@ -881,6 +1068,23 @@ clocks; `ask`; `pace`; named files (`note`, `gallery`, `minimap`); the
 probes (`git`, `monitor`). A Python app is removed when its twin is at
 least as good and its tests are carried over.
 
+[as built] Every host function above exists, in the driver and
+headless (`plan/design.md`, Protocol; `sdk/template/PROTOCOL.md`):
+`clock.now`, `clock.zone` (our TZif reader over the system's files,
+[recommended]), `storage.*`, `app.result`, `file.*` by handle,
+`probe.git` (no directory: the program's working directory
+[recommended]), `probe.system`; `asset.*` answered by the runner
+[recommended]. `confetti`, `sand` moved to `plugins/store-apps/` (the
+Python twins kept), with the harness `rust/ptyrc-cli/tests/store_apps.rs`
+and the guide `plugins/store-apps/README.md`. The 26 apps left, their
+waves, the findings to settle first and the shared code:
+`temp/20112026-02-ready/audit/migration-plan.md`. Of its findings,
+landed: a default frame (`[app] frame`), an option without a default,
+`--seed` the launcher's (seeds `random`), `dev probe`, `--key` to a
+`keys-read` holder, the headless clip, the single crate of rules; on
+the audit's recommendations, the owner's word not recorded. Not built:
+the Braille and half-block canvases, `Sight`, the `_shared` copies.
+
 ## Code
 
 | | |
@@ -888,6 +1092,8 @@ least as good and its tests are carried over.
 | `rust/ptyrc-box` | the runner: engine, ABI, limits, canvas diff. Its own binary: `ptyrc` and the driver do not link the engine |
 | `rust/ptyrc-store` | manifest, fetch, check, lock, registry, the Rust build. No engine |
 | `rust/ptyrc-server` | the token, `app.start {store}`, the check, `denied`, the pop-up, a layer per app, `surface`, the answers cut to a degree, the key that hides all, the per-app limits |
+| `rust/ptyrc-rules` | [as built] the table, the check, the cut answers, the pointer of an effect, the surface clip: one copy for the driver and the box |
+| `rust/ptyrc-probe` | [as built] `probe.git`, `probe.system` |
 | `rust/ptyrc-cli` | `store`, `dev`; `app` resolves store apps |
 | `sdk/rust/ptyrc-app` | the guest crate |
 | `sdk/js` | the interpreter guest, its prelude, `ptyrc.d.ts` |
@@ -922,6 +1128,11 @@ No `unsafe` of ours outside `ptyrc-server`; no async runtime.
   called, the answers searched); the declared words do not add up.
 - Every moved app: the tests of its Python twin, through `dev test`.
 
+[as built] `rust/ptyrc-box/tests/hostile/` (26 guests), `tests/script.rs`
+(hostile scripts; `PTYRC_REQUIRE_JS=1`), `tests/protocol.rs` (headless
+held to the driver's rules); `ptyrc-server/src/glyph_tests.rs`; the
+shipped trees by `store_apps.rs` (`dev check`, `--unit`, `--cases`).
+
 ## Milestones
 
 0. **Ground**, in the driver, no store yet: the token and `app.start
@@ -955,12 +1166,23 @@ No `unsafe` of ours outside `ptyrc-server`; no async runtime.
 app runs with the default profile and no more; the README says the
 store is not yet safe for strangers' apps.
 
+[as built] 0 to 4 done; the speed bound held for one colour, 3 ms
+for a colour a cell (decision 23). 5 done but for the hosting. 6: the
+runner's profile; the build's for `rustc` alone (Landlock; no network
+namespace, no seccomp: `rust/ptyrc-store/BUILD-PROFILE.md`); cargo
+not wired. 7: two apps of 28.
+
 ## TBD
 
 - The names, the colours and the default profile of The list, to
-  confirm; the host functions of Migration with it.
+  confirm; the host functions of Migration with it. [decided] 6, 7, 17.
 - Headless and a stranger's app: granted as declared, or refused
-  unless `--allow`.
+  unless `--allow`. [decided] Granted, with a warning (18).
 - cargo under the OS profile, as proposed, or `rustc` alone.
-- `tested`: who, what is written down; tiers signed or not.
-- macOS: the runner is portable, its OS profile is another.
+  [decided] `rustc` alone now (20).
+- `tested`: who, what is written down; tiers signed or not. [decided]
+  `MAINTAINERS`, an optional `note`, signed later (22).
+- macOS: the runner is portable, its OS profile is another. [decided]
+  Start and log (19, 24).
+- Open: the questions of `migration-plan.md` (e) not landed (4 to 9);
+  the agents' choices listed in `temp/20112026-01-store/handover.md`.

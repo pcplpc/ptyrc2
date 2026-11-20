@@ -96,3 +96,22 @@ fn one_shot_exits() {
     let last = &report.screens.last().unwrap().1;
     assert!(last.iter().all(|r| r.is_empty()), "{report}");
 }
+
+/// The bounds in the manifests, refused before the app runs: `bursts`
+/// 1 to 10 here, `rate` 1 to 200 in the script's confetti.
+#[test]
+fn bounds_in_the_manifest() {
+    use ptyrc_store::{manifest, options};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for (dir, name, max) in [
+        ("../examples/confetti", "bursts", 10),
+        ("../../js/examples/confetti", "rate", 200),
+    ] {
+        let dir = root.join(dir);
+        let m = std::fs::read(dir.join(manifest::MANIFEST)).unwrap();
+        let m = manifest::parse_bytes(&m).unwrap();
+        let read = |n: i32| options::read(&m, &[format!("--{name}"), n.to_string()], &dir);
+        assert!(read(max).is_ok() && read(1).is_ok(), "{name}");
+        assert!(read(0).is_err() && read(max + 1).is_err(), "{name}");
+    }
+}

@@ -91,6 +91,32 @@ fn the_same_run_twice() {
 }
 
 /// `call` answers in memory the guest allocated: `(ptr << 32) | len`.
+/// The wall time of the ticks: counted, in `--json`, out of the text.
+#[test]
+fn the_ticks_timed() {
+    let options = Options {
+        duration_ms: 1000,
+        ..Options::default()
+    };
+    let r = run(&counter(), &options).unwrap();
+    assert_eq!((r.ticks, r.timing.ticks), (10, 10));
+    let mean = r.timing.mean().unwrap();
+    assert!(mean <= r.timing.max && r.timing.max <= r.timing.total);
+    assert!(!r.to_string().contains("ticks"));
+    let line = r.timing_line();
+    assert!(
+        line.starts_with("ticks: 10; a tick, wall time: mean "),
+        "{line}"
+    );
+    let j = r.to_json();
+    assert_eq!(j["ticks"], 10);
+    assert!(j["tick_ms"]["mean"].as_f64().unwrap() <= j["tick_ms"]["max"].as_f64().unwrap());
+    // No tick: none timed.
+    let quiet = run(&guest(&format!("{INIT}{TICK}{EVENT}")), &options).unwrap();
+    assert_eq!(quiet.timing_line(), "ticks: 0");
+    assert!(quiet.to_json()["tick_ms"].is_null());
+}
+
 #[test]
 fn call_answers() {
     let wasm = guest(&format!(

@@ -1,0 +1,3 @@
+# test_clock (test_apps.py): the widget `clock` placed, titled, in the
+# largest face that fits, the time of the wall clock, a tick a second.
+--size 80x24 --for 3s --at 1s,3s --clock 2026-11-13T09:05:07Z

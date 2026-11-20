@@ -204,11 +204,20 @@ pub struct Error {
 }
 
 impl Error {
-    fn new(code: &str, message: impl Into<String>) -> Error {
+    /// `code`, `message`, no hint: `native::serve` answers with it.
+    pub fn new(code: &str, message: impl Into<String>) -> Error {
         Error {
             code: code.into(),
             message: message.into(),
             hint: None,
+        }
+    }
+
+    /// The same, with `hint`.
+    pub fn with_hint(self, hint: impl Into<String>) -> Error {
+        Error {
+            hint: Some(hint.into()),
+            ..self
         }
     }
 }
@@ -225,7 +234,7 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-/// A protocol request (`plan/design.md`, Protocol), answered before it
+/// A protocol request (`PROTOCOL.md`, Methods), answered before it
 /// returns. `params`: an object, or `Value::Null` for `{}`.
 pub fn call(method: &str, params: Value) -> Result<Value, Error> {
     let params = match params {
@@ -295,7 +304,7 @@ pub fn size() -> Result<(u32, u32), Error> {
     }
 }
 
-/// `draw.put` of a whole sprite (`plan/design.md`, scene); its id.
+/// `draw.put` of a whole sprite (`PROTOCOL.md`, Methods); its id.
 pub fn put(sprite: Value) -> Result<u64, Error> {
     let answer = call("draw.put", sprite)?;
     answer
@@ -431,7 +440,7 @@ impl Run {
 
 /// Columns of a glyph on a terminal, coarsely (the runner has the last
 /// word): 0 a mark that joins the glyph before, 2 wide, else 1.
-pub fn width(c: char) -> usize {
+pub fn width(c: char) -> u32 {
     const ZERO: [(u32, u32); 7] = [
         (0x0300, 0x036f),
         (0x200b, 0x200f),
@@ -471,7 +480,7 @@ pub fn width(c: char) -> usize {
 }
 
 /// Columns of `text` on a terminal ([`width`] of each glyph).
-pub fn cells(text: &str) -> usize {
+pub fn cells(text: &str) -> u32 {
     text.chars().map(width).sum()
 }
 

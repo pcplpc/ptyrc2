@@ -31,7 +31,7 @@ function size() {
 }
 
 export function init(args) {
-  if (Number.isFinite(args.rate) && args.rate > 0) rate = Math.min(args.rate, 200);
+  if (Number.isInteger(args.rate)) rate = args.rate; // 1 to 200: the manifest
   resize(size());
   call("subscribe", { topics: ["size"] });
   period(50);

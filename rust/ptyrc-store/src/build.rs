@@ -12,7 +12,8 @@
 //! read the two sources; write `out/`, `tmp/`; no TCP, no abstract
 //! socket, no signal out. Bounds: the time of both runs, the address
 //! space and the size of a file written by each, the module. The
-//! module imports from `ptyrc` only.
+//! module imports from `ptyrc` only. One build at a time in a work
+//! directory: [`lock`] on `WORK.lock`, held through the build.
 
 pub mod scan;
 
@@ -225,6 +226,7 @@ pub fn build(
         ))
         .with_hint("rustup update"));
     }
+    let _held = lock(work)?;
     let start = Instant::now();
     fresh(work)?;
     let (app, lib, out, tmp) = (
@@ -295,9 +297,16 @@ pub fn build(
             .collect(),
     )?;
     if !rlib.status.success() {
-        return Err(failed("ptyrc-app", &rlib, options).with_hint(
-            "the toolchain is older than ptyrc-app needs (edition 2024: rustc 1.85); rustup update",
-        ));
+        let hint = match toolchain.version().is_some_and(|v| v < EDITION_2024) {
+            true => "the toolchain is older than ptyrc-app needs (edition 2024: rustc 1.85); \
+                     rustup update"
+                .to_string(),
+            false => format!(
+                "rustc {} on ptyrc's own ptyrc-app: the messages above; not the app's sources",
+                toolchain.release
+            ),
+        };
+        return Err(failed("ptyrc-app", &rlib, options).with_hint(hint));
     }
     let made = run(
         &app,
@@ -382,6 +391,30 @@ pub fn vendored_differs(tree: &dyn Tree, checked: &Checked) -> Vec<String> {
         }
     }
     out
+}
+
+/// The first `rustc` of edition 2024, which `ptyrc-app` is in.
+const EDITION_2024: (u32, u32, u32) = (1, 85, 0);
+
+/// An exclusive lock on `PATH.lock` (made, its directory too), held
+/// until the file is dropped; waits for another holder, of this
+/// process or another. [`build`] takes it on its work directory; a
+/// step around a build takes it on another path.
+pub fn lock(path: &Path) -> Result<std::fs::File> {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(".lock");
+    let file = PathBuf::from(name);
+    if let Some(parent) = file.parent() {
+        mkdir(parent)?;
+    }
+    let f = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&file)
+        .map_err(|e| Error::io(file.display(), e))?;
+    f.lock().map_err(|e| Error::io(file.display(), e))?;
+    Ok(f)
 }
 
 /// `work`, empty: made, or emptied when it holds the mark.

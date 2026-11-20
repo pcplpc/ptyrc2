@@ -127,3 +127,41 @@ fn a_rust_app_built_into_the_cache() {
     std::fs::write(root.join("shipped/confetti").join(MODULE), b"\0asm").unwrap();
     assert_eq!(s.tree(&dirs).unwrap(), root.join("shipped/confetti"));
 }
+
+/// Two `ptyrc app` of a shipped Rust app at once, not built: one
+/// builds, the other waits and starts that build.
+#[test]
+fn a_rust_app_built_once_for_two_at_once() {
+    let root = tmp("shipped-twice");
+    let dirs = Dirs::under(&root);
+    copy(
+        &examples("rust").join("confetti"),
+        &root.join("shipped/confetti"),
+    );
+    if let Err(e) = Toolchain::find() {
+        assert!(
+            std::env::var_os("PTYRC_REQUIRE_RUSTC").is_none_or(|v| v != "1"),
+            "PTYRC_REQUIRE_RUSTC=1: {e}"
+        );
+        eprintln!("skipped: {e}");
+        return;
+    }
+    let s = shipped::get(&dirs, "confetti").unwrap().unwrap();
+    let built = std::sync::atomic::AtomicUsize::new(0);
+    let dirs_got: Vec<_> = std::thread::scope(|sc| {
+        let all: Vec<_> = (0..3)
+            .map(|_| {
+                sc.spawn(|| {
+                    s.build(&dirs, |_| {
+                        built.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    })
+                })
+            })
+            .collect();
+        all.into_iter()
+            .map(|r| r.join().unwrap().unwrap())
+            .collect()
+    });
+    assert_eq!(built.into_inner(), 1);
+    assert!(dirs_got.iter().all(|d| d.join(MODULE).is_file()));
+}

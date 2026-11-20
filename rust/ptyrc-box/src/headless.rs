@@ -2132,6 +2132,8 @@ pub struct Report {
     pub met: Vec<String>,
     /// `tick` calls made.
     pub ticks: u64,
+    /// Their wall time (`--timing`): never in what two reports compare.
+    pub timing: crate::runner::Timing,
     /// How the guest ended before the run did. `exit(0)`: `Exit(0)`.
     pub end: Option<Error>,
     /// The permissions the app was refused or answered without.
@@ -2290,7 +2292,8 @@ impl Report {
     /// `[y, x, w, style]`), `refused`, `lowered`, `dropped`, `notes`,
     /// `lacks`, `limits`, `end`, `result` (`{value, status}` or null),
     /// `storage` (key: value), `files` (written: `option`, `name`,
-    /// `size`, `text` or `base64`).
+    /// `size`, `text` or `base64`); `ticks`, `tick_ms` (`mean`, `max`
+    /// of the wall time of a tick, null without one: [`Report::timing_line`]).
     pub fn to_json(&self) -> Value {
         let screens: Vec<Value> = self
             .screens
@@ -2352,6 +2355,9 @@ impl Report {
             "result": self.result.as_ref().map(|(v, s)| json!({"value": v, "status": s})),
             "storage": self.storage,
             "files": files,
+            "ticks": self.ticks,
+            "tick_ms": self.timing.mean().map(|mean| json!({
+                "mean": ms(mean), "max": ms(self.timing.max)})),
         })
     }
 }
@@ -2444,6 +2450,28 @@ impl Report {
             writeln!(f, "ended: {e}")?;
         }
         Ok(())
+    }
+}
+
+/// Milliseconds, to the microsecond.
+fn ms(d: std::time::Duration) -> f64 {
+    (d.as_micros() as f64) / 1000.0
+}
+
+impl Report {
+    /// `--timing`: the ticks run, the mean and the max of the wall time
+    /// of one, host calls in it (what `limit-time` bounds). Not in the
+    /// text report, which two runs compare.
+    pub fn timing_line(&self) -> String {
+        match self.timing.mean() {
+            None => format!("ticks: {}", self.ticks),
+            Some(mean) => format!(
+                "ticks: {}; a tick, wall time: mean {:.3} ms, max {:.3} ms",
+                self.ticks,
+                ms(mean),
+                ms(self.timing.max)
+            ),
+        }
     }
 }
 
@@ -2755,6 +2783,7 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
         }
     }
     let met = runner.met().iter().map(|m| m.to_string()).collect();
+    let timing = runner.timing();
     let host = runner.host_mut();
     if let Some(t) = host.nowhere {
         notes.push(format!(
@@ -2781,6 +2810,7 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
         log: std::mem::take(&mut host.log),
         met,
         ticks,
+        timing,
         end: done.err(),
     })
 }

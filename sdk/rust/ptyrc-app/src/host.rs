@@ -162,6 +162,19 @@ pub mod clock {
         offsets.ok_or_else(|| bad("clock.zone", "offsets"))
     }
 
+    /// The `period` to the next multiple of `every_ms` of the wall clock
+    /// after `unix_ms` (`now().unix_ms`), plus `every_ms` while under 33
+    /// (a `period` under 33 is 33). At each tick: `period(until(
+    /// now()?.unix_ms, 1000))` ticks on the second. Pure.
+    pub fn until(unix_ms: i64, every_ms: u32) -> u32 {
+        let every = every_ms.max(1);
+        let mut left = every - unix_ms.rem_euclid(i64::from(every)) as u32;
+        while left < 33 {
+            left += every;
+        }
+        left
+    }
+
     /// The date and time of `unix_ms` at `offset_s` east of UTC
     /// (proleptic Gregorian).
     pub fn civil(unix_ms: i64, offset_s: i32) -> Civil {
@@ -217,9 +230,12 @@ pub mod storage {
     }
 }
 
-/// Reads `method` whole, `params` and `offset`, `len`, base64 by pieces.
-fn read_all(method: &str, params: &Value) -> Result<Vec<u8>, Error> {
+/// Reads `method` whole, `params` and `offset`, `len`, base64 by pieces;
+/// the `mtime_ms` of the answers (0: none), `not-usable` if it changes
+/// between two pieces.
+fn read_all(method: &str, params: &Value) -> Result<(Vec<u8>, i64), Error> {
     let mut out = Vec::new();
+    let mut mtime = None;
     loop {
         let mut p = params.clone();
         p["as"] = json!("base64");
@@ -228,21 +244,33 @@ fn read_all(method: &str, params: &Value) -> Result<Vec<u8>, Error> {
         let answer = call(method, p)?;
         let piece = answer["base64"].as_str().and_then(base64::decode);
         let piece = piece.ok_or_else(|| bad(method, "base64"))?;
+        let m = answer["mtime_ms"].as_i64().unwrap_or(0);
+        if *mtime.get_or_insert(m) != m {
+            return Err(Error::new(
+                "not-usable",
+                format!("{method}: changed while read"),
+            ));
+        }
         out.extend_from_slice(&piece);
         if answer["eof"] != false || piece.is_empty() {
-            return Ok(out);
+            return Ok((out, m));
         }
     }
 }
 
 /// Reads as text: whole in one answer, or by bytes.
-fn read_text(method: &str, params: &Value) -> Result<String, Error> {
+fn read_text(method: &str, params: &Value) -> Result<(String, i64), Error> {
     let mut p = params.clone();
     p["as"] = json!("text");
     let answer = call(method, p)?;
     match answer["text"].as_str() {
-        Some(t) if answer["eof"] != false => Ok(t.to_string()),
-        Some(_) => Ok(String::from_utf8_lossy(&read_all(method, params)?).into_owned()),
+        Some(t) if answer["eof"] != false => {
+            Ok((t.to_string(), answer["mtime_ms"].as_i64().unwrap_or(0)))
+        }
+        Some(_) => {
+            let (bytes, m) = read_all(method, params)?;
+            Ok((String::from_utf8_lossy(&bytes).into_owned(), m))
+        }
         None => Err(bad(method, "text")),
     }
 }
@@ -254,12 +282,12 @@ pub mod asset {
 
     /// The asset as text (UTF-8, invalid bytes replaced).
     pub fn text(name: &str) -> Result<String, Error> {
-        read_text("asset.read", &json!({ "name": name }))
+        Ok(read_text("asset.read", &json!({ "name": name }))?.0)
     }
 
     /// The asset's bytes.
     pub fn bytes(name: &str) -> Result<Vec<u8>, Error> {
-        read_all("asset.read", &json!({ "name": name }))
+        Ok(read_all("asset.read", &json!({ "name": name }))?.0)
     }
 
     /// The names of the assets.
@@ -336,11 +364,22 @@ impl File {
 
     /// The content as text (UTF-8, invalid bytes replaced).
     pub fn text(&self) -> Result<String, Error> {
-        read_text("file.read", &self.params())
+        Ok(self.text_with_mtime()?.0)
     }
 
     /// The content.
     pub fn bytes(&self) -> Result<Vec<u8>, Error> {
+        Ok(self.bytes_with_mtime()?.0)
+    }
+
+    /// `text` and the `mtime_ms` it was read at: the `if_mtime_ms` of a
+    /// `write` that must not clobber a change made since.
+    pub fn text_with_mtime(&self) -> Result<(String, i64), Error> {
+        read_text("file.read", &self.params())
+    }
+
+    /// `bytes` and the `mtime_ms` they were read at.
+    pub fn bytes_with_mtime(&self) -> Result<(Vec<u8>, i64), Error> {
         read_all("file.read", &self.params())
     }
 
@@ -469,15 +508,21 @@ mod tests {
                 "asset.list" => json!({"assets": [{"name": "p/ship.pic", "size": 3}]}),
                 "file.list" => json!({"entries": [{"name": "x.txt", "size": 3}]}),
                 "file.stat" => json!({"exists": true, "size": 3, "mtime_ms": 7}),
+                "file.write" if p["if_mtime_ms"] == 1 => {
+                    return Err(Error::new("not-usable", "file.write: changed since")
+                        .with_hint("read it again"));
+                }
                 "file.write" => json!({"size": 2, "mtime_ms": 8}),
                 "file.read" | "asset.read" if p["as"] == "text" => {
-                    json!({"text": "héllo", "size": 6, "eof": p["file"] != "f1"})
+                    json!({"text": "héllo", "size": 6, "mtime_ms": 7, "eof": p["file"] != "f1" && p["file"] != "f2"})
                 }
                 "file.read" | "asset.read" => {
                     let at = p["offset"].as_u64().unwrap() as usize;
                     let end = (at + p["len"].as_u64().unwrap() as usize).min(big.len());
+                    // f2: written between two pieces.
+                    let mtime = if p["file"] == "f2" { at } else { 9 };
                     json!({"base64": (base64::encode(&big[at..end])), "size": (big.len()),
-                           "eof": (end == big.len())})
+                           "mtime_ms": mtime, "eof": (end == big.len())})
                 }
                 _ => json!({}),
             })
@@ -547,6 +592,35 @@ mod tests {
         assert_eq!((b.len(), b[300]), (3 << 20, (300 % 251) as u8));
         assert_eq!(log.borrow_mut().drain(..).count(), 3);
         assert_eq!(File::new("f1").text().unwrap(), String::from_utf8_lossy(&b));
+
+        // The mtime read with the content: one answer, or each piece.
+        assert_eq!(f.text_with_mtime().unwrap(), ("héllo".into(), 7));
+        assert_eq!(File::new("f1").text_with_mtime().unwrap().1, 9);
+        assert_eq!(File::new("f1").bytes_with_mtime().unwrap().1, 9);
+        let e = File::new("f2").bytes_with_mtime().unwrap_err();
+        assert_eq!(
+            (e.code.as_str(), e.message.as_str()),
+            ("not-usable", "file.read: changed while read")
+        );
+        // An error answered by `serve`, as the host's.
+        let e = f.write("x", Some(1)).unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "not-usable: file.write: changed since (read it again)"
+        );
+    }
+
+    #[test]
+    fn until_the_next_multiple() {
+        use super::clock::until;
+        assert_eq!(until(1_000, 1000), 1000);
+        assert_eq!(until(1_400, 1000), 600);
+        assert_eq!(until(1_967, 1000), 33);
+        // Under 33: the one after.
+        assert_eq!(until(1_968, 1000), 1032);
+        assert_eq!(until(-1, 1000), 1001);
+        assert_eq!(until(5, 10), 35);
+        assert_eq!(until(5, 0), 33);
     }
 
     #[test]

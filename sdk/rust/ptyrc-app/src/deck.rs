@@ -866,7 +866,7 @@ impl Keys {
 // ---- pieces of an interactive widget ----
 
 /// The longest start of `text` that holds in `n` cells.
-fn head(text: &str, n: usize) -> &str {
+fn head(text: &str, n: u32) -> &str {
     let mut used = 0;
     for (i, ch) in text.char_indices() {
         used += crate::width(ch);
@@ -878,7 +878,7 @@ fn head(text: &str, n: usize) -> &str {
 }
 
 /// `text` in `n` cells at most: cut, `…` in the last.
-pub fn cut(text: &str, n: usize) -> String {
+pub fn cut(text: &str, n: u32) -> String {
     if cells(text) <= n {
         text.to_string()
     } else if n > 0 {
@@ -889,7 +889,7 @@ pub fn cut(text: &str, n: usize) -> String {
 }
 
 /// `row` in exactly `w` cells: cut, or blanks added.
-pub fn fit(row: &[Run], w: usize) -> Vec<Run> {
+pub fn fit(row: &[Run], w: u32) -> Vec<Run> {
     let mut out = Vec::new();
     let mut room = w;
     for piece in row {
@@ -903,17 +903,17 @@ pub fn fit(row: &[Run], w: usize) -> Vec<Run> {
         }
     }
     if room > 0 || out.is_empty() {
-        out.push(Run::new(" ".repeat(room)));
+        out.push(Run::new(" ".repeat(room as usize)));
     }
     out
 }
 
 /// `text` in `n` lines of `w` cells at most, cut at blanks; the rest in
 /// the last, cut.
-pub fn wrap(text: &str, w: usize, n: usize) -> Vec<String> {
+pub fn wrap(text: &str, w: u32, n: u32) -> Vec<String> {
     let mut words = text.split_whitespace().peekable();
     let mut lines: Vec<String> = Vec::new();
-    while lines.len() < n {
+    while lines.len() < n as usize {
         let Some(first) = words.next() else { break };
         let mut line = first.to_string();
         while let Some(next) = words.peek() {
@@ -1019,7 +1019,7 @@ impl Field {
     /// The row of `w` cells: the text in `style` (its colours and
     /// attributes), the cursor inverse when `focused`, `placeholder` dim
     /// when empty.
-    pub fn render(&mut self, w: usize, focused: bool, placeholder: &str, style: &Run) -> Vec<Run> {
+    pub fn render(&mut self, w: u32, focused: bool, placeholder: &str, style: &Run) -> Vec<Run> {
         let dim = Run::new(placeholder).attrs(attr::DIM);
         if !focused {
             if self.text.is_empty() {
@@ -1088,7 +1088,8 @@ impl Listing {
     }
 
     /// The indices shown in `h` rows, `sel` among them.
-    pub fn window(&mut self, h: usize) -> Range<usize> {
+    pub fn window(&mut self, h: u32) -> Range<usize> {
+        let h = h as usize;
         self.page = h.max(1);
         self.sel = self.sel.min(self.count.saturating_sub(1));
         let top = self.top.min(self.sel).min(self.count.saturating_sub(h));
@@ -1097,8 +1098,8 @@ impl Listing {
     }
 
     /// `"3/12"` when the list does not hold in `h` rows; else empty.
-    pub fn mark(&self, h: usize) -> String {
-        if self.count > h {
+    pub fn mark(&self, h: u32) -> String {
+        if self.count > h as usize {
             format!("{}/{}", self.sel + 1, self.count)
         } else {
             String::new()

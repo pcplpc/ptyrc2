@@ -142,7 +142,9 @@ install::install_built(&dirs, &origin, &tree, &checked, Some(&built.wasm), ...)?
   crate. `ptyrc-app` as an rlib, then the app as a `cdylib` with
   `--extern ptyrc_app`; `--edition 2024`, `-C opt-level=s`, `panic=abort`,
   `codegen-units=1`, `lto`, `strip=symbols`; the environment cleared;
-  paths in messages from the app's root.
+  paths in messages from the app's root. One build at a time in `work`:
+  `build::lock(work)`, an exclusive lock on `WORK.lock`, held through
+  the build; a caller wanting a wider step locks another path.
 - Each `rustc` under the profile (Linux, Landlock), from a thread that
   restricts itself and spawns it; the rest of the process is not
   restricted. No profile: refused, unless `Options::unconfined` (`store
@@ -211,7 +213,8 @@ The store apps of ptyrc itself (`plugins/store-apps/README.md`).
   ptyrc's version), else `ErrorKind::Build`, "not built".
   `Shipped::build(dirs, on_build)`: `build::build` (`unconfined`: our
   own sources) into that cache, the tree copied beside `app.wasm`;
-  nothing fetched.
+  nothing fetched. Under `build::lock` of the cache: a second caller
+  waits, then takes the first one's build.
 
 ## Registry
 
