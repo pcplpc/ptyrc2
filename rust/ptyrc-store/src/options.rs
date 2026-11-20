@@ -181,6 +181,21 @@ impl AppOption {
         }
     }
 
+    /// A `bool` on by default: given, it changes nothing; `--no-NAME`
+    /// turns it off.
+    pub fn on_by_default(&self) -> bool {
+        self.ty == OptionType::Bool && self.default == Some(OptionValue::Bool(true))
+    }
+
+    /// The flag that changes it: `--no-NAME` for a bool on by default,
+    /// else `--NAME`.
+    pub fn flag(&self) -> String {
+        match self.on_by_default() {
+            true => format!("--no-{}", self.name),
+            false => format!("--{}", self.name),
+        }
+    }
+
     /// The bounds as shown: `1 to 10`, `at least 1`, `at most 10`.
     pub fn range(&self) -> Option<String> {
         match (&self.min, &self.max) {
@@ -1405,6 +1420,7 @@ pub fn help(m: &Manifest, program: &str) -> String {
         }
         match &o.default {
             Some(OptionValue::Bool(false)) | None => {}
+            Some(OptionValue::Bool(true)) => doc.push_str(&format!(" [default: --{}]", o.name)),
             Some(d) => doc.push_str(&format!(" [default: {}]", d.text())),
         }
         if o.list && m.args.as_ref().is_none_or(|p| p.option.name != o.name) {
@@ -1427,14 +1443,17 @@ pub fn help(m: &Manifest, program: &str) -> String {
         text.push_str("\noptions:\n");
     }
     for o in &m.options {
-        let short = o.short.map(|c| format!("-{c}, ")).unwrap_or_default();
+        // On by default: its `-c` changes nothing, not shown.
+        let short = (o.short.filter(|_| !o.on_by_default()))
+            .map(|c| format!("-{c}, "))
+            .unwrap_or_default();
         let value = match o.ty {
             OptionType::Bool => String::new(),
             ty => format!(" {}", ty.metavar()),
         };
         line(
             &mut text,
-            format!("{short}--{}{value}", o.name),
+            format!("{short}{}{value}", o.flag()),
             &describe(o),
         );
     }
@@ -1460,11 +1479,17 @@ pub fn help(m: &Manifest, program: &str) -> String {
     ] {
         line(&mut text, flag.into(), doc);
     }
-    let wait = if m.app.wait { "--wait" } else { "--no-wait" };
+    let wait = if m.app.wait {
+        "--wait"
+    } else {
+        "until init ends"
+    };
     line(
         &mut text,
         "--wait, --no-wait".into(),
-        &format!("wait for its end, print its result [default: {wait}]"),
+        &format!(
+            "wait for its end, print its result; --no-wait: not for init either [default: {wait}]"
+        ),
     );
     text
 }
@@ -1878,6 +1903,27 @@ mod tests {
             assert!(h.contains(said), "{said}: {h}");
         }
         let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    #[test]
+    fn a_bool_on_by_default_is_turned_off() {
+        let m = manifest(
+            "[options]\nseconds = { type = \"bool\", default = true, short = \"s\", doc = \"with seconds\" }\n",
+        );
+        let h = help(&m, "ptyrc app a");
+        assert!(
+            h.contains("  --no-seconds") && h.contains("with seconds [default: --seconds]\n"),
+            "{h}"
+        );
+        assert!(!h.contains("-s, ") && !h.contains("default: true"), "{h}");
+        let o = &m.options[0];
+        assert_eq!((o.on_by_default(), o.flag()), (true, "--no-seconds".into()));
+        let cwd = std::env::temp_dir();
+        let args = |text: &str| Value::Object(read(&m, &words(text), &cwd).unwrap().unwrap().args);
+        assert_eq!(args("--no-seconds"), json!({"seconds": false}));
+        assert_eq!(args("--seconds"), json!({"seconds": true}));
+        assert_eq!(args("-s"), json!({"seconds": true}));
+        assert_eq!(args("--no-seconds=true"), json!({"seconds": false}));
     }
 
     #[test]

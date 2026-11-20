@@ -1,0 +1,2 @@
+# test_life_all (-g --rate 8 --kinds all): patterns dropped, no soup.
+--size 40x8 --for 1500ms --at 500ms,1500ms --seed 4 --speed 30 --screen tests/words.screen -g --rate 8 --kinds all

@@ -32,6 +32,12 @@ static const char PRELUDE[] = {
 static const char DECK[] = {
 #embed "deck.js"
     , 0};
+static const char CANVAS[] = {
+#embed "canvas.js"
+    , 0};
+static const char SIGHT[] = {
+#embed "sight.js"
+    , 0};
 
 // Members of the `init` JSON, taken out before the script's `init`.
 #define SOURCES_KEY "ptyrc:sources"
@@ -43,7 +49,19 @@ static const char DECK[] = {
 // The API, and the natives under it: reachable until SEALED.
 #define API "ptyrc"
 #define NATIVE "ptyrc:native"
-#define DECK_API "ptyrc/deck"
+// The modules of the SDK beside the API, by name.
+static const struct { const char *name, *src; size_t len; } MODULES[] = {
+    {"ptyrc/deck", DECK, sizeof DECK - 1},
+    {"ptyrc/canvas", CANVAS, sizeof CANVAS - 1},
+    {"ptyrc/sight", SIGHT, sizeof SIGHT - 1},
+};
+#define NMODULES (sizeof MODULES / sizeof MODULES[0])
+
+static int sdk_module(const char *name) {
+    for (size_t i = 0; i < NMODULES; i++)
+        if (!strcmp(name, MODULES[i].name)) return (int)i;
+    return -1;
+}
 
 static JSRuntime *RT;
 static JSContext *CTX;
@@ -389,10 +407,10 @@ static char *normal(JSContext *ctx, const char *dir, size_t dirlen, const char *
 }
 
 static char *normalize(JSContext *ctx, const char *base, const char *spec, void *opaque) {
-    if (!strcmp(spec, API) || !strcmp(spec, DECK_API) || (!strcmp(spec, NATIVE) && !SEALED))
+    if (!strcmp(spec, API) || sdk_module(spec) >= 0 || (!strcmp(spec, NATIVE) && !SEALED))
         return js_strdup(ctx, spec);
     if (strncmp(spec, "./", 2) && strncmp(spec, "../", 3)) {
-        return throw_fmt(ctx, "import \"%s\": no such module\n  hint: \"ptyrc\", \"ptyrc/deck\", or a file of the app by relative path: \"./%s\"",
+        return throw_fmt(ctx, "import \"%s\": no such module\n  hint: \"ptyrc\", \"ptyrc/deck\", \"ptyrc/canvas\", \"ptyrc/sight\", or a file of the app by relative path: \"./%s\"",
                          spec, spec + strspn(spec, "/"));
     }
     const char *slash = strrchr(base, '/');
@@ -402,7 +420,7 @@ static char *normalize(JSContext *ctx, const char *base, const char *spec, void 
         return throw_fmt(ctx, "import \"%s\" from %s: outside the app\n  hint: imports stay inside the tree of the app",
                          spec, base);
     }
-    if (!strcmp(name, NATIVE) || !strcmp(name, DECK_API)) {  // a file of that name: none is
+    if (!strcmp(name, NATIVE) || sdk_module(name) >= 0) {  // a file of that name: none is
         throw_fmt(ctx, "`%s`: no such file in the app", name);
         js_free(ctx, name);
         return NULL;
@@ -425,7 +443,8 @@ static JSModuleDef *load(JSContext *ctx, const char *name, void *opaque) {
         return m;
     }
     if (!strcmp(name, API)) return compile(ctx, name, PRELUDE, sizeof PRELUDE - 1);
-    if (!strcmp(name, DECK_API)) return compile(ctx, name, DECK, sizeof DECK - 1);
+    int sdk = sdk_module(name);
+    if (sdk >= 0) return compile(ctx, name, MODULES[sdk].src, MODULES[sdk].len);
     JSValue text = JS_GetPropertyStr(ctx, SOURCES, name);
     if (!JS_IsString(text)) {
         JS_FreeValue(ctx, text);

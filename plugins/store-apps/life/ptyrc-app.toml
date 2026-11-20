@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "life"
+version = "0.1.0"
+summary = "Conway's game of life in Braille, behind the text."
+license = "GPL-3.0-or-later"
+api = 1
+rust = "src/lib.rs"
+rustc = "1.88"
+surface = "frame"
+frame = "largest"
+random = [[], ["-a"]]
+
+[permissions]
+shape = "where the text is: nothing is drawn beside it, no cell lives on it (-w)"
+pointer = "the pointer clears the cells near it (--cursor)"
+
+[options]
+speed = { type = "float", default = 10.0, doc = "generations a second, more than 0" }
+colour = { type = "bool", short = "c", doc = "a glyph in the colour of its age" }
+trail = { type = "bool", short = "t", doc = "the cells that died fade out" }
+guests = { type = "bool", short = "g", doc = "patterns dropped in, where the world is empty first" }
+rate = { type = "float", default = 3.0, min = 0.0, doc = "with -g: patterns a second into an empty world, 4 times fewer into a crowded one; 0: only when it is still" }
+kinds = { type = "string", list = true, choices = ["ship", "seed", "oscillator", "puffer", "gun", "still", "filler", "all"], doc = "with -g: the kinds dropped, again for each; none: all" }
+particles = { type = "bool", short = "p", doc = "particles where cells die together and where a pattern lands" }
+walls = { type = "bool", short = "w", doc = "no cell lives under the text" }
+cursor = { type = "bool", needs = ["pointer"], doc = "the pointer of the host, over the pane, clears the cells near it" }
+all = { type = "bool", short = "a", needs = ["pointer"], doc = "-c -t -g -p -w --cursor" }

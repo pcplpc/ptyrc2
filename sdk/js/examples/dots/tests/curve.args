@@ -1,0 +1,2 @@
+# a curve off the text
+--size 30x6 --screen tests/hello.screen --for 1s --at 1s

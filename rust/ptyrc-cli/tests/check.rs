@@ -71,6 +71,7 @@ fn the_keys_of_the_manifest() {
     );
     assert_eq!(status, Some(0), "{text}");
     for said in [
+        "; the install refuses it: TODO in [app] summary, [permissions] shape; asks shape\n",
         "note: [app] summary: starts with TODO",
         "note: [permissions] shape: starts with TODO",
     ] {

@@ -8,7 +8,7 @@ use crate::assets::{base64_decode, read_answer, valid_component};
 use crate::core::CallError;
 use ptyrc_core::zone::{self, Missing, Zone};
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -261,6 +261,8 @@ pub struct HostFns {
     pub zone: Option<Zone>,
     pub zones: Zones,
     pub storage: BTreeMap<String, String>,
+    /// The keys the app set or removed.
+    pub storage_written: BTreeSet<String>,
     /// `(value, status)` of the last `app.result`.
     pub result: Option<(Value, u8)>,
     /// The handles: `f0`, `f1`, ... in order.
@@ -535,12 +537,15 @@ impl HostFns {
                         ),
                     ));
                 }
+                self.storage_written.insert(key.clone());
                 self.storage.insert(key, value.to_owned());
                 Ok(quota(after))
             }
             "storage.remove" => {
                 let key = key_of(method, params)?;
-                self.storage.remove(&key);
+                if self.storage.remove(&key).is_some() {
+                    self.storage_written.insert(key);
+                }
                 Ok(json!({}))
             }
             _ => {

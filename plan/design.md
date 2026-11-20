@@ -2252,6 +2252,10 @@ Host functions (`driver/hostfn.rs`; the contract:
   `--json`: JSON), control characters escaped as `\u{..}`, to a
   terminal glyphs only; exits with its status, the runner's own
   failure first; no result: 1, nothing printed.
+  `ptyrc app ID` waits first for the end of `init` (the runner's log
+  line `ptyrc-box: init done`; 60 s at most): an app that exited in
+  it, its last five log lines on stderr, the command's status its
+  own. `--no-wait`: neither wait (400 ms alone, `START_WAIT`).
 
 Frame info: `{"id","kind":"raw"|"pane"|"chrome","state":"candidate"|
 "stable"|"inactive","usable","rect":[x,y,w,h],"origin":[x,y],

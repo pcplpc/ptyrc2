@@ -69,7 +69,16 @@ fn read_args(m: &Manifest, given: &[String]) -> Result<(options::Launch, Resolve
         false => {
             let each = (m.options.iter()).map(|o| {
                 let range = o.range().map(|r| format!(", {r}")).unwrap_or_default();
-                format!("--{} ({}{range}): {}", o.name, o.type_name(), o.doc)
+                let choices = match o.choices.is_empty() {
+                    true => String::new(),
+                    false => format!(", one of {}", o.choices.join(", ")),
+                };
+                format!(
+                    "{} ({}{range}{choices}): {}",
+                    o.flag(),
+                    o.type_name(),
+                    o.doc
+                )
             });
             format!("[options]: {}", each.collect::<Vec<_>>().join("; "))
         }
@@ -146,9 +155,31 @@ fn file_words(m: &Manifest, files: &[String], words: &mut Vec<String>) -> Result
 
 /// The flags of `dev test` that take a value or stand alone.
 pub const TEST_FLAGS: &[&str] = &[
-    "size", "for", "at", "seed", "tape", "screen", "styles", "timing", "unit", "arg", "deny",
-    "event", "key", "clock", "zone", "storage", "file", "probe", "pointer", "click", "focus",
-    "paste", "resize", "json",
+    "size",
+    "for",
+    "at",
+    "seed",
+    "tape",
+    "screen",
+    "styles",
+    "timing",
+    "unit",
+    "arg",
+    "deny",
+    "event",
+    "key",
+    "clock",
+    "zone",
+    "storage",
+    "storage-out",
+    "file",
+    "probe",
+    "pointer",
+    "click",
+    "focus",
+    "paste",
+    "resize",
+    "json",
 ];
 
 /// The options of the app named as a flag of `dev test`: given before
@@ -284,6 +315,8 @@ pub struct TestOpts {
     pub files: Vec<String>,
     /// `ptyrc-box --headless` flags, as given.
     pub flags: Vec<OsString>,
+    /// `--storage-out DIR`.
+    pub storage_out: Option<PathBuf>,
 }
 
 /// The flags of `ptyrc-box` that hold the app to what its manifest
@@ -436,6 +469,15 @@ pub fn test(o: TestOpts) -> Result<ExitCode, Fail> {
     let grants = grants(&m, &o.deny, &launch, &resolved)?;
     let args = Value::Object(resolved.init.clone());
     let program = runner()?;
+    // The runner writes a file opened before its profile; the directory
+    // is written here.
+    let out_file = o.storage_out.as_ref().map(|_| {
+        std::env::temp_dir().join(format!("ptyrc-storage-out-{}.json", std::process::id()))
+    });
+    let mut out_flags: Vec<OsString> = Vec::new();
+    if let Some(f) = &out_file {
+        out_flags.extend(["--storage-out".into(), f.into()]);
+    }
     let status = Command::new(&program)
         .arg("--headless")
         .arg("--manifest")
@@ -445,10 +487,60 @@ pub fn test(o: TestOpts) -> Result<ExitCode, Fail> {
         .arg(args.to_string())
         .args(&o.flags)
         .args(grants)
+        .args(out_flags)
         .stdin(Stdio::null())
         .status()
-        .map_err(|e| Fail::from(format!("{}: {}", program.display(), io_text(&e))))?;
-    Ok(status_of(status))
+        .map_err(|e| Fail::from(format!("{}: {}", program.display(), io_text(&e))));
+    if let (Some(dir), Some(file)) = (&o.storage_out, &out_file) {
+        let text = std::fs::read_to_string(file);
+        let _ = std::fs::remove_file(file);
+        if status.is_ok() {
+            let text = text.unwrap_or_default();
+            match serde_json::from_str::<BTreeMap<String, String>>(&text) {
+                Ok(storage) => storage_into(dir, &storage)?,
+                Err(_) => eprintln!(
+                    "ptyrc: --storage-out {}: the runner gave no storage; not written",
+                    dir.display()
+                ),
+            }
+        }
+    }
+    Ok(status_of(status?))
+}
+
+/// A key as `--storage` reads it: a file name of `[A-Za-z0-9._-]`, not
+/// `.` nor `..`.
+fn is_key(k: &str) -> bool {
+    !k.is_empty()
+        && k != "."
+        && k != ".."
+        && (k.bytes()).all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+}
+
+/// `--storage-out DIR`: a file a key; a file of DIR named as a key and
+/// not in `storage` removed: DIR holds the storage, no more.
+fn storage_into(dir: &Path, storage: &BTreeMap<String, String>) -> Result<(), Fail> {
+    let fail = |p: &Path, e: std::io::Error| {
+        Fail::from(format!("--storage-out {}: {}", p.display(), io_text(&e)))
+    };
+    std::fs::create_dir_all(dir).map_err(|e| fail(dir, e))?;
+    for e in std::fs::read_dir(dir).map_err(|e| fail(dir, e))?.flatten() {
+        let name = e.file_name();
+        let Some(k) = name.to_str() else { continue };
+        if is_key(k) && !storage.contains_key(k) && e.file_type().is_ok_and(|t| t.is_file()) {
+            std::fs::remove_file(e.path()).map_err(|x| fail(&e.path(), x))?;
+        }
+    }
+    for (k, v) in storage.iter().filter(|(k, _)| is_key(k)) {
+        let p = dir.join(k);
+        std::fs::write(&p, v).map_err(|e| fail(&p, e))?;
+    }
+    eprintln!(
+        "ptyrc: storage: {} keys written to {}",
+        storage.len(),
+        dir.display()
+    );
+    Ok(())
 }
 
 /// `dev test --unit FILE`: the unit tests of a script app, under the
@@ -625,5 +717,25 @@ pub fn run(common: &Common, dir: &Path, given: &[String]) -> Result<ExitCode, Fa
             // The connection closes: the driver removes what it drew.
             stop(&mut c);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_list_names_a_bool_on_by_default_by_its_no_flag() {
+        let m = super::manifest::parse(
+            "[app]\nid = \"a\"\nversion = \"0.1.0\"\nsummary = \"A.\"\n\
+             license = \"GPL-3.0-or-later\"\napi = 1\nscript = \"app.js\"\n\
+             [options]\nseconds = { type = \"bool\", default = true, doc = \"with seconds\" }\n",
+        )
+        .unwrap();
+        let Err(e) = super::read_args(&m, &["--help".to_string()]) else {
+            panic!("--help")
+        };
+        let hint = e.hint.unwrap_or_default();
+        assert!(hint.contains("--no-seconds (bool): with seconds"), "{hint}");
+        let (launch, _) = super::read_args(&m, &["--no-seconds".to_string()]).unwrap();
+        assert_eq!(launch.args["seconds"], false);
     }
 }

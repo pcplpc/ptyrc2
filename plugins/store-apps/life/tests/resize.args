@@ -1,0 +1,3 @@
+# test_life_resize_and_room: the view narrows at 1 s: the world is cut,
+# the text read again.
+--size 40x8 --for 2s --at 900ms,1s,2s --seed 4 --speed 30 --screen tests/words.screen --resize 1s:30x6

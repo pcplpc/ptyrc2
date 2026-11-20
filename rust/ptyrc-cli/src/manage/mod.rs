@@ -293,14 +293,9 @@ pub fn start(client: &mut Client, argv: &[String], name: &str) -> Result<Value, 
 
 /// `start`, with the params of `app.start` made.
 pub fn start_with(client: &mut Client, params: Value) -> Result<Value, Fail> {
-    let started = client.call("app.start", params)?;
-    // A store app granted without asking (no screen): each named.
-    for w in started["warnings"].as_array().into_iter().flatten() {
-        eprintln!("ptyrc: warning: {}", w.as_str().unwrap_or_default());
-    }
-    let id = started["app"]["id"].as_u64().unwrap_or(0);
+    let mut info = start_call(client, params)?;
+    let id = info["id"].as_u64().unwrap_or(0);
     let deadline = Instant::now() + START_WAIT;
-    let mut info = started["app"].clone();
     loop {
         if let Some(now) = find(&list(client)?, id) {
             info = now.clone();
@@ -313,6 +308,16 @@ pub fn start_with(client: &mut Client, params: Value) -> Result<Value, Fail> {
         }
         std::thread::sleep(LOOK_EVERY);
     }
+}
+
+/// `app.start`, its warnings on stderr: the info of the app.
+pub fn start_call(client: &mut Client, params: Value) -> Result<Value, Fail> {
+    let mut started = client.call("app.start", params)?;
+    // A store app granted without asking (no screen): each named.
+    for w in started["warnings"].as_array().into_iter().flatten() {
+        eprintln!("ptyrc: warning: {}", w.as_str().unwrap_or_default());
+    }
+    Ok(started["app"].take())
 }
 
 /// What `argv` declares when it is `ptyrc-app NAME ARGS...`: what

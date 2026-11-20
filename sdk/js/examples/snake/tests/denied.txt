@@ -1,0 +1,12 @@
+--- 1000 ms
+
+
+
+
+
+
+      o
+  ●   o
+   @ooo
+refused at 0 ms: input.grab (denied)
+refused: keys-arrows, declared and answered no

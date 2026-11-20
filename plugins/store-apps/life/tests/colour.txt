@@ -1,0 +1,59 @@
+--- 500 ms
+⢀⡊  ⠱⡈⠄⢅ ⡀   ⠛⡘⠃⠂⠁⠇ ⣠⣦⡀    ⠉⠠⠤⠐  ⠈⣤⠿⢀⠸⣤⣧
+⠁⠁⢦⠂⢰⢉⠅⢬⡘⠁⣀⢀⠄⣇⣀⠓⢄⡀ ⠺⣇⣀⡿⠕⠭⠂  ⢀⣀ ⠴⠱⢶⡷⢹⠂⣫⠷
+words in the way ⠔  ⠈⠋⡀     ⠸⠉⢀⡀⠠⠎⠋⠊⣢⣤ ⣀
+⣧⡄⠣⠃⠸⡀⠐⡂ ⠉⠉⠛⠅⣖⡵⠐⠰  ⡀⣰⠚⢈⢦⡀   ⠛⠊⠐⠔⠉⠁⠉⠉⠈⠉⠫⡁
+⡼⡁ more words here ⡀⣥⡄⠘⢡⡅    ⢀⣠⠞⠦⠔⣲   ⢀⣠
+⢺⣐⠖⠁⣤⢱⡢⡌⠉ ⠠⢠⠚⠯⠄⡈⡄⠑⠊  ⠙⠛⠋     ⠣⣷⠏⠣⠔⢁⡀⡀⣤⣤⡄
+⠲⠡⠞⠃⠈⠉⠉⠁⠘⠃ ⠈⠁⠙⠇⠉ ⡤⡀⣀          ⣠⣤⠚⢔⢂⠖⠁⢳⠿⣈
+⢭⠃ ⢄  ⡔⢢ ⢔⡄  ⣀⢄⠐⢠⢘⠇⠴⠁      ⣤⣠⠁⣀⠰⠁⢠⡧⡀⡠⠶⠄⣁
+--- 500 ms, styles
+ab  cdad d   dddedc ddf    gdde  cdbdddb
+fdbedfdddfcdfdddfd dddddhi  cb ddddddgc
+                 d  fdb     cddjdddddd g
+bddfgdfd gdddddfe  dddddd   gefddbdddddd
+cd                 dddddd    fddddd   gg
+dadfbdfcb efddadaaf  cgb     fdbdddffbdd
+dfddgbgekh cfdbb fdi          ddcddddbcd
+dd g  ll kk  dfefdddd      gbdddfbdkddad
+a: fg=156
+b: fg=243
+c: fg=240
+d: fg=231
+e: fg=236
+f: fg=228
+g: fg=238
+h: fg=61
+i: fg=67
+j: fg=114
+k: fg=73
+l: fg=79
+--- 1500 ms
+    ⢹⠏⠱⡦⡀⠊⢀   ⢀⡤⠰⠇      ⢀   ⢈⢛⣽⠠⠋     ⠈
+ ⣀⡀⢎⣙⡆⢈⠡⠸⣚⣟⡱  ⠈⠈⠢⡍⢒    ⠐⠥⠃  ⠈⠓⠊   ⢠⣄
+words in the way ⢉⠁   ⣀⡀        ⠛ ⠫⠇
+⢩⣿⢧⠂⢠⠈⠉⢠  ⠠⠤    ⡔⢑⣄⢒ ⣀⠃⠁        ⢀⡀⢀
+⣀⠁ more words here   ⠉         ⣶⠑⠁⢠   ⣀⡀
+⠸⠓⡆⠒ ⢀⡀     ⠘⠗    ⡀          ⡀⡀⠉  ⠸⡷ ⠰⣹⠨
+⠂⠠⠃⠅ ⠐⠂  ⢀⣀      ⠈⠃        ⢀⡃⡀⠈⠰⡀  ⠛  ⠈⠑
+    ⢠⣤⡀ ⠾⡡⠜    ⢀⣤          ⠈⠠⠔⢼⣾⡀  ⠶  ⢠⡀
+--- 1500 ms, styles
+    aabacda   eafa      g   babfa     a
+ aaaabafaaaf  hfaaa    ggi  daa   dd
+                 ba   be        i aa
+hdaaaaaa  aa    aaaa aah        iee
+ah                   b         hjge   aa
+aaaa ee     bb    a          ceh  ab iaa
+aafe ac  ka      ba        fagaaa  d  aa
+    aab afa    da          hifaaf  k  ab
+a: fg=231
+b: fg=243
+c: fg=156
+d: fg=240
+e: fg=236
+f: fg=228
+g: fg=114
+h: fg=238
+i: fg=79
+j: fg=67
+k: fg=61

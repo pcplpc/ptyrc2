@@ -1,0 +1,2 @@
+# over the words: the screen at 0, 5 s and 10 s
+--size 40x10 --screen tests/words.screen --for 10s --at 0,5s,10s

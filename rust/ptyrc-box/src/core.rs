@@ -91,6 +91,8 @@ pub trait Host: Send + 'static {
     fn assets(&self) -> Option<&crate::assets::Assets> {
         None
     }
+    /// `period` was called (live: its instant is kept, `ticks::Ticks`).
+    fn period_asked(&mut self) {}
 }
 
 struct Canvas {
@@ -121,6 +123,8 @@ pub struct Core<H> {
     pub limits: Limits,
     canvases: Vec<Option<Canvas>>,
     period: u32,
+    /// `period` called since `take_asked`.
+    asked: bool,
     exit: Option<i32>,
     now_ms: u64,
     window: (u64, u32),
@@ -135,6 +139,7 @@ impl<H: Host> Core<H> {
             limits,
             canvases: Vec::new(),
             period: 0,
+            asked: false,
             exit: None,
             now_ms: 0,
             window: (0, 0),
@@ -151,6 +156,11 @@ impl<H: Host> Core<H> {
     /// The tick period wanted, ms; 0: events only.
     pub fn period(&self) -> u32 {
         self.period
+    }
+
+    /// `period` was called since the last call of this.
+    pub fn take_asked(&mut self) -> bool {
+        std::mem::take(&mut self.asked)
     }
 
     pub fn exit_code(&self) -> Option<i32> {
@@ -364,6 +374,8 @@ impl<H: Host> Core<H> {
 
     /// `period`.
     pub fn set_period(&mut self, ms: u32) {
+        self.host.period_asked();
+        self.asked = true;
         self.period = match ms {
             0 => 0,
             ms => ms.max(MIN_PERIOD_MS),

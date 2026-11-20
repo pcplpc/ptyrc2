@@ -1,0 +1,12 @@
+--- 1500 ms
+    ⢹⠏ ⡦⡀ ⢀    ⡤⠰⠇      ⢀    ⢛ ⠠⠋     ⠈
+ ⣀⡀⢎⣙ ⢈⠡⠸⣚⣟⡱   ⠈⠢⡍⢒    ⠐⠥⠃   ⠓⠊
+  ⡤⠄⠈    ⠈⠉       ⠁             ⠛ ⠫⠇
+  ⢧⠂⢠⠈⠉⢠  ⠠⠤    ⡔⢑⣄⢒ ⣀⠃         ⢀
+⣀  ⣀⠈⠠⠤⠈        ⠶⣐⠜             ⠑⠁    ⣀⡀
+⠸⠓⡆⠒              ⡀          ⡀    ⠸  ⠰⣹⠨
+⠂⠠⠃  ⠐⠂  ⢀⣀       ⠃        ⢀⡃⡀⠈⠰⡀     ⠈⠑
+    ⢠⣤  ⠾⡡⠜     ⣤           ⠠⠔⢼⣾⡀  ⠶  ⢠
+dropped at 500 ms: pointer 20,4: not held
+dropped at 1000 ms: pointer 21,4: not held
+lowered: pointer, declared and answered no

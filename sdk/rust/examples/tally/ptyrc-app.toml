@@ -6,6 +6,7 @@ summary = "Counts its runs in storage; the local date and time; the count as its
 license = "GPL-3.0-or-later"
 api = 1
 rust = "src/lib.rs"
+surface = "frame"
 rustc = "1.85"
 
 [permissions]

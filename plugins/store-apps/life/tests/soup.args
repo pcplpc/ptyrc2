@@ -1,0 +1,3 @@
+# test_life: a soup at --speed 30 behind two lines of text; nothing
+# drawn on the cell on each side of a glyph of the text.
+--size 40x8 --for 1500ms --at 500ms,1500ms --seed 4 --speed 30 --screen tests/words.screen

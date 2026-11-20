@@ -13,7 +13,8 @@
 //! socket, no signal out. Bounds: the time of both runs, the address
 //! space and the size of a file written by each, the module. The
 //! module imports from `ptyrc` only. One build at a time in a work
-//! directory: [`lock`] on `WORK.lock`, held through the build.
+//! directory: the caller's, by [`lock`] (`ptyrc dev`, a shipped app)
+//! or the store's lock (an install).
 
 pub mod scan;
 
@@ -226,7 +227,6 @@ pub fn build(
         ))
         .with_hint("rustup update"));
     }
-    let _held = lock(work)?;
     let start = Instant::now();
     fresh(work)?;
     let (app, lib, out, tmp) = (
@@ -398,8 +398,8 @@ const EDITION_2024: (u32, u32, u32) = (1, 85, 0);
 
 /// An exclusive lock on `PATH.lock` (made, its directory too), held
 /// until the file is dropped; waits for another holder, of this
-/// process or another. [`build`] takes it on its work directory; a
-/// step around a build takes it on another path.
+/// process or another. Around [`build`] and what uses its work
+/// directory; the file is left.
 pub fn lock(path: &Path) -> Result<std::fs::File> {
     let mut name = path.as_os_str().to_os_string();
     name.push(".lock");

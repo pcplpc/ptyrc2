@@ -1,0 +1,24 @@
+# test_life_cursor: the pointer moved over a soup, to and fro between
+# 20,4 and 21,4: no cell is left around it.
+--size 40x8 --for 1500ms --at 450ms,1500ms --seed 4 --speed 30 --cursor
+--pointer 500:20,4
+--pointer 550:21,4
+--pointer 600:20,4
+--pointer 650:21,4
+--pointer 700:20,4
+--pointer 750:21,4
+--pointer 800:20,4
+--pointer 850:21,4
+--pointer 900:20,4
+--pointer 950:21,4
+--pointer 1000:20,4
+--pointer 1050:21,4
+--pointer 1100:20,4
+--pointer 1150:21,4
+--pointer 1200:20,4
+--pointer 1250:21,4
+--pointer 1300:20,4
+--pointer 1350:21,4
+--pointer 1400:20,4
+--pointer 1450:21,4
+--pointer 1500:20,4

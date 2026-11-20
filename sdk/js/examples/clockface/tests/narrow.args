@@ -1,0 +1,2 @@
+# a narrow one: the driver picks the line
+--size 20x6 --for 1s --at 1s

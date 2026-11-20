@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "dots"
+version = "0.1.0"
+summary = "A curve in Braille over the frame, kept a cell from the text."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "frame"
+
+[permissions]
+shape = "no dot within a cell of the text; without it, dots everywhere"
+
+[options]
+full = { type = "bool", default = false, doc = "every dot on, each tick: the cost of a frame-sized Braille" }

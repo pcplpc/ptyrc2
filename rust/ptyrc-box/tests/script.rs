@@ -220,7 +220,7 @@ fn errors_name_the_place_and_the_cure() {
             "import fs from 'fs';\nexport function init() {}",
             &[
                 "import \"fs\": no such module",
-                "hint: \"ptyrc\", \"ptyrc/deck\", or a file",
+                "hint: \"ptyrc\", \"ptyrc/deck\", \"ptyrc/canvas\", \"ptyrc/sight\", or a file",
             ],
         ),
         (
@@ -917,7 +917,10 @@ fn host_functions_from_memory() {
     assert_eq!(r.written.len(), 1);
     let text = r.to_string();
     assert!(text.contains("result: r (status 3)"), "{text}");
-    assert!(text.contains("storage: k = \"v1\"\nstorage: seed = "), "{text}");
+    assert!(
+        text.contains("storage: k = \"v1\"\nstorage: seed = \"s0\" (given, not written)\n"),
+        "{text}"
+    );
     assert!(text.contains("files: save written, 4 bytes"), "{text}");
     let j = r.to_json();
     assert_eq!(j["files"][0]["text"], "done");
@@ -933,6 +936,12 @@ fn host_functions_from_memory() {
         r.screens[0].1[0], "0 denied denied todo denied asset bad-params ok {}",
         "{r}"
     );
+    assert_eq!(
+        r.storage_lines(),
+        ["storage: not held: the storage given (--storage, 1 key) not used"]
+    );
+    assert!(!r.to_string().contains("s0"), "{r}");
+    assert_eq!(r.to_json()["storage_held"], false);
 }
 
 /// The scene steps on its own clock, as the driver's: the screen at T

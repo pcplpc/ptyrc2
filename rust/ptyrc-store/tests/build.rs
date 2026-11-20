@@ -289,8 +289,8 @@ fn probe_no_rustc() {
     assert!(e.hint.unwrap().contains("https://rustup.rs"));
 }
 
-/// Two builds at once in one work directory: one after the other, the
-/// same module (`build::lock`).
+/// Two builds at once in one work directory, each under `build::lock`:
+/// one after the other, the same module.
 #[test]
 fn two_builds_at_once_in_one_work_directory() {
     let Some(t) = toolchain() else { return };
@@ -299,7 +299,12 @@ fn two_builds_at_once_in_one_work_directory() {
     let work = common::tmp("twice").join("work");
     let built: Vec<_> = std::thread::scope(|s| {
         let all: Vec<_> = (0..3)
-            .map(|_| s.spawn(|| build::build(&tree, &checked, &work, &t, &Options::default())))
+            .map(|_| {
+                s.spawn(|| {
+                    let _held = build::lock(&work).unwrap();
+                    build::build(&tree, &checked, &work, &t, &Options::default())
+                })
+            })
             .collect();
         all.into_iter()
             .map(|r| r.join().unwrap().unwrap())

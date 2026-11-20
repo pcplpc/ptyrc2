@@ -68,6 +68,11 @@ impl<H: Host> Runner<H> {
         self.guest.core().period()
     }
 
+    /// `period` was called since the last call of this (`ticks::Ticks`).
+    pub fn take_asked(&mut self) -> bool {
+        self.guest.core_mut().take_asked()
+    }
+
     /// Three late calls in a row: no `tick`, no `event` until `resume`.
     pub fn paused(&self) -> bool {
         self.paused

@@ -45,7 +45,8 @@ pub enum Dev {
     /// [args] todo = { type = "file", min = 1, max = 1, ... }: --file
     /// ARG#0=todo.md. Also, as ptyrc-box takes them: --clock ISO,
     /// --zone NAME, --storage DIR (a file a key: its name the key, its
-    /// content the value; read once, never written back), --probe
+    /// content the value; read once; --storage-out writes the end),
+    /// --probe
     /// git=FILE.json (written by `ptyrc dev probe git`), --pointer T:X,Y, --click T:X,Y, --press T:X,Y,
     /// --release T:X,Y, --focus T:TAG, --paste T:TEXT, --resize T:CxR.
     /// A flag of dev test is its own before `--`; an app's option of the
@@ -84,6 +85,11 @@ pub enum Dev {
         /// `ticks`, `tick_ms`
         #[arg(long)]
         timing: bool,
+        /// The storage at the end into DIR, as --storage reads it (a file
+        /// a key); DIR then holds that and no other key. A second run:
+        /// --storage DIR. May be the DIR of --storage
+        #[arg(long, value_name = "DIR")]
+        storage_out: Option<PathBuf>,
         /// The unit tests of a script: the exports `test_*` of FILE, a
         /// script of the app [default: tests.js]; no screen, no session.
         /// Status 1 when one fails
@@ -92,7 +98,9 @@ pub enum Dev {
         /// The cases of the tree: each tests/CASE.args, the words after
         /// `ptyrc dev test .` (white space, `#` comments, run in the
         /// tree), its report against tests/CASE.txt; those NAMEd alone.
-        /// A line a case, a diff for a failure; status 1 when one fails
+        /// A line a case, a diff for a failure; status 1 when one fails.
+        /// The cases run at once, a Rust app built once before. The
+        /// canonical runner: the harness and a tree's test.sh call it
         #[arg(long, value_name = "NAME", num_args = 0.., conflicts_with = "unit")]
         cases: Option<Vec<String>>,
         /// With --cases: write each CASE.txt from the run. Read the diff
@@ -188,6 +196,7 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
             screen,
             styles,
             timing,
+            mut storage_out,
             mut args,
             mut deny,
             events,
@@ -211,6 +220,7 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
                     || !screen.is_empty()
                     || styles
                     || timing
+                    || storage_out.is_some()
                     || !args.is_empty()
                     || !deny.is_empty()
                     || !events.is_empty()
@@ -261,6 +271,14 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
                     "--styles" if inline.is_none() => flags.push("--styles".into()),
                     "--timing" if inline.is_none() => flags.push("--timing".into()),
                     "--arg" => args.push(value()),
+                    "--storage-out" => {
+                        if storage_out.replace(value().into()).is_some() {
+                            return Err(Fail::usage(
+                                "--storage-out: given twice",
+                                "--storage-out once; the app's own after `--`",
+                            ));
+                        }
+                    }
                     "--deny" => deny.push(value()),
                     "--file" => files.push(value()),
                     "--size" | "--for" | "--at" | "--seed" | "--tape" | "--screen" | "--event"
@@ -329,6 +347,7 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
                 deny,
                 files,
                 flags,
+                storage_out,
             })
         }
         Dev::Run { dir, args } => {
@@ -404,7 +423,8 @@ fn check(dir: &Path) -> Result<ExitCode, Fail> {
             // `[app] random`: each draw read as `ptyrc app` reads it. The
             // bare draw (`random` absent: `[[]]`) that does not read is
             // never drawn (the menu skips it): a note.
-            let mut notes: Vec<String> = (ptyrc_store::manifest::todos(&ok.manifest).iter())
+            let todos = ptyrc_store::manifest::todos(&ok.manifest);
+            let mut notes: Vec<String> = (todos.iter())
                 .map(|t| format!("{t}: starts with TODO; the install refuses it"))
                 .collect();
             let bare = ok.manifest.app.random == [Vec::<String>::new()];
@@ -450,8 +470,13 @@ fn check(dir: &Path) -> Result<ExitCode, Fail> {
                     true => "asks no permission".to_string(),
                     false => format!("asks {}", asks.join(", ")),
                 };
+                // A note, status 0; the install refuses it: said here.
+                let todo = match todos.is_empty() {
+                    true => String::new(),
+                    false => format!("; the install refuses it: TODO in {}", todos.join(", ")),
+                };
                 println!(
-                    "ok: {} {}: {} files, {} bytes; {asks}",
+                    "ok: {} {}: {} files, {} bytes{todo}; {asks}",
                     a.id,
                     a.version,
                     ok.files.len(),

@@ -1,0 +1,2 @@
+# storage and the clock denied
+--size 50x2 --for 1s --at 1s --deny storage,clock

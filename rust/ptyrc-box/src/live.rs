@@ -4,6 +4,7 @@
 use crate::core::{CallError, Host, Limits};
 use crate::error::Error;
 use crate::runner::Runner;
+use crate::ticks::Ticks;
 use ptyrc_proto::{Client, ClientError};
 use serde_json::Value;
 use std::fs::File;
@@ -15,6 +16,9 @@ use std::time::{Duration, Instant};
 /// How often the signals are looked at with no tick due.
 const IDLE: Duration = Duration::from_millis(200);
 
+/// The line logged once `init` returned: `ptyrc app` waits for it.
+pub const STARTED: &str = "ptyrc-box: init done";
+
 /// The host of a live run. The connection has presented the token
 /// already (`Client::connect`).
 pub struct Live {
@@ -25,6 +29,8 @@ pub struct Live {
     /// `--seed N`: `random` as a headless run of that seed draws it.
     seeded: Option<u64>,
     gone: Option<String>,
+    /// The instant of the last `period` call.
+    asked: Option<Instant>,
     /// The app's assets, read before the profile.
     pub assets: Option<crate::assets::Assets>,
 }
@@ -44,6 +50,7 @@ impl Live {
             urandom: File::open("/dev/urandom").ok(),
             seeded: None,
             gone: None,
+            asked: None,
             assets: None,
         }
     }
@@ -81,6 +88,10 @@ impl Host for Live {
 
     fn size(&self) -> (u32, u32) {
         self.size
+    }
+
+    fn period_asked(&mut self) {
+        self.asked = Some(Instant::now());
     }
 
     fn log(&mut self, text: &str) {
@@ -135,16 +146,25 @@ pub fn run_confined(
     let mut runner = Runner::load(wasm, host, limits)?;
     confine()?;
     let start = Instant::now();
-    let now = || (start.elapsed().as_secs_f64() * 1000.0 * rate) as u64;
+    let ms = |at: Instant| at.saturating_duration_since(start).as_secs_f64() * 1000.0 * rate;
+    let now = || ms(Instant::now()) as u64;
+    // When the period was asked in the step, rounded up: a tick never
+    // before it.
+    let asked = |runner: &mut Runner<Live>| {
+        runner.take_asked();
+        (runner.host_mut().asked.take()).map(|at| ms(at).ceil() as u64)
+    };
     let exit = |done: Result<(), Error>| match done {
         Err(Error::Exit(code)) => Ok(Some(code)),
         Err(e) => Err(e),
         Ok(()) => Ok(None),
     };
-    if let Some(code) = exit(runner.init(args, now()))? {
+    let at = now();
+    if let Some(code) = exit(runner.init(args, at))? {
         return Ok(code);
     }
-    let mut next_tick: Option<u64> = None;
+    runner.host_mut().log(STARTED);
+    let mut ticks = Ticks::new(runner.period(), asked(&mut runner).unwrap_or(at));
     let mut told = false;
     loop {
         if term.load(Ordering::Relaxed) {
@@ -159,13 +179,7 @@ pub fn run_confined(
                 .host_mut()
                 .log("paused: three late in a row; no tick, no event");
         }
-        let period = u64::from(runner.period());
-        next_tick = match (period, next_tick) {
-            (0, _) => None,
-            (p, None) => Some(now() + p),
-            (_, some) => some,
-        };
-        let wait = match next_tick {
+        let wait = match ticks.next() {
             Some(t) => {
                 Duration::from_secs_f64(t.saturating_sub(now()) as f64 / 1000.0 / rate).min(IDLE)
             }
@@ -181,19 +195,20 @@ pub fn run_confined(
             {
                 runner.host_mut().size = size;
             }
-            if let Some(code) = exit(runner.event(&e.event, &e.data, now()))? {
+            let at = now();
+            if let Some(code) = exit(runner.event(&e.event, &e.data, at))? {
                 return Ok(code);
             }
+            let asked = asked(&mut runner);
+            ticks.step(runner.period(), at, asked, false);
         }
-        if let Some(t) = next_tick
-            && now() >= t
-        {
-            let at = now();
+        let at = now();
+        if ticks.due(at) {
             if let Some(code) = exit(runner.tick(at))? {
                 return Ok(code);
             }
-            // A tick missed is not made up for.
-            next_tick = Some((t + period).max(at));
+            let asked = asked(&mut runner);
+            ticks.step(runner.period(), at, asked, true);
         }
     }
 }

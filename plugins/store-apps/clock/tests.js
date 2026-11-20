@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The unit tests of clock, `ptyrc dev test --unit`: the faces of a time
 // of their own (test_clock.py), the wall clock on a host of its own;
-// those of braille.js and digits.js.
+// digits.js's: `_shared/js/digits.tests.js`; Braille: the SDK's.
 
 import { assert, assertEqual, assertThrows, cells, civil } from "ptyrc";
 import { DIM, HOURS, MINUTES, SECONDS, Wall, face, ladder, options, week } from "./app.js";
 import { LARGE, SMALL, decode } from "./digits.js";
 
-export { test_braille } from "./braille.tests.js";
-export { test_blocks, test_fonts, test_layout } from "./digits.tests.js";
 
 /** `civil` of a UTC date. */
 const at = (y, mo, d, h = 0, mi = 0, s = 0) => civil(Date.UTC(y, mo - 1, d, h, mi, s), 0);

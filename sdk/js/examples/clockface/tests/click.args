@@ -1,0 +1,2 @@
+# a left click pauses at 2.5 s; a click on the border is none
+--size 40x8 --for 4s --at 3s,4s --click 2500:21,3 --click 3500:20,3

@@ -1,0 +1,2 @@
+# the text changed: read again
+--size 30x6 --screen tests/hello.screen --screen 1500:tests/later.screen --for 2s --at 1s,2s

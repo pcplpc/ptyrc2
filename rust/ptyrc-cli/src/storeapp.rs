@@ -13,6 +13,7 @@ use ptyrc_store::{Launch, Manifest, OptionValue};
 use serde_json::Value;
 use std::io::IsTerminal;
 use std::process::ExitCode;
+use std::time::{Duration, Instant};
 
 const MANIFEST: &str = "ptyrc-app.toml";
 
@@ -148,8 +149,11 @@ pub fn start_params(app: &StoreApp, words: &[String]) -> Result<Option<Value>, F
 
 /// `ptyrc app ID|ORIGIN [--wait|--no-wait] [OPTION...]`: the driver
 /// starts it; the pop-up first, when it asks for something not answered
-/// yet. Waiting (`[app] wait = true`: by default): until it exits, its
-/// result printed, the command's status that of the result.
+/// yet. Then until `init` ended (`INIT_WAIT` at most): an app that
+/// exited in it, its last log lines on stderr, the command's status its
+/// own. Waiting (`[app] wait = true`, `--wait`): until it exits, its
+/// result printed, the command's status that of the result. `--no-wait`:
+/// neither, `START_WAIT` alone (`manage::start_with`).
 pub fn run(common: &Common, app: &StoreApp, words: &[String]) -> Result<ExitCode, Fail> {
     let Some(launch) = parse_options(app, words)? else {
         print!("{}", usage(app));
@@ -159,8 +163,34 @@ pub fn run(common: &Common, app: &StoreApp, words: &[String]) -> Result<ExitCode
     prepare(app)?;
     let params = launch.params(&app.installed.origin);
     let mut client = crate::connect(common)?;
-    let info = crate::manage::start_with(&mut client, params)?;
+    if launch.launcher.wait == Some(false) {
+        let info = crate::manage::start_with(&mut client, params)?;
+        crate::manage::report(common, &[info]);
+        return Ok(ExitCode::SUCCESS);
+    }
+    let info = crate::manage::start_call(&mut client, params)?;
+    let (info, started) = until_started(&mut client, info)?;
+    // Its own status: not 0, not a signal (128 + N: stopped).
+    let own = info["status"].as_u64().filter(|s| (1..128).contains(s));
+    if let Some(status) = own.filter(|_| !started && info["state"] == "exited") {
+        eprintln!(
+            "ptyrc: app {} ({}) ended in init, status {status}",
+            info["id"],
+            crate::manage::label(&info)
+        );
+        for line in last_lines(&info, LAST_LINES) {
+            eprintln!("  {line}");
+        }
+        return Ok(ExitCode::from(status.min(255) as u8));
+    }
     if !wait {
+        if !started && info["state"] != "exited" {
+            eprintln!(
+                "ptyrc: app {}: init not ended after {} s",
+                info["id"],
+                INIT_WAIT.as_secs()
+            );
+        }
         crate::manage::report(common, &[info]);
         return Ok(ExitCode::SUCCESS);
     }
@@ -186,6 +216,57 @@ pub fn run(common: &Common, app: &StoreApp, words: &[String]) -> Result<ExitCode
         (Some(status), _) => status,
     };
     Ok(ExitCode::from(status.min(255) as u8))
+}
+
+/// How long `ptyrc app` waits for the end of `init`: the interpreter
+/// compiled (some 20 s in a debug build, more under load), then `init`
+/// (2 s at most). Only a bound: the wait ends with `init`.
+pub const INIT_WAIT: Duration = Duration::from_secs(60);
+
+/// The line the runner logs once `init` returned
+/// (`ptyrc_box::live::STARTED`).
+const STARTED: &str = "ptyrc-box: init done";
+
+/// The log lines shown of an app that ended in `init`.
+const LAST_LINES: usize = 5;
+
+/// The info of the app `info` once `init` ended or the app exited,
+/// `INIT_WAIT` at most; `true`: `init` ended.
+fn until_started(client: &mut ptyrc_proto::Client, mut info: Value) -> Result<(Value, bool), Fail> {
+    let id = info["id"].as_u64().unwrap_or(0);
+    let deadline = Instant::now() + INIT_WAIT;
+    loop {
+        if let Some(now) = crate::manage::find(&crate::manage::list(client)?, id) {
+            info = now.clone();
+        }
+        let log = log_text(&info);
+        if log.lines().any(|l| l == STARTED) {
+            return Ok((info, true));
+        }
+        if info["state"] == "exited" || Instant::now() >= deadline {
+            return Ok((info, false));
+        }
+        std::thread::sleep(crate::manage::LOOK_EVERY);
+    }
+}
+
+fn log_text(info: &Value) -> String {
+    info["log"]
+        .as_str()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .unwrap_or_default()
+}
+
+/// The last `n` lines of the app's log, the OS profile's (`ptyrc-box:
+/// profile`) and the warnings printed already left out; glyphs only.
+fn last_lines(info: &Value, n: usize) -> Vec<String> {
+    let log = log_text(info);
+    let lines: Vec<String> = (log.lines())
+        .filter(|l| !l.trim().is_empty())
+        .filter(|l| !l.starts_with("ptyrc-box: profile") && !l.starts_with("ptyrc: warning: "))
+        .map(|l| ptyrc_vt::glyphs_only(l).trim_end().to_string())
+        .collect();
+    lines[lines.len().saturating_sub(n)..].to_vec()
 }
 
 /// A result as printed: a string as it is, a list a line each, else
@@ -261,11 +342,11 @@ fn catalog_rows(app: &StoreApp) -> Vec<Opt> {
     let m = &app.manifest;
     let mut options: Vec<Opt> = (m.options.iter())
         .map(|o| Opt {
-            flags: o
-                .short
+            // On by default: `--no-NAME` alone.
+            flags: (o.short.filter(|_| !o.on_by_default()))
                 .map(|c| format!("-{c}"))
                 .into_iter()
-                .chain([format!("--{}", o.name)])
+                .chain([o.flag()])
                 .collect(),
             kind: match (o.ty, o.choices.is_empty()) {
                 (OptionType::Bool, _) => Kind::Flag,
@@ -405,6 +486,20 @@ mod tests {
         let mut largest = app;
         largest.manifest.app.frame = Some("largest".into());
         assert_eq!(frame(&catalog_rows(&largest)).as_deref(), Some("largest"));
+    }
+
+    #[test]
+    fn a_bool_on_by_default_is_a_no_flag() {
+        let mut app = app();
+        let loud = app.manifest.options.iter_mut().find(|o| o.name == "loud");
+        let loud = loud.unwrap();
+        (loud.default, loud.short) = (Some(OptionValue::Bool(true)), Some('l'));
+        let rows = catalog_rows(&app);
+        let row = rows.iter().find(|o| o.help == "noise").unwrap();
+        assert_eq!(row.flags, ["--no-loud"]);
+        let parsed = parse_options(&app, &words("--no-loud")).unwrap().unwrap();
+        assert_eq!(Value::Object(parsed.args), json!({"loud": false}));
+        assert!(usage(&app).contains("--no-loud"));
     }
 
     #[test]

@@ -131,6 +131,59 @@ fn cases_run_bless_and_differ() {
     assert_eq!(out.status.code(), Some(2), "{}", said(&out));
 }
 
+/// A case may end with a status other than 0 when its `.txt` says so:
+/// `ended: exit: N`.
+#[test]
+fn a_case_ends_with_the_status_it_says() {
+    if !has_js() {
+        return;
+    }
+    build_runner();
+    let dir = tree("exit", "frame");
+    let js = r#"
+import { exit, log } from "ptyrc";
+export function init(args) {
+  if (args.word === "bad") { log("bad word"); exit(2); }
+}
+"#;
+    std::fs::write(dir.join("app.js"), js).unwrap();
+    let tests = dir.join("tests");
+    std::fs::write(
+        tests.join("bad.args"),
+        "--for 100 -- --word bad
+",
+    )
+    .unwrap();
+    std::fs::write(
+        tests.join("good.args"),
+        "--for 100
+",
+    )
+    .unwrap();
+    let out = ptyrc(&dir, &["dev", "test", "--cases", "--bless"]);
+    assert!(out.status.success(), "{}", said(&out));
+    let bad = std::fs::read_to_string(tests.join("bad.txt")).unwrap();
+    assert!(bad.lines().any(|l| l == "ended: exit: 2"), "{bad}");
+    let out = ptyrc(&dir, &["dev", "test", "--cases"]);
+    assert_eq!(
+        text(&out),
+        "ok   tests/bad\nok   tests/good\n",
+        "{}",
+        said(&out)
+    );
+    // The good report for the bad run: a status 2 not said, a failure.
+    let good = std::fs::read_to_string(tests.join("good.txt")).unwrap();
+    std::fs::write(tests.join("bad.txt"), &good).unwrap();
+    std::fs::write(tests.join("good.txt"), &bad).unwrap();
+    let out = ptyrc(&dir, &["dev", "test", "--cases"]);
+    assert_eq!(out.status.code(), Some(1), "{}", said(&out));
+    let got = text(&out);
+    assert!(
+        got.contains("FAIL tests/bad") && got.contains("FAIL tests/good"),
+        "{got}"
+    );
+}
+
 /// `surface = "widget"`: a bare sprite shown nowhere, said; its widget
 /// shown.
 #[test]

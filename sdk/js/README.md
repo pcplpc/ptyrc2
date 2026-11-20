@@ -7,8 +7,9 @@ JavaScript interpreter that is itself a guest of ABI 1
 | | |
 |---|---|
 | `ptyrc.d.ts` | the API, typed: the whole of it. An app is written from this file |
-| `interp/` | the interpreter guest (`ptyrc-js.wasm`): QuickJS-ng and `ptyrc.c` (the natives, the loader), the modules `"ptyrc"` (`prelude.js`) and `"ptyrc/deck"` (`deck.js`), `build.sh`, `NOTICES` |
-| `examples/clockface/` | a deck of widgets: two sizes, a canvas, a key of its widget, unit tests; the model of a deck app |
+| `interp/` | the interpreter guest (`ptyrc-js.wasm`): QuickJS-ng and `ptyrc.c` (the natives, the loader), the modules `"ptyrc"` (`prelude.js`), `"ptyrc/deck"` (`deck.js`), `"ptyrc/canvas"` (`canvas.js`), `"ptyrc/sight"` (`sight.js`), `build.sh`, `NOTICES` |
+| `examples/clockface/` | a deck of widgets: two sizes, a canvas, a key and a click of its widget, unit tests (the deck on a host of its own); the model of a deck app |
+| `examples/dots/` | a curve in Braille over the frame, kept a cell from the text by a `Sight`, `shape` denied; the unit tests of `"ptyrc/canvas"` and `"ptyrc/sight"` |
 | `examples/confetti/` | paper falling behind the text, `rate` 1 to 200 by the manifest; no test of its own (`rust/ptyrc-cli/tests/storeapp.rs`) |
 | `examples/sand/` | one effect of the driver started, no permission; the twin of `sdk/rust/examples/sand` |
 | `examples/tally/` | storage, the wall clock, `civil`, the result, each denied; the twin of `sdk/rust/examples/tally` |
@@ -76,7 +77,8 @@ unchanged.
 - `ptyrc:manifest`, set by the runner from `--manifest`: what the app
   may know of its manifest, the grants and limits among it;
   `manifest()` returns a copy, `null` without one.
-- The interpreter takes the three out; the script's `init(args)` gets
+- `ptyrc:unit`, set by `--unit`: the tests run, not `init`.
+- The interpreter takes the four out; the script's `init(args)` gets
   the rest.
 
 ## Modules
@@ -87,9 +89,15 @@ unchanged.
   `fit`, `wrap`); on `"ptyrc"` alone. `deck.tick(now)` sends what
   changed in one `batch` (one by one where `batch` answers `headless`);
   until a `widgets` event names the variant shown, it renders each. A
-  `Canvas` goes as `cells` (runs): the driver refuses `grid` in a
-  widget. No file answers to that name: a file `ptyrc.js`
-  is `"./ptyrc.js"`.
+  `Canvas` goes as `cells` (runs).
+- `"ptyrc/canvas"`: `Braille` (2 by 4 dots a cell), `Half` (two pixels
+  of colour a cell, glyphs over them), colours (`mix`, `xterm`,
+  `palette`, `named`, `hex`, `channels`); pure, the twin of
+  `_canvas.py`.
+- `"ptyrc/sight"`: `Sight`, the shape of the view of a frame kept by
+  the topics `frames`, `text`, `size`, `move`, `cursor` (`_cli.Sight`).
+- The four are compiled only when imported. No file answers to their
+  names: a file `ptyrc.js` is `"./ptyrc.js"`.
 - `"./x.js"`, `"../lib/y.js"`: files of the tree, by path relative to
   the importing file. Outside the tree, absolute, a URL: refused.
 - `"ptyrc:native"`, the host functions under the API, is served to the
@@ -139,8 +147,9 @@ limits but time: 10 s a test (and for loading FILE), 60 s the file in
 all (the rest not run); `ok   NAME` or `FAIL NAME` and the error as logged
 (`file:line:col`); then `P passed, F failed`. A test ended by the
 runner (`time`, `stack`): the rest not run. Status 0 when all passed.
-No session: `call` answers `not-usable`. `assert`, `assertEqual`
-(deep), `assertThrows`: of `"ptyrc"`.
+No session: `call` answers `not-usable`; a `Sight` takes a `call` of
+the test's own (`examples/dots/sight.tests.js`). `assert`,
+`assertEqual` (deep), `assertThrows`: of `"ptyrc"`.
 
 ## Errors
 
@@ -184,13 +193,21 @@ Measured 2026-11-20, a 200x60 canvas, 30 Hz, a headless run, release
 | does 100000 steps of integer arithmetic | 6.5 to 6.7 ms |
 
 - A `set`: about 0.7 µs. A step of a loop: about 65 ns.
+- `"ptyrc/canvas"`, a `Braille` of 200x60 (`dev test --timing`, a
+  release runner, 2026-11-20, a loaded machine, three runs): 96000
+  dots by `set`, then `rows`, 60 `text` and `present`: 41 to 48 ms a
+  tick, against the 50 ms bound; `set` alone 41 to 45 ms (0.45 µs a
+  dot). The same cells by `bits` (`fill(255)`), `rows`, `text`,
+  `present`: 2.1 to 2.8 ms. `examples/dots`, a curve of 600 segments
+  and the text spared: 12.6 ms.
 - A start: 0.18 to 0.20 s the first time in a process (Cranelift
   compiles the module), 1.1 ms after it. A runner is one process an
   app: each app pays the first.
 
 A script paints by runs (`fill`, `text`) and by the cells that
 change, not every cell every tick: a simulation over every cell goes
-to Rust.
+to Rust. Braille: lines and points (thousands of dots a tick) are cheap;
+every dot of a frame each tick is at the bound.
 
 ## Tests
 
@@ -203,7 +220,10 @@ tests SKIPPED` says so. `sdk/rust/tests/tests/host.rs`: `textWithMtime`
 and a write guarded by it, `until`, as their Rust twins.
 
 `rust/ptyrc-cli/tests/dev.rs`: `ptyrc dev new`, `check`, `test`, `run`
-on the template; every example passes `dev check` and `dev test`.
+on the template; every example passes `dev check`, `dev test` and
+`dev test --unit`: the modules `"ptyrc/canvas"`, `"ptyrc/sight"` are
+tested by `examples/dots/tests.js` (`test_canvas.py`, the `Sight` of
+`_cli.py`), the deck's handlers by `examples/clockface/tests.js`.
 
 ## Not done
 

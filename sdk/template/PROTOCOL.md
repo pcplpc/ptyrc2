@@ -5,7 +5,7 @@
 throws (Rust: `Err`) `{code, message, hint?}`. Coordinates are 0-based,
 `x` right, `y` down. `frame`: a frame id or name, default `"raw"` (the
 whole screen). `rect`: `[x, y, w, h]`. Durations are session time, ms.
-Checked against the driver by `rust/ptyrc-box/tests/protocol.rs`.
+`ptyrc dev test` answers as the driver does (Headless, below).
 
 ## Permissions
 
@@ -115,6 +115,8 @@ Cut answers:
 | `storage.set` | `key`, `value` (a string, 256 KiB) | `{"used","quota"}`; past 64 keys or 1 MiB: `not-usable`, nothing written; 16 a second | `storage` |
 | `storage.remove` | `key` | `{}` | `storage` |
 | `storage.list` | | `{"keys":[{"key","size"}],"used","quota"}` | `storage` |
+| `asset.list` | | `{"assets":[{"name","size"}]}`: the files of `[app] assets`, names relative to that directory (`ship.pic`, `sub/a.pic`) | — |
+| `asset.read` | `name`, `as` (`"text"`, `"base64"`), `offset`, `len` (1 MiB at most) | `{"text" \| "base64", "size", "eof"}`; none of that name: `no-file` | — |
 | `file.stat` | `file` (a handle), `name` (a file of a `dir`) | `{"exists", "size", "mtime_ms"}`; absent: `{"exists": false}` | — |
 | `file.read` | `file`, `name`, `as` (`"text"`, `"base64"`), `offset`, `len` (1 MiB at most) | `{"text" \| "base64", "size", "mtime_ms", "eof"}`; a file of 16 MiB at most | — |
 | `file.list` | `file` (a `dir`) | `{"entries":[{"name","size"}]}`: its regular files of a valid name, 1024 at most | — |
@@ -176,9 +178,20 @@ Host functions (`clock.*`, `storage.*`, `app.result`, `file.*`,
 | `idle` | `{"frame","idle","score","free"}`, when `idle` changes | `shape` |
 | `colors` | host colours | `shape` |
 | `input` | `{"key","bytes","grabbed":true}` (a grab), `{"key","bytes","widget"}` (a focused widget), `{"released":"escape"}`; every key | `keys-read` for every key; a grab's and a focused widget's come unsubscribed |
-| `mouse` | `{"sprite","button","action","mods","at","x","y","frame","pos"}` | — on its own widget or sprite in front; elsewhere `clicks` |
-| `hover` | `{"sprite","at","x","y","frame","pos","mods"}`; `sprite` null: left | — on its own widget or sprite in front; elsewhere `pointer` |
+| `mouse` | `{"sprite","button","action","mods","at","x","y","frame","pos"}` (below) | — on its own widget or sprite in front; elsewhere `clicks` |
+| `hover` | `{"sprite","at","x","y","frame","pos","mods"}` (below); `sprite` null: left | — on its own widget or sprite in front; elsewhere `pointer` |
 
+- `mouse`, `hover`: `x`, `y` the screen cell; `at` `[x, y]` the cell of
+  the sprite under it (a widget's sprite is its outer box: the border
+  is row and column 0; the inner box starts at `rect` plus the border's
+  width), null when none; `frame`, `pos` the frame there and the cell
+  in it; `mods` of `shift`, `alt`, `ctrl`. `action`: `press`,
+  `release`, `drag` (moved, a button down), `move` (moved, none down),
+  `wheel`. `button`: `left`, `middle`, `right`, `wheel-up`,
+  `wheel-down`, `wheel-left`, `wheel-right`, `none`. The release and
+  the drags of a press go to the sprite pressed, `at` null when off it.
+  A deck turns them into `click(x, y, button, widget)` and `hover(x,
+  y, widget)` on the inner box (`ptyrc.d.ts`).
 - `screen.*` answers the wrapped program's cells. With `text`,
   `screen.text`, `screen.cells {sprites: true}` compose its own
   sprites alone over them: an app never reads another's.
@@ -214,7 +227,8 @@ calls a second), `headless`.
   `--clock ISO` (default `2000-01-01T00:00:00Z`) advancing with session
   time, local zone `--zone NAME` (default `UTC`); `storage.*` empty,
   or the files of `--storage DIR` (a file a key: its name the key, its
-  content the value; never written back); `app.result`;
+  content the value; read once); `--storage-out DIR` writes the storage
+  at the end into DIR, as `--storage` reads it; `app.result`;
   `file.*` on a file option given (`--NAME PATH`, or `--file
   NAME=PATH`; `ARG#N` names the `N`th value of `[args]`, from 0:
   `[args] todo = { type = "file", min = 1, max = 1, doc = "..." }`,
@@ -224,8 +238,19 @@ calls a second), `headless`.
   `files-write`; `probe.*` from `--probe git=FILE.json` (written by
   `ptyrc dev probe git [DIR]`, `system=` by `ptyrc dev probe system`:
   the driver's probe now; none: the not-held answer; `probe.git` one read a second, as the driver); `asset.*` from `[app] assets`. The report:
-  `result:` (and the status), `storage:` (a line a key, the value cut
-  past 60 characters), `files:` (written); `--json` their values whole.
+  `result:` (and the status), `storage:` (a line a key the app wrote,
+  `KEY = "VALUE"` or `KEY removed`; a key given and not written, `KEY =
+  "VALUE" (given, not written)`; the value cut past 60 characters;
+  `storage` not held: one line, the storage given not used), `files:`
+  (written); `--json` their values whole.
+- A second run from the first one's storage: `ptyrc dev test .
+  --storage-out tests/stored` once, the directory kept in the tree;
+  the case `--storage tests/stored`. Not one case writing what another
+  reads: the cases run at once.
+- `--timing`: a last line, the ticks run and the wall time of one,
+  mean and max, host calls in it (what the 50 ms bound measures). Not
+  in the report otherwise, which a case compares whole; `--json` has
+  `ticks` and `tick_ms` always.
 - The permissions are those the manifest declares for the run (a
   permission tied to an option by `needs`, or `files`, `files-write`
   to a file option: only when that option asks it; `[limits]`:
@@ -347,7 +372,7 @@ memory-mib = 128
 - ptyrc's own options, the same for every app and never told to it:
   `--frame F`, `--front`, `--back`, `--prefer SIDE`, `--alpha A` (the
   opacity of its sprites), `--border B` (of its widgets), `--wait`,
-  `--seed N` (its `random` drawn from `N`, as under `dev test --seed
+  `--no-wait`, `--seed N` (its `random` drawn from `N`, as under `dev test --seed
   N`; absent, from `/dev/urandom`: an app keeps no seed option of its
   own).
 - `--help` is made from the manifest; `ptyrc dev check` checks it.

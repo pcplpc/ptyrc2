@@ -1,0 +1,3 @@
+# shape answered no: the view is blank to the app, the glyphs come
+# beside the text; behind it all the same.
+--size 40x8 --for 1500ms --at 500ms,1500ms --seed 4 --speed 30 --screen tests/words.screen --deny shape

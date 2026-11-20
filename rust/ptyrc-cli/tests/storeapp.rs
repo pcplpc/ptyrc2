@@ -1840,3 +1840,62 @@ fn the_seed_of_the_launcher() {
         );
     }
 }
+
+const REFUSES: &str = r#"
+import { exit, log } from "ptyrc";
+export function init(args) {
+  if (args.zone !== "UTC") {
+    log("--zone " + args.zone + ": no such zone");
+    exit(2);
+  }
+}
+export function tick(now) {}
+export function event(topic, data) {}
+"#;
+
+/// `ptyrc app ID`: until `init` ended; an option refused there, the
+/// app's log line on stderr and its status; one taken, `running`.
+#[test]
+fn an_option_refused_in_init_is_told() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let sb = Sandbox::new("refused");
+    let manifest = "[app]\nid = \"refuses\"\nversion = \"0.1.0\"\nsummary = \"Refuses a zone.\"\n\
+                    license = \"GPL-3.0-or-later\"\napi = 1\nscript = \"app.js\"\n\n[options]\n\
+                    zone = { type = \"string\", default = \"UTC\", doc = \"a zone\" }\n";
+    install(&sb, "refuses", manifest.to_string(), REFUSES);
+    let mut driver = sb.ptyrc();
+    driver
+        .env("PTYRC_BOX", runner())
+        .env("PTYRC_JS", &js)
+        .args(["run", "--name", "s", "--headless", "--size", "60x16"])
+        .args(["--", "sh", "-c", "exec sleep 1000"])
+        .stdin(std::process::Stdio::null());
+    let _driver = common::Proc(driver.spawn().unwrap());
+    let socket = sb.socket("s");
+    wait_for(
+        || std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "socket",
+    );
+    let bad = sb.run(&["-s", "s", "app", "refuses", "--zone", "Nowhere/Atlantis"]);
+    let err = String::from_utf8_lossy(&bad.stderr).into_owned();
+    assert_eq!(bad.status.code(), Some(2), "{err}");
+    assert!(err.contains("ended in init, status 2"), "{err}");
+    assert!(
+        err.contains("--zone Nowhere/Atlantis: no such zone"),
+        "{err}"
+    );
+    assert!(!err.contains("profile"), "{err}");
+
+    let good = sb.run(&["-s", "s", "app", "refuses"]);
+    let out = String::from_utf8_lossy(&good.stdout).into_owned();
+    assert!(
+        good.status.success(),
+        "{}",
+        String::from_utf8_lossy(&good.stderr)
+    );
+    assert!(out.contains("refuses: running"), "{out}");
+}

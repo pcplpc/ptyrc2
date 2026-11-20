@@ -1,15 +1,16 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
-# The screen at 1 s, 3 s and 6 s, against expected.txt: the effect `sand`
-# of the driver, which the test host has too.
-# After a change meant to change it: ./test.sh --update
+# The cases (tests/CASE.args, each report against tests/CASE.txt), then
+# the unit tests (tests.js). Exits 1 when one fails.
+# After a change meant to change a report: ./test.sh --update
 set -eu
 cd "$(dirname "$0")"
-run() { "${PTYRC:-ptyrc}" dev test . --size 40x8 --for 6s --at 1s,3s,6s --rate 120; }
-if [ "${1:-}" = --update ]; then
-  run > expected.txt
-else
-  run > actual.txt
-  diff -u expected.txt actual.txt
-  rm actual.txt
+ptyrc=${PTYRC:-ptyrc}
+bless=
+[ "${1:-}" = --update ] && bless=--bless
+failed=0
+"$ptyrc" dev test . --cases $bless || failed=1
+if [ -f tests.js ]; then
+  "$ptyrc" dev test . --unit || failed=1
 fi
+exit $failed

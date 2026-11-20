@@ -1,0 +1,12 @@
+--- 1000 ms
+hello⠉world⠤⢤⣤⣤⣤⣤⡤⠤⠒⠒⠒⠒⠉⠉⠉⢉⣉⠭⠟
+   ⠈⢉⣒⠶⠤⠶⣒⣉⠉⠁    ⠈⠉⣉⣒⠶⠤⠶⣒⡉⠁
+⢀⡤⠖⠋⠁      ⣉⣉⡲⠶⠶⢖⣉⣉      ⠈⠙⠲⢤⡀
+⣏   ⢀⣀⠤⠴⠒⠊⠉       ⠈⠉⠑⠒⠦⠤⣀⡀   ⣹
+⢈⠵⠲⠯⣉⣀                  ⣀⣉⠽⠖⠮⡁
+⠳⠤⢤⣀⣀⣈⣉⣉⣒⣒⣒⣢⣤⣤⠤⠤⣤⣤⣔⣒⣒⣒⣉⣉⣁⣀⣀⡤⠤⠞
+lowered at 0 ms: frame.get, to the degree none
+lowered at 50 ms: screen.shape, to the degree none
+lowered: layout, not declared: fine if intended; else the manifest would ask for it: [permissions] layout = "..."
+lowered: shape, declared and answered no
+note: declaring less is good: the user is asked less, and a lowered answer is an answer

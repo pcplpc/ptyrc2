@@ -6,6 +6,7 @@ summary = "Counts its runs in storage; the local date and time; the count as its
 license = "GPL-3.0-or-later"
 api = 1
 script = "app.js"
+surface = "frame"
 
 [permissions]
 storage = "the count of runs"

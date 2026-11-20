@@ -17,7 +17,8 @@ ptyrc-box --headless [--no-profile] [--manifest JSON] [--script] MODULE [ARGS] [
 
 Runs `MODULE` (a binary module; with `--script`, `APP.js`) in the
 session of `PTYRC_SOCKET`, presenting `PTYRC_TOKEN`. `ARGS`: the JSON
-given to `init`, default `{}`. The log is stderr. SIGTERM: `stop`, then
+given to `init`, default `{}`. The log is stderr; once `init`
+returned, the line `ptyrc-box: init done` (`ptyrc app` waits for it). SIGTERM: `stop`, then
 the end. `--seed N`: `random` drawn as a headless run of seed `N`
 draws it; absent, from `/dev/urandom`. Status: that of `exit`; 0 after SIGTERM; 70 a guest ended by
 the runner; 2 usage; 5 the connection, or the OS profile refused.
@@ -71,7 +72,9 @@ that of `exit`, or 70.
   alone, checked, unused (a note). `--storage DIR`:
   the values, a file a key: its name the key (`[A-Za-z0-9._-]`), its
   content the value (UTF-8); other entries skipped; read once, never
-  written back. `--file NAME=PATH`: a
+  written back. `--storage-out FILE`: the storage at the end, one JSON
+  object (key: value), FILE opened before the profile (`ptyrc dev test
+  --storage-out DIR` writes DIR from it). `--file NAME=PATH`: a
   file or a directory read once, its handle (`f0`, ...) given to
   `init` under `NAME` (a handle there already is kept); read only.
   `--write-file NAME=PATH`: the same, the manifest's `write = true`:
@@ -82,9 +85,12 @@ that of `exit`, or 70.
   the not-held answer, and a note. `probe.git`, as the driver: one
   read a second of session time; within it the same params (but
   `since`) get the last answer, others `not-usable`. The report: `result:`, `storage:`
-  (a line a key, `KEY = "VALUE"`, cut past 60 characters, the size
-  then given), `files:` (written); `--json`: the values whole, the
-  contents. Status: that of `app.result` when the run ends well.
+  (a line a key: written by the app, `KEY = "VALUE"` or `KEY removed`;
+  given and not written, `KEY = "VALUE" (given, not written)`; a value
+  cut past 60 characters, the size then given; `storage` not held, one
+  line: the storage given not used), `files:` (written); `--json`: the
+  values whole (`storage` at the end, `storage_given`,
+  `storage_written`, `storage_held`), the contents. Status: that of `app.result` when the run ends well.
 - `--event T:TOPIC:JSON`: an event at `T`, to a topic subscribed and
   held. `--key T:KEY`: a key named as `input.send` names it, to the
   app when it grabbed it (`input.grab`); `ctrl+t` releases the grab;
@@ -182,7 +188,7 @@ bytes in the guest's memory, no terminator. JSON is a text.
 | `cells` | `(id) -> ptr` | its cells; 0: no such canvas |
 | `present` | `(id, place_ptr, place_len) -> status` | show the canvas; 0, or 1: refused (the reason is logged) |
 | `release` | `(id)` | forget the canvas, remove its picture; the host calls `free` on its cells |
-| `period` | `(ms)` | the tick wanted; under 33: 33; 0: none (the default) |
+| `period` | `(ms)` | the tick wanted; under 33: 33; 0: none (the default). A period counts from its call |
 | `log` | `(ptr, len)` | a line of the app's log |
 | `random` | `(ptr, len)` | random bytes; `len` at most 65536 |
 | `exit` | `(code)` | ends the app; does not return |
@@ -341,7 +347,10 @@ Headless: at each resize of the tape, the screen resized first;
 `--event T:size:JSON` delivers the data alone, the screen unchanged;
 `snapshot` is ignored.
 - `live::run`: a session (`Live::new(Client, log)`, `.seeded(N)`), real
-  time times `PTYRC_CLOCK_RATE`.
+  time times `PTYRC_CLOCK_RATE`. Ticks are due as headless
+  (`ticks::Ticks`): a period asked, changed or not, counts from its
+  call; none asked, each tick one period after the last was due; a
+  tick missed is not made up for.
 - `Runner<H: Host>`: `load`, `init`, `tick`, `event`, `stop`; `Host` is
   the outside (`call`, `size`, `log`, `random`).
 - `engine.rs` alone names wasmtime. One engine a process, its epoch
@@ -392,6 +401,8 @@ unchanged.
 - `tests/abi.rs`: the ABI against small guests.
 - `tests/hostile/`: guests that must end contained.
 - `tests/live.rs`: above.
+- `tests/ticks.rs`: a live run (a driver of the test's own) against
+  headless: the tick times.
 - `tests/profile.rs`: the OS profile.
 - `tests/script.rs`: script apps and hostile scripts. They need the
   interpreter: `sdk/js/interp/build.sh`. Without it they pass, testing nothing,

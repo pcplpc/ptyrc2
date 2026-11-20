@@ -26,6 +26,8 @@
 // `async`; nothing awaited outlives the call.
 //
 // Widgets the driver places and sizes: the module "ptyrc/deck", below.
+// Braille dots, half blocks, colours: "ptyrc/canvas". The shape of the
+// view kept by the topics: "ptyrc/sight".
 // Unit tests: `tests.js`, its exports `test_*` (`ptyrc dev test --unit`),
 // `assert`, `assertEqual`, `assertThrows`.
 //
@@ -37,8 +39,8 @@
 // start); the wall clock is `now()` (permission `clock`). A file is one
 // the user named (`file(handle)`); state that outlives a run goes to
 // `storage` (permission `storage`); the app's own files are `asset`s.
-// `Math.random()` draws from the host. Modules: "ptyrc", and files of
-// the app: "./lib/util.js".
+// `Math.random()` draws from the host. Modules: "ptyrc", "ptyrc/deck",
+// "ptyrc/canvas", "ptyrc/sight", and files of the app: "./lib/util.js".
 //
 // An error left uncaught is logged with its file and line. A
 // `PtyrcError` (a request refused) left uncaught in `tick` or `event`
@@ -234,7 +236,7 @@ declare module "ptyrc" {
   export function asset(name: string): string;
   /** An asset's bytes. @throws PtyrcError `no-file` */
   export function assetBytes(name: string): Uint8Array;
-  /** The names of the assets: `pictures/ship.pic`. */
+  /** The names of the assets, relative to `[app] assets`: `ship.pic`, `sub/a.pic`. */
   export function assets(): string[];
 
   /**
@@ -330,7 +332,8 @@ declare module "ptyrc" {
  *   export function event(topic, data) { deck.event(topic, data); }
  *
  * Give the deck every `tick` and every `event`: it follows the topics
- * `widgets` (the variant shown), `move`, `hover`, `input`.
+ * `widgets` (the variant shown), `move`, `hover`, `mouse`, `input`.
+ * Under `--unit`, `new Deck({call})` with a host of the test's own.
  */
 declare module "ptyrc/deck" {
   import { Canvas, Run, StyleSpec } from "ptyrc";
@@ -366,6 +369,8 @@ declare module "ptyrc/deck" {
     every?: boolean;
     /** Session ms without a move after which a hover ends: 1500; null: never. */
     hoverTimeout?: number | null;
+    /** The request function: `call` of "ptyrc"; a fake one makes a deck testable under `--unit`. */
+    call?: (method: string, params?: object) => any;
   }
 
   /** What a handler returns: `false` when nothing changed (not drawn again). */
@@ -382,8 +387,15 @@ declare module "ptyrc/deck" {
     key?(name: string, widget: Widget): Changed;
     /** A bracketed paste, its lines parted by `\n`. */
     paste?(text: string, widget: Widget): Changed;
-    /** The pointer on the cell `(x, y)` of the inner box. */
+    /** The pointer on the cell `(x, y)` of the inner box (the border is not in it). */
     hover?(x: number, y: number, widget: Widget): Changed;
+    /**
+     * A button pressed, or a wheel turned, on the cell `(x, y)` of the
+     * inner box: `button` `left`, `middle`, `right`, `wheel-up`,
+     * `wheel-down`, `wheel-left`, `wheel-right`. Releases and drags are
+     * not told. Subscribes `mouse`.
+     */
+    click?(x: number, y: number, button: string, widget: Widget): Changed;
     /** The pointer left, the widget moved, or `hoverTimeout` passed. */
     leave?(widget: Widget): Changed;
     /** Closed by the user (ctrl+x): out of the deck. */
@@ -399,6 +411,8 @@ declare module "ptyrc/deck" {
     /** Session time of the last `tick`. */
     readonly now: number;
     hoverTimeout: number | null;
+    /** The request function of the deck and its widgets. */
+    readonly call: (method: string, params?: object) => any;
     /**
      * Declares the tag, each variant rendered once, and shows it.
      * `render(w, h, widget)`: the content of the variant of that size;
@@ -412,7 +426,7 @@ declare module "ptyrc/deck" {
      * sends what changed in one `batch`. Ends a hover past its timeout.
      */
     tick(now: number): void;
-    /** Takes `widgets`, `move`, `hover`, `input`; false: not the deck's. */
+    /** Takes `widgets`, `move`, `hover`, `mouse`, `input`; false: not the deck's. */
     event(topic: string, data: any): boolean;
     /** Renders now: `widget` alone, or all; `every`: each variant. */
     draw(widget?: Widget, every?: boolean): void;
@@ -506,4 +520,183 @@ declare module "ptyrc/deck" {
   export function fit(row: string | Run[], w: number): Run[];
   /** `text` on `n` lines of `w` cells, cut at blanks; the rest ends the last line with `…`. */
   export function wrap(text: string, w: number, n: number): string[];
+}
+
+/**
+ * Pictures finer than a cell, pure: no call. A colour here is the
+ * number of `rgb(r, g, b)`; `"#rrggbb"` is taken too. A dot, a pixel or
+ * a cell outside is ignored; read outside: `false`, `null`.
+ *
+ *   import { Canvas, rgb } from "ptyrc";
+ *   import { Braille, Half } from "ptyrc/canvas";
+ *   const dots = new Braille(20, 5);          // 40 by 20 dots
+ *   dots.line(0, 0, 39, 19);
+ *   deck.add("plot", [[20, 5]], () => dots.rows());
+ *   dots.draw(canvas, 0, 0, { fg: 6 });       // or on a Canvas
+ *
+ * Cost (`sdk/js/README.md`, Speed): `set` about 0.45 µs; at 200x60,
+ * 96000 dots set one by one take about 45 ms, near the 50 ms of a tick.
+ * `rows` and `draw` of 200x60: about 2 ms. A picture that sets every
+ * dot of the frame each tick: write `bits`, or go to Rust.
+ */
+declare module "ptyrc/canvas" {
+  import { Canvas, Run, Style, StyleSpec } from "ptyrc";
+
+  /** A colour of this module: `rgb(r, g, b)`, or `"#rrggbb"` as input. */
+  export type RGB = number | string;
+
+  /** `DOTS[y][x]`: the bit of the dot `(x, y)` of a cell; the glyph is U+2800 plus the bits. */
+  export const DOTS: readonly (readonly [number, number])[];
+
+  /** `2 * width` by `4 * height` dots, on or off, in `width` by `height` cells. */
+  export class Braille {
+    /** All off. @throws RangeError unless two integers, 1 at least. */
+    constructor(width: number, height: number);
+    readonly width: number;
+    readonly height: number;
+    /** The dots of the cell `(cx, cy)` at `cy * width + cx`, `DOTS` bits. */
+    readonly bits: Uint8Array;
+    /** The dot `(x, y)` on, or off with `false`. */
+    set(x: number, y: number, on?: boolean): void;
+    get(x: number, y: number): boolean;
+    /**
+     * Every dot from `(x0, y0)` to `(x1, y1)`: `max(1, round(max(|dx|,
+     * |dy|)))` steps, each rounded to a dot.
+     */
+    line(x0: number, y0: number, x1: number, y1: number, on?: boolean): void;
+    /** Every dot off. */
+    clear(): this;
+    /** The glyph of the cell; `""` when no dot of it is on. */
+    glyph(cx: number, cy: number): string;
+    /** The cells `[cx, cy]` with a dot on, row by row. */
+    cells(): [number, number][];
+    /** A string a row of cells, a blank where no dot is on: a widget's content, `draw.*` rows. */
+    rows(): string[];
+    /** Each row on `canvas` from `(x, y)`, as `canvas.text`: a blank is a hole unless `style` has a `bg`. */
+    draw(canvas: Canvas, x?: number, y?: number, style?: Style | StyleSpec): this;
+  }
+
+  /** Two pixels are alike when their channels differ by this much at most, summed: 24. */
+  export const NEAR: number;
+
+  /**
+   * `width` by `2 * height` pixels in `width` by `height` cells: a cell
+   * is `▀`, the top pixel its foreground, the bottom its background.
+   * Glyphs go over the pixels.
+   */
+  export class Half {
+    /** Every pixel `color` (black). @throws RangeError unless two integers, 1 at least. */
+    constructor(width: number, height: number, color?: RGB);
+    readonly width: number;
+    readonly height: number;
+    /** Every pixel; the glyphs stay. */
+    fill(color: RGB): this;
+    get(x: number, y: number): number | null;
+    /** A pixel; `alpha` under 1: mixed over the one there. */
+    set(x: number, y: number, color: RGB, alpha?: number): void;
+    rect(x: number, y: number, w: number, h: number, color: RGB, alpha?: number): void;
+    /** The pixels whose centre `(x + .5, y + .5)` is within `r` of `(cx, cy)`. */
+    disc(cx: number, cy: number, r: number, color: RGB, alpha?: number): void;
+    /** Glyphs from the cell `(cx, cy)`, one a code point, cut at the edge; `bg` null: the mean of the two pixels. */
+    put(cx: number, cy: number, text: string, fg?: RGB | null, bg?: RGB | null): void;
+    /**
+     * The cells of `braille` with a dot on, where no glyph is and the two
+     * pixels are alike (`NEAR`): the glyph over the pixel under most of
+     * its dots, `fg` mixed over that by `tint`. Where they differ, an
+     * edge: no glyph; `fg` mixed by `rough` into each pixel under a dot.
+     */
+    ink(braille: Braille, fg?: RGB | null, tint?: number, rough?: number): void;
+    /**
+     * Rows of runs `{t, fg?, bg}`, colours of the 256 (`xterm`); `deep`:
+     * `"#rrggbb"`. Cells alike are one run; a blank joins the run before
+     * it. Ink over two pixels the 256 tell apart is left out.
+     */
+    rows(deep?: boolean): Run[][];
+    /** The cells on `canvas` from `(x, y)`. */
+    draw(canvas: Canvas, x?: number, y?: number, deep?: boolean): this;
+  }
+
+  /** From `a` (`t` 0) to `b` (`t` 1), `t` clamped, each channel rounded. */
+  export function mix(a: RGB, b: RGB, t: number): number;
+  export function channels(c: RGB): [number, number, number];
+  /** `"#rrggbb"`. */
+  export function hex(c: RGB): string;
+  /** The nearest of the 240 fixed colours of the 256 (16..255); a grey only for a grey. */
+  export function xterm(c: RGB): number;
+  /** The colour `n` of the 256, 16..255, as `rgb`. @throws RangeError */
+  export function palette(n: number): number;
+  /**
+   * The palette number, 0..15, of `black`, `red`, `green`, `yellow`,
+   * `blue`, `magenta`, `cyan`, `white`, or `bright-` one of them: the 16
+   * the terminal sets. @throws RangeError
+   */
+  export function named(name: string): number;
+}
+
+/**
+ * The shape of the view of a frame, kept current by the topics: the
+ * view is read again only when an event says it changed.
+ *
+ *   import { Sight } from "ptyrc/sight";
+ *   let sight;
+ *   export function init() { sight = new Sight({ cursor: true }); period(50); }
+ *   export function tick(now) {
+ *     if (!sight.look()) return;          // off screen
+ *     if (sight.changed) walls = ...sight.rows;
+ *   }
+ *   export function event(topic, data) { sight.event(topic, data); }
+ *
+ * What it holds at each degree (`PROTOCOL.md`, cut answers): `layout`
+ * refused, the raw frame and no `frames` event; `shape` refused, blank
+ * rows of the size, `cursor` null, `degree` `"none"`; `words` alone, the
+ * held words among `words`; `text: true` without `text`, the shape.
+ */
+declare module "ptyrc/sight" {
+  export interface SightOptions {
+    /** The frame read: an id or a name (`"raw"`). A `move` event changes it. */
+    frame?: number | string;
+    /** Words shown as on screen in the shape (`screen.shape {words}`). */
+    words?: string[];
+    /** The text (`screen.text`), not the shape. */
+    text?: boolean;
+    /** Subscribe `cursor` too. */
+    cursor?: boolean;
+    /** The request function: `call` of "ptyrc"; a fake one in unit tests. */
+    call?: (method: string, params?: object) => any;
+  }
+
+  export class Sight {
+    /** Subscribes `frames`, `text`, `size`, `move` (and `cursor`); reads `frame.get`. */
+    constructor(options?: SightOptions);
+    /** The frame read. */
+    frame: number | string;
+    /** Its info as last told (`frame.get`, `frames`). */
+    readonly info: any;
+    /** The view, a string a row, padded to the width: `#` ink, a blank, a word of `words` as shown; or the text. */
+    readonly rows: string[];
+    /** The size of the view. */
+    readonly size: [number, number];
+    /** The frame on the screen, `[x, y, w, h]`. */
+    readonly rect: [number, number, number, number] | null;
+    /** In view cells; null: hidden, not told, or `shape` not held. */
+    readonly cursor: [number, number] | null;
+    /** What the last read was cut to: `"none"`, `"shape"`, `"words"`; null: whole. */
+    readonly degree: string | null;
+    /** The last `look` read the view. */
+    readonly changed: boolean;
+    /** The frame is on screen. */
+    readonly usable: boolean;
+    /**
+     * Takes `frames`, `text`, `cursor`: true. Reads `size` and `move`
+     * (the frame named is read from then on) and returns false: the
+     * app or its deck wants them too. Any other: false.
+     */
+    event(topic: string, data: any): boolean;
+    /** At the tick: the view read again when told; false while the frame is off screen. */
+    look(): boolean;
+    /** Read again at the next `look`. */
+    touch(): void;
+    /** `rows[y][x]` is not a blank; false outside. */
+    ink(x: number, y: number): boolean;
+  }
 }

@@ -3,8 +3,9 @@
 //
 // Two sizes: block digits (17x3, a Canvas) where there is room, a line
 // (5x1) where not; the driver picks. The widget asks for the keyboard,
-// quietly: focused (ctrl+t twice), `space` pauses, `r` resets. Time is
-// session time, the `now` of `tick`.
+// quietly: focused (ctrl+t twice), `space` pauses, `r` resets. A left
+// click on it pauses too, a right click resets. Time is session time,
+// the `now` of `tick`.
 
 import { period } from "ptyrc";
 import { Deck } from "ptyrc/deck";
@@ -30,9 +31,15 @@ function key(name) {
   }
 }
 
+function click(x, y, button) {
+  if (button === "left") return key("space");
+  if (button === "right") return key("r");
+  return false;
+}
+
 export function init(args) {
   deck = new Deck({ border: "round", prefer: "top-right", every: args.every });
-  deck.add("clockface", SIZES, (w, h) => face(elapsed(deck.now), w, h, since === null), { key });
+  deck.add("clockface", SIZES, (w, h) => face(elapsed(deck.now), w, h, since === null), { key, click });
   period(1000);
 }
 

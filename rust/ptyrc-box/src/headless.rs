@@ -10,6 +10,7 @@ use crate::grants::{self, Degree, Gate, Grants};
 use crate::hostfn::{self, HostFns, Named};
 use crate::nozzle::{self, Nozzles};
 use crate::runner::Runner;
+use crate::ticks::Ticks;
 use ptyrc_core::frames::{FrameConfig, FrameEvent, Frames, ScreenInput};
 use ptyrc_core::plugin::DrawExt;
 use ptyrc_core::scene::{ColorSpec, Scene, SpritePatch, SpriteSpec};
@@ -2144,6 +2145,12 @@ pub struct Report {
     pub result: Option<(Value, u8)>,
     /// The storage at the end.
     pub storage: BTreeMap<String, String>,
+    /// The storage given (`--storage`), before the app ran.
+    pub storage_given: BTreeMap<String, String>,
+    /// The keys the app set or removed.
+    pub storage_written: BTreeSet<String>,
+    /// `storage` held: else the storage given was never read.
+    pub storage_held: bool,
     /// The files the app wrote, in memory.
     pub written: Vec<Named>,
 }
@@ -2291,7 +2298,9 @@ impl Report {
     /// The report as one JSON value: `screens` (`t`, `rows`, `styles`:
     /// `[y, x, w, style]`), `refused`, `lowered`, `dropped`, `notes`,
     /// `lacks`, `limits`, `end`, `result` (`{value, status}` or null),
-    /// `storage` (key: value), `files` (written: `option`, `name`,
+    /// `storage` (key: value, at the end), `storage_given` (before),
+    /// `storage_written` (the keys set or removed), `storage_held`,
+    /// `files` (written: `option`, `name`,
     /// `size`, `text` or `base64`); `ticks`, `tick_ms` (`mean`, `max`
     /// of the wall time of a tick, null without one: [`Report::timing_line`]).
     pub fn to_json(&self) -> Value {
@@ -2354,6 +2363,9 @@ impl Report {
             "end": self.end.as_ref().map(|e| e.to_string()),
             "result": self.result.as_ref().map(|(v, s)| json!({"value": v, "status": s})),
             "storage": self.storage,
+            "storage_given": self.storage_given,
+            "storage_written": self.storage_written,
+            "storage_held": self.storage_held,
             "files": files,
             "ticks": self.ticks,
             "tick_ms": self.timing.mean().map(|mean| json!({
@@ -2436,8 +2448,8 @@ impl Report {
             };
             writeln!(f, "result: {value} (status {status})")?;
         }
-        for (k, v) in &self.storage {
-            writeln!(f, "storage: {k} = {}", cut_value(v))?;
+        for line in self.storage_lines() {
+            writeln!(f, "{line}")?;
         }
         for file in &self.written {
             let size = file.content.bytes.as_ref().map_or(0, Vec::len);
@@ -2450,6 +2462,44 @@ impl Report {
             writeln!(f, "ended: {e}")?;
         }
         Ok(())
+    }
+}
+
+impl Report {
+    /// `storage:` lines: a key the app wrote, `KEY = "VALUE"`, or `KEY
+    /// removed`; a key given and not written, `KEY = "VALUE" (given, not
+    /// written)`. `storage` not held: the storage given, unused.
+    pub fn storage_lines(&self) -> Vec<String> {
+        if !self.storage_held {
+            return match self.storage_given.len() {
+                0 => Vec::new(),
+                1 => {
+                    vec!["storage: not held: the storage given (--storage, 1 key) not used".into()]
+                }
+                n => vec![format!(
+                    "storage: not held: the storage given (--storage, {n} keys) not used"
+                )],
+            };
+        }
+        let keys: BTreeSet<&String> = (self.storage.keys())
+            .chain(self.storage_given.keys())
+            .collect();
+        let mut out = Vec::new();
+        for k in keys {
+            let written = self.storage_written.contains(k);
+            match (self.storage.get(k), written) {
+                (Some(v), true) => out.push(format!("storage: {k} = {}", cut_value(v))),
+                (Some(v), false) => out.push(format!(
+                    "storage: {k} = {} (given, not written)",
+                    cut_value(v)
+                )),
+                (None, _) if self.storage_given.contains_key(k) => {
+                    out.push(format!("storage: {k} removed"))
+                }
+                (None, _) => {}
+            }
+        }
+        out
     }
 }
 
@@ -2680,7 +2730,7 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
     let mut styles = Vec::new();
     // Widgets not laid out at a screen shown: `(key, note)`.
     let mut hidden: Vec<(String, String)> = Vec::new();
-    let mut ticks = 0;
+    let mut given = 0;
 
     let mut done = runner.init(&args, 0);
     // A step after `init`, as the driver's: what it tells (`idle` of a
@@ -2693,8 +2743,8 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
             }
         }
     }
-    let mut period = runner.period();
-    let mut next_tick = (period > 0).then_some(u64::from(period));
+    runner.take_asked();
+    let mut ticks = Ticks::new(runner.period(), 0);
     // At one time: the tape, the events, the tick, the screen.
     while done.is_ok() {
         let now = [
@@ -2702,7 +2752,7 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
             texts.peek().map(|s| s.0),
             events.peek().map(|e| e.0),
             inject.peek().map(|e| e.0),
-            next_tick.filter(|t| *t <= end),
+            ticks.next().filter(|t| *t <= end),
             at.peek().copied(),
             // The scene steps on its own clock, as the driver's: the
             // screen at T is the same whatever else is asked.
@@ -2737,16 +2787,15 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
         {
             done = runner.event(&e.1, &e.2, now);
         }
-        if done.is_ok() && next_tick == Some(now) {
+        let due = done.is_ok() && ticks.due(now);
+        if due {
             if !runner.paused() {
-                ticks += 1;
+                given += 1;
             }
             done = runner.tick(now);
         }
-        if runner.period() != period || next_tick == Some(now) {
-            period = runner.period();
-            next_tick = (period > 0).then_some(now + u64::from(period));
-        }
+        let asked = runner.take_asked().then_some(now);
+        ticks.step(runner.period(), now, asked, due);
         runner.host_mut().settle();
         // What the step told (`idle`, `widgets`): heard at once.
         let told = runner.host_mut().take_events();
@@ -2757,6 +2806,8 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
             }
         }
         if again {
+            let asked = runner.take_asked().then_some(now);
+            ticks.step(runner.period(), now, asked, false);
             runner.host_mut().settle();
         }
         if at.next_if_eq(&now).is_some() {
@@ -2784,6 +2835,7 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
     }
     let met = runner.met().iter().map(|m| m.to_string()).collect();
     let timing = runner.timing();
+    let storage_held = (options.grants.as_ref()).is_none_or(|g| g.holds("storage"));
     let host = runner.host_mut();
     if let Some(t) = host.nowhere {
         notes.push(format!(
@@ -2803,13 +2855,16 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
         notes,
         result: fns.result,
         storage: fns.storage,
+        storage_given: options.host.storage.clone(),
+        storage_written: fns.storage_written,
+        storage_held,
         written: fns.files.into_iter().filter(|f| f.written).collect(),
         requests: std::mem::take(&mut host.requests),
         lacks: std::mem::take(&mut host.lacks),
         dropped: std::mem::take(&mut host.dropped),
         log: std::mem::take(&mut host.log),
         met,
-        ticks,
+        ticks: given,
         timing,
         end: done.err(),
     })

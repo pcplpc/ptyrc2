@@ -16,6 +16,7 @@ mod nozzle;
 pub mod profile;
 pub mod runner;
 pub mod script;
+pub mod ticks;
 
 pub use crate::core::{CallError, Host, Limits};
 pub use crate::error::Error;

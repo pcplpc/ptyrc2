@@ -4,10 +4,12 @@
 //! its id its directory; its `LICENSE` the repository's; each draw of
 //! `[app] random` read by its options; its cases, `ptyrc dev test TREE
 //! --cases` (each `tests/CASE.args` against `tests/CASE.txt`); `ptyrc
-//! dev test --unit` when `tests.js` exists; a Rust app's `cargo test`.
+//! dev test --unit` when `tests.js` exists; a Rust app's `cargo test`;
+//! each file named as one of `_shared/js/` that file, byte for byte.
+//! `_shared/js/`: its `*.tests.js` run once, in a tree of their own.
 //!
 //! `PTYRC_BLESS=1`: `--cases --bless`, each `CASE.txt` written from the
-//! run. `PTYRC_STORE_APP=NAME` runs that tree alone. Without the
+//! run. `PTYRC_SYNC=1`: each copy of `_shared/js/` written from it. `PTYRC_STORE_APP=NAME` runs that tree alone. Without the
 //! interpreter (`sdk/js/interp/build.sh`) the script apps are skipped,
 //! unless `PTYRC_REQUIRE_JS=1`.
 
@@ -83,6 +85,106 @@ fn said(out: &Output) -> String {
     )
 }
 
+/// The files of `_shared/js/` that trees copy: name, bytes. Not its
+/// `*.tests.js`.
+fn shared() -> Vec<(String, Vec<u8>)> {
+    let dir = root().join("plugins/store-apps/_shared/js");
+    let mut out: Vec<(String, Vec<u8>)> = (std::fs::read_dir(dir).unwrap().flatten())
+        .map(|e| e.path())
+        .filter(|p| p.is_file())
+        .map(|p| (p.file_name().unwrap().to_string_lossy().into_owned(), p))
+        .filter(|(n, _)| n.ends_with(".js") && !n.ends_with(".tests.js"))
+        .map(|(n, p)| (n, std::fs::read(p).unwrap()))
+        .collect();
+    out.sort();
+    out
+}
+
+/// The files of `dir` and below, `target/` and `tests/` left out.
+fn files(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        let p = e.path();
+        let name = e.file_name();
+        if p.is_dir() && name != "target" && name != "tests" && name != ".git" {
+            out.extend(files(&p));
+        } else if p.is_file() {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// Each copy of a file of `_shared/js/` in `dir`: that file, or written
+/// from it with `sync`.
+fn copies(dir: &Path, shared: &[(String, Vec<u8>)], sync: bool) -> Vec<String> {
+    let mut fails = Vec::new();
+    for f in files(dir) {
+        let name = f.file_name().unwrap().to_string_lossy().into_owned();
+        let Some((_, source)) = shared.iter().find(|(n, _)| *n == name) else {
+            continue;
+        };
+        if std::fs::read(&f).ok().as_ref() == Some(source) {
+            continue;
+        }
+        let at = f.strip_prefix(dir).unwrap().display().to_string();
+        if sync {
+            std::fs::write(&f, source).unwrap();
+            eprintln!("wrote {at} from _shared/js/{name}");
+        } else {
+            fails.push(format!(
+                "{at}: not a copy of _shared/js/{name} (PTYRC_SYNC=1 copies it)"
+            ));
+        }
+    }
+    fails
+}
+
+/// The unit tests of `_shared/js/`, once: its files and a `tests.js`
+/// exporting every `*.tests.js`, as an app of a scratch tree.
+#[test]
+fn shared_unit_tests() {
+    if !root().join(JS).is_file() {
+        assert!(!flag("PTYRC_REQUIRE_JS"), "PTYRC_REQUIRE_JS=1: no {JS}");
+        eprintln!("store apps: _shared/js unit tests SKIPPED: no interpreter");
+        return;
+    }
+    build_runner();
+    let src = root().join("plugins/store-apps/_shared/js");
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("store-apps-shared");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut tests = String::from("// SPDX-License-Identifier: GPL-3.0-or-later\n");
+    let mut names: Vec<String> = (std::fs::read_dir(&src).unwrap().flatten())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".js"))
+        .collect();
+    names.sort();
+    for n in &names {
+        std::fs::copy(src.join(n), dir.join(n)).unwrap();
+        if n.ends_with(".tests.js") {
+            tests.push_str(&format!("export * from \"./{n}\";\n"));
+        }
+    }
+    std::fs::write(dir.join("tests.js"), tests).unwrap();
+    std::fs::write(dir.join("app.js"), "export function init() {}\n").unwrap();
+    std::fs::write(
+        dir.join(manifest::MANIFEST),
+        "[app]\nid = \"shared\"\nversion = \"0.1.0\"\nsummary = \"_shared/js\"\n\
+         license = \"GPL-3.0-or-later\"\napi = 1\nscript = \"app.js\"\n",
+    )
+    .unwrap();
+    let unit = ptyrc(
+        &dir,
+        &["dev".into(), "test".into(), ".".into(), "--unit".into()],
+    );
+    assert!(
+        unit.status.success(),
+        "_shared/js: dev test --unit\n{}",
+        said(&unit)
+    );
+}
+
 /// Every problem of the tree `dir`.
 fn tree(dir: &Path, js: bool, bless: bool) -> Vec<String> {
     let name = dir.file_name().unwrap().to_string_lossy().into_owned();
@@ -101,6 +203,7 @@ fn tree(dir: &Path, js: bool, bless: bool) -> Vec<String> {
     if std::fs::read(dir.join("LICENSE")).ok() != Some(license) {
         fails.push("LICENSE: not a copy of the repository's LICENSE.txt".into());
     }
+    fails.extend(copies(dir, &shared(), flag("PTYRC_SYNC")));
     for draw in &m.app.random {
         if let Err(e) = ptyrc_store::options::read(&m, draw, dir) {
             fails.push(format!("[app] random: {draw:?}: {e}"));

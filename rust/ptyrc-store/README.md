@@ -70,7 +70,9 @@ the driver.
   file to write). `Resolved::asked(manifest)`: the permissions
   declared for that run. `check_named(path, kind, write)`: the
   driver's check of a path again.
-- `help(manifest, program)`: `--help` of a store app.
+- `help(manifest, program)`: `--help` of a store app. A bool on by
+  default shown as `--no-NAME` (`AppOption::flag`), `[default:
+  --NAME]`; so in the menu of `ptyrc manage` and the list of `dev test`.
 - Errors: `ErrorKind::Usage`.
 
 ## Origin
@@ -143,8 +145,9 @@ install::install_built(&dirs, &origin, &tree, &checked, Some(&built.wasm), ...)?
   `--extern ptyrc_app`; `--edition 2024`, `-C opt-level=s`, `panic=abort`,
   `codegen-units=1`, `lto`, `strip=symbols`; the environment cleared;
   paths in messages from the app's root. One build at a time in `work`:
-  `build::lock(work)`, an exclusive lock on `WORK.lock`, held through
-  the build; a caller wanting a wider step locks another path.
+  the caller's. `build::lock(path)`: an exclusive lock on `PATH.lock`
+  (left), held until dropped; `ptyrc dev` and `Shipped::build` take it,
+  an install holds the store's lock.
 - Each `rustc` under the profile (Linux, Landlock), from a thread that
   restricts itself and spawns it; the rest of the process is not
   restricted. No profile: refused, unless `Options::unconfined` (`store

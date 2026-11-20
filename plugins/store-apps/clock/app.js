@@ -13,7 +13,7 @@
 
 import { civil, exit, log, now, period, until, zone } from "ptyrc";
 import { Deck } from "ptyrc/deck";
-import { Braille } from "./braille.js";
+import { Braille } from "ptyrc/canvas";
 import { LARGE, SMALL, beside, blocks, fit } from "./digits.js";
 
 export const HOURS = 14; // bright cyan

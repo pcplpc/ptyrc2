@@ -98,15 +98,11 @@ pub fn run(program: &Path, dir: &Path, args: &Path, bless: bool) -> Outcome {
         Ok(o) => o,
         Err(e) => return Outcome::Failed(None, format!("{}: {e}\n", program.display())),
     };
-    if !out.status.success() {
-        let said = format!(
-            "{}{}",
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
-        );
+    let got = String::from_utf8_lossy(&out.stdout).into_owned();
+    if !out.status.success() && !out.status.code().is_some_and(|n| says_status(&got, n)) {
+        let said = format!("{got}{}", String::from_utf8_lossy(&out.stderr));
         return Outcome::Failed(out.status.code(), said);
     }
-    let got = String::from_utf8_lossy(&out.stdout).into_owned();
     let expected = args.with_extension("txt");
     if bless {
         return match std::fs::write(&expected, &got) {
@@ -119,6 +115,14 @@ pub fn run(program: &Path, dir: &Path, args: &Path, bless: bool) -> Outcome {
         Ok(want) => Outcome::Differs(diff(&want, &got)),
         Err(_) => Outcome::Missing,
     }
+}
+
+/// The report gives the status `n` of its run: `ended: exit: N`, or
+/// `result: VALUE (status N)`. A case may end so: its `CASE.txt` holds
+/// the line.
+fn says_status(report: &str, n: i32) -> bool {
+    let (exit, result) = (format!("ended: exit: {n}"), format!(" (status {n})"));
+    (report.lines()).any(|l| l == exit || (l.starts_with("result: ") && l.ends_with(&result)))
 }
 
 /// The lines of `want` and `got` that differ, each hunk with two
@@ -219,6 +223,14 @@ mod tests {
             words("--size 40x8 # the screen\n# a line\n--at 1s,2s\n"),
             ["--size", "40x8", "--at", "1s,2s"]
         );
+    }
+
+    #[test]
+    fn the_status_a_report_says() {
+        assert!(says_status("--- 1 ms\nended: exit: 2\n", 2));
+        assert!(!says_status("ended: exit: 2\n", 3));
+        assert!(says_status("result: \"no\" (status 1)\n", 1));
+        assert!(!says_status("x (status 1)\n", 1));
     }
 
     #[test]

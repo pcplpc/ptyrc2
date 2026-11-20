@@ -29,14 +29,26 @@ NAME/
 ```
 
 - `LICENSE`: the store wants the GPL text in each tree; git stores the
-  28 copies as one blob. The harness checks each is the repository's.
-- A module: code another app wants too (the twin's `_canvas`, `_x`,
-  or a part of another app it imports) is a file of its own, importing
-  `"ptyrc"` alone, so that it can go unchanged into the SDK or
-  `_shared/js/`. Its tests beside it, `x.tests.js`; `dev test --unit`
-  runs `tests.js` alone: `export { test_x } from "./x.tests.js"`.
-  `clock`: `braille.js` (`_canvas.Braille`), `digits.js` (the fonts
-  and layout `timer` takes from `clock`).
+  copies as one blob. The harness checks each is the repository's.
+- A module: code another app wants too (the twin's `_x`, or a part of
+  another app it imports) is a file of its own, importing the SDK's
+  modules alone. Its tests beside it, `x.tests.js`; `dev test --unit`
+  runs `tests.js` alone: `export { test_x } from "./x.tests.js"`. What
+  any author would want is the SDK's (`"ptyrc/canvas"`: the twin's
+  `_canvas`; `"ptyrc/sight"`: `_cli.Sight`).
+
+## Shared code: `_shared/js/`
+
+Code of a family of our apps (`_arcade`, `_reef`, `_sky`, `_strip`,
+the fonts of `clock` and `timer`) has one source, `_shared/js/x.js`,
+copied into each tree that uses it, anywhere in it (`NAME/x.js`,
+`NAME/lib/x.js`): each tree stays whole, the store and the runner
+know nothing of it. A file of a tree named as one of `_shared/js/` is
+its copy: the harness checks it byte for byte, as it does `LICENSE`;
+`PTYRC_SYNC=1` writes each copy from the source. Its tests,
+`_shared/js/x.tests.js`, are not copied: the harness runs them once.
+`_shared` is not an app: no manifest, a name the store refuses.
+Tenants: `digits.js` (`clock`; `timer` next).
 - A Rust app: `app.wasm` is built from the tree on demand in a
   checkout (`<cache>/ptyrc/shipped/NAME/`, at `ptyrc app`); a release
   installs the trees in `<data>/ptyrc/shipped/` with `app.wasm` beside
@@ -57,15 +69,22 @@ ptyrc dev test NAME/ --cases [CASE...] [--bless]
 
 Each case (those named alone), a line: `ok`, or `FAIL` and a diff
 (`-` expected, `+` got, two lines around); status 1 when one fails.
-`--bless` writes each `CASE.txt` from the run. The harness below runs
-it; `sdk/template/test.sh` is the same loop in shell.
+`--bless` writes each `CASE.txt` from the run. The cases run at once;
+a Rust app is built once before them. It is the canonical runner: the
+harness below runs it, a tree's `test.sh` calls it.
+
+A second run from the first one's storage: `ptyrc dev test .
+--storage-out tests/stored` once, the directory kept in the tree; the
+case `--storage tests/stored`. Not a case writing what another reads.
+`--timing` (not in a case): the ticks and the wall time of one.
 
 The scene steps on its own clock, as the driver's: the screen at `T`
 is the same whatever other times `--at` asks.
 
-A case passes only when the app ends with status 0: an option refused
-in `init` (`exit(2)`) is a unit test of the function that refuses it
-(`clock`: `options(args, host)`, `test_bad_zone`).
+A run that ends with a status other than 0 fails its case, unless the
+report says that status (`ended: exit: N`, `result: VALUE (status
+N)`) and so `CASE.txt` holds the line: an option refused in `init`
+(`exit(2)`) is a case.
 
 The wall clock: `--clock ISO` (default `2000-01-01T00:00:00Z`),
 `--zone NAME` the machine's (default `UTC`), `--deny clock` the time
@@ -88,6 +107,7 @@ effect that follows the pointer asks the driver (`"pointer": true`,
 cargo test -p ptyrc-cli --test store_apps           # every tree
 PTYRC_STORE_APP=NAME cargo test -p ptyrc-cli --test store_apps
 PTYRC_BLESS=1 ...                                   # --cases --bless
+PTYRC_SYNC=1 ...                                    # copies of _shared/js written
 ```
 
 A start of the runner compiles the interpreter: some 7 s of processor
@@ -97,7 +117,8 @@ time in a debug build, 2 s in a release one. The cases run on
 176 s of processor time, against 4 s, 49 s); `PTYRC_BOX` names
 another (`ptyrc dev test` takes it, as the driver).
 
-Per tree: `ptyrc dev check`; the id its directory; `LICENSE`; each
+Per tree: `ptyrc dev check`; the id its directory; `LICENSE`; the
+copies of `_shared/js/`; each
 draw of `random` read by the options; each case against its `.txt`
 (`dev test --cases`); `dev test --unit` when `tests.js` exists; a Rust
 app's `cargo test`.
@@ -130,15 +151,14 @@ with `PTYRC_REQUIRE_JS=1`). Bless only after reading the diff.
    the twin: `X = { type = "bool", default = true }`. A bound or a rule
    the manifest cannot say (`--bursts 1..10`, two options exclusive):
    checked in `init`, `exit(2)` with a log line; live, `ptyrc app`
-   says `running` and the line is in `ptyrc manage log ID` alone.
+   prints the line and exits 2.
 5. The code: pure parts exported (`spot`, `options`, a `Show` with
    `put`, `heat`, `rnd` injected; `clock`: the faces of a `civil` time,
    a `Wall` with `now`, `zone` injected), so that `tests.js` drives
    them on a clock of its own. Session time is `Date.now()` and
    `tick(now)`; the wall clock `now()`, `civil`, and `period(until(
-   unixMs, 1000))` at each tick (live, 2026-11-20: a `period` asked in
-   `tick` applies a tick late, `ptyrc-box/src/live.rs`; the ticks fall
-   anywhere in the second; headless they are on it). A `Deck` cannot run in `--unit` (no
+   unixMs, 1000))` at each tick: the ticks fall on the second, live
+   and headless. A `Deck` cannot run in `--unit` (no
    session): keep `render(w, h)` a call of a pure face, test the faces,
    and the deck in cases. Colours are numbers: the twin's names
    `bright-cyan` 14, `bright-magenta` 13, `bright-yellow` 11,

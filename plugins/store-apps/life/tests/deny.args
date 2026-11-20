@@ -1,0 +1,4 @@
+# test_reads.py (life --cursor): pointer answered no: the soup goes on,
+# the moves reach nobody.
+--size 40x8 --for 1500ms --at 1500ms --seed 4 --speed 30 --cursor --deny pointer
+--pointer 500:20,4 --pointer 1000:21,4

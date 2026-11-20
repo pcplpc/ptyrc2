@@ -1,19 +1,16 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
-# The unit tests; then the widget in a wide screen at 0, 2 s, 3 s, and in
-# a narrow one: the driver picks the line. Against expected.txt.
-# After a change meant to change it: ./test.sh --update
+# The cases (tests/CASE.args, each report against tests/CASE.txt), then
+# the unit tests (tests.js). Exits 1 when one fails.
+# After a change meant to change a report: ./test.sh --update
 set -eu
 cd "$(dirname "$0")"
-"${PTYRC:-ptyrc}" dev test . --unit
-run() {
-  "${PTYRC:-ptyrc}" dev test . --size 40x8 --for 3s --at 0,2s,3s
-  "${PTYRC:-ptyrc}" dev test . --size 20x6 --for 1s --at 1s
-}
-if [ "${1:-}" = --update ]; then
-  run > expected.txt
-else
-  run > actual.txt
-  diff -u expected.txt actual.txt
-  rm actual.txt
+ptyrc=${PTYRC:-ptyrc}
+bless=
+[ "${1:-}" = --update ] && bless=--bless
+failed=0
+"$ptyrc" dev test . --cases $bless || failed=1
+if [ -f tests.js ]; then
+  "$ptyrc" dev test . --unit || failed=1
 fi
+exit $failed

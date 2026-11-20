@@ -22,6 +22,8 @@
 //! `--clock ISO`, `--zone NAME`, `--storage DIR`, `--file NAME=PATH`,
 //! `--write-file NAME=PATH` (the manifest's `write = true`),
 //! `--probe git|system=FILE.json`: the host functions (`hostfn`).
+//! `--storage-out FILE`: the storage at the end, one JSON object (key:
+//! value), the file opened before the profile, written after the run.
 //! `--assets DIR`, live too: `asset.*`, answered by the runner.
 //! `--styles`: under each screen, its styles. `--timing`: a last line,
 //! the ticks and the wall time of one (`Report::timing_line`); kept out
@@ -69,7 +71,7 @@ const USAGE: &str =
                  [--event T:TOPIC:JSON]... [--key T:KEY]... [--pointer T:X,Y]...
                  [--click T:X,Y]... [--press T:X,Y]... [--release T:X,Y]...
                  [--focus T:TAG]... [--paste T:TEXT]... [--resize T:CxR]...
-                 [--clock ISO] [--zone NAME] [--storage DIR] [--file NAME=PATH]...
+                 [--clock ISO] [--zone NAME] [--storage DIR] [--storage-out FILE] [--file NAME=PATH]...
                  [--write-file NAME=PATH]... [--probe git|system=FILE.json]...
                  [--user-word WORD]... [--user-pattern TEXT]... [--user-regex RE]...
                  [--front | --back] [--prefer P] [--alpha A] [--border B]
@@ -150,6 +152,7 @@ struct Cli {
     clock: Option<i64>,
     zone: Option<String>,
     storage: Option<PathBuf>,
+    storage_out: Option<PathBuf>,
     /// `(option, path, write)`.
     files: Vec<(String, PathBuf, bool)>,
     user_words: Vec<String>,
@@ -366,6 +369,7 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
             }
             "--zone" => cli.zone = Some(string(value("--zone")?)),
             "--storage" => cli.storage = Some(value("--storage")?.into()),
+            "--storage-out" => cli.storage_out = Some(value("--storage-out")?.into()),
             flag @ ("--file" | "--write-file") => {
                 let (n, p) = pair(flag, &string(value(flag)?))?;
                 cli.files.push((n, p, flag == "--write-file"));
@@ -424,6 +428,7 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
         || cli.clock.is_some()
         || cli.zone.is_some()
         || cli.storage.is_some()
+        || cli.storage_out.is_some()
         || !cli.files.is_empty()
         || !cli.probes.is_empty()
         || !cli.user_words.is_empty()
@@ -435,7 +440,7 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
             "--size, --for, --at, --tape, --screen, --json, --styles, --timing, --grant, \
              --deny, --words, --event, --key, --pointer, --click, --press, --release, --focus, \
              --paste, --resize, --clock, \
-             --zone, --storage, --file, --write-file, --probe, --user-word, --user-pattern, \
+             --zone, --storage, --storage-out, --file, --write-file, --probe, --user-word, --user-pattern, \
              --user-regex, --front, --back, --prefer, --alpha, --border, --surface: with \
              --headless"
                 .into(),
@@ -569,6 +574,14 @@ fn headless_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
         Ok(a) => a,
         Err(e) => return fail(2, e),
     };
+    // Opened now: no file is opened under the profile.
+    let storage_out = match &cli.storage_out {
+        Some(p) => match std::fs::File::create(p) {
+            Ok(f) => Some(f),
+            Err(e) => return fail(2, format!("--storage-out {}: {e}", p.display())),
+        },
+        None => None,
+    };
     if let Err(e) = confine(cli, false) {
         return fail(5, e);
     }
@@ -595,6 +608,13 @@ fn headless_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
     };
     for line in &report.log {
         eprintln!("{line}");
+    }
+    if let Some(mut f) = storage_out {
+        use std::io::Write;
+        let text = serde_json::to_string(&report.storage).unwrap_or_default();
+        if let Err(e) = f.write_all(text.as_bytes()) {
+            eprintln!("ptyrc-box: --storage-out: {e}");
+        }
     }
     if cli.json {
         println!("{}", report.to_json());

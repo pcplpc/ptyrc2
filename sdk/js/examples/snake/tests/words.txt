@@ -26,26 +26,3 @@ $ make
 cc -O2 -o snake snake.c
 
                                  ●
---- 1000 ms
-    @ooo                    ←↑↓→ ctrl+t
-
-
-
-
-
-
-
-      ●
-ended: exit: 0
---- 1000 ms
-
-
-
-
-
-
-      o
-  ●   o
-   @ooo
-refused at 0 ms: input.grab (denied)
-refused: keys-arrows, declared and answered no

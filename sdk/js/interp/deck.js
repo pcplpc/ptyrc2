@@ -2,7 +2,7 @@
 // The module "ptyrc/deck": widgets kept fresh, and the pieces of an
 // interactive one. `ptyrc.d.ts` is its contract.
 
-import { call, cells, Canvas, PtyrcError } from "ptyrc";
+import { call as hostCall, cells, Canvas, PtyrcError } from "ptyrc";
 
 // What of a widget's info a hover stands on.
 const PLACE = ["sprite", "variant", "rect"];
@@ -129,11 +129,11 @@ export class Widget {
     if (opts.variant != null) p.variant = opts.variant;
     if (rows != null) p.content = content(rows);
     if (opts.title != null) p.title = opts.title;
-    call("widget.set", p);
+    this.#deck.call("widget.set", p);
   }
   hide() {
     try {
-      call("widget.hide", { id: this.id });
+      this.#deck.call("widget.hide", { id: this.id });
     } catch (e) {
       if (!(e instanceof PtyrcError) || (e.code !== "no-sprite" && e.code !== "gone")) throw e;
     }
@@ -143,12 +143,12 @@ export class Widget {
   ask(opts = {}) {
     const p = { id: this.id };
     for (const k of ["quiet", "escape", "close"]) if (opts[k] != null) p[k] = opts[k];
-    const answer = call("widget.ask", p);
+    const answer = this.#deck.call("widget.ask", p);
     if (answer?.widget) this.info = answer.widget;
   }
   release() {
     try {
-      call("widget.release", { id: this.id });
+      this.#deck.call("widget.release", { id: this.id });
     } catch (e) {
       if (!(e instanceof PtyrcError) || (e.code !== "no-sprite" && e.code !== "gone")) throw e;
     }
@@ -169,8 +169,10 @@ export class Deck {
   #overUntil = null;
   #keys = new Map();
   constructor(options = {}) {
-    const { every, hoverTimeout, ...show } = options;
-    for (const k of Object.keys(show)) if (!SHOW.includes(k)) throw bad(`new Deck(options): ${k}: not one of ${SHOW.join(", ")}, every, hoverTimeout`);
+    const { every, hoverTimeout, call = hostCall, ...show } = options;
+    for (const k of Object.keys(show)) if (!SHOW.includes(k)) throw bad(`new Deck(options): ${k}: not one of ${SHOW.join(", ")}, every, hoverTimeout, call`);
+    if (typeof call !== "function") throw bad("new Deck({call}): this.call(method, params) is a function");
+    this.call = call;
     this.#defaults = show;
     this.#every = !!every;
     this.widgets = [];
@@ -183,13 +185,13 @@ export class Deck {
     if (!fresh.length) return;
     fresh.forEach((t) => this.#subscribed.add(t));
     try {
-      call("subscribe", { topics: fresh });
+      this.call("subscribe", { topics: fresh });
     } catch (e) {
       if (!(e instanceof PtyrcError)) throw e;
       // One topic refused refuses all: each alone.
       for (const t of fresh)
         try {
-          call("subscribe", { topics: [t] });
+          this.call("subscribe", { topics: [t] });
         } catch (e2) {
           if (!(e2 instanceof PtyrcError)) throw e2;
         }
@@ -201,7 +203,7 @@ export class Deck {
     if (!calls.length) return;
     if (calls.length > 1 && this.#batch) {
       try {
-        const out = call("batch", { calls });
+        const out = this.call("batch", { calls });
         for (const r of out.results ?? []) if (r.error) throw new PtyrcError(r.error);
         return;
       } catch (e) {
@@ -209,7 +211,7 @@ export class Deck {
         this.#batch = false;
       }
     }
-    for (const c of calls) call(c.method, c.params);
+    for (const c of calls) this.call(c.method, c.params);
   }
 
   #declare(w, sizes) {
@@ -219,7 +221,7 @@ export class Deck {
       if (name !== null) v.name = name;
       return v;
     });
-    call("widget.declare", { widgets: list });
+    this.call("widget.declare", { widgets: list });
     const show = { tag: w.tag };
     for (const k of SHOW) {
       const v = w.options[k] ?? this.#defaults[k];
@@ -227,7 +229,7 @@ export class Deck {
     }
     this.#forget(w);
     w.hidden = false;
-    const answer = call("widget.show", show);
+    const answer = this.call("widget.show", show);
     if (answer?.widget) w.info = answer.widget;
     for (const v of list) this.#sent.set(`${w.id}:${v.name ?? `${v.size[0]}x${v.size[1]}`}`, JSON.stringify(v.content));
     if (w.options.key || w.options.paste) {
@@ -254,6 +256,7 @@ export class Deck {
     const w = new Widget(this, tag, render, options);
     if (options.key || options.paste) this.#keys.set(w, new Keys());
     if (options.hover || options.leave) this.#subscribe("hover");
+    if (options.click) this.#subscribe("mouse");
     this.widgets.push(w);
     this.#declare(w, sizes);
     return w;
@@ -311,16 +314,30 @@ export class Deck {
     if (w && w.options.leave && w.options.leave(w) !== false) this.draw(w);
   }
 
-  #hover(data) {
+  // The widget with `handler` under the screen cell of `data`, and the
+  // cell of its inner box.
+  #under(data, handler) {
     let found = null;
     for (const w of this.widgets) {
-      const h = w.options.hover;
       const { rect, size } = w;
-      if (!h || data.sprite == null || w.info.sprite !== data.sprite || !rect || !size) continue;
+      if (!w.options[handler] || data.sprite == null || w.info.sprite !== data.sprite || !rect || !size) continue;
       const x = data.x - rect[0] - ((rect[2] - size[0]) >> 1);
       const y = data.y - rect[1] - ((rect[3] - size[1]) >> 1);
       if (x >= 0 && x < size[0] && y >= 0 && y < size[1]) found = [w, x, y];
     }
+    return found;
+  }
+
+  #mouse(data) {
+    if (data?.action !== "press" && data?.action !== "wheel") return;
+    const found = this.#under(data, "click");
+    if (!found) return;
+    const [w, x, y] = found;
+    if (w.options.click(x, y, data.button, w) !== false) this.draw(w);
+  }
+
+  #hover(data) {
+    const found = this.#under(data, "hover");
     if (!found || found[0] !== this.#over) this.leave();
     if (!found) return;
     const [w, x, y] = found;
@@ -378,6 +395,9 @@ export class Deck {
         return true;
       case "hover":
         this.#hover(data);
+        return true;
+      case "mouse":
+        this.#mouse(data);
         return true;
       case "input":
         return this.#input(data);

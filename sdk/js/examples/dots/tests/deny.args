@@ -1,0 +1,2 @@
+# shape denied: a blank view, dots everywhere
+--size 30x6 --screen tests/hello.screen --deny shape --for 1s --at 1s

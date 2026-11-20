@@ -475,6 +475,8 @@ export function assertThrows(f, kind, message) {
 // `file:line:column: what`, the frames of the app, the cure when known.
 
 const FRAMES = 6;
+// The modules of the SDK beside "ptyrc": their frames are left out.
+const SDK = ["ptyrc/deck", "ptyrc/canvas", "ptyrc/sight"];
 const NO_TIMER = "no timer: ask a period (period(50)) and count in tick(now)";
 const NO_NETWORK = "no network: a store app has none";
 const NO_PAGE = 'no page: draw on a Canvas from "ptyrc"';
@@ -497,7 +499,7 @@ function describe(e) {
   const frames = [];
   for (const line of String(e.stack ?? "").split("\n")) {
     const at = /^\s*at (?:.* \()?(.+?):(\d+):(\d+)\)?$/.exec(line);
-    if (at && at[1] !== "ptyrc" && at[1] !== "ptyrc/deck" && at[1] !== "native" && !at[1].startsWith("<")) frames.push({ line: line.trimEnd(), where: `${at[1]}:${at[2]}:${at[3]}` });
+    if (at && at[1] !== "ptyrc" && !SDK.includes(at[1]) && at[1] !== "native" && !at[1].startsWith("<")) frames.push({ line: line.trimEnd(), where: `${at[1]}:${at[2]}:${at[3]}` });
   }
   // A file that does not parse: its place, the message.
   const parsing = e.name === "SyntaxError" && frames.length && !frames.some((f) => f.line.includes(" ("));
