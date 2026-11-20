@@ -535,3 +535,75 @@ fn check_names_the_ceiling() {
     );
     assert!(err.contains("memory-mib = 512 at most"), "{err}");
 }
+
+const RUN: &str = r#"
+import { call, exit } from "ptyrc";
+function t(m, p) { try { return call(m, p); } catch (e) { return e.code; } }
+export function init(args) {
+  const grab = t("input.grab", { keys: ["up"] });
+  const out = [typeof grab === "string" ? grab : "grabbed"];
+  if (args.save) out.push(t("file.write", { file: args.save.file, text: "x" }));
+  if (args.look) out.push(t("file.write", { file: args.look.file, text: "x" }));
+  for (const p of [args.name, args.todo, "hello"]) {
+    if (p) out.push(t("screen.find", { pattern: p }).matches.length);
+  }
+  call("app.result", { value: out });
+  exit(0);
+}
+"#;
+
+/// `dev test` holds the app to what the run asks (`Resolved::asked`):
+/// a permission an option needs, only with that option; the user's
+/// word and pattern found; `--file NAME=PATH` a handle, written back
+/// only when the manifest says `write = true`.
+#[test]
+fn the_run_asks_what_its_options_need() {
+    if !has_js() {
+        return;
+    }
+    let dir = scratch("asked");
+    std::fs::write(
+        dir.join("ptyrc-app.toml"),
+        "[app]\nid = \"asked\"\nversion = \"0.1.0\"\nsummary = \"A probe.\"\n\
+         license = \"GPL-3.0-or-later\"\napi = 1\nscript = \"app.js\"\n\
+         [permissions]\nshape = \"walls\"\nkeys-arrows = \"steer\"\n\
+         files = \"named\"\nfiles-write = \"kept\"\n\
+         [options]\nsteer = { type = \"bool\", default = false, needs = [\"keys-arrows\"], \
+         doc = \"steer\" }\n\
+         save = { type = \"file\", write = true, doc = \"kept\" }\n\
+         look = { type = \"file\", doc = \"read\" }\n\
+         name = { type = \"word\", doc = \"a word\" }\n\
+         todo = { type = \"pattern\", doc = \"a mark\" }\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("app.js"), RUN).unwrap();
+    std::fs::write(dir.join("screen.txt"), "hello Rose TODO:\n").unwrap();
+    std::fs::write(dir.join("a.txt"), "a").unwrap();
+    let run = |more: &[&str]| {
+        let base = [
+            "dev",
+            "test",
+            "--json",
+            "--for",
+            "0",
+            "--screen",
+            "screen.txt",
+        ];
+        let out = ok(&ptyrc(&dir, &[&base[..], more].concat()));
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        v["result"]["value"].clone()
+    };
+    assert_eq!(run(&[]), json!(["denied", 0]));
+    assert_eq!(run(&["--steer"]), json!(["grabbed", 0]));
+    assert_eq!(
+        run(&["--name", "rose", "--todo", "TODO:"]),
+        json!(["denied", 1, 1, 0])
+    );
+    assert_eq!(
+        run(&["--file", "save=a.txt", "--file", "look=a.txt"]),
+        json!(["denied", {"size": 1, "mtime_ms": 946_684_800_000_u64}, "denied", 0])
+    );
+    let out = ptyrc(&dir, &["dev", "test", "--file", "nope=a.txt"]);
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("nope: not a file or directory option"));
+}

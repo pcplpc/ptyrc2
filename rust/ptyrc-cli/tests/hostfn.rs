@@ -472,3 +472,60 @@ fn files_and_probes_of_a_store_app() {
         "{text}"
     );
 }
+
+const ASSETS: &str = r#"
+import { call, exit } from "ptyrc";
+export function init(args) {
+  call("app.result", { value: [call("asset.list"), call("asset.read", { name: "a/hello.txt" })] });
+  exit(0);
+}
+export function tick(now) {}
+export function event(topic, data) {}
+"#;
+
+/// The driver starts a store app with `--assets` of its tree: `asset.*`
+/// answered by the runner.
+#[test]
+fn a_store_app_reads_its_assets() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        assert!(
+            std::env::var_os("PTYRC_REQUIRE_JS").is_none(),
+            "no interpreter"
+        );
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let runner = Path::new(BIN).with_file_name("ptyrc-box");
+    if !runner.is_file() {
+        let built = std::process::Command::new(env!("CARGO"))
+            .args(["build", "-p", "ptyrc-box", "--bin", "ptyrc-box"])
+            .status()
+            .unwrap();
+        assert!(built.success());
+    }
+    let sb = Sandbox::new("hostfn-assets");
+    let assets = sb.dir.join("repo-assets/assets/a");
+    std::fs::create_dir_all(&assets).unwrap();
+    std::fs::write(assets.join("hello.txt"), "hi").unwrap();
+    install(&sb, "assets", "assets = \"assets/\"\n", ASSETS);
+    let mut driver = sb.ptyrc();
+    driver
+        .env("PTYRC_BOX", &runner)
+        .env("PTYRC_JS", &js)
+        .args(["run", "--name", "h", "--headless", "--", "cat"])
+        .stdin(std::process::Stdio::null());
+    let _driver = common::Proc(driver.spawn().unwrap());
+    common::wait_for(
+        || std::os::unix::net::UnixStream::connect(sb.socket("h")).is_ok(),
+        "socket",
+    );
+    let out = sb.run(&["-s", "h", "--json", "app", "assets", "--wait"]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let got: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        got[0]["assets"],
+        json!([{"name": "a/hello.txt", "size": 2}])
+    );
+    assert_eq!(got[1]["text"], "hi", "{got}");
+}

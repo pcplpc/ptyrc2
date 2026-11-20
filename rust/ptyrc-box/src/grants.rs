@@ -39,6 +39,13 @@ pub struct Grants {
     held: BTreeSet<String>,
     /// The words of `words`, as declared.
     pub words: Vec<String>,
+    /// The user's words (a `word` option given): found at any degree,
+    /// shown from `shape` (`ptyrc-server`, `lower.rs`).
+    pub user_words: Vec<String>,
+    /// The user's patterns (a `pattern` option given): `(pattern,
+    /// regex)`; `screen.find`, `screen.wait` of exactly one answered as
+    /// under `text`.
+    pub patterns: Vec<(String, bool)>,
 }
 
 impl Grants {
@@ -64,6 +71,8 @@ impl Grants {
             declared,
             held,
             words: words.iter().map(|s| s.as_ref().to_owned()).collect(),
+            user_words: Vec::new(),
+            patterns: Vec::new(),
         }
     }
 
@@ -86,18 +95,40 @@ impl Grants {
         held.max().unwrap_or(Degree::None)
     }
 
-    /// The words shown: those declared, when `words` is held.
-    pub fn held_words(&self) -> &[String] {
-        match self.degree() >= Degree::Words {
-            true => &self.words,
-            false => &[],
+    /// The words found: those declared, when `words` is held; the
+    /// user's, at any degree.
+    pub fn found_words(&self) -> Vec<String> {
+        let mut found = match self.degree() >= Degree::Words {
+            true => self.words.clone(),
+            false => Vec::new(),
+        };
+        found.extend(self.user_words.iter().cloned());
+        found
+    }
+
+    /// The words shown: those found, from `shape`.
+    pub fn held_words(&self) -> Vec<String> {
+        match self.degree() >= Degree::Shape {
+            true => self.found_words(),
+            false => Vec::new(),
         }
     }
 
-    /// Whether `word` is among the words held, case ignored.
+    /// Whether `word` is among the words shown, case ignored.
     pub fn holds_word(&self, word: &str) -> bool {
         let word = word.to_lowercase();
         self.held_words().iter().any(|h| h.to_lowercase() == word)
+    }
+
+    /// Whether `word` is among the words found, case ignored.
+    pub fn finds_word(&self, word: &str) -> bool {
+        let word = word.to_lowercase();
+        self.found_words().iter().any(|h| h.to_lowercase() == word)
+    }
+
+    /// Whether `(pattern, regex)` is a pattern of the user.
+    pub fn user_pattern(&self, pattern: &str, regex: bool) -> bool {
+        (self.patterns.iter()).any(|(p, r)| p == pattern && *r == regex)
     }
 }
 

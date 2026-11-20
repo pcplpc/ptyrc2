@@ -861,6 +861,26 @@ impl Engine for ScreenEngine {
         }))
     }
 
+    fn canvas_at(&self, sprite: u64, x: u16, y: u16) -> Option<[i64; 2]> {
+        if self.veil != Veil::Off {
+            return None;
+        }
+        let list = self.scene.list();
+        let s = list.iter().find(|s| s.id == sprite)?;
+        let [sx, sy] = s.screen?;
+        let (cx, cy) = (x as i64 - sx, y as i64 - sy);
+        let [w, h] = s.size;
+        let inside = (0..w as i64).contains(&cx) && (0..h as i64).contains(&cy);
+        let in_view = match s.frame {
+            Some(frame) if frame != ptyrc_core::RAW => self.frames.info(frame).is_some_and(|i| {
+                let r = i.rect;
+                i.usable && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h
+            }),
+            _ => true,
+        };
+        (inside && in_view).then_some([cx, cy])
+    }
+
     fn bracketed_paste(&self) -> bool {
         self.app.modes().bracketed_paste
     }

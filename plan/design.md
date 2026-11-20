@@ -1652,7 +1652,10 @@ that moves a snapshot is read in the diff of the `.snap`.
   cell, with one move between when the app follows drags (1002, 1003).
   `not-usable` when the app asked for no mouse report, or for a cell
   X10 cannot tell (past 222).
-- Host mouse (`mouse.rs`): while a client is subscribed to `mouse`, the
+- Host mouse (`mouse.rs`): while a client is subscribed to `mouse`
+  (an app that does not hold the whole session: with `clicks`, or
+  once it showed a widget or put a sprite in front; `hover` likewise
+  with `pointer`; `Driver::asks_host_mouse`), the
   driver asks the host terminal for reports (1002, 1006; asked again
   after a burst that sets a private mode) and takes them out of the
   keyboard stream, SGR or X10, before a grab. A report on a sprite (the
@@ -1792,6 +1795,11 @@ the pop-up, `app.start {store}`.
   {NAME: REASON}, "words": [WORD]}`, what the child asks, kept on its
   entry (`permissions::Declared`). A name not known: `bad-params`.
   Absent: the child holds the whole session, as before.
+  The hotkey's child (`ptyrc manage`, or the command configured)
+  declares nothing: the user's own tool, started by the user's key
+  (principle 4), it holds the whole session; what it needs (`app.*`,
+  a modal, `input.send`) is open to no app. Not keyed in
+  `permissions.toml`, not asked.
 - **`permissions.toml`**, in `$XDG_CONFIG_HOME/ptyrc/`, else
   `~/.config/ptyrc/`: the answers, one table per identity. Written by
   the driver alone (`permissions::remember`): mode 0600, the directory
@@ -1910,6 +1918,19 @@ the pop-up, `app.start {store}`.
   put: `no-sprite`, as an id that does not exist; `draw.clear {all}`:
   its own. `widget.set`, `.hide`, `.ask`, `.release` are of the
   connection already. Errors `no-frame`, `no-sprite`: no hint.
+  `screen.text`, `screen.cells {sprites: true}`, with `text`: the
+  sprites of its connections alone (`owners`, set by the driver;
+  `Scene::compose_of`).
+- **Where it landed** (`own::landing`, principle 3): in `draw.list`,
+  `screen`, `visible`, `covered` of a sprite anchored by what the app
+  may not read are told at the degree that would have told it: `anchor
+  {text}` a listed word (literal) at `words`, a word of the user at
+  `shape`, else `text`; `{cursor}`, `{auto}` at `shape`; else `screen`
+  null, `visible` false, `covered` 0, as a sprite not placed yet. A
+  store app's `frame`: 0 below `layout`; `NOWHERE` told as its
+  surface's frame. The errors of `draw.put`, `draw.update` on an
+  anchor are of its syntax alone (an empty text, a bad regex): they
+  tell nothing of the screen.
 - **A store app** (`driver/own.rs`), besides:
   - Its band of layers: `layer` of `draw.put`, `draw.ext`, of
     `draw.update` and `widget.show` when given, is replaced by its own,
@@ -1929,7 +1950,13 @@ the pop-up, `app.start {store}`.
     as `frame`. `widget`: a widget as named; a bare sprite on
     `rpc::NOWHERE`, a frame id no frame has: put, listed, never shown.
     Clipped, never refused; nothing in the answers tells it. Its frame
-    gone (a new layout): what it draws goes to `NOWHERE` until moved.
+    gone (a new layout): the pane that took its place, if one did
+    (`driver/heir.rs`, the rule of `_cli.heir`: a usable pane of the
+    same key over half of the smaller of the two, in proportion after a
+    resize; the most overlap), is its frame; the sprites it put there
+    or on `NOWHERE` go along; it is told `move {frame}`, then `size`,
+    when subscribed. No heir: what it draws goes to `NOWHERE` until
+    moved.
   - Limits of the driver, all its connections: 256 sprites
     (`draw.put`, `draw.ext` without `id`), 16 widgets (`widget.show` of
     a new tag), 32 subscriptions. Past one: `not-usable`, the message
@@ -1946,6 +1973,19 @@ the pop-up, `app.start {store}`.
   the program when a listener of the whole session hears it, or one
   told it on its own thing, or one that holds `clicks-grab`; else the
   program has it too.
+- **The pointer told to an effect** (`driver/nozzle.rs`): `pointer`,
+  `bomb` (booleans) in the `params` of the effect of `draw.put`,
+  `draw.update` are the driver's, taken out before the effect sees
+  them; any connection. `pointer`: on each host move the driver tunes
+  the effect with `hover`, the cell of its canvas under the pointer
+  (shown, in the view of its frame), or null, when it changes. `bomb`:
+  a press on its canvas, then its release: `bomb` `[x, y, ms]`, with
+  `dx, dy` when released on another screen cell. The app is told
+  nothing (principle 2): no permission. The press, its drags and
+  release are taken from the program when the app holds `clicks-grab`
+  or the whole session; else the program has them too. The host mouse
+  is asked while such an effect is (`hover`, `mouse` heard by the
+  driver).
 - **The driver's looks** (`driver/own.rs`), for every such app: a
   `border` of `widget.declare`, `widget.show` that is `alert` (or of
   that `base`), or double lines (`double`, `╔═║`...) on a background
@@ -2035,7 +2075,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `screen.shape` | `frame`, `rect`, `words` | as `screen.text`: where there is ink, and the words named; see below |
 | `screen.cursor` | `trail` | `{"x","y","visible","frame","pos":[x,y],"trail":[[ms,x,y],...]}`; `frame`: the innermost frame showing it, `pos`: its cell there |
 | `screen.wait` | `pattern` or `stable_ms` or `idle` (or `gone`), `timeout_ms`, `frame` | `{"matched":bool,"match":...}`; with `idle`: `{"matched":true,"match":null,"frame":id,"idle":{"score","idle","free"}}`, the frame name resolved at each look |
-| `input.send` | `text` or `keys` or `bytes` (base64), `paste`, `host` (typed as on the host keyboard: hotkey, focus, grab) | `{}` |
+| `input.send` | `text` or `keys` or `bytes` (base64), `paste` (bracketed when the app asked; `ESC [201~` in the text left out), `host` (typed as on the host keyboard: hotkey, focus, grab) | `{}` |
 | `input.click` | `x`, `y` (screen cell), `button`: `left`, `middle`, `right`, `wheel-up`, `wheel-down`, `wheel-left`, `wheel-right`; `mods`: `shift`, `alt`, `ctrl`; `count` (1 to 3); `to`: `[x, y]` | `{}` |
 | `input.grab` | `keys`: names (absent: all), `escape` (`ctrl+t`) | `{"escape":name}` |
 | `input.release` | | `{}` |

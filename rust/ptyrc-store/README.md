@@ -92,7 +92,8 @@ let checked = check(&tree)?;                         // or DirTree::new(dir)
   (no `..`, `.git`, absolute, control), regular files and directories
   only, 512 files, 8 MiB, a `.js` 1 MiB, the manifest 64 KiB and valid,
   the GPL-3 text as `LICENSE`/`COPYING` at the app root, the entry,
-  `assets`, `tape`.
+  `assets` (each name under it by the runner's rule, `ASSET_RULE`),
+  `tape`.
 - `check_all`: every problem (`Vec<Error>`, never empty); what needs
   the manifest is skipped without it. `check` is its first.
 - `DirTree` skips, at its root, `.git` and a directory holding

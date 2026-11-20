@@ -16,6 +16,8 @@ use std::sync::Arc;
 const MAX_INSTANTS: usize = 64;
 /// The range of an instant, ms: that of a `Date` in a script.
 const MAX_MS: i64 = 8_640_000_000_000_000;
+/// A real `probe.git` a second, at most (the driver's `PROBE_EVERY`).
+const PROBE_EVERY_MS: u64 = 1000;
 /// `storage.set` and `file.write` a second, at most.
 pub const WRITES_A_SECOND: u32 = 16;
 /// A result, serialised, at most.
@@ -158,6 +160,9 @@ pub struct Named {
     pub content: Content,
     /// Written by the app, in memory.
     pub written: bool,
+    /// The manifest's `write = true` (`--write-file`): written back
+    /// with `files-write`.
+    pub write: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -191,6 +196,7 @@ impl Named {
             entries: None,
             content: Content::default(),
             written: false,
+            write: false,
         };
         // A link in place of the file named: absent, as the driver.
         let meta = match std::fs::symlink_metadata(path) {
@@ -263,6 +269,8 @@ pub struct HostFns {
     pub probes: BTreeMap<String, Value>,
     /// Probes held and asked with no answer given.
     pub unanswered: Vec<String>,
+    /// `probe.git`: `(ms, params but since)` of the last read.
+    pub git_read: Option<(u64, Value)>,
     /// `(second, count)` of the writes.
     pub window: (u64, u32),
 }
@@ -400,6 +408,9 @@ impl HostFns {
                 if in_batch {
                     return Err(not_in_batch(method));
                 }
+                if part == "git" {
+                    return self.git(params, now_ms, none);
+                }
                 match self.probes.get(part) {
                     Some(answer) => Ok(answer.clone()),
                     None => {
@@ -414,6 +425,40 @@ impl HostFns {
             _ if method.starts_with("storage.") => self.storage(method, params, now_ms),
             _ => self.file(method, params, now_ms, writable),
         }
+    }
+
+    /// `probe.git` as the driver answers it: one read a second; sooner,
+    /// the last answer to the same params (`unchanged` when `since` is
+    /// its stamp), `not-usable` to others.
+    fn git(&mut self, params: &Value, now_ms: u64, none: Value) -> Result<Value, CallError> {
+        let mut key = params.clone();
+        if let Some(o) = key.as_object_mut() {
+            o.remove("since");
+        }
+        let Some(answer) = self.probes.get("git").cloned() else {
+            if !self.unanswered.iter().any(|p| p == "git") {
+                self.unanswered.push("git".into());
+            }
+            return Ok(none);
+        };
+        match &self.git_read {
+            Some((at, asked)) if now_ms < at + PROBE_EVERY_MS && *asked != key => {
+                return Err(CallError {
+                    hint: Some(
+                        "asked again within the second, the same params get the last answer".into(),
+                    ),
+                    ..CallError::new("not-usable", "probe.git: one read a second")
+                });
+            }
+            Some((at, _)) if now_ms < at + PROBE_EVERY_MS => {}
+            _ => self.git_read = Some((now_ms, key)),
+        }
+        let stamp = &answer["stamp"];
+        let since = params.get("since").and_then(Value::as_str);
+        Ok(match since.is_some() && since == stamp.as_str() {
+            true => json!({"unchanged": true, "stamp": stamp}),
+            false => answer,
+        })
     }
 
     /// One write more this second, or `not-usable`.
@@ -562,7 +607,7 @@ impl HostFns {
                     "a file handle",
                 ));
             }
-            if !writable {
+            if !writable || !self.files[i].write {
                 return Err(CallError {
                     hint: Some(
                         "a box ticked is written back: the manifest's `write = true` and \
@@ -810,6 +855,7 @@ mod tests {
                 mtime_ms: 7,
             },
             written: false,
+            write: true,
         };
         let mut dir = file(None);
         dir.name = "pics".into();
@@ -868,6 +914,11 @@ mod tests {
             false,
         );
         assert_eq!(w.unwrap_err().code, "denied");
+        // Not `write = true` in the manifest: denied, `files-write` held.
+        h.files[0].write = false;
+        let e = call(&mut h, "file.write", json!({"file": "f0", "text": "x"})).unwrap_err();
+        assert_eq!(e.code, "denied");
+        h.files[0].write = true;
         let e = call(
             &mut h,
             "file.write",
@@ -898,7 +949,7 @@ mod tests {
         let mut h = HostFns::default();
         h.probes
             .insert("git".into(), json!({"repo": {"name": "x"}, "stamp": "s"}));
-        let g = call(&mut h, "probe.git", json!({})).unwrap();
+        let g = call(&mut h, "probe.git", json!({"parts": ["head"]})).unwrap();
         assert_eq!(g["repo"]["name"], "x");
         let s = call(&mut h, "probe.system", json!({})).unwrap();
         assert_eq!(s["degree"], "none");
@@ -907,5 +958,17 @@ mod tests {
             .call("probe.git", &json!({}), 0, true, false, true)
             .unwrap();
         assert_eq!(low, json!({"repo": null, "degree": "none"}));
+        // Within the second of the read: the same params, the last
+        // answer; others, `not-usable`; past it, a read.
+        let mut git = |params: Value, ms| h.call("probe.git", &params, ms, false, false, false);
+        let since = json!({"parts": ["head"], "since": "s"});
+        assert_eq!(
+            git(since, 999).unwrap(),
+            json!({"unchanged": true, "stamp": "s"})
+        );
+        let e = git(json!({"parts": ["log"]}), 999).unwrap_err();
+        assert_eq!(e.code, "not-usable");
+        assert_eq!(git(json!({"parts": ["log"]}), 1000).unwrap()["stamp"], "s");
+        assert_eq!(git(json!({}), 1500).unwrap_err().code, "not-usable");
     }
 }

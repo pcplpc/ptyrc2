@@ -35,7 +35,7 @@ its own widget, or its own sprite in front of the text.
 | `keys-read` | topic `input`: every key | subscribed, no event | red |
 | `pointer` | topic `hover` elsewhere than its own things: moves anywhere | no event there | plain |
 | `clicks` | topic `mouse` elsewhere than its own things: clicks anywhere | no event there | red |
-| `clicks-grab` | a click it is told elsewhere taken from the program | the program has it too | red |
+| `clicks-grab` | a click it is told elsewhere, or told to its effect (`bomb`), taken from the program | the program has it too | red |
 | `limit-memory` | `[limits]` `memory-mib`, `canvas-screens`, `log-mib` | the default | plain |
 | `limit-time` | `[limits]` `tick-ms`, `init-ms`, `calls-per-second` | the default | plain |
 | `clock` | `clock.now`, `clock.zone`: the wall clock, zones | session time as the epoch, UTC, `"degree": "none"` | plain |
@@ -96,7 +96,7 @@ Cut answers:
 | `draw.update` | `id`, members to change; `effect` tunes the running one | `{}` | — |
 | `draw.remove` | `id` | `{}` | — |
 | `draw.clear` | | `{"removed":n}`: its own | — |
-| `draw.list` | | `{"sprites":[...]}`: its own | — |
+| `draw.list` | | `{"sprites":[...]}`: its own; where an anchor landed (`screen`, `visible`, `covered`) told at the degree that finds it (`text`: `words` for a listed word, else `text`; `cursor`, `auto`: `shape`), else `screen` null, `visible` false; `frame` 0 below `layout` | — |
 | `draw.ext` | `name`, `function`, `params`, sprite members; `id`: redraw that one | `{"id":n}` | — |
 | `draw.exts` | | `{"exts":[{"name","functions"}],"effects":[name]}` | — |
 | `widget.declare` | `widgets`: `[{tag, name, size:[w,h], content}]`, `border` | `{"tags":[...]}` | — |
@@ -131,7 +131,12 @@ y], "space": "view" | "frame"}`, `{"text": "word", "side": "right" |
 "left" | "above" | "below" | "over"}`, `{"auto": {"prefer":
 "top-right"}}`, `{"cursor": {"dx": 1, "dy": 0}}`. `layer`: absent or
 negative, behind the text; in front only with `front` (else behind).
-Effects: `draw.exts`. Limits of the driver: 256 sprites, 16 widgets,
+Effects: `draw.exts`. `params` of an effect, the driver's, of
+`draw.put` and `draw.update`: `"pointer": true`, the driver tunes
+`hover` (the canvas cell under the host pointer, or null); `"bomb":
+true`, on the release of a press on its canvas, `bomb` (`[x, y, ms]`,
+`[x, y, ms, dx, dy]` released elsewhere). The app is told nothing. The
+press is taken from the program with `clicks-grab`. Limits of the driver: 256 sprites, 16 widgets,
 32 subscriptions; past one, `not-usable`.
 
 Host functions (`clock.*`, `storage.*`, `app.result`, `file.*`,
@@ -171,8 +176,9 @@ Host functions (`clock.*`, `storage.*`, `app.result`, `file.*`,
 | `mouse` | `{"sprite","button","action","mods","at","x","y","frame","pos"}` | — on its own widget or sprite in front; elsewhere `clicks` |
 | `hover` | `{"sprite","at","x","y","frame","pos","mods"}`; `sprite` null: left | — on its own widget or sprite in front; elsewhere `pointer` |
 
-- `screen.*` answers the wrapped program's cells, never the composed
-  picture: an app never reads its own sprites, nor another's.
+- `screen.*` answers the wrapped program's cells. With `text`,
+  `screen.text`, `screen.cells {sprites: true}` compose its own
+  sprites alone over them: an app never reads another's.
 - Poll or subscribe: a `call` costs one of 1000 a second. Subscribe to
   `text` or `screen` and read on the event; poll at the tick only when
   that topic is not held. `size` is always worth subscribing.
@@ -205,13 +211,20 @@ calls a second), `headless`.
   `--clock ISO` (default `2000-01-01T00:00:00Z`) advancing with session
   time, local zone `--zone NAME` (default `UTC`); `storage.*` empty,
   or the files of `--storage DIR` (never written back); `app.result`;
-  `file.*` on `--file NAME=PATH` (the handle under `NAME` in `init`;
-  writes in memory); `probe.*` from `--probe git=FILE.json` (none: the
-  not-held answer); `asset.*` from `[app] assets`. The report:
+  `file.*` on a file option given (`--NAME PATH`, or `--file
+  NAME=PATH`; `ARG#N` names the `N`th value of `[args]`, from 0): its
+  handle in `init`, writes in memory, only with `write = true` and
+  `files-write`; `probe.*` from `--probe git=FILE.json` (none: the
+  not-held answer; `probe.git` one read a second, as the driver); `asset.*` from `[app] assets`. The report:
   `result:` (and the status), `storage:`, `files:` (written); `--json`
   their values.
-- The permissions are those the manifest declares (`[limits]`:
-  `limit-memory`, `limit-time`); `--deny a,b` answers them no. The
+- The permissions are those the manifest declares for the run (a
+  permission tied to an option by `needs`, or `files`, `files-write`
+  to a file option: only when that option asks it; `[limits]`:
+  `limit-memory`, `limit-time`); `--deny a,b` answers them no. A
+  `word` or `pattern` option given is held as the driver holds it.
+  The launcher's options (`--front`, `--back`, `--prefer`, `--alpha`,
+  `--border`) apply as under `ptyrc app`. The
   report names each request `refused`, each answer `lowered` and the
   permission it lacked; one not declared is fine if intended: an app
   that declares less is asked less.

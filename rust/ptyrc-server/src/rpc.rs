@@ -145,12 +145,20 @@ struct ViewParams {
     /// What the host shows: the app and the sprites over it.
     #[serde(default)]
     sprites: bool,
+    /// Of `sprites`: these owners' alone. Set by the driver for an app
+    /// that sees its own (`driver/own.rs`).
+    #[serde(default)]
+    owners: Option<Vec<u64>>,
 }
 
 /// The grid a view is read from: the app's, or the composed one.
-fn shown(engine: &ScreenEngine, sprites: bool) -> std::borrow::Cow<'_, Grid> {
-    if sprites {
-        std::borrow::Cow::Owned(engine.scene.compose(engine.app.grid(), &engine.frames))
+fn shown<'e>(engine: &'e ScreenEngine, p: &ViewParams) -> std::borrow::Cow<'e, Grid> {
+    let (grid, frames) = (engine.app.grid(), &engine.frames);
+    if p.sprites {
+        std::borrow::Cow::Owned(match &p.owners {
+            Some(owners) => engine.scene.compose_of(grid, frames, owners),
+            None => engine.scene.compose(grid, frames),
+        })
     } else {
         std::borrow::Cow::Borrowed(engine.app.grid())
     }
@@ -160,7 +168,7 @@ fn screen_text(engine: &ScreenEngine, params: Value) -> Res {
     let p: ViewParams = parse(params)?;
     let id = frame_of(engine, &p.frame)?;
     let rect = view_rect(engine, id, p.rect)?;
-    let grid = shown(engine, p.sprites);
+    let grid = shown(engine, &p);
     let lines = if p.ansi {
         let all = render_ansi(&grid, Some(&engine.app));
         if rect == grid.rect() {
@@ -204,7 +212,7 @@ fn screen_cells(engine: &ScreenEngine, params: Value) -> Res {
     let p: ViewParams = parse(params)?;
     let id = frame_of(engine, &p.frame)?;
     let rect = view_rect(engine, id, p.rect)?;
-    let grid = shown(engine, p.sprites);
+    let grid = shown(engine, &p);
     let rows: Vec<Value> = (rect.y..rect.bottom())
         .map(|row| {
             let cells: Vec<&Cell> = (rect.x..rect.right()).map(|c| grid.cell(c, row)).collect();

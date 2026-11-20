@@ -3539,3 +3539,17 @@ fn sprite_cells_are_capped() {
         .unwrap_err();
     assert!(e.to_string().starts_with("size: 4096x4096"), "{e}");
 }
+
+#[test]
+fn composed_with_the_sprites_of_some_owners() {
+    let mock = Mock::new();
+    let mut scene = Scene::new();
+    for (owner, x, row) in [(1, 0, "aa"), (2, 4, "bb")] {
+        let s = spec(json!({"anchor": {"at": [x, 0]}, "content": {"rows": [row]}}));
+        scene.add(owner, s, ms(0)).unwrap();
+    }
+    show(&mut scene, &mock, &base(), 0);
+    assert!(scene.compose(&base(), &mock).text()[0].starts_with("aa  bb"));
+    assert!(scene.compose_of(&base(), &mock, &[2]).text()[0].starts_with("    bb"));
+    assert!(!scene.compose_of(&base(), &mock, &[]).text()[0].contains('a'));
+}

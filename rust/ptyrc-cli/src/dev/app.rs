@@ -7,6 +7,7 @@ use crate::{Common, Fail};
 use ptyrc_proto::session;
 use ptyrc_store::build;
 use ptyrc_store::manifest::{self, MANIFEST};
+use ptyrc_store::options::Resolved;
 use ptyrc_store::{Checked, DirTree, Entry, ErrorKind, Manifest, check, options};
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
@@ -51,10 +52,11 @@ fn manifest_of(dir: &Path) -> Result<Manifest, Fail> {
     Ok(manifest::parse(&text)?)
 }
 
-/// The argument of `init`: the words given read as `ptyrc app` reads
-/// them (`ptyrc_store::options::read`), or as `NAME=VALUE`; the
-/// defaults of `[options]` filled in (`options::resolve`).
-fn init_args(m: &Manifest, given: &[String]) -> Result<Value, Fail> {
+/// The words given read as `ptyrc app` reads them
+/// (`ptyrc_store::options::read`), or as `NAME=VALUE`, and checked as the
+/// driver checks them (`options::resolve`): `init` holds the defaults of
+/// `[options]` filled in.
+fn read_args(m: &Manifest, given: &[String]) -> Result<(options::Launch, Resolved), Fail> {
     let names = match m.options.is_empty() {
         true => "the manifest has no [options]".to_string(),
         false => {
@@ -69,10 +71,73 @@ fn init_args(m: &Manifest, given: &[String]) -> Result<Value, Fail> {
     let Some(launch) = read else {
         return Err(Fail::usage("--help: the options of the manifest", names));
     };
-    let args = Value::Object(launch.args);
-    Ok(Value::Object(
-        options::resolve(m, Some(&args), &launch.files)?.init,
-    ))
+    let args = Value::Object(launch.args.clone());
+    let resolved = options::resolve(m, Some(&args), &launch.files)?;
+    Ok((launch, resolved))
+}
+
+/// The argument of `init` (`read_args`).
+fn init_args(m: &Manifest, given: &[String]) -> Result<Value, Fail> {
+    Ok(Value::Object(read_args(m, given)?.1.init))
+}
+
+/// `--file NAME=PATH` of `dev test` as the words of the app: `--NAME
+/// PATH` for a file or directory option; `ARG#N` the `N`th value of
+/// `[args]`, from 0, after the positionals typed.
+fn file_words(m: &Manifest, files: &[String], words: &mut Vec<String>) -> Result<(), Fail> {
+    let named: Vec<&str> = (m.options.iter().chain(m.args.as_ref().map(|a| &a.option)))
+        .filter(|o| o.ty.named())
+        .map(|o| o.name.as_str())
+        .collect();
+    let hint = || match named.is_empty() {
+        true => "the manifest has no file or directory option".to_string(),
+        false => format!(
+            "NAME: a file or directory option ({}); ARG#N: a value of [args]",
+            named.join(", ")
+        ),
+    };
+    let mut positional: Vec<(usize, &str)> = Vec::new();
+    for f in files {
+        let Some((name, path)) = f
+            .split_once('=')
+            .filter(|(n, p)| !n.is_empty() && !p.is_empty())
+        else {
+            return Err(Fail::usage(format!("--file {f}: NAME=PATH"), hint()));
+        };
+        if let Some(n) = name.strip_prefix("ARG#") {
+            let args = m.args.as_ref().filter(|a| a.option.ty.named());
+            match (n.parse::<usize>(), args) {
+                (Ok(n), Some(_)) => positional.push((n, path)),
+                _ => {
+                    return Err(Fail::usage(
+                        format!("--file {f}: no such value of [args]"),
+                        hint(),
+                    ));
+                }
+            }
+        } else if m.options.iter().any(|o| o.name == name && o.ty.named()) {
+            words.extend([format!("--{name}"), path.to_string()]);
+        } else {
+            return Err(Fail::usage(
+                format!("--file {f}: {name}: not a file or directory option"),
+                hint(),
+            ));
+        }
+    }
+    positional.sort();
+    for (i, (n, _)) in positional.iter().enumerate() {
+        if *n != i {
+            return Err(Fail::usage(
+                format!("--file ARG#{n}: ARG#{i} is not given"),
+                "ARG#0, ARG#1, ...: in order, none left out",
+            ));
+        }
+    }
+    if !positional.is_empty() && !words.iter().any(|w| w == "--") {
+        words.push("--".into());
+    }
+    words.extend(positional.into_iter().map(|(_, p)| p.to_string()));
+    Ok(())
 }
 
 /// The arguments of `ptyrc-box` that name the guest: `--script APP.js`,
@@ -155,13 +220,22 @@ pub struct TestOpts {
     pub args: Vec<String>,
     /// Permissions declared and denied.
     pub deny: Vec<String>,
+    /// `--file NAME=PATH`, as given.
+    pub files: Vec<String>,
     /// `ptyrc-box --headless` flags, as given.
     pub flags: Vec<OsString>,
 }
 
 /// The flags of `ptyrc-box` that hold the app to what its manifest
-/// declares, less `deny`.
-fn grants(m: &Manifest, deny: &[String]) -> Result<Vec<OsString>, Fail> {
+/// declares for this run (`Resolved::asked`: a permission an option
+/// needs only when that option is given), less `deny`; the user's words
+/// and patterns; the launcher's options; the files named.
+fn grants(
+    m: &Manifest,
+    deny: &[String],
+    launch: &options::Launch,
+    resolved: &Resolved,
+) -> Result<Vec<OsString>, Fail> {
     let declared = declared(m);
     for d in deny {
         if !manifest::PERMISSIONS.contains(&d.as_str()) {
@@ -174,14 +248,63 @@ fn grants(m: &Manifest, deny: &[String]) -> Result<Vec<OsString>, Fail> {
             eprintln!("ptyrc: note: --deny {d}: not declared, never held");
         }
     }
+    let mut asked = resolved.asked(m);
+    for l in &m.limits {
+        let p = manifest::limit_permission(&l.name);
+        if !asked.contains(&p) {
+            asked.push(p);
+        }
+    }
     let words = m.permissions.iter().flat_map(|p| p.words.iter());
     let words: Vec<&str> = words.map(String::as_str).collect();
-    let mut flags: Vec<OsString> = vec!["--grant".into(), declared.join(",").into()];
+    let mut flags: Vec<OsString> = vec!["--grant".into(), asked.join(",").into()];
     if !deny.is_empty() {
         flags.extend(["--deny".into(), deny.join(",").into()]);
     }
     if !words.is_empty() {
         flags.extend(["--words".into(), words.join(",").into()]);
+    }
+    for w in &resolved.words {
+        flags.extend(["--user-word".into(), w.into()]);
+    }
+    for p in &resolved.patterns {
+        let flag = if p.regex {
+            "--user-regex"
+        } else {
+            "--user-pattern"
+        };
+        flags.extend([flag.into(), (&p.pattern).into()]);
+    }
+    let l = &launch.launcher;
+    match l.front {
+        Some(true) => flags.push("--front".into()),
+        Some(false) => flags.push("--back".into()),
+        None => {}
+    }
+    let mut put = |flag: &str, v: Option<String>| {
+        if let Some(v) = v {
+            flags.extend([flag.into(), v.into()]);
+        }
+    };
+    put("--prefer", l.prefer.clone());
+    put("--alpha", l.alpha.map(|a| a.to_string()));
+    put("--border", l.border.clone());
+    // The handles in order (`f0`, ...), each under its option: the
+    // runner numbers them as given.
+    let mut handles: Vec<_> = resolved.files.iter().collect();
+    handles.sort_by_key(|h| h.handle[1..].parse::<usize>().unwrap_or(usize::MAX));
+    for h in handles {
+        let holds = |v: &Value| v.get("file").and_then(Value::as_str) == Some(&h.handle);
+        let option = (resolved.init.iter())
+            .find(|(_, v)| match v {
+                Value::Array(list) => list.iter().any(holds),
+                v => holds(v),
+            })
+            .map(|(k, _)| k.clone())
+            .unwrap_or_default();
+        let flag = if h.write { "--write-file" } else { "--file" };
+        let pair = format!("{option}={}", h.path.display());
+        flags.extend([flag.into(), pair.into()]);
     }
     Ok(flags)
 }
@@ -217,8 +340,11 @@ pub fn given(m: &Manifest) -> Value {
 
 pub fn test(o: TestOpts) -> Result<ExitCode, Fail> {
     let m = manifest_of(&o.dir)?;
-    let args = init_args(&m, &o.args)?;
-    let grants = grants(&m, &o.deny)?;
+    let mut words = o.args.clone();
+    file_words(&m, &o.files, &mut words)?;
+    let (launch, resolved) = read_args(&m, &words)?;
+    let grants = grants(&m, &o.deny, &launch, &resolved)?;
+    let args = Value::Object(resolved.init.clone());
     let program = runner()?;
     let status = Command::new(&program)
         .arg("--headless")

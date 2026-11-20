@@ -9,11 +9,16 @@
 //!
 //! `--headless`: no session; `headless::run`, the report on stdout
 //! (`--json`: one JSON value), the log on stderr. `--grant`, `--deny`,
-//! `--words`: the requests checked as the driver checks a store app.
+//! `--words`: the requests checked as the driver checks a store app;
+//! `--user-word`, `--user-pattern`, `--user-regex`: what the user gave
+//! (`word`, `pattern` options); `--front`, `--back`, `--prefer`,
+//! `--alpha`, `--border`: the launcher's options, applied as the driver
+//! applies them.
 //! `--event`, `--key`, `--pointer`, `--click`, `--focus`, `--paste`:
 //! what the user does, at a session time.
 //! `--screen [T:]FILE`, again for each: the screen from T on.
 //! `--clock ISO`, `--zone NAME`, `--storage DIR`, `--file NAME=PATH`,
+//! `--write-file NAME=PATH` (the manifest's `write = true`),
 //! `--probe git|system=FILE.json`: the host functions (`hostfn`).
 //! `--assets DIR`, live too: `asset.*`, answered by the runner.
 //! `--styles`: under each screen, its styles.
@@ -58,7 +63,9 @@ const USAGE: &str =
                  [--event T:TOPIC:JSON]... [--key T:KEY]... [--pointer T:X,Y]...
                  [--click T:X,Y]... [--focus T:TAG]... [--paste T:TEXT]...
                  [--clock ISO] [--zone NAME] [--storage DIR] [--file NAME=PATH]...
-                 [--probe git|system=FILE.json]...
+                 [--write-file NAME=PATH]... [--probe git|system=FILE.json]...
+                 [--user-word WORD]... [--user-pattern TEXT]... [--user-regex RE]...
+                 [--front | --back] [--prefer P] [--alpha A] [--border B]
        ptyrc-box --unit FILE [--no-profile] [--manifest JSON] --script APP.js [ARGS]
 T: milliseconds, or with a unit: 500ms, 2s";
 
@@ -134,8 +141,12 @@ struct Cli {
     clock: Option<i64>,
     zone: Option<String>,
     storage: Option<PathBuf>,
-    /// `(option, path)`.
-    files: Vec<(String, PathBuf)>,
+    /// `(option, path, write)`.
+    files: Vec<(String, PathBuf, bool)>,
+    user_words: Vec<String>,
+    /// `(pattern, regex)`.
+    patterns: Vec<(String, bool)>,
+    launcher: headless::Launcher,
     /// `(git | system, file)`.
     probes: Vec<(String, PathBuf)>,
     assets: Option<PathBuf>,
@@ -331,7 +342,24 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
             }
             "--zone" => cli.zone = Some(string(value("--zone")?)),
             "--storage" => cli.storage = Some(value("--storage")?.into()),
-            "--file" => cli.files.push(pair("--file", &string(value("--file")?))?),
+            flag @ ("--file" | "--write-file") => {
+                let (n, p) = pair(flag, &string(value(flag)?))?;
+                cli.files.push((n, p, flag == "--write-file"));
+            }
+            "--user-word" => cli.user_words.push(string(value("--user-word")?)),
+            flag @ ("--user-pattern" | "--user-regex") => {
+                let p = string(value(flag)?);
+                cli.patterns.push((p, flag == "--user-regex"));
+            }
+            "--front" => cli.launcher.front = Some(true),
+            "--back" => cli.launcher.front = Some(false),
+            "--prefer" => cli.launcher.prefer = Some(string(value("--prefer")?)),
+            "--alpha" => {
+                let v = string(value("--alpha")?);
+                let a = v.parse::<f64>().ok().filter(|a| (0.0..=1.0).contains(a));
+                cli.launcher.alpha = Some(a.ok_or_else(|| format!("--alpha {v}: 0 to 1"))?);
+            }
+            "--border" => cli.launcher.border = Some(string(value("--border")?)),
             "--probe" => {
                 let v = string(value("--probe")?);
                 let (n, p) = pair("--probe", &v)?;
@@ -367,12 +395,16 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
         || cli.zone.is_some()
         || cli.storage.is_some()
         || !cli.files.is_empty()
-        || !cli.probes.is_empty();
+        || !cli.probes.is_empty()
+        || !cli.user_words.is_empty()
+        || !cli.patterns.is_empty()
+        || cli.launcher != headless::Launcher::default();
     if headless_only && !cli.headless {
         return Err(
             "--size, --for, --at, --seed, --tape, --screen, --json, --styles, --grant, \
              --deny, --words, --event, --key, --pointer, --click, --focus, --paste, --clock, \
-             --zone, --storage, --file, --probe: with --headless"
+             --zone, --storage, --file, --write-file, --probe, --user-word, --user-pattern, \
+             --user-regex, --front, --back, --prefer, --alpha, --border: with --headless"
                 .into(),
         );
     }
@@ -486,6 +518,11 @@ fn headless_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
         }
         (None, true) => None,
     };
+    let grants = grants.map(|mut g| {
+        g.user_words = cli.user_words.clone();
+        g.patterns = cli.patterns.clone();
+        g
+    });
     // Headless: what the grants hold, else all.
     let granted: Vec<String> = match &grants {
         Some(g) => g.held(),
@@ -515,6 +552,7 @@ fn headless_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
         limits,
         host,
         assets,
+        launcher: cli.launcher.clone(),
         ..d
     };
     let report = match headless::run(wasm, &options) {
@@ -582,9 +620,10 @@ fn host_fns(cli: &Cli, granted: &[String]) -> Result<HostFns, String> {
                 .insert(key, String::from_utf8_lossy(&bytes).into_owned());
         }
     }
-    for (option, path) in &cli.files {
-        h.files
-            .push(Named::read(option, path).map_err(|e| format!("--file {option}: {e}"))?);
+    for (option, path, write) in &cli.files {
+        let mut named = Named::read(option, path).map_err(|e| format!("--file {option}: {e}"))?;
+        named.write = *write;
+        h.files.push(named);
     }
     for (name, path) in &cli.probes {
         let text = std::fs::read_to_string(path)

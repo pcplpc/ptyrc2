@@ -8,6 +8,8 @@ ptyrc-box [--no-profile] [--manifest JSON] [--script] MODULE [ARGS]
 ptyrc-box --headless [--no-profile] [--manifest JSON] [--script] MODULE [ARGS] [--size CxR] [--for T]
           [--at T,...] [--seed N] [--tape FILE | --screen FILE] [--json]
           [--grant NAME,...] [--deny NAME,...] [--words WORD,...]
+          [--user-word WORD]... [--user-pattern TEXT]... [--user-regex RE]...
+          [--front | --back] [--prefer P] [--alpha A] [--border B]
           [--event T:TOPIC:JSON]... [--key T:KEY]...
 ```
 
@@ -33,7 +35,13 @@ that of `exit`, or 70.
   degree held is cut to it, marked `"degree"`; an act not held, a
   method closed to apps: `denied`, the hint naming the permission.
   `--deny` alone: every permission but these. Neither: the whole
-  session.
+  session. `--user-word`: a word the user gave, found at any degree,
+  shown from `shape`; `--user-pattern`, `--user-regex`: a pattern the
+  user gave, `screen.find`, `screen.wait` of exactly it answered as
+  under `text` (`ptyrc-server`, `lower.rs`).
+- `--front`, `--back`, `--prefer`, `--alpha`, `--border`: the
+  launcher's options, on the app's requests as the driver sets them
+  (`own_params`).
 - Host functions from memory (`hostfn.rs`), the driver's answers:
   `--clock ISO` the wall time at 0 (default `2000-01-01T00:00:00Z`),
   advancing with session time; `--zone NAME` the local zone (a name of
@@ -41,9 +49,13 @@ that of `exit`, or 70.
   read whole before the profile when `clock` is held. `--storage DIR`:
   the values, a file a key, never written back. `--file NAME=PATH`: a
   file or a directory read once, its handle (`f0`, ...) given to
-  `init` under `NAME`; writes stay in memory, with `files-write`.
+  `init` under `NAME` (a handle there already is kept); read only.
+  `--write-file NAME=PATH`: the same, the manifest's `write = true`:
+  writes, with `files-write`, stay in memory.
   `--probe git=FILE.json`, `system=`: the answer as written; none:
-  the not-held answer, and a note. The report: `result:`, `storage:`
+  the not-held answer, and a note. `probe.git`, as the driver: one
+  read a second of session time; within it the same params (but
+  `since`) get the last answer, others `not-usable`. The report: `result:`, `storage:`
   (keys, sizes), `files:` (written); `--json`: the values, the
   contents. Status: that of `app.result` when the run ends well.
 - `--event T:TOPIC:JSON`: an event at `T`, to a topic subscribed and

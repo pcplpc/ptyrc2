@@ -37,8 +37,11 @@ pub enum Dev {
     /// requests refused or lowered, the permissions lacking, the limits
     /// met, the end; the log on stderr. The same run every time. A Rust
     /// app is built first (rustc, as the store builds it). It holds what
-    /// its manifest declares. Also, as ptyrc-box takes them: --clock ISO,
-    /// --zone NAME, --storage DIR, --file NAME=PATH, --probe
+    /// its manifest declares for the run: a permission an option needs,
+    /// only with that option given. --file NAME=PATH: the file option
+    /// NAME (ARG#N: the Nth value of [args], from 0), as --NAME PATH.
+    /// Also, as ptyrc-box takes them: --clock ISO, --zone NAME,
+    /// --storage DIR, --probe
     /// git=FILE.json, --pointer T:X,Y, --click T:X,Y, --focus T:TAG,
     /// --paste T:TEXT
     #[command(allow_hyphen_values = true)]
@@ -157,6 +160,7 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
             // Flags of `dev test` after the first option of the app,
             // before a `--`: ours.
             let mut flags: Vec<OsString> = Vec::new();
+            let mut files: Vec<String> = Vec::new();
             let mut json = common.json;
             let mut words = options.into_iter();
             while let Some(w) = words.next() {
@@ -173,9 +177,10 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
                     "--styles" if inline.is_none() => flags.push("--styles".into()),
                     "--arg" => args.push(value()),
                     "--deny" => deny.push(value()),
+                    "--file" => files.push(value()),
                     "--size" | "--for" | "--at" | "--seed" | "--tape" | "--screen" | "--event"
-                    | "--key" | "--clock" | "--zone" | "--storage" | "--file" | "--probe"
-                    | "--pointer" | "--click" | "--focus" | "--paste" => {
+                    | "--key" | "--clock" | "--zone" | "--storage" | "--probe" | "--pointer"
+                    | "--click" | "--focus" | "--paste" => {
                         flags.extend([name.clone().into(), value().into()])
                     }
                     _ => args.push(w),
@@ -215,6 +220,7 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
                 dir,
                 args,
                 deny,
+                files,
                 flags,
             })
         }

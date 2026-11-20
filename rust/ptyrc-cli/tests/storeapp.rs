@@ -500,6 +500,500 @@ fn a_store_app_is_clipped_to_its_surface() {
     wait_for(|| layer(&mut client) == Some(behind), "behind when focused");
 }
 
+/// Three panes, bars at columns 19 and 39; a line typed: two, the
+/// left two merged.
+const MERGE: &str = r#"printf '\033[2J\033[H'
+i=1
+while [ $i -le 16 ]; do
+  printf '\033[%d;1Hleft\033[%d;20H│\033[%d;21Hmid\033[%d;40H│\033[%d;41Hright' $i $i $i $i $i
+  i=$((i+1))
+done
+read x
+printf '\033[2J\033[H'
+i=1
+while [ $i -le 16 ]; do
+  printf '\033[%d;1Hwide\033[%d;40H│\033[%d;41Hright' $i $i $i
+  i=$((i+1))
+done
+exec sleep 1000
+"#;
+
+const FOLLOWS: &str = r#"
+import { call, log, period } from "ptyrc";
+export function init(args) {
+  call("subscribe", { topics: ["move", "size"] });
+  call("draw.put", { content: { rows: ["="] }, anchor: { at: [8, 0], space: "view" } });
+  log("drawn");
+  period(0);
+}
+export function tick(now) {}
+export function event(topic, data) { log(topic + "=" + JSON.stringify(data)); }
+"#;
+
+#[test]
+fn a_store_app_follows_its_pane() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let sb = Sandbox::new("follows");
+    install(
+        &sb,
+        "follows",
+        wide_manifest("follows", "frame", ""),
+        FOLLOWS,
+    );
+    let mut driver = sb.ptyrc();
+    driver
+        .env("PTYRC_BOX", runner())
+        .env("PTYRC_JS", &js)
+        .args(["run", "--name", "s", "--headless", "--size", "60x16"])
+        .args(["--", "sh", "-c", MERGE])
+        .stdin(std::process::Stdio::null());
+    let _driver = common::Proc(driver.spawn().unwrap());
+    let socket = sb.socket("s");
+    wait_for(
+        || std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "socket",
+    );
+    let mut client = sb.client("s");
+    let pane = |client: &mut Client, x: u64, w: u64| {
+        let frames = client.call("frame.list", json!({})).unwrap();
+        (frames["frames"].as_array().unwrap().iter())
+            .find(|f| {
+                f["kind"] == "pane"
+                    && f["rect"][0] == x
+                    && f["rect"][2] == w
+                    && f["state"] == "stable"
+            })
+            .map(|f| f["id"].as_u64().unwrap())
+    };
+    let mut left = 0;
+    wait_for(
+        || pane(&mut client, 0, 19).map(|id| left = id).is_some(),
+        "the panes",
+    );
+    let started = client
+        .call("app.start", json!({"store": "follows", "frame": left}))
+        .unwrap();
+    let id = started["app"]["id"].as_u64().unwrap();
+    wait_slow(|| log_of(&mut client, id).contains("drawn"), "drawn");
+    let frame_of_its_sprite = |client: &mut Client| {
+        let list = client.call("draw.list", json!({})).unwrap();
+        (list["sprites"].as_array().unwrap().iter())
+            .find(|s| s["kind"] != "widget")
+            .map(|s| s["frame"].clone())
+    };
+    assert_eq!(frame_of_its_sprite(&mut client), Some(json!(left)));
+
+    // The left pane goes; the wide one takes its place.
+    client.call("input.send", json!({"text": "\n"})).unwrap();
+    let mut wide = 0;
+    wait_for(
+        || pane(&mut client, 0, 39).map(|id| wide = id).is_some(),
+        "the wide pane",
+    );
+    assert_ne!(wide, left);
+    wait_for(
+        || frame_of_its_sprite(&mut client) == Some(json!(wide)),
+        "its sprite moved",
+    );
+    let log = log_of(&mut client, id);
+    wait_slow(
+        || log_of(&mut client, id).contains(&format!("move={{\"frame\":{wide}}}")),
+        "told",
+    );
+    let log = log_of(&mut client, id) + &log;
+    assert!(log.contains("size={\"size\":[60,16]}"), "{log}");
+    assert!(!log.contains("exit:"), "{log}");
+    // Shown again: on the wide pane, behind its text.
+    let text = client
+        .call("screen.text", json!({"sprites": true}))
+        .unwrap();
+    assert!(
+        text["lines"][0].as_str().unwrap().starts_with("wide    ="),
+        "{text}"
+    );
+}
+
+const BOMBS: &str = r#"
+import { call, log, period } from "ptyrc";
+export function init(args) {
+  const effect = { name: "sand", params: { rate: 1, pointer: true, bomb: true } };
+  call("draw.put", { effect, size: [20, 5], anchor: { at: [10, 5], space: "view" } });
+  log("drawn");
+  period(0);
+}
+export function tick(now) {}
+export function event(topic, data) {}
+"#;
+
+#[test]
+fn the_clicks_told_to_an_effect() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let sb = Sandbox::new("bombs");
+    install(&sb, "bombs", wide_manifest("bombs", "frame", ""), BOMBS);
+    let (runner, js) = (runner(), js.to_string_lossy().into_owned());
+    let (runner, js) = (
+        format!("PTYRC_BOX={}", runner.display()),
+        format!("PTYRC_JS={js}"),
+    );
+    let program = r"printf '\033[?1000h\033[?1006h'; exec cat -v";
+    let xdg = |name: &str, dir: &str| format!("{name}={}", sb.dir.join(dir).display());
+    let (data, state, cache) = (
+        xdg("XDG_DATA_HOME", "data"),
+        xdg("XDG_STATE_HOME", "state"),
+        xdg("XDG_CACHE_HOME", "cache"),
+    );
+    let argv = [
+        "env", &runner, &js, &data, &state, &cache, BIN, "run", "--name", "s", "--", "sh", "-c",
+        program,
+    ];
+    let (mut host, _driver) = common::HostPty::spawn(&sb, &argv);
+    wait_for(|| sb.socket("s").exists(), "the session");
+    let mut client = sb.client("s");
+    let shown = |client: &mut Client| {
+        let text = client.call("screen.text", json!({})).unwrap();
+        let lines = text["lines"].as_array().unwrap().iter();
+        lines.map(|l| l.as_str().unwrap()).collect::<String>()
+    };
+    // A press and its release at screen cell (x, y), then a press off
+    // the sand, that the program has: true when the first reached it.
+    let mut n = 0;
+    let mut click = |host: &mut common::HostPty, client: &mut Client, x: u16, y: u16| {
+        let at = format!("{};{}", x + 1, y + 1);
+        host.type_in(format!("\x1b[<0;{at}M\x1b[<0;{at}m").as_bytes());
+        n += 1;
+        let mark = format!("[<0;1;{n}M");
+        host.type_in(format!("\x1b{mark}").as_bytes());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !shown(client).contains(&mark) {
+            host.pump();
+            assert!(Instant::now() < deadline, "{mark}: {}", shown(client));
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        shown(client).contains(&format!("[<0;{at}M"))
+    };
+    // The user's: on the sand, taken; off it, the program's.
+    let effect = json!({"name": "sand", "params": {"rate": 1, "bomb": true}});
+    let anchor = json!({"at": [10, 5], "space": "view"});
+    let sand = client
+        .call(
+            "draw.put",
+            json!({"effect": effect, "size": [20, 5], "anchor": anchor}),
+        )
+        .unwrap();
+    host.wait_seen("\x1b[?1002h");
+    let placed = |client: &mut Client| {
+        let list = client.call("draw.list", json!({})).unwrap();
+        let sprites = list["sprites"].as_array().unwrap().clone();
+        sprites.iter().any(|s| !s["screen"].is_null())
+    };
+    wait_for(|| placed(&mut client), "the sand placed");
+    assert!(!click(&mut host, &mut client, 12, 6));
+    assert!(click(&mut host, &mut client, 40, 6));
+    client
+        .call("draw.remove", json!({"id": sand["id"]}))
+        .unwrap();
+    // A store app without `clicks-grab`: the program has it too.
+    let started = client.call("app.start", json!({"store": "bombs"})).unwrap();
+    let id = started["app"]["id"].as_u64().unwrap();
+    wait_slow(|| log_of(&mut client, id).contains("drawn"), "drawn");
+    wait_for(|| placed(&mut client), "the sand placed");
+    assert!(click(&mut host, &mut client, 13, 7));
+    let log = log_of(&mut client, id);
+    assert!(!log.contains("exit:"), "{log}");
+}
+
+const READS: &str = r#"
+import { call, log, period } from "ptyrc";
+export function init(args) {
+  call("draw.put", { content: { rows: ["MINE"] }, anchor: { at: [10, 0], space: "view" } });
+  period(100);
+}
+export function tick(now) {
+  const text = call("screen.text", { sprites: true });
+  log("row=" + text.lines[0]);
+}
+export function event(topic, data) {}
+"#;
+
+#[test]
+fn a_store_app_reads_its_own_sprites_alone() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let sb = Sandbox::new("reads");
+    install(
+        &sb,
+        "reads",
+        wide_manifest("reads", "frame", "text = \"to read\""),
+        READS,
+    );
+    let mut driver = sb.ptyrc();
+    driver
+        .env("PTYRC_BOX", runner())
+        .env("PTYRC_JS", &js)
+        .args([
+            "run",
+            "--name",
+            "s",
+            "--headless",
+            "--size",
+            "40x6",
+            "--",
+            "cat",
+        ])
+        .stdin(std::process::Stdio::null());
+    let _driver = common::Proc(driver.spawn().unwrap());
+    let socket = sb.socket("s");
+    wait_for(
+        || std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "socket",
+    );
+    let mut client = sb.client("s");
+    let anchor = json!({"at": [0, 0], "space": "view"});
+    let user = json!({"content": {"rows": ["USER"]}, "anchor": anchor});
+    client.call("draw.put", user).unwrap();
+    let started = client.call("app.start", json!({"store": "reads"})).unwrap();
+    let id = started["app"]["id"].as_u64().unwrap();
+    wait_slow(
+        || log_of(&mut client, id).contains("MINE"),
+        "its sprite read",
+    );
+    let log = log_of(&mut client, id);
+    assert!(!log.contains("USER"), "{log}");
+    // The user's: both.
+    let text = client
+        .call("screen.text", json!({"sprites": true}))
+        .unwrap();
+    assert!(
+        text["lines"][0]
+            .as_str()
+            .unwrap()
+            .starts_with("USER      MINE"),
+        "{text}"
+    );
+}
+
+const UNKNOWN: &str = r#"
+import { call, log, period } from "ptyrc";
+export function init(args) {
+  for (const m of ["no.such", "draw.nope", "storage.nope", "app.nope", "tape.nope", "batch"]) {
+    try {
+      call(m, m == "batch" ? { calls: [{ method: "no.such", params: {} }] } : {});
+      log(m + "=ok");
+    } catch (e) {
+      log(m + "=" + e.code);
+    }
+  }
+  log("done");
+  period(0);
+}
+export function tick(now) {}
+export function event(topic, data) {}
+"#;
+
+#[test]
+fn a_store_app_calling_an_unknown_method_is_denied() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let sb = Sandbox::new("unknown");
+    let storage = "storage = \"its notes\"";
+    install(
+        &sb,
+        "unknown",
+        wide_manifest("unknown", "frame", storage),
+        UNKNOWN,
+    );
+    let mut driver = sb.ptyrc();
+    driver
+        .env("PTYRC_BOX", runner())
+        .env("PTYRC_JS", &js)
+        .args([
+            "run",
+            "--name",
+            "s",
+            "--headless",
+            "--size",
+            "40x6",
+            "--",
+            "cat",
+        ])
+        .stdin(std::process::Stdio::null());
+    let _driver = common::Proc(driver.spawn().unwrap());
+    let socket = sb.socket("s");
+    wait_for(
+        || std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "socket",
+    );
+    let mut client = sb.client("s");
+    let started = client
+        .call("app.start", json!({"store": "unknown"}))
+        .unwrap();
+    let id = started["app"]["id"].as_u64().unwrap();
+    wait_slow(|| log_of(&mut client, id).contains("done"), "the calls");
+    let log = log_of(&mut client, id);
+    assert!(!log.contains("unknown-method"), "{log}");
+    for m in [
+        "no.such",
+        "draw.nope",
+        "storage.nope",
+        "app.nope",
+        "tape.nope",
+    ] {
+        assert!(log.contains(&format!("{m}=denied")), "{m}: {log}");
+    }
+}
+
+const DEAF: &str = r#"
+import { call, log, period } from "ptyrc";
+export function init(args) {
+  call("subscribe", { topics: ["mouse", "hover"] });
+  log("subscribed");
+  period(0);
+}
+export function tick(now) {}
+export function event(topic, data) {}
+"#;
+
+#[test]
+fn the_host_mouse_is_not_asked_for_a_store_app_told_nothing() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let sb = Sandbox::new("deaf");
+    install(&sb, "deaf", wide_manifest("deaf", "frame", ""), DEAF);
+    let env = |name: &str, value: String| format!("{name}={value}");
+    let at = |dir: &str| sb.dir.join(dir).display().to_string();
+    let vars = [
+        env("PTYRC_BOX", runner().display().to_string()),
+        env("PTYRC_JS", js.display().to_string()),
+        env("XDG_DATA_HOME", at("data")),
+        env("XDG_STATE_HOME", at("state")),
+        env("XDG_CACHE_HOME", at("cache")),
+    ];
+    let mut argv: Vec<&str> = vec!["env"];
+    argv.extend(vars.iter().map(String::as_str));
+    argv.extend([BIN, "run", "--name", "s", "--", "cat"]);
+    let (mut host, _driver) = common::HostPty::spawn(&sb, &argv);
+    wait_for(|| sb.socket("s").exists(), "the session");
+    let mut client = sb.client("s");
+    let started = client.call("app.start", json!({"store": "deaf"})).unwrap();
+    let id = started["app"]["id"].as_u64().unwrap();
+    wait_slow(
+        || log_of(&mut client, id).contains("subscribed"),
+        "subscribed",
+    );
+    std::thread::sleep(Duration::from_millis(200));
+    host.pump();
+    let seen = String::from_utf8_lossy(&host.seen).into_owned();
+    assert!(!seen.contains("\x1b[?1002h"), "{seen:?}");
+    // The user's: asked.
+    client
+        .call("subscribe", json!({"topics": ["mouse"]}))
+        .unwrap();
+    host.wait_seen("\x1b[?1002h");
+}
+
+const GIVEN: &str = r#"
+import { call, log, period } from "ptyrc";
+export function init(args) {
+  const anchor = { auto: { prefer: "top-right" } };
+  call("draw.put", { content: { rows: ["x"] }, layer: "front", anchor });
+  call("widget.declare", { widgets: [{ tag: "w", size: [4, 1], content: { rows: ["hi"] } }] });
+  call("widget.show", { tag: "w", border: "plain" });
+  log("drawn");
+  period(0);
+}
+export function tick(now) {}
+export function event(topic, data) {}
+"#;
+
+#[test]
+fn the_launchers_prefer_border_back() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let sb = Sandbox::new("given");
+    install(
+        &sb,
+        "given",
+        wide_manifest("given", "frame", "front = \"on top\""),
+        GIVEN,
+    );
+    let mut driver = sb.ptyrc();
+    driver
+        .env("PTYRC_BOX", runner())
+        .env("PTYRC_JS", &js)
+        .args([
+            "run",
+            "--name",
+            "s",
+            "--headless",
+            "--size",
+            "60x16",
+            "--",
+            "cat",
+        ])
+        .stdin(std::process::Stdio::null());
+    let _driver = common::Proc(driver.spawn().unwrap());
+    let socket = sb.socket("s");
+    wait_for(
+        || std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "socket",
+    );
+    let mut client = sb.client("s");
+    let args = [
+        "-s",
+        "s",
+        "app",
+        "given",
+        "--prefer",
+        "bottom-left",
+        "--border",
+        "heavy",
+    ];
+    let run = sb.run(&[&args[..], &["--back", "--no-wait"]].concat());
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let apps = client.call("app.list", json!({})).unwrap();
+    let id = apps["apps"][0]["id"].as_u64().unwrap();
+    wait_slow(|| log_of(&mut client, id).contains("drawn"), "drawn");
+    let list = client.call("draw.list", json!({})).unwrap();
+    let sprite = (list["sprites"].as_array().unwrap().iter())
+        .find(|s| s["anchor"].get("auto").is_some())
+        .cloned()
+        .unwrap();
+    // `--back` over its `front`; `--prefer` over its own.
+    assert!(sprite["layer"].as_i64().unwrap() < 0, "{sprite}");
+    assert_eq!(
+        sprite["anchor"]["auto"]["prefer"],
+        json!("bottom-left"),
+        "{sprite}"
+    );
+    // `--border` over the one it asked.
+    let widgets = client.call("widget.list", json!({})).unwrap();
+    assert_eq!(widgets["widgets"][0]["border"], json!("heavy"), "{widgets}");
+}
+
 /// A look-alike of the driver's pop-up: a box of double lines, white on
 /// blue, ` ptyrc ` at its foot, asked on `hud`; a widget with `alert`.
 const FAKE: &str = r#"

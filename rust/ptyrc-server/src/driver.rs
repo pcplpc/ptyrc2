@@ -293,6 +293,13 @@ struct Driver {
     asks: VecDeque<asks::Asking>,
     /// The sprites each narrowed connection put (`own`).
     drawn: HashMap<ConnId, HashSet<u64>>,
+    /// The surfaces that follow their panes (`heir`).
+    follow: heir::Follow,
+    /// The effects told the pointer (`nozzle`).
+    nozzles: nozzle::Nozzles,
+    /// Narrowed connections that showed a widget or put a sprite in
+    /// front: what they own may be pointed at.
+    pointable: HashSet<ConnId>,
     /// The answers of the pop-up for the start it lets go on.
     given: Option<Entry>,
     /// The worker of the host functions; None: it did not start.
@@ -483,6 +490,10 @@ macro_rules! hook {
     }};
 }
 
+// After `hook!`: they use it.
+mod heir;
+mod nozzle;
+
 impl Driver {
     fn start(cfg: Config) -> Result<Driver, RunError> {
         let Some(program) = cfg.argv.first() else {
@@ -611,6 +622,9 @@ impl Driver {
             handoff_kill: None,
             asks: VecDeque::new(),
             drawn: HashMap::new(),
+            follow: heir::Follow::default(),
+            nozzles: nozzle::Nozzles::default(),
+            pointable: HashSet::new(),
             given: None,
         })
     }
@@ -686,6 +700,9 @@ impl Driver {
             handoff_kill: None,
             asks: VecDeque::new(),
             drawn: HashMap::new(),
+            follow: heir::Follow::default(),
+            nozzles: nozzle::Nozzles::default(),
+            pointable: HashSet::new(),
             given: None,
         })
     }
@@ -821,6 +838,7 @@ impl Driver {
                 let mut out = Vec::new();
                 hook!(self, now, |ctx| engine.on_tick(now, &mut out, ctx));
                 self.host.write(&out)?;
+                self.follow_panes(engine);
             }
 
             if let Some(status) = self.exit_status
@@ -930,6 +948,8 @@ impl Driver {
                 }
             }
             self.reap_conns(engine);
+            self.follow_panes(engine);
+            self.feed_nozzles(engine);
             self.flush_apps(engine);
         }
     }
@@ -1151,6 +1171,8 @@ impl Driver {
         if self.host_mouse != mouse::HostMouse::Hover {
             return;
         }
+        let canvas = |id, x, y| engine.canvas_at(id, x, y);
+        self.nozzles.hover(report.x, report.y, &canvas);
         match engine.sprite_at(report.x, report.y) {
             Some(mut data) => {
                 self.hovered = Some(data["sprite"].clone());
@@ -1184,12 +1206,27 @@ impl Driver {
                 continue;
             };
             rest = &rest[len..];
-            let app = |report: mouse::Report| report.encode(engine.mouse_mode());
             if report.hover() {
                 self.hover(report, engine);
-                out.extend(app(report).unwrap_or_default());
+                out.extend(report.encode(engine.mouse_mode()).unwrap_or_default());
                 continue;
             }
+            // Told to an effect; taken from the program by its app's grab.
+            let now = self.now();
+            let canvas = |id, x, y| engine.canvas_at(id, x, y);
+            let (conns, apps) = (&self.conns, &self.apps);
+            let takes = |conn: ConnId| {
+                let app = conns.get(&conn).and_then(|c| c.app);
+                let app = app.and_then(|id| apps.as_ref()?.get(id));
+                app.is_none_or(|a| {
+                    !a.grants.narrowed() || a.grants.holds(grants::Permission::ClicksGrab)
+                })
+            };
+            let by_effect = self.nozzles.click(report, now, &canvas, &takes);
+            let app = |report: mouse::Report| match by_effect {
+                true => None,
+                false => report.encode(engine.mouse_mode()),
+            };
             if !self.topics.contains("mouse") {
                 // Listeners of `hover` only: the clicks are the app's.
                 out.extend(app(report).unwrap_or_default());
@@ -1725,6 +1762,28 @@ impl Driver {
         engine: &mut dyn Engine,
         in_batch: bool,
     ) -> Option<Result<Value, RpcError>> {
+        // The pointer told to an effect: the driver's flags.
+        let flags = nozzle::take_flags(method, &mut params);
+        let id = params.get("id").and_then(Value::as_u64);
+        let answer = self.dispatch_checked(conn, method, params, engine, in_batch);
+        if let (Some(flags), Some(Ok(answer))) = (flags, &answer)
+            && let Some(id) = id.or_else(|| answer.get("id").and_then(Value::as_u64))
+        {
+            self.nozzles.note(conn, id, flags);
+            self.refresh_topics();
+            self.sync_host_mouse(engine);
+        }
+        answer
+    }
+
+    fn dispatch_checked(
+        &mut self,
+        conn: ConnId,
+        method: &str,
+        mut params: Value,
+        engine: &mut dyn Engine,
+        in_batch: bool,
+    ) -> Option<Result<Value, RpcError>> {
         // A process that came from elsewhere is an app (a client) from
         // its first request that is not on the table itself: a verb of
         // `ptyrc manage` is none.
@@ -1763,12 +1822,25 @@ impl Driver {
             if let Err(e) = self.own_limits(conn, own, method, &params, engine, now) {
                 return Some(Err(e));
             }
+            // What it may be pointed at by default: a widget, a sprite in
+            // front (the host mouse is asked for it).
+            let front = params
+                .get("layer")
+                .and_then(Value::as_i64)
+                .is_some_and(|l| l > 0);
+            let pointable = method == "widget.show"
+                || (front && matches!(method, "draw.put" | "draw.ext" | "draw.update"));
             let answer = self.cut_answer(conn, method, params, engine, in_batch);
-            return answer.map(|answer| {
+            let answer = answer.map(|answer| {
                 let mut answer = answer.map_err(lower::scrub)?;
                 self.own_answer(conn, own, method, &mut answer);
                 Ok(answer)
             });
+            if pointable && matches!(answer, Some(Ok(_))) && self.pointable.insert(conn) {
+                self.refresh_topics();
+                self.sync_host_mouse(engine);
+            }
+            return answer;
         }
         self.cut_answer(conn, method, params, engine, in_batch)
     }
@@ -2485,6 +2557,7 @@ impl Driver {
             }
             id
         };
+        self.refresh_topics();
         let mut reply = json!({"app": self.app_info(id, Some(conn), engine)});
         if !warnings.is_empty() {
             for w in &warnings {
@@ -2588,13 +2661,48 @@ impl Driver {
         self.repaint = true;
     }
 
+    /// `topic` of `conn`, when `mouse` or `hover`, turns the host mouse
+    /// on (`sync_host_mouse`): of the user's; of an app that may hear
+    /// it elsewhere (`clicks`, `pointer`), or on what it owns (a widget,
+    /// a sprite in front); else it is told nothing, and asks nothing of
+    /// the host.
+    fn asks_host_mouse(&self, id: ConnId, conn: &Conn, topic: &str) -> bool {
+        let needs = match topic {
+            "mouse" => grants::Permission::Clicks,
+            "hover" => grants::Permission::Pointer,
+            _ => return true,
+        };
+        let app = conn.app.and_then(|a| self.apps.as_ref()?.get(a));
+        app.is_none_or(|app| {
+            !app.grants.narrowed() || app.grants.holds(needs) || self.pointable.contains(&id)
+        })
+    }
+
     fn refresh_topics(&mut self) {
         // The topics heard: one an app does not hold wakes nothing.
         let apps = self.apps.as_ref();
         let mut heard = HashSet::new();
-        for conn in self.conns.values() {
+        for (id, conn) in &self.conns {
             let topics = conn.topics.iter();
-            heard.extend(topics.filter(|t| ear(apps, conn, t) != Ear::Deaf).cloned());
+            let mouse = |t: &&String| self.asks_host_mouse(*id, conn, t);
+            heard.extend(
+                (topics.filter(|t| ear(apps, conn, t) != Ear::Deaf))
+                    .filter(mouse)
+                    .cloned(),
+            );
+        }
+        // A surface on a frame follows its pane: the driver hears `frames`.
+        let follows = (apps.iter().flat_map(|apps| apps.iter()))
+            .any(|app| matches!(app.surface, Some(Surface::Frame(_) | Surface::Screen(_))));
+        if follows {
+            heard.insert("frames".to_string());
+        }
+        // An effect told the pointer: the driver hears the host mouse.
+        let (moves, clicks) = self.nozzles.wants();
+        for (topic, wanted) in [("hover", moves), ("mouse", clicks)] {
+            if wanted {
+                heard.insert(topic.to_string());
+            }
         }
         self.topics = heard;
     }
@@ -2611,6 +2719,12 @@ impl Driver {
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
             if paste && engine.bracketed_paste() {
+                // The end marker in the text would end the paste: the
+                // rest typed as keys. Left out, as terminals do.
+                let mut text = text.to_string();
+                while text.contains("\x1b[201~") {
+                    text = text.replace("\x1b[201~", "");
+                }
                 bytes.extend_from_slice(b"\x1b[200~");
                 bytes.extend_from_slice(text.as_bytes());
                 bytes.extend_from_slice(b"\x1b[201~");
@@ -2938,6 +3052,9 @@ impl Driver {
     }
 
     fn emit(&mut self, topic: &str, data: Value) {
+        if topic == "frames" {
+            self.follow.seen = Some(data.clone());
+        }
         if !self.topics.contains(topic) {
             return;
         }
@@ -2969,6 +3086,8 @@ impl Driver {
         for id in dead {
             self.conns.remove(&id);
             self.drawn.remove(&id);
+            self.nozzles.forget_conn(id);
+            self.pointable.remove(&id);
             if let Some(apps) = &mut self.apps {
                 apps.detach(id);
             }

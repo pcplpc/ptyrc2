@@ -828,3 +828,28 @@ mod hosted {
         assert!(!sb.socket("h").exists());
     }
 }
+
+#[test]
+fn a_paste_does_not_end_before_its_end() {
+    let sb = Sandbox::new("paste-end");
+    let program = r"printf '\033[?2004h'; exec cat -v";
+    let _driver = sb.headless("p", &["sh", "-c", program]);
+    let mut client = sb.client("p");
+    let text = "a\u{1b}[201~b\u{1b}[20\u{1b}[201~1~c\n";
+    let paste =
+        |client: &mut Client| client.call("input.send", json!({"text": text, "paste": true}));
+    wait_for(
+        || {
+            paste(&mut client).unwrap();
+            let shown = client.call("screen.text", json!({})).unwrap();
+            shown["lines"][0]
+                .as_str()
+                .unwrap_or_default()
+                .contains("200~")
+        },
+        "the paste",
+    );
+    let shown = client.call("screen.text", json!({})).unwrap();
+    let line = shown["lines"][0].as_str().unwrap().to_string();
+    assert!(line.starts_with("^[[200~abc"), "{line}");
+}

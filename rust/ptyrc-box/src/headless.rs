@@ -342,6 +342,22 @@ pub struct Headless {
     /// Clock, storage, result, files, probes.
     pub fns: HostFns,
     pub assets: Option<Assets>,
+    /// The launcher's options of the run.
+    pub launcher: Launcher,
+}
+
+/// The launcher's options (`ptyrc app ... --front`): applied to the
+/// app's requests as the driver applies them to a store app's.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Launcher {
+    /// `--front`, `--back`: the band of its sprites and widgets.
+    pub front: Option<bool>,
+    /// `--prefer P`: of its widgets, of an anchor placed by the heat.
+    pub prefer: Option<String>,
+    /// `--alpha A`: the opacity of its sprites, multiplied.
+    pub alpha: Option<f64>,
+    /// `--border B`: of its widgets.
+    pub border: Option<String>,
 }
 
 /// A frame at the last look: rect, origin, the text of its rows.
@@ -410,6 +426,7 @@ impl Headless {
             store: None,
             fns: HostFns::default(),
             assets: None,
+            launcher: Launcher::default(),
         };
         h.observe();
         h
@@ -1246,14 +1263,14 @@ impl Headless {
                 if !shape {
                     self.lack("shape", &[]);
                 }
-                lines(self, g.held_words()).map(cut)
+                lines(self, &g.held_words()).map(cut)
             }
             "screen.cells" => {
                 self.lack("text", &[]);
                 if !shape {
                     self.lack("shape", &[]);
                 }
-                lines(self, g.held_words()).map(|lines| {
+                lines(self, &g.held_words()).map(|lines| {
                     let rows: Vec<Value> = (lines.into_iter())
                         .map(|l| match l.is_empty() {
                             true => json!([]),
@@ -1281,7 +1298,7 @@ impl Headless {
                         p[k] = v.clone();
                     }
                 }
-                let words = g.held_words().to_vec();
+                let words = g.held_words();
                 self.answer(method, &p).map(|v| {
                     let lines: Vec<String> = (v["lines"].as_array().into_iter().flatten())
                         .filter_map(Value::as_str)
@@ -1337,9 +1354,20 @@ impl Headless {
                 };
                 let pattern = params.get("pattern").and_then(Value::as_str).unwrap_or("");
                 let regex = params.get("regex") == Some(&Value::Bool(true));
+                // The user's pattern, exactly: answered as under `text`.
+                if g.user_pattern(pattern, regex) {
+                    let mut p = params.clone();
+                    if let Some(o) = p.as_object_mut().filter(|_| degree < Degree::Layout) {
+                        o.remove("frame");
+                    }
+                    return (
+                        self.answer(method, &p).map(|v| mark(v, degree)),
+                        Some(degree),
+                    );
+                }
                 let word =
                     !regex && !pattern.is_empty() && pattern.chars().all(char::is_alphanumeric);
-                if !(word && g.holds_word(pattern)) {
+                if !(word && g.finds_word(pattern)) {
                     match word {
                         true => self.lack("words", &[pattern.to_owned()]),
                         false => self.lack("text", &[]),
@@ -1596,24 +1624,49 @@ impl Headless {
         let modal = object.get("modal") == Some(&Value::Bool(true));
         let sprites = g.holds("front");
         let widgets = sprites || g.holds("front-widget");
+        let by_hand = self.launcher.front;
+        let new = method == "draw.put" || (method == "draw.ext" && !object.contains_key("id"));
         let (layer, lacks) = match method {
-            "draw.put" => (Some(band(front && sprites)), front && !sprites),
-            "draw.ext" if !object.contains_key("id") => {
-                (Some(band(front && sprites)), front && !sprites)
-            }
+            _ if new => (Some(by_hand.unwrap_or(front && sprites)), front && !sprites),
             "draw.update" | "draw.ext" if asked.is_some() => {
-                (Some(band(front && sprites)), front && !sprites)
+                (Some(by_hand.unwrap_or(front && sprites)), front && !sprites)
             }
+            "widget.show" if by_hand.is_some() => (by_hand, false),
             "widget.show" if asked.is_some() || modal => {
-                (Some(band((front || modal) && widgets)), front && !widgets)
+                (Some((front || modal) && widgets), front && !widgets)
             }
-            "widget.show" if !widgets => (Some(band(false)), false),
+            "widget.show" if !widgets => (Some(false), false),
             _ => (None, false),
         };
-        if let Some(layer) = layer {
-            object.insert("layer".into(), json!(layer));
+        if let Some(front) = layer {
+            object.insert("layer".into(), json!(band(front)));
         }
-        if lacks {
+        // The launcher's options (`ptyrc-server`, `own_params`).
+        let l = &self.launcher;
+        if let Some(alpha) = l.alpha {
+            let asked = object.get("alpha").and_then(Value::as_f64);
+            if new || (asked.is_some() && matches!(method, "draw.update" | "draw.ext")) {
+                object.insert("alpha".into(), json!(alpha * asked.unwrap_or(1.0)));
+            }
+        }
+        if let Some(prefer) = &l.prefer {
+            if method == "widget.show" {
+                object.insert("prefer".into(), json!(prefer));
+            }
+            let auto = (object.get_mut("anchor"))
+                .and_then(|a| a.get_mut("auto"))
+                .and_then(Value::as_object_mut);
+            if let Some(auto) = auto {
+                auto.insert("prefer".into(), json!(prefer));
+            }
+        }
+        if let Some(border) = &l.border {
+            let declared = method == "widget.declare" && object.contains_key("border");
+            if method == "widget.show" || declared {
+                object.insert("border".into(), json!(border));
+            }
+        }
+        if lacks && by_hand.is_none() {
             let p = if method == "widget.show" {
                 "front-widget"
             } else {
@@ -1904,6 +1957,7 @@ pub struct Options {
     /// file under its option in `args`, as a handle.
     pub host: HostFns,
     pub assets: Option<Assets>,
+    pub launcher: Launcher,
 }
 
 impl Default for Options {
@@ -1924,6 +1978,7 @@ impl Default for Options {
                 ..HostFns::default()
             },
             assets: None,
+            launcher: Launcher::default(),
         }
     }
 }
@@ -2344,6 +2399,15 @@ fn with_handles(args: &Value, files: &[Named]) -> Value {
     for (i, f) in files.iter().enumerate() {
         let handle = json!({"file": format!("f{i}"), "name": f.name});
         let slot = &mut args[f.option.as_str()];
+        // Named already (`ptyrc dev test`, the launcher's reading).
+        let given = |v: &Value| v.get("file").and_then(Value::as_str) == Some(&format!("f{i}"));
+        let named = match &*slot {
+            Value::Array(list) => list.iter().any(given),
+            v => given(v),
+        };
+        if named {
+            continue;
+        }
         match slot {
             Value::Array(list) => list.push(handle),
             Value::Object(o) if o.contains_key("file") => {
@@ -2369,6 +2433,7 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
     }
     host.fns = options.host.clone();
     host.assets = options.assets.clone();
+    host.launcher = options.launcher.clone();
     let args = with_handles(&options.args, &options.host.files);
     let mut texts: Vec<(u64, &str)> = match &options.under {
         Under::Text(text) => vec![(0, text.as_str())],
@@ -2731,6 +2796,75 @@ mod tests {
         let c = h.call("screen.cursor", json!({})).unwrap();
         assert_eq!((c["x"].clone(), c["y"].clone()), (json!(5), json!(1)));
         assert!(h.call("frame.list", json!({})).unwrap()["frames"][0].is_object());
+    }
+
+    /// The user's word found at any degree, shown from `shape`; the
+    /// user's pattern opens `screen.find`, `screen.wait` for itself
+    /// alone (`ptyrc-server`, `the_users_pattern_opens_itself_alone`).
+    #[test]
+    fn the_users_word_and_pattern() {
+        for declared in [&[][..], &["layout"], &["shape"]] {
+            let mut h = Headless::new((20, 3), 1);
+            h.feed(b"hello fish\r\n12 ms TODO:");
+            let mut g = Grants::new(declared, &[], &[]);
+            g.user_words = vec!["Fish".into()];
+            g.patterns = vec![("TODO:".into(), false), (r"\d+ ms".into(), true)];
+            h.set_grants(Some(g));
+            let f = h.call("screen.find", json!({"pattern": "fish"})).unwrap();
+            assert_eq!(f["matches"][0]["x"], 6, "{declared:?}");
+            let f = h.call("screen.find", json!({"pattern": "TODO:"})).unwrap();
+            assert_eq!(f["matches"][0]["x"], 6, "{declared:?}");
+            let regex = json!({"pattern": r"\d+ ms", "regex": true});
+            let w = h.call("screen.wait", regex).unwrap();
+            assert_eq!(w["matched"], true, "{declared:?}");
+            for other in [
+                json!({"pattern": "TODO:", "regex": true}),
+                json!({"pattern": r"\d+ ms"}),
+                json!({"pattern": "TODO"}),
+                json!({"pattern": ".*", "regex": true}),
+                json!({"pattern": "hello"}),
+            ] {
+                let f = h.call("screen.find", other.clone()).unwrap();
+                assert_eq!(f["matches"], json!([]), "{other}");
+            }
+            let t = h.call("screen.text", json!({})).unwrap();
+            let shown = match declared == ["shape"] {
+                true => "##### fish",
+                false => "",
+            };
+            assert_eq!(t["lines"][0], shown, "{declared:?}");
+        }
+    }
+
+    /// `--front`, `--alpha`, `--prefer`, `--border`: on the app's
+    /// requests, as `own_params` sets them.
+    #[test]
+    fn the_launchers_options() {
+        let mut h = host(&[], &[]);
+        h.launcher = Launcher {
+            front: Some(true),
+            prefer: Some("top".into()),
+            alpha: Some(0.5),
+            border: Some("rounded".into()),
+        };
+        let mut put = json!({"content": {"rows": ["X"]}, "alpha": 0.5,
+                             "anchor": {"auto": {"w": 1, "h": 1}}});
+        h.own_layer(&Grants::new(&[] as &[&str], &[], &[]), "draw.put", &mut put);
+        assert_eq!(put["layer"], band(true));
+        assert_eq!(put["alpha"], 0.25);
+        assert_eq!(put["anchor"]["auto"]["prefer"], "top");
+        let mut show = json!({"tag": "w"});
+        let g = Grants::new(&[] as &[&str], &[], &[]);
+        h.own_layer(&g, "widget.show", &mut show);
+        assert_eq!(
+            (&show["layer"], &show["prefer"], &show["border"]),
+            (&json!(band(true)), &json!("top"), &json!("rounded"))
+        );
+        assert!(h.lacks.is_empty(), "the user's hand: nothing lacks");
+        let put = json!({"content": {"rows": ["X"]}, "anchor": {"at": [0, 0], "space": "view"}});
+        h.call("draw.put", put).unwrap();
+        h.settle();
+        assert_eq!(h.screen()[0], "Xello fish");
     }
 
     /// In front only with `front`; else behind, told as lowered.

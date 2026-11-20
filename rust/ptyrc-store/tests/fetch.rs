@@ -369,6 +369,21 @@ fn check_refuses_names() {
     let mut v = base();
     v.push(node("dev", Kind::Other));
     assert!(check(&Fake(v)).is_err());
+    // An asset's name keeps the runner's rule.
+    let mut v = base();
+    v.push(node("assets/a/b/c/ok-1.txt", Kind::File));
+    assert!(check(&Fake(v)).is_ok());
+    for bad in [
+        "assets/a b.txt",
+        "assets/.hidden",
+        "assets/a/b/c/d/e.txt",
+        "assets/é",
+    ] {
+        let mut v = base();
+        v.push(node(bad, Kind::File));
+        let e = check(&Fake(v)).unwrap_err();
+        assert!(e.message.contains("not a name of an asset"), "{bad}: {e}");
+    }
 }
 
 #[test]

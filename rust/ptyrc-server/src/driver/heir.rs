@@ -1,0 +1,199 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! The surface follows its pane: when the frame of a store app's
+//! surface leaves the screen, the pane that took its place is its frame
+//! (`heir`); its sprites go along; the app is told (`move`, `size`).
+
+use super::Driver;
+use crate::engine::{Ctx, Effects, Engine, Reply, Token};
+use crate::grants::Surface;
+use serde_json::{Value, json};
+use std::collections::HashMap;
+
+/// What the driver keeps to follow the panes.
+#[derive(Default)]
+pub(super) struct Follow {
+    /// The frames as last told by the engine, not yet looked at.
+    pub seen: Option<Value>,
+    /// Of each app: the info of its frame and the size of the screen,
+    /// when both were last stable.
+    settled: HashMap<u64, (Value, [f64; 2])>,
+}
+
+fn rect(info: &Value) -> Option<[f64; 4]> {
+    let r = info.get("rect")?.as_array()?;
+    let v = |i: usize| r.get(i)?.as_f64();
+    Some([v(0)?, v(1)?, v(2)?, v(3)?])
+}
+
+fn size(info: &Value) -> Option<[f64; 2]> {
+    rect(info).map(|r| [r[2], r[3]])
+}
+
+/// Of `frames`, the pane that took the place of `gone`: usable, of the
+/// same key, over at least half of the smaller of the two; the one that
+/// overlaps most. `scale`: how much the screen grew since `gone` was
+/// seen, across and down. The rule of `_cli.heir`.
+pub(super) fn heir(gone: &Value, frames: &[Value], scale: [f64; 2]) -> Option<u32> {
+    let [x, y, w, h] = rect(gone)?;
+    let (x, y, w, h) = (x * scale[0], y * scale[1], w * scale[0], h * scale[1]);
+    let shared = |pane: &Value| {
+        let Some([px, py, pw, ph]) = rect(pane) else {
+            return 0.0;
+        };
+        let across = (x + w).min(px + pw) - x.max(px);
+        let down = (y + h).min(py + ph) - y.max(py);
+        across.max(0.0) * down.max(0.0)
+    };
+    let heirs = frames.iter().filter(|pane| {
+        pane["id"] != gone["id"]
+            && pane["kind"] == "pane"
+            && pane["usable"] == true
+            && pane["key"] == gone["key"]
+            && size(pane).is_some_and(|[pw, ph]| 2.0 * shared(pane) >= (w * h).min(pw * ph))
+    });
+    let best = heirs.max_by(|a, b| shared(a).total_cmp(&shared(b)))?;
+    best["id"].as_u64().and_then(|id| u32::try_from(id).ok())
+}
+
+impl Driver {
+    /// The frames the engine told last: each store app whose frame left
+    /// the screen is moved to its heir.
+    pub(super) fn follow_panes(&mut self, engine: &mut dyn Engine) {
+        let Some(seen) = self.follow.seen.take() else {
+            return;
+        };
+        let frames = seen["frames"].as_array().cloned().unwrap_or_default();
+        let raw = frames.iter().find(|f| f["kind"] == "raw");
+        let screen = raw.and_then(size);
+        let stable = |f: &Value| f["state"] == "stable";
+        let surfaces: Vec<(u64, u32)> = (self.apps.iter())
+            .flat_map(|apps| apps.iter())
+            .filter_map(|app| match app.surface? {
+                Surface::Frame(frame) | Surface::Screen(frame) if frame != 0 => {
+                    Some((app.id, frame))
+                }
+                _ => None,
+            })
+            .collect();
+        let mut moves = Vec::new();
+        for (app, frame) in surfaces {
+            let mine = frames.iter().find(|f| f["id"] == frame);
+            if let Some(mine) = mine.filter(|f| f["state"] != "inactive") {
+                if let Some(screen) = screen.filter(|_| raw.is_some_and(stable) && stable(mine)) {
+                    self.follow.settled.insert(app, (mine.clone(), screen));
+                }
+                continue;
+            }
+            let (gone, scale) = match self.follow.settled.get(&app) {
+                Some((info, [w, h])) => {
+                    let [sw, sh] = screen.unwrap_or([*w, *h]);
+                    (info.clone(), [sw / w.max(1.0), sh / h.max(1.0)])
+                }
+                None => match mine {
+                    Some(mine) => (mine.clone(), [1.0, 1.0]),
+                    None => continue,
+                },
+            };
+            if let Some(new) = heir(&gone, &frames, scale) {
+                let info = frames.iter().find(|f| f["id"] == new).cloned();
+                if let (Some(info), Some(screen)) = (info, screen) {
+                    self.follow.settled.insert(app, (info, screen));
+                }
+                moves.push((app, frame, new));
+            }
+        }
+        for (app, from, to) in moves {
+            self.rehome(app, from, to, engine);
+        }
+        self.follow
+            .settled
+            .retain(|id, _| (self.apps.as_ref()).is_some_and(|apps| apps.get(*id).is_some()));
+    }
+
+    /// The surface of `app` from frame `from` to `to`: its sprites
+    /// there, or shown nowhere, go along; it is told.
+    fn rehome(&mut self, app: u64, from: u32, to: u32, engine: &mut dyn Engine) {
+        let Some(apps) = self.apps.as_mut() else {
+            return;
+        };
+        let Some(entry) = apps.get(app) else {
+            return;
+        };
+        let (Some(surface), conns) = (entry.surface, entry.conns.clone()) else {
+            return;
+        };
+        apps.set_surface(app, surface.moved(to));
+        let now = self.now();
+        let Some(&first) = conns.iter().next() else {
+            return;
+        };
+        let mut call = |driver: &mut Driver, method: &str, params: Value| {
+            let token = Token(driver.next_token);
+            driver.next_token += 1;
+            hook!(driver, now, |ctx| engine
+                .handle(first, token, method, params, ctx))
+        };
+        let listed = match call(self, "draw.list", json!({})) {
+            Reply::Ok(list) => list["sprites"].as_array().cloned().unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        let mine =
+            |id: u64| (conns.iter()).any(|c| self.drawn.get(c).is_some_and(|d| d.contains(&id)));
+        let there = |f: &Value| {
+            f.as_u64()
+                .is_some_and(|f| f == u64::from(from) || f == u64::from(crate::rpc::NOWHERE))
+        };
+        let ids: Vec<u64> = (listed.iter())
+            .filter(|s| there(&s["frame"]))
+            .filter_map(|s| s["id"].as_u64())
+            .filter(|id| mine(*id))
+            .collect();
+        for id in ids {
+            call(self, "draw.update", json!({"id": id, "frame": to}));
+        }
+        let size = json!({"size": [self.info.cols, self.info.rows]});
+        for conn in conns {
+            let topics = self.conns.get(&conn).map(|c| c.topics.clone());
+            let topics = topics.unwrap_or_default();
+            if topics.contains("move") {
+                self.send_event(conn, "move", json!({"frame": to}));
+            }
+            if topics.contains("size") {
+                self.send_event(conn, "size", size.clone());
+            }
+        }
+        self.repaint = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pane(id: u32, rect: [u16; 4]) -> Value {
+        json!({"id": id, "kind": "pane", "usable": true, "key": null, "rect": rect,
+               "state": "stable"})
+    }
+
+    #[test]
+    fn the_heir_is_the_pane_that_took_the_place() {
+        let gone = pane(1, [0, 0, 19, 16]);
+        let frames = [pane(2, [0, 0, 39, 16]), pane(3, [40, 0, 20, 16])];
+        assert_eq!(heir(&gone, &frames, [1.0, 1.0]), Some(2));
+        // Far from it: none.
+        assert_eq!(heir(&gone, &frames[1..], [1.0, 1.0]), None);
+        // Another key: none.
+        let mut other = pane(2, [0, 0, 39, 16]);
+        other["key"] = json!("w2");
+        assert_eq!(heir(&gone, &[other], [1.0, 1.0]), None);
+        // Not usable: none.
+        let mut hidden = pane(2, [0, 0, 39, 16]);
+        hidden["usable"] = json!(false);
+        assert_eq!(heir(&gone, &[hidden], [1.0, 1.0]), None);
+        // The screen doubled across: the place is looked for in proportion.
+        let gone = pane(1, [20, 0, 20, 16]);
+        let frames = [pane(2, [0, 0, 39, 16]), pane(3, [40, 0, 40, 16])];
+        assert_eq!(heir(&gone, &frames, [1.0, 1.0]), Some(2));
+        assert_eq!(heir(&gone, &frames, [2.0, 1.0]), Some(3));
+    }
+}

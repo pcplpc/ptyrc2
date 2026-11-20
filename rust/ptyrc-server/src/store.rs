@@ -199,10 +199,14 @@ fn of_tree(
     let manifest = manifest::parse_bytes(&source).map_err(refused)?;
     let text = |p: PathBuf| p.to_string_lossy().into_owned();
     // A script, or the module built at the install.
-    let guest = match &manifest.app.entry {
+    let mut guest = match &manifest.app.entry {
         Entry::Script(path) => vec!["--script".into(), text(tree.join(path))],
         Entry::Rust(_) => vec![text(tree.join(ptyrc_store::build::MODULE))],
     };
+    // `[app] assets`: read by the runner, answered by it (`asset.*`).
+    if let Some(a) = &manifest.app.assets {
+        guest.splice(0..0, ["--assets".into(), text(tree.join(a))]);
+    }
     // `native/...` is the key of the shipped apps in `permissions.toml`.
     if installed.origin.starts_with("native/") {
         return Err(RpcError::new(

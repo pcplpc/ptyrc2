@@ -10,7 +10,7 @@
 
 use super::raster::{self, Slot};
 use super::{Blend, HostColors, Scene, Sprite, faded, is_open, on_backdrop, paint, paint_alpha};
-use crate::types::{SpriteId, Surfaces};
+use crate::types::{OwnerId, SpriteId, Surfaces};
 use ptyrc_vt::palette::{self, Rgb};
 use ptyrc_vt::{Attrs, Cell, Color, Grid, Rect, Style};
 
@@ -134,6 +134,8 @@ pub struct Composer {
     dirty: Vec<bool>,
     /// Rows composed again at the last `compose`.
     pub(super) recomposed: usize,
+    /// The owners drawn; `None`: all (`Scene::compose_of`).
+    only: Option<Vec<OwnerId>>,
 }
 
 impl Default for Composer {
@@ -153,6 +155,7 @@ impl Composer {
             placed: Vec::new(),
             dirty: Vec::new(),
             recomposed: 0,
+            only: None,
         }
     }
 
@@ -183,6 +186,14 @@ impl Scene {
     /// are now: a scroll between the two moves frame-anchored sprites.
     pub fn compose(&self, base: &Grid, surfaces: &dyn Surfaces) -> Grid {
         let mut composer = Composer::new();
+        self.compose_with(base, surfaces, &mut composer);
+        composer.out
+    }
+
+    /// `compose` with the sprites of `owners` alone.
+    pub fn compose_of(&self, base: &Grid, surfaces: &dyn Surfaces, owners: &[OwnerId]) -> Grid {
+        let mut composer = Composer::new();
+        composer.only = Some(owners.to_vec());
         self.compose_with(base, surfaces, &mut composer);
         composer.out
     }
@@ -220,7 +231,12 @@ impl Scene {
         let places: Vec<Option<Place>> = self
             .sprites
             .iter()
-            .map(|sprite| place_of(sprite, base, surfaces, cursor))
+            .map(|sprite| {
+                let drawn = (c.only.as_ref()).is_none_or(|only| only.contains(&sprite.owner));
+                drawn
+                    .then(|| place_of(sprite, base, surfaces, cursor))
+                    .flatten()
+            })
             .collect();
         let mut by_id: Vec<usize> = (0..self.sprites.len()).collect();
         by_id.sort_unstable_by_key(|&i| self.sprites[i].id);

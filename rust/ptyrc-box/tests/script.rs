@@ -901,6 +901,7 @@ fn host_functions_from_memory() {
             mtime_ms: 1,
         },
         written: false,
+        write: true,
     });
     let mut assets = ptyrc_box::assets::Assets::default();
     assets.files.insert("a/b.txt".into(), b"asset".to_vec());
@@ -908,8 +909,7 @@ fn host_functions_from_memory() {
     let r = run(wasm, &o).unwrap();
     assert_eq!(r.end, None, "{r}");
     assert_eq!(
-        r.screens[0].1[0],
-        "1000000 4 s0 todo 4 asset bad-params bad-request {}",
+        r.screens[0].1[0], "1000000 4 s0 todo 4 asset bad-params bad-request {}",
         "{r}"
     );
     assert_eq!(r.result, Some((json!("r"), 3)));
@@ -923,11 +923,14 @@ fn host_functions_from_memory() {
     assert_eq!(j["files"][0]["text"], "done");
     assert_eq!(j["storage"]["k"], "v1");
     // Not held: the clock lowered, storage and writes denied.
-    o.grants = Some(ptyrc_box::grants::Grants::new(&[] as &[&str], &[], &[] as &[&str]));
+    o.grants = Some(ptyrc_box::grants::Grants::new(
+        &[] as &[&str],
+        &[],
+        &[] as &[&str],
+    ));
     let r = run(wasm, &o).unwrap();
     assert_eq!(
-        r.screens[0].1[0],
-        "0 denied denied todo denied asset bad-params ok {}",
+        r.screens[0].1[0], "0 denied denied todo denied asset bad-params ok {}",
         "{r}"
     );
 }

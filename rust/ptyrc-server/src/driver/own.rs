@@ -9,7 +9,7 @@
 use super::Driver;
 use crate::apps::Given;
 use crate::engine::{ConnId, Engine};
-use crate::grants::{Degree, Permission, Surface};
+use crate::grants::{self, Degree, Permission, Surface};
 use ptyrc_proto::{ErrorCode, RpcError};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -180,6 +180,11 @@ impl Driver {
         };
         if method == "draw.clear" {
             object.remove("all");
+        }
+        // The composed picture: its own sprites alone.
+        if matches!(method, "screen.text" | "screen.cells") {
+            let owners: Vec<u64> = own.conns.iter().map(|c| c.0).collect();
+            object.insert("owners".into(), json!(owners));
         }
         // A store app names no layer: its band; in front with the
         // permission, else behind (the lesser form); `--front`,
@@ -358,7 +363,61 @@ impl Driver {
         };
         if let Some(Value::Array(items)) = answer.get_mut(member) {
             items.retain(|item| keep(item));
+            if method == "draw.list" {
+                let cut = self.cut_of(conn);
+                let cut = cut.as_ref().map(|(d, w, h)| (*d, w.as_slice(), h));
+                let surface = own.store.then(|| own.frame().unwrap_or(0));
+                items
+                    .iter_mut()
+                    .for_each(|item| landing(item, cut, surface));
+            }
         }
+    }
+}
+
+/// Of an app's own sprite in `draw.list`: where an anchor placed by
+/// what the app may not read landed, told at the degree that would
+/// have told it; hidden below it, as a sprite not placed yet. `cut`:
+/// its degree, its words, the user's; `None`: all told. `surface`: of
+/// a store app, the frame told in place of `NOWHERE`, and of every
+/// frame below `layout`: 0.
+pub(super) fn landing(
+    item: &mut Value,
+    cut: Option<(Degree, &[String], &grants::Hand)>,
+    surface: Option<u32>,
+) {
+    if let Some((degree, words, hand)) = cut {
+        let anchor = &item["anchor"];
+        let among = |list: &[String], text: &str| list.iter().any(|w| w.eq_ignore_ascii_case(text));
+        let needs = if let Some(text) = anchor.get("text").and_then(Value::as_str) {
+            let literal = anchor.get("regex") != Some(&Value::Bool(true));
+            match () {
+                _ if literal && among(words, text) => Degree::Words,
+                _ if literal && among(&hand.words, text) => Degree::Shape,
+                _ => Degree::Text,
+            }
+        } else if anchor.get("cursor").is_some() || anchor.get("auto").is_some() {
+            Degree::Shape
+        } else {
+            Degree::None
+        };
+        if degree < needs {
+            item["screen"] = Value::Null;
+            item["visible"] = json!(false);
+            item["covered"] = json!(0.0);
+        }
+        if let Some(surface) = surface {
+            let nowhere = item["frame"] == json!(crate::rpc::NOWHERE);
+            if degree < Degree::Layout {
+                item["frame"] = json!(0);
+            } else if nowhere {
+                item["frame"] = json!(surface);
+            }
+        }
+    } else if let Some(surface) = surface
+        && item["frame"] == json!(crate::rpc::NOWHERE)
+    {
+        item["frame"] = json!(surface);
     }
 }
 
@@ -450,6 +509,44 @@ mod tests {
         }
         assert!(in_front(&json!("hud")) && in_front(&json!(5)));
         assert!(!in_front(&json!("back")) && !in_front(&json!(-5)) && !in_front(&json!("x")));
+    }
+
+    #[test]
+    fn where_an_anchor_landed_is_told_at_its_degree() {
+        let nowhere = crate::rpc::NOWHERE;
+        let sprite = |anchor: Value| {
+            json!({"anchor": anchor, "screen": [3, 4], "visible": true, "covered": 0.5,
+                   "frame": nowhere})
+        };
+        let hand = grants::Hand {
+            words: vec!["Rose".into()],
+            ..Default::default()
+        };
+        let words = ["fish".to_string()];
+        let told = |anchor: Value, degree: Degree| {
+            let mut item = sprite(anchor);
+            landing(&mut item, Some((degree, &words, &hand)), Some(5));
+            (item["screen"] != Value::Null, item["frame"].clone())
+        };
+        let text = |t: &str| json!({"text": t});
+        assert_eq!(told(text("fish"), Degree::Shape), (false, json!(5)));
+        assert_eq!(told(text("fish"), Degree::Words), (true, json!(5)));
+        assert!(!told(text("cat"), Degree::Words).0);
+        assert!(told(text("cat"), Degree::Text).0);
+        assert!(!told(json!({"text": "fish", "regex": true}), Degree::Words).0);
+        assert!(told(text("rose"), Degree::Shape).0);
+        let cursor = json!({"cursor": {"dx": 1}});
+        assert_eq!(told(cursor.clone(), Degree::None), (false, json!(0)));
+        assert!(told(cursor, Degree::Shape).0);
+        assert!(!told(json!({"auto": {}}), Degree::Layout).0);
+        assert_eq!(told(json!({"at": [1, 1]}), Degree::None), (true, json!(0)));
+        // The whole screen held: all told; `NOWHERE` is still its frame.
+        let mut item = sprite(text("cat"));
+        landing(&mut item, None, Some(5));
+        assert_eq!(
+            (item["visible"].clone(), item["frame"].clone()),
+            (json!(true), json!(5))
+        );
     }
 
     #[test]

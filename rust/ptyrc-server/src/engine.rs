@@ -204,6 +204,12 @@ pub trait Engine {
         None
     }
 
+    /// The cell of the canvas of `sprite` at this screen cell, when it
+    /// is shown there, in the view of its frame.
+    fn canvas_at(&self, _sprite: u64, _x: u16, _y: u16) -> Option<[i64; 2]> {
+        None
+    }
+
     /// The default colours of the host: at start, then when the host
     /// tells others.
     fn on_host_colors(&mut self, _colors: ptyrc_core::scene::HostColors, _ctx: &mut Ctx) {}

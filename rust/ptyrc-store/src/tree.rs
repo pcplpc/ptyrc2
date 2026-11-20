@@ -195,6 +195,18 @@ pub fn check_all(tree: &dyn Tree) -> std::result::Result<Checked, Vec<Error>> {
                 "add the directory, or remove assets",
             ));
         }
+        if let Some(a) = &manifest.app.assets {
+            let under = format!("{a}/");
+            for n in files.iter().filter(|n| n.path.starts_with(&under)) {
+                let name = &n.path[under.len()..];
+                if !asset_name(name) {
+                    bad.push(tree_err(
+                        format!("{}: not a name of an asset, never answered", n.path),
+                        ASSET_RULE,
+                    ));
+                }
+            }
+        }
         if let Some(t) = &manifest.app.tape
             && file(t).is_none()
         {
@@ -213,6 +225,22 @@ pub fn check_all(tree: &dyn Tree) -> std::result::Result<Checked, Vec<Error>> {
         }),
         _ => Err(bad),
     }
+}
+
+/// The rule of an asset's name, as the runner keeps it (`ptyrc-box`,
+/// `assets::valid_name`).
+pub const ASSET_RULE: &str = "under [app] assets: components of [A-Za-z0-9._-], 1 to 64 bytes, \
+    none starting with `.`, `/` between them, 4 at most";
+
+/// A name under `[app] assets` the runner answers.
+pub fn asset_name(name: &str) -> bool {
+    let part = |c: &str| {
+        (1..=64).contains(&c.len())
+            && !c.starts_with('.')
+            && c.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+    };
+    name.split('/').count() <= 4 && name.split('/').all(part)
 }
 
 /// A plain directory (`ptyrc dev check DIR`). Skipped at its root: `.git`,
