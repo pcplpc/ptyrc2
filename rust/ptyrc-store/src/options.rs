@@ -244,6 +244,14 @@ impl Cx<'_> {
                     "lower-case letters, digits and `-`, a letter first, 32 at most",
                 ));
             }
+            if name == "seed" {
+                return Err(self.err(
+                    k.span(),
+                    "[options] seed: an option of ptyrc's own",
+                    "remove it: `ptyrc app ID --seed N` seeds `random` (and Math.random); \
+                     without it, /dev/urandom",
+                ));
+            }
             if crate::manifest::RESERVED_OPTIONS.contains(&name)
                 || name.strip_prefix("no-").is_some()
             {
@@ -540,6 +548,12 @@ impl Cx<'_> {
                 Some(value)
             }
         };
+        // A bool without a default is false; any other option without
+        // one is `null` in `init`.
+        let default = match (ty, default, list) {
+            (OptionType::Bool, None, false) => Some(OptionValue::Bool(false)),
+            (_, d, _) => d,
+        };
         let option = AppOption {
             name: name.to_string(),
             ty,
@@ -579,20 +593,6 @@ impl Cx<'_> {
                     return Err(self.err(span, format!("[{section}] default: {why}"), ""));
                 }
             }
-        } else if !list
-            && matches!(
-                ty,
-                OptionType::Int | OptionType::Float | OptionType::Bool | OptionType::String
-            )
-        {
-            return Err(self.err(
-                at,
-                format!("[{section}]: a default is wanted"),
-                format!(
-                    "{name} = {{ type = \"{}\", default = ..., doc = \"...\" }}",
-                    ty.as_str()
-                ),
-            ));
         }
         Ok(option)
     }
@@ -883,11 +883,13 @@ pub struct Launcher {
     pub border: Option<String>,
     /// `--wait`, `--no-wait`.
     pub wait: Option<bool>,
+    /// `--seed N`: the seed of the app's `random`.
+    pub seed: Option<u64>,
 }
 
 impl Launcher {
     /// The members of `app.start`: `frame`, `front`, `prefer`, `alpha`,
-    /// `border`.
+    /// `border`, `seed`.
     pub fn members(&self, params: &mut Map<String, Value>) {
         let mut put = |k: &str, v: Option<Value>| {
             if let Some(v) = v {
@@ -899,6 +901,7 @@ impl Launcher {
         put("prefer", self.prefer.as_ref().map(|p| json!(p)));
         put("alpha", self.alpha.map(|a| json!(a)));
         put("border", self.border.as_ref().map(|b| json!(b)));
+        put("seed", self.seed.map(|s| json!(s)));
     }
 }
 
@@ -976,10 +979,7 @@ pub fn read(m: &Manifest, words: &[String], cwd: &Path) -> Result<Option<Launch>
         }
         if let Some((name, value)) = bare {
             let o = find(name).expect("filtered");
-            given.push((
-                o,
-                flag_value(o, &format!("{name}="), Some(value.into()), false)?,
-            ));
+            given.push((o, flag_value(o, name, Some(value.into()), false)?));
             continue;
         }
         if let Some(flag) = word.strip_prefix("--") {
@@ -1003,6 +1003,14 @@ pub fn read(m: &Manifest, words: &[String], cwd: &Path) -> Result<Option<Launch>
                 "wait" => l.wait = Some(true),
                 "no-wait" => l.wait = Some(false),
                 "frame" => l.frame = Some(value(&mut inline, "a frame: an id or a name")?),
+                "seed" => {
+                    let n = value(&mut inline, "a seed")?;
+                    let seed = n.parse::<u64>().ok();
+                    l.seed =
+                        Some(seed.ok_or_else(|| {
+                            usage(format!("--seed {n}: an integer of 0 to 2^64-1"))
+                        })?);
+                }
                 "prefer" => {
                     let p = value(&mut inline, "a side")?;
                     if !PREFER.contains(&p.as_str()) {
@@ -1102,8 +1110,7 @@ pub fn read(m: &Manifest, words: &[String], cwd: &Path) -> Result<Option<Launch>
 /// `--NAME=yes`; else the text, typed.
 fn flag_value(o: &AppOption, flag: &str, v: Option<String>, off: bool) -> Result<Value> {
     if o.ty != OptionType::Bool {
-        return text_value(o, v.as_deref().unwrap_or_default())
-            .map_err(|e| usage(format!("{flag}: {}", e.message)));
+        return typed(o, v.as_deref().unwrap_or_default(), flag);
     }
     match v.as_deref() {
         None | Some("true" | "yes" | "on") => Ok(json!(!off)),
@@ -1114,6 +1121,12 @@ fn flag_value(o: &AppOption, flag: &str, v: Option<String>, off: bool) -> Result
 
 /// A word typed, as JSON of the option's type. A file stays its text.
 fn text_value(o: &AppOption, v: &str) -> Result<Value> {
+    typed(o, v, &o.name)
+}
+
+/// [`text_value`], a refusal named by `label` (the option, or the flag
+/// typed).
+fn typed(o: &AppOption, v: &str, label: &str) -> Result<Value> {
     let value = match o.ty {
         OptionType::Int => v.parse::<i64>().map(|n| json!(n)).ok(),
         OptionType::Float => v
@@ -1128,11 +1141,11 @@ fn text_value(o: &AppOption, v: &str) -> Result<Value> {
         },
         _ => Some(json!(v)),
     };
-    let value = value.ok_or_else(|| usage(format!("{v}: {} wanted", o.ty.as_str())))?;
+    let value = value.ok_or_else(|| usage(format!("{label}: {v}: {} wanted", o.ty.as_str())))?;
     if o.ty.named() {
         return Ok(value);
     }
-    item(o, &value).map_err(|why| usage(format!("{}: {why}", o.name)))
+    item(o, &value).map_err(|why| usage(format!("{label}: {why}")))
 }
 
 /// A file named: its handle added to `files`; the value the guest gets.
@@ -1429,12 +1442,21 @@ pub fn help(m: &Manifest, program: &str) -> String {
         line(&mut text, "--no-NAME".into(), "a yes-or-no option, off");
     }
     text.push_str("\noptions of ptyrc, for every app:\n");
+    let frame = m.app.frame.as_deref().unwrap_or("active");
+    line(
+        &mut text,
+        "--frame F".into(),
+        &format!("the frame it draws on [default: {frame}]"),
+    );
     for (flag, doc) in [
-        ("--frame F", "the frame it draws on [default: active]"),
         ("--front, --back", "in front of the text, or behind it"),
         ("--prefer SIDE", "where its widgets go: top-right, ..., any"),
         ("--alpha A", "the opacity of what it draws, 0 to 1"),
         ("--border B", "the border of its widgets"),
+        (
+            "--seed N",
+            "the seed of its random numbers [default: the clock]",
+        ),
     ] {
         line(&mut text, flag.into(), doc);
     }
@@ -1450,7 +1472,7 @@ pub fn help(m: &Manifest, program: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::manifest::parse;
+    use crate::manifest::{App, parse};
 
     const HEAD: &str = "[app]\nid = \"a\"\nversion = \"1\"\nsummary = \"An app.\"\n\
                         license = \"GPL-3.0-or-later\"\napi = 1\nscript = \"app.js\"\n";
@@ -1513,9 +1535,9 @@ mod tests {
             (opt("w = { type = \"word\", default = \"no way\", doc = \"d\" }"), "a word is"),
             (opt("b = { type = \"bool\", list = true, doc = \"d\" }"), "list of bool"),
             (opt("n = { type = \"int\", list = true, default = 1, doc = \"d\" }"), "starts empty"),
-            (opt("n = { type = \"int\", doc = \"d\" }"), "a default is wanted"),
             (opt("x = { type = \"int\", default = 1, short = \"h\", doc = \"d\" }"), "short"),
             (opt("border = { type = \"int\", default = 1, doc = \"d\" }"), "of ptyrc's own"),
+            (opt("seed = { type = \"int\", doc = \"d\" }"), "seed: an option of ptyrc's own"),
             (opt("no-x = { type = \"int\", default = 1, doc = \"d\" }"), "no-NAME"),
             (
                 opt("a = { type = \"int\", default = 1, short = \"x\", doc = \"d\" }\n\
@@ -1578,9 +1600,10 @@ mod tests {
         ] {
             assert!(read(bad).is_err(), "{bad}");
         }
-        let l = read("--front --frame 2 --prefer top --alpha 0.5 --border rounded --no-wait")
-            .unwrap()
-            .unwrap();
+        let l =
+            read("--front --frame 2 --prefer top --alpha 0.5 --border rounded --no-wait --seed 7")
+                .unwrap()
+                .unwrap();
         assert_eq!(
             l.launcher,
             Launcher {
@@ -1590,10 +1613,13 @@ mod tests {
                 alpha: Some(0.5),
                 border: Some("rounded".into()),
                 wait: Some(false),
+                seed: Some(7),
             }
         );
         let p = l.params("example.org/a/b");
         assert_eq!(p["front"], json!(true));
+        assert_eq!(p["seed"], json!(7));
+        assert!(read("--seed -1").is_err() && read("--seed").is_err());
         assert_eq!(p["store"], json!("example.org/a/b"));
         assert!(p.get("files").is_none());
         assert_eq!(read("--back").unwrap().unwrap().launcher.front, Some(false));
@@ -1798,13 +1824,14 @@ mod tests {
             json!({"bursts": 10, "speed": 0.5, "at": [9, -3]})
         );
         for (bad, said) in [
-            ("--bursts 0", "bursts: 0: 1 to 10"),
-            ("--bursts 11", "bursts: 11: 1 to 10"),
-            ("--speed 0.25", "speed: 0.25: at least 0.5"),
-            ("--at 1 --at 10", "at: 10: at most 9"),
+            ("--bursts 0", "--bursts: 0: 1 to 10"),
+            ("--bursts 11", "--bursts: 11: 1 to 10"),
+            ("--bursts=x", "--bursts: x: int wanted"),
+            ("--speed 0.25", "--speed: 0.25: at least 0.5"),
+            ("--at 1 --at 10", "--at: 10: at most 9"),
         ] {
             let message = read(bad).unwrap_err().message;
-            assert!(message.contains(said), "{bad}: {message}");
+            assert!(message.starts_with(said), "{bad}: {message}");
         }
         let r = resolve(&m, Some(&json!({"bursts": 12})), &[]);
         assert!(r.unwrap_err().message.contains("bursts: 12: 1 to 10"));
@@ -1814,6 +1841,40 @@ mod tests {
             "how fast (at least 0.5)",
             "where (at most 9)",
         ] {
+            assert!(h.contains(said), "{said}: {h}");
+        }
+        let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    #[test]
+    fn an_option_without_a_default() {
+        let m = manifest(
+            "[options]\n\
+             start = { type = \"int\", min = 1, max = 9, doc = \"the start\" }\n\
+             rate = { type = \"float\", doc = \"how fast\" }\n\
+             zone = { type = \"string\", doc = \"where\" }\n\
+             kind = { type = \"string\", choices = [\"a\", \"b\"], doc = \"which\" }\n\
+             shy = { type = \"bool\", doc = \"hide\" }\n",
+        );
+        let shy = m.options.iter().find(|o| o.name == "shy").unwrap();
+        assert_eq!(shy.default, Some(OptionValue::Bool(false)));
+        let none = resolve(&m, None, &[]).unwrap();
+        for name in ["start", "rate", "zone", "kind"] {
+            assert_eq!(none.init[name], Value::Null, "{name}");
+        }
+        assert_eq!(none.init["shy"], json!(false));
+        let cwd = scratch("none");
+        let read = |text: &str| read(&m, &words(text), &cwd);
+        assert_eq!(read("").unwrap().unwrap().args, Map::new());
+        assert!(read("--start 0").is_err() && read("--kind c").is_err());
+        let given = read("--start 9 --kind b --zone x").unwrap().unwrap();
+        assert_eq!(
+            Value::Object(given.args),
+            json!({"start": 9, "kind": "b", "zone": "x"})
+        );
+        let h = help(&m, "ptyrc app a");
+        assert!(h.contains("the start (1 to 9)\n"), "{h}");
+        for said in ["how fast\n", "where\n", "hide\n"] {
             assert!(h.contains(said), "{said}: {h}");
         }
         let _ = std::fs::remove_dir_all(&cwd);
@@ -1832,8 +1893,18 @@ mod tests {
             "[repeated]",
             "--no-NAME",
             "--border B",
+            "the frame it draws on [default: active]",
         ] {
             assert!(h.contains(said), "{said}: {h}");
         }
+        let largest = manifest("").app;
+        let m = Manifest {
+            app: App {
+                frame: Some("largest".into()),
+                ..largest
+            },
+            ..manifest("")
+        };
+        assert!(help(&m, "a").contains("[default: largest]"));
     }
 }

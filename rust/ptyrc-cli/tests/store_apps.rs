@@ -2,13 +2,12 @@
 //! The harness of the shipped store apps, `plugins/store-apps/NAME/`
 //! (`plugins/store-apps/README.md`). For each tree: `ptyrc dev check`;
 //! its id its directory; its `LICENSE` the repository's; each draw of
-//! `[app] random` read by its options; each case `tests/CASE.args`, the
-//! words after `ptyrc dev test TREE` (run in the tree), its screens
-//! against `tests/CASE.txt`; `ptyrc dev test --unit` when `tests.js`
-//! exists; a Rust app's `cargo test`.
+//! `[app] random` read by its options; its cases, `ptyrc dev test TREE
+//! --cases` (each `tests/CASE.args` against `tests/CASE.txt`); `ptyrc
+//! dev test --unit` when `tests.js` exists; a Rust app's `cargo test`.
 //!
-//! `PTYRC_BLESS=1` writes each `CASE.txt` from the run, in place of the
-//! comparison. `PTYRC_STORE_APP=NAME` runs that tree alone. Without the
+//! `PTYRC_BLESS=1`: `--cases --bless`, each `CASE.txt` written from the
+//! run. `PTYRC_STORE_APP=NAME` runs that tree alone. Without the
 //! interpreter (`sdk/js/interp/build.sh`) the script apps are skipped,
 //! unless `PTYRC_REQUIRE_JS=1`.
 
@@ -75,16 +74,6 @@ fn ptyrc(dir: &Path, args: &[String]) -> Output {
         .unwrap()
 }
 
-/// The words of a `.args` file: split on white space; `#` to the end
-/// of a line is a comment. No quoting.
-fn words(text: &str) -> Vec<String> {
-    (text.lines())
-        .map(|l| l.split('#').next().unwrap_or(""))
-        .flat_map(str::split_whitespace)
-        .map(str::to_string)
-        .collect()
-}
-
 fn said(out: &Output) -> String {
     format!(
         "status {:?}\n--- stdout\n{}--- stderr\n{}",
@@ -92,53 +81,6 @@ fn said(out: &Output) -> String {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     )
-}
-
-/// A first line that differs, and the two sides.
-fn differ(want: &str, got: &str) -> String {
-    let (w, g): (Vec<&str>, Vec<&str>) = (want.lines().collect(), got.lines().collect());
-    let at = (0..w.len().max(g.len()))
-        .find(|&i| w.get(i) != g.get(i))
-        .unwrap_or(0);
-    format!(
-        "first difference at line {}:\n  expected: {:?}\n  got:      {:?}\n--- got\n{got}",
-        at + 1,
-        w.get(at).copied().unwrap_or("<end>"),
-        g.get(at).copied().unwrap_or("<end>"),
-    )
-}
-
-/// One case: `tests/CASE.args`; problems in `fails`.
-fn case(tree: &Path, args: &Path, bless: bool) -> Option<String> {
-    let name = args.file_stem().unwrap().to_string_lossy().into_owned();
-    let expected = args.with_extension("txt");
-    let mut argv: Vec<String> = vec!["dev".into(), "test".into(), tree.display().to_string()];
-    argv.extend(words(&std::fs::read_to_string(args).unwrap()));
-    let out = ptyrc(tree, &argv);
-    if !out.status.success() {
-        return Some(format!(
-            "case {name}: ptyrc {}\n{}",
-            argv.join(" "),
-            said(&out)
-        ));
-    }
-    let got = String::from_utf8(out.stdout).unwrap();
-    if bless {
-        std::fs::write(&expected, &got).unwrap();
-        return None;
-    }
-    match std::fs::read_to_string(&expected) {
-        Ok(want) if want == got => None,
-        Ok(want) => Some(format!(
-            "case {name}: the screens differ from {}; PTYRC_BLESS=1 if meant\n{}",
-            expected.display(),
-            differ(&want, &got)
-        )),
-        Err(_) => Some(format!(
-            "case {name}: no {}; PTYRC_BLESS=1 writes it",
-            expected.display()
-        )),
-    }
 }
 
 /// Every problem of the tree `dir`.
@@ -168,22 +110,14 @@ fn tree(dir: &Path, js: bool, bless: bool) -> Vec<String> {
     if !rust && !js {
         return fails;
     }
-    let mut cases: Vec<PathBuf> = (std::fs::read_dir(dir.join("tests")).into_iter())
-        .flatten()
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x == "args"))
-        .collect();
-    cases.sort();
-    if cases.is_empty() {
-        fails.push("no case: tests/CASE.args".into());
+    let mut argv: Vec<String> = vec!["dev".into(), "test".into(), ".".into(), "--cases".into()];
+    if bless {
+        argv.push("--bless".into());
     }
-    std::thread::scope(|s| {
-        let runs: Vec<_> = (cases.iter())
-            .map(|c| s.spawn(move || case(dir, c, bless)))
-            .collect();
-        fails.extend(runs.into_iter().filter_map(|r| r.join().unwrap()));
-    });
+    let cases = ptyrc(dir, &argv);
+    if !cases.status.success() {
+        fails.push(format!("dev test --cases\n{}", said(&cases)));
+    }
     if !rust && dir.join("tests.js").is_file() {
         let unit = ptyrc(
             dir,
@@ -236,14 +170,6 @@ fn every_shipped_tree() {
         runs.into_iter().flat_map(|r| r.join().unwrap()).collect()
     });
     assert!(fails.is_empty(), "\n{}", fails.join("\n\n"));
-}
-
-#[test]
-fn the_words_of_a_case() {
-    assert_eq!(
-        words("--size 40x8 # the screen\n# a line\n--at 1s,2s\n"),
-        ["--size", "40x8", "--at", "1s,2s"]
-    );
 }
 
 /// `ptyrc ARGS` with the shipped trees of the repository and empty

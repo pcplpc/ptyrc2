@@ -1211,6 +1211,106 @@ fn frame_layer_and_view_cells() {
 }
 
 #[test]
+fn moved_with_the_owner_to_another_pane() {
+    let mut rig = Rig::new(40, 12);
+    rig.mock.infos.push(surface(PANE, Rect::new(20, 2, 20, 10)));
+    rig.mock.infos.push(surface(7, Rect::new(0, 2, 20, 10)));
+    rig.declare(1, "t", &[[6, 2]]);
+    rig.declare(2, "t", &[[6, 2]]);
+    let mut show = Show::new("t");
+    show.frame = FrameSel::Id(PANE);
+    let mine = rig.show(1, show.clone());
+    let other = rig.show(2, show);
+    // The pane goes; owner 1 is moved to frame 7, owner 2 is not.
+    rig.mock.infos.retain(|i| i.id != PANE);
+    assert_eq!(rig.w.move_owner(1, PANE, 7), 1);
+    assert_eq!(rig.w.move_owner(1, PANE, 7), 0);
+    rig.w.touch();
+    rig.run(1000);
+    let info = rig.info(mine);
+    assert_eq!((info.frame, info.state), (Some(7), WidgetState::Placed));
+    let [x, y, w, h] = info.rect.unwrap();
+    assert!(x + w <= 20 && y >= 2 && y + h <= 12, "{:?}", info.rect);
+    let sprite = rig
+        .scene
+        .list()
+        .into_iter()
+        .find(|s| Some(s.id) == info.sprite);
+    assert_eq!(sprite.unwrap().frame, Some(7));
+    assert!(
+        rig.events
+            .iter()
+            .any(|e| e.id == mine && e.frame == Some(7))
+    );
+    assert_eq!(rig.info(other).frame, Some(PANE));
+}
+
+/// A grid cell: scalar, fg, bg (kind, then bytes), attributes, repeats.
+fn grid_cell(ch: char, fg: [u8; 4], bg: [u8; 4], attrs: u16, more: u16) -> Vec<u8> {
+    let mut c = (ch as u32).to_le_bytes().to_vec();
+    c.extend(fg);
+    c.extend(bg);
+    c.extend(attrs.to_le_bytes());
+    c.extend(more.to_le_bytes());
+    c
+}
+
+#[test]
+fn a_grid_is_the_cells_it_spells() {
+    let none = [0; 4];
+    let mut row = grid_cell('A', [2, 1, 0, 0], [3, 0, 0, 255], 1, 0);
+    row.extend(grid_cell('\0', none, none, 0, 0));
+    row.extend(grid_cell('中', none, none, 0, 0));
+    row.extend(grid_cell('\0', none, none, 0, 0));
+    row.extend(grid_cell('x', none, none, 0, 2));
+    let mut text = String::new();
+    crate::scene::grid::encode(&row, &mut text);
+    let grid = Content {
+        grid: Some(vec![text]),
+        ..Content::default()
+    };
+    let mut rig = Rig::new(40, 10);
+    let decl = Declare {
+        widgets: vec![VariantDecl {
+            tag: "g".into(),
+            size: [7, 1],
+            content: Some(grid.clone()),
+            ..VariantDecl::default()
+        }],
+        border: None,
+    };
+    rig.w.declare(1, decl).unwrap();
+    let id = rig.show(1, Show::new("g"));
+    let [x, y, _, _] = rig.rect(id).unwrap();
+    let line = &rig.shown()[y as usize + 1];
+    assert!(line.contains("│A 中xxx│"), "{line:?} at {x}");
+    let out = rig.scene.compose(&rig.grid, &rig.mock);
+    let a = out.cell(x + 1, y + 1).style;
+    assert_eq!((a.fg, a.bg), (Color::Indexed(1), Color::Rgb(0, 0, 255)));
+    assert!(a.attrs.contains(ptyrc_vt::Attrs::BOLD));
+    assert!(!a.attrs.contains(ptyrc_vt::Attrs::DIM));
+    // By `widget.set` too; with rows or cells, refused; bad base64, refused.
+    let set = |content: Content| Set {
+        id,
+        content: Some(content),
+        ..Set::default()
+    };
+    rig.w.set(1, set(grid.clone())).unwrap();
+    let mut both = grid.clone();
+    both.rows = Some(vec!["x".into()]);
+    let e = rig.w.set(1, set(both)).unwrap_err();
+    assert!(matches!(e, WidgetError::BadParams(m) if m.contains("exclusive")));
+    let e = rig.w.set(
+        1,
+        set(Content {
+            grid: Some(vec!["*".into()]),
+            ..Content::default()
+        }),
+    );
+    assert!(matches!(e, Err(WidgetError::BadParams(m)) if m.contains("base64")));
+}
+
+#[test]
 fn quiet_screen_costs_nothing() {
     let mut rig = Rig::new(80, 24);
     assert_eq!(rig.w.next_wake(), None);

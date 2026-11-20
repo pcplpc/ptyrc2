@@ -707,6 +707,7 @@ script = "app.js"                  # or: rust = "src/lib.rs"
 rustc = "1.85"                     # Rust only: the oldest that builds
 assets = "assets/"                 # read-only, nothing asked
 surface = "widget"                 # widget | frame | screen
+frame = "largest"                  # active (default) | largest | quietest | idle | raw
 tape = "demo.tape"                 # a replay, for the store page
 
 [permissions]                      # names TBD; each with its reason
@@ -731,6 +732,9 @@ rate = { type = "int", default = 20, doc = "grains a second" }
   says otherwise or the app holds the permission (Permissions).
 - `[options]` are the app's own. The layer, the frame, the corner,
   the opacity are options of ptyrc, the same for every app.
+- `frame` [as built]: the frame a start without `--frame` draws on, a
+  name the driver resolves to one frame; absent: `active`. `all` is
+  refused: a surface is one frame (`surface = "screen"`: anywhere).
 - `assets`: reached by name through `call`, read-only.
 - Bounds: the manifest 64 KiB; the tree 8 MiB and 512 files; a script
   1 MiB. Regular files only: a symlink, a submodule, a path with `..`:

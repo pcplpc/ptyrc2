@@ -21,7 +21,7 @@ NAME/
   app.js           or Cargo.toml, src/lib.rs (rustc only, no crate)
   tests.js         unit tests: exports test_*
   tests/CASE.args  the words after `ptyrc dev test NAME/`
-  tests/CASE.txt   its screens, written by PTYRC_BLESS=1
+  tests/CASE.txt   its report, written by `dev test --cases --bless`
   tests/*.screen   files the cases name (--screen tests/x.screen)
 ```
 
@@ -37,9 +37,18 @@ NAME/
 `tests/CASE.args`: words split on white space, `#` to the end of a
 line a comment, no quoting (write JSON without spaces). Run in the
 tree: paths are relative to it. An app option named as one of `dev
-test` (`--size`, `--seed`, `--at`, ...) goes after `--`; before it,
+test` (`--size`, `--at`, ...) goes after `--`; before it,
 the flag is `dev test`'s (`dev check` and `dev test` say so). Name the
 Python test it carries in the first comment line.
+
+```
+ptyrc dev test NAME/ --cases [CASE...] [--bless]
+```
+
+Each case (those named alone), a line: `ok`, or `FAIL` and a diff
+(`-` expected, `+` got, two lines around); status 1 when one fails.
+`--bless` writes each `CASE.txt` from the run. The harness below runs
+it; `sdk/template/test.sh` is the same loop in shell.
 
 The scene steps on its own clock, as the driver's: the screen at `T`
 is the same whatever other times `--at` asks.
@@ -57,7 +66,7 @@ effect that follows the pointer asks the driver (`"pointer": true`,
 ```
 cargo test -p ptyrc-cli --test store_apps           # every tree
 PTYRC_STORE_APP=NAME cargo test -p ptyrc-cli --test store_apps
-PTYRC_BLESS=1 ...                                   # rewrite CASE.txt
+PTYRC_BLESS=1 ...                                   # --cases --bless
 ```
 
 A start of the runner compiles the interpreter: some 7 s of processor
@@ -68,8 +77,9 @@ time in a debug build, 2 s in a release one. The cases run on
 another (`ptyrc dev test` takes it, as the driver).
 
 Per tree: `ptyrc dev check`; the id its directory; `LICENSE`; each
-draw of `random` read by the options; each case against its `.txt`;
-`dev test --unit` when `tests.js` exists; a Rust app's `cargo test`.
+draw of `random` read by the options; each case against its `.txt`
+(`dev test --cases`); `dev test --unit` when `tests.js` exists; a Rust
+app's `cargo test`.
 Needs `sdk/js/interp/build.sh` (else the scripts are skipped, or fail
 with `PTYRC_REQUIRE_JS=1`). Bless only after reading the diff.
 

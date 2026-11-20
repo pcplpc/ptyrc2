@@ -34,6 +34,8 @@ pub(crate) struct Found {
     pub unknown: Vec<String>,
     /// `[app] surface`.
     pub surface: manifest::Surface,
+    /// `[app] frame`: the frame of a start without one.
+    pub frame: Option<String>,
     /// The files named at the start, by handle.
     pub files: Vec<Handle>,
     /// This commit has not started yet.
@@ -179,12 +181,13 @@ pub(crate) fn regranted(argv: &[String], granted: &[&str]) -> Option<Vec<String>
     Some(command_line(&base, &given, granted))
 }
 
-/// The app in `tree`, as installed.
+/// The app in `tree`, as installed; `seed` the runner's `--seed`.
 fn of_tree(
     installed: &install::Installed,
     tree: &Path,
     args: Option<&Value>,
     files: Option<&Value>,
+    seed: Option<u64>,
 ) -> Result<Found, RpcError> {
     let source = std::fs::read(tree.join(MANIFEST)).map_err(|e| {
         RpcError::new(
@@ -207,6 +210,10 @@ fn of_tree(
     if let Some(a) = &manifest.app.assets {
         guest.splice(0..0, ["--assets".into(), text(tree.join(a))]);
     }
+    // `--seed N` of the launcher: `random` as `ptyrc dev test --seed N`.
+    if let Some(seed) = seed {
+        guest.splice(0..0, ["--seed".into(), seed.to_string()]);
+    }
     // `native/...` is the key of the shipped apps in `permissions.toml`.
     if installed.origin.starts_with("native/") {
         return Err(RpcError::new(
@@ -227,17 +234,19 @@ fn of_tree(
         declared,
         unknown,
         surface: manifest.app.surface,
+        frame: manifest.app.frame.clone(),
         files: run.files,
         first: !installed.started,
     })
 }
 
-/// The installed app `name` (an id or an origin) with `args` and
-/// `files` of `app.start`.
+/// The installed app `name` (an id or an origin) with `args`, `files`
+/// and `seed` of `app.start`.
 pub(crate) fn find(
     name: &str,
     args: Option<&Value>,
     files: Option<&Value>,
+    seed: Option<u64>,
 ) -> Result<Found, RpcError> {
     let dirs = Dirs::from_env().map_err(refused)?;
     let (installed, tree) = install::locate(&dirs, name).map_err(|e| {
@@ -247,7 +256,7 @@ pub(crate) fn find(
             None => error.with_hint("ptyrc store ls lists what is installed"),
         }
     })?;
-    of_tree(&installed, &tree, args, files)
+    of_tree(&installed, &tree, args, files, seed)
 }
 
 impl Found {

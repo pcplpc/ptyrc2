@@ -916,6 +916,12 @@ impl Engine for ScreenEngine {
         ctx.request_repaint();
     }
 
+    fn move_widgets(&mut self, conn: ConnId, from: u32, to: u32, ctx: &mut Ctx) {
+        if self.widgets.move_owner(conn.0, from, to) > 0 {
+            ctx.request_repaint();
+        }
+    }
+
     fn owned(&self, conn: ConnId) -> crate::engine::Owned {
         let mut owned = crate::engine::Owned::default();
         for sprite in self.scene.list().iter().filter(|s| s.owner == conn.0) {

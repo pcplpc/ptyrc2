@@ -124,8 +124,12 @@ pub fn limit_permission(name: &str) -> &'static str {
 
 /// Option names reserved to ptyrc's launcher (principle 4).
 pub const RESERVED_OPTIONS: &[&str] = &[
-    "alpha", "back", "border", "frame", "front", "help", "no-wait", "prefer", "wait",
+    "alpha", "back", "border", "frame", "front", "help", "no-wait", "prefer", "seed", "wait",
 ];
+
+/// `[app] frame`: the frame names the driver resolves to one frame
+/// (`frame.get`), as `--frame` takes them.
+pub const FRAMES: &[&str] = &["active", "idle", "largest", "quietest", "raw"];
 
 /// Bounds on `words`: count, and characters per word.
 pub const MAX_WORDS: usize = 32;
@@ -157,6 +161,9 @@ pub struct App {
     /// A directory of the tree, no trailing `/`.
     pub assets: Option<String>,
     pub surface: Surface,
+    /// `[app] frame`: one of [`FRAMES`], the frame a start without
+    /// `--frame` draws on. Absent: the driver's, `active`.
+    pub frame: Option<String>,
     pub tape: Option<String>,
     /// `ptyrc app ID` waits for its result by default (`--wait`).
     pub wait: bool,
@@ -216,8 +223,8 @@ pub struct Limit {
 pub use crate::options::{AppOption, OptionType, OptionValue, Positional};
 
 const APP_KEYS: &[&str] = &[
-    "api", "assets", "id", "license", "random", "rust", "rustc", "script", "summary", "surface",
-    "tape", "version", "wait",
+    "api", "assets", "frame", "id", "license", "random", "rust", "rustc", "script", "summary",
+    "surface", "tape", "version", "wait",
 ];
 /// `[app] random`: lists, words of a list, bytes of a word.
 pub const RANDOM_MAX: (usize, usize, usize) = (16, 16, 64);
@@ -529,6 +536,25 @@ impl Cx<'_> {
                 ));
             }
         };
+        let frame = self.string(t, "app", "frame", "\"largest\"")?;
+        match frame.as_deref() {
+            None => {}
+            Some(f) if FRAMES.contains(&f) => {}
+            Some("all") => {
+                return Err(self.err(
+                    self.span(t, "frame"),
+                    "[app] frame: \"all\": a store app draws on one frame",
+                    "surface = \"screen\" draws on the whole screen; or frame = \"largest\"",
+                ));
+            }
+            Some(f) => {
+                return Err(self.err(
+                    self.span(t, "frame"),
+                    format!("[app] frame: {f:?}: not a frame name"),
+                    format!("frame = one of {}", FRAMES.join(", ")),
+                ));
+            }
+        }
         let wait = match field(t, "wait") {
             None => false,
             Some((_, v)) => match v.get_ref() {
@@ -552,6 +578,7 @@ impl Cx<'_> {
             rustc,
             assets,
             surface,
+            frame,
             tape,
             wait,
             random,
@@ -771,6 +798,28 @@ impl Cx<'_> {
         }
         Ok(out)
     }
+}
+
+/// The texts of the manifest left as the template wrote them (they
+/// start with `TODO`): `[app] summary`, a reason of `[permissions]`, a
+/// `doc` of `[options]` or `[args]`. Noted by `ptyrc dev check`,
+/// refused by the install.
+pub fn todos(m: &Manifest) -> Vec<String> {
+    let todo = |s: &str| s.trim_start().starts_with("TODO");
+    let mut out = Vec::new();
+    if todo(&m.app.summary) {
+        out.push("[app] summary".to_string());
+    }
+    for p in m.permissions.iter().filter(|p| todo(&p.why)) {
+        out.push(format!("[permissions] {}", p.name));
+    }
+    for o in m.options.iter().filter(|o| todo(&o.doc)) {
+        out.push(format!("[options] {} doc", o.name));
+    }
+    if let Some(a) = m.args.as_ref().filter(|a| todo(&a.option.doc)) {
+        out.push(format!("[args] {} doc", a.option.name));
+    }
+    out
 }
 
 /// `[a-z][a-z0-9-]*`, at most `max` bytes.

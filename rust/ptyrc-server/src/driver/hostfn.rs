@@ -277,7 +277,7 @@ impl Driver {
                 let Some(app) = app.filter(|_| identity.is_some()) else {
                     return Some(Err(no_app("a probe")));
                 };
-                lane = Lane::Probe;
+                lane = Lane::Probe(app);
                 match self.probe_job(conn, app, method, &params) {
                     Ok(job) => job,
                     Err(e) => return Some(Err(e)),
@@ -426,12 +426,7 @@ impl Driver {
             return;
         };
         for &id in ids {
-            // Answered under a token no request holds: dropped.
-            let job: Job = Box::new(move |state: &mut State| {
-                state.probes.remove(&id);
-                Ok(Value::Null)
-            });
-            let _ = hostio.submit(Lane::Probe, Token(u64::MAX), job);
+            hostio.forget(id);
         }
     }
 

@@ -3,7 +3,9 @@
 //! "Tools".
 
 mod app;
+pub mod cases;
 mod new;
+mod probe;
 mod registry;
 
 use crate::store::io_text;
@@ -39,12 +41,15 @@ pub enum Dev {
     /// app is built first (rustc, as the store builds it). It holds what
     /// its manifest declares for the run: a permission an option needs,
     /// only with that option given. --file NAME=PATH: the file option
-    /// NAME (ARG#N: the Nth value of [args], from 0), as --NAME PATH.
-    /// Also, as ptyrc-box takes them: --clock ISO, --zone NAME,
-    /// --storage DIR, --probe
-    /// git=FILE.json, --pointer T:X,Y, --click T:X,Y, --press T:X,Y,
-    /// --release T:X,Y, --focus T:TAG,
-    /// --paste T:TEXT, --resize T:CxR
+    /// NAME (ARG#N: the Nth value of [args], from 0), as --NAME PATH;
+    /// [args] todo = { type = "file", min = 1, max = 1, ... }: --file
+    /// ARG#0=todo.md. Also, as ptyrc-box takes them: --clock ISO,
+    /// --zone NAME, --storage DIR (a file a key: its name the key, its
+    /// content the value; read once, never written back), --probe
+    /// git=FILE.json (written by `ptyrc dev probe git`), --pointer T:X,Y, --click T:X,Y, --press T:X,Y,
+    /// --release T:X,Y, --focus T:TAG, --paste T:TEXT, --resize T:CxR.
+    /// A flag of dev test is its own before `--`; an app's option of the
+    /// same name goes after
     #[command(allow_hyphen_values = true)]
     Test {
         /// The app's directory [default: .]
@@ -78,6 +83,16 @@ pub enum Dev {
         /// Status 1 when one fails
         #[arg(long, value_name = "FILE", num_args = 0..=1, default_missing_value = "tests.js")]
         unit: Option<String>,
+        /// The cases of the tree: each tests/CASE.args, the words after
+        /// `ptyrc dev test .` (white space, `#` comments, run in the
+        /// tree), its report against tests/CASE.txt; those NAMEd alone.
+        /// A line a case, a diff for a failure; status 1 when one fails
+        #[arg(long, value_name = "NAME", num_args = 0.., conflicts_with = "unit")]
+        cases: Option<Vec<String>>,
+        /// With --cases: write each CASE.txt from the run. Read the diff
+        /// first
+        #[arg(long, requires = "cases")]
+        bless: bool,
         /// An option of the manifest's [options]; again for each
         #[arg(long = "arg", value_name = "NAME=VALUE")]
         args: Vec<String>,
@@ -89,7 +104,8 @@ pub enum Dev {
         #[arg(long = "event", value_name = "T:TOPIC:JSON")]
         events: Vec<String>,
         /// A key of the keyboard at session time T: to the app when it
-        /// grabbed it
+        /// grabbed it; else to the program, `input {bytes}` to the app
+        /// with keys-read
         #[arg(long = "key", value_name = "T:KEY")]
         keys: Vec<String>,
         /// Options of the manifest's [options], as `ptyrc app` takes
@@ -126,6 +142,26 @@ pub enum Dev {
         #[arg(long, value_name = "NAME")]
         remote: Option<String>,
     },
+    /// Print what the driver's probe answers now, as JSON: a fixture for
+    /// `dev test --probe git=FILE.json` (or system=). git: the
+    /// repository holding DIR, `days` in UTC (headless --zone by
+    /// default); system: a second sample a second after the first
+    Probe {
+        /// git or system
+        #[arg(value_parser = ["git", "system"])]
+        what: String,
+        /// git: a directory of the repository [default: .]
+        dir: Option<PathBuf>,
+        /// The parts asked, comma-separated [default: all]
+        #[arg(long, value_name = "NAME,...")]
+        parts: Option<String>,
+        /// git: commits of `log` [default: 30]
+        #[arg(long, value_name = "N")]
+        log: Option<u64>,
+        /// system: processes of `glance` [default: 5]
+        #[arg(long, value_name = "N")]
+        top: Option<u64>,
+    },
     #[command(flatten)]
     Registry(registry::RegistryDev),
 }
@@ -150,9 +186,38 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
             events,
             keys,
             unit,
+            cases,
+            bless,
             options,
         } => {
             let (dir, options) = split_dir(dir, options);
+            if let Some(mut names) = cases {
+                // The command takes hyphens as values: `--cases --bless`.
+                let bless = bless || names.iter().any(|n| n == "--bless");
+                names.retain(|n| n != "--bless");
+                let given = names.iter().any(|n| n.starts_with('-'))
+                    || size.is_some()
+                    || duration.is_some()
+                    || at.is_some()
+                    || seed.is_some()
+                    || tape.is_some()
+                    || !screen.is_empty()
+                    || styles
+                    || !args.is_empty()
+                    || !deny.is_empty()
+                    || !events.is_empty()
+                    || !keys.is_empty()
+                    || !options.is_empty();
+                if given {
+                    return Err(Fail::usage(
+                        "--cases: no other flag, no option",
+                        "the words of a case are in its tests/CASE.args",
+                    ));
+                }
+                let dir = here(dir);
+                is_dir(&dir)?;
+                return cases::all(&dir, &names, bless);
+            }
             if let Some(file) = unit {
                 let dir = here(dir);
                 is_dir(&dir)?;
@@ -225,6 +290,25 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
             if json {
                 flags.push("--json".into());
             }
+            // A flag of one value given twice: refused, as clap refuses
+            // its own (here, or after the app's first option).
+            for once in [
+                "--size",
+                "--for",
+                "--at",
+                "--seed",
+                "--tape",
+                "--clock",
+                "--zone",
+                "--storage",
+            ] {
+                if flags.iter().filter(|f| *f == once).count() > 1 {
+                    return Err(Fail::usage(
+                        format!("{once}: given twice"),
+                        format!("{once} once; the app's own after `--`"),
+                    ));
+                }
+            }
             let deny = deny.iter().flat_map(|d| d.split(',')).map(str::trim);
             let deny = deny.filter(|d| !d.is_empty()).map(str::to_owned).collect();
             app::test(app::TestOpts {
@@ -242,6 +326,21 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
             app::run(common, &dir, &args)
         }
         Dev::Entry { dir, remote } => entry(&dir.unwrap_or_else(|| ".".into()), remote),
+        Dev::Probe {
+            what,
+            dir,
+            parts,
+            log,
+            top,
+        } => match what.as_str() {
+            "git" if top.is_none() => probe::git(&here(dir), parts.as_deref(), log),
+            "system" if dir.is_none() && log.is_none() => probe::system(parts.as_deref(), top),
+            _ => Err(Fail::usage(
+                format!("dev probe {what}: DIR and --log are of git, --top of system"),
+                "ptyrc dev probe git [DIR] [--parts P] [--log N]; ptyrc dev probe system \
+                 [--parts P] [--top N]",
+            )),
+        },
     }
 }
 
@@ -293,7 +392,9 @@ fn check(dir: &Path) -> Result<ExitCode, Fail> {
             // `[app] random`: each draw read as `ptyrc app` reads it. The
             // bare draw (`random` absent: `[[]]`) that does not read is
             // never drawn (the menu skips it): a note.
-            let mut notes = Vec::new();
+            let mut notes: Vec<String> = (ptyrc_store::manifest::todos(&ok.manifest).iter())
+                .map(|t| format!("{t}: starts with TODO; the install refuses it"))
+                .collect();
             let bare = ok.manifest.app.random == [Vec::<String>::new()];
             for draw in &ok.manifest.app.random {
                 let read = ptyrc_store::options::read(&ok.manifest, draw, dir).and_then(|l| {

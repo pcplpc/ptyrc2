@@ -67,8 +67,10 @@ fn read_args(m: &Manifest, given: &[String]) -> Result<(options::Launch, Resolve
     let names = match m.options.is_empty() {
         true => "the manifest has no [options]".to_string(),
         false => {
-            let each =
-                (m.options.iter()).map(|o| format!("--{} ({}): {}", o.name, o.type_name(), o.doc));
+            let each = (m.options.iter()).map(|o| {
+                let range = o.range().map(|r| format!(", {r}")).unwrap_or_default();
+                format!("--{} ({}{range}): {}", o.name, o.type_name(), o.doc)
+            });
             format!("[options]: {}", each.collect::<Vec<_>>().join("; "))
         }
     };
@@ -81,11 +83,6 @@ fn read_args(m: &Manifest, given: &[String]) -> Result<(options::Launch, Resolve
     let args = Value::Object(launch.args.clone());
     let resolved = options::resolve(m, Some(&args), &launch.files)?;
     Ok((launch, resolved))
-}
-
-/// The argument of `init` (`read_args`).
-fn init_args(m: &Manifest, given: &[String]) -> Result<Value, Fail> {
-    Ok(Value::Object(read_args(m, given)?.1.init))
 }
 
 /// `--file NAME=PATH` of `dev test` as the words of the app: `--NAME
@@ -312,6 +309,7 @@ fn grants(
     put("--prefer", l.prefer.clone());
     put("--alpha", l.alpha.map(|a| a.to_string()));
     put("--border", l.border.clone());
+    put("--seed", l.seed.map(|s| s.to_string()));
     // The handles in order (`f0`, ...), each under its option: the
     // runner numbers them as given.
     let mut handles: Vec<_> = resolved.files.iter().collect();
@@ -389,6 +387,12 @@ pub fn test(o: TestOpts) -> Result<ExitCode, Fail> {
     let mut words = o.args.clone();
     file_words(&m, &o.files, &mut words)?;
     let (launch, resolved) = read_args(&m, &words)?;
+    if launch.launcher.seed.is_some() && o.flags.iter().any(|f| f == "--seed") {
+        return Err(Fail::usage(
+            "--seed: given twice",
+            "--seed once: dev test's, or the launcher's after `--`, the same seed",
+        ));
+    }
     let grants = grants(&m, &o.deny, &launch, &resolved)?;
     let args = Value::Object(resolved.init.clone());
     let program = runner()?;
@@ -396,6 +400,7 @@ pub fn test(o: TestOpts) -> Result<ExitCode, Fail> {
         .arg("--headless")
         .arg("--manifest")
         .arg(given(&m).to_string())
+        .args(["--surface", m.app.surface.as_str()])
         .args(guest(&o.dir, &m)?)
         .arg(args.to_string())
         .args(&o.flags)
@@ -520,12 +525,16 @@ pub fn run(common: &Common, dir: &Path, given: &[String]) -> Result<ExitCode, Fa
     loop {
         // A failed start waits for a change, as an exit does.
         let mut child = match manifest_of(dir).and_then(|m| {
-            let args = init_args(&m, given)?;
+            let (launch, resolved) = read_args(&m, given)?;
+            let args = Value::Object(resolved.init);
             // The author's own run: all it declares, its limits too.
             let mut told = self::given(&m);
             told["granted"] = json!(declared(&m));
             let mut guest = guest(dir, &m)?;
             guest.splice(0..0, ["--manifest".into(), told.to_string().into()]);
+            if let Some(seed) = launch.launcher.seed {
+                guest.splice(0..0, ["--seed".into(), seed.to_string().into()]);
+            }
             eprintln!("ptyrc: starting {} {}", m.app.id, m.app.version);
             start(&program, &socket, &guest, &args)
         }) {

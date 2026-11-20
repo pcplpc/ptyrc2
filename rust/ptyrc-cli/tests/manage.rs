@@ -337,7 +337,7 @@ exec sleep 1000
 "#;
 
 /// A native app below `layout` (it declares `clock`): one sprite on the
-/// frame of its argv; told `move`, one more there. It asks to move
+/// frame of its argv (a name, or an id); told `move`, one more there. It asks to move
 /// itself, and another. Every line it is sent noted in `$LOG.<pid>`.
 const BLIND: &str = r#"
 import json, os, socket, sys
@@ -347,7 +347,8 @@ def send(n, method, params):
     s.sendall((json.dumps({"id": n, "method": method, "params": params}) + "\n").encode())
 me = int(os.environ["PTYRC_APP"])
 send(0, "auth", {"token": os.environ["PTYRC_TOKEN"]})
-send(1, "draw.put", {"content": {"rows": ["HELLO"]}, "frame": sys.argv[1],
+frame = int(sys.argv[1]) if sys.argv[1].isdigit() else sys.argv[1]
+send(1, "draw.put", {"content": {"rows": ["HELLO"]}, "frame": frame,
                      "anchor": {"at": [4, 1], "space": "view"}})
 send(2, "subscribe", {"topics": ["move"]})
 send(3, "app.move", {"app": me, "frame": 0})
@@ -456,4 +457,75 @@ fn a_native_app_below_layout_is_where_the_user_puts_it() {
     let other = start(&mut client, Some(right));
     wait_for(|| app(&mut client, other)["sprites"] == 1, "the sprite");
     assert_eq!(app(&mut client, other)["frames"], json!([right]));
+}
+
+#[test]
+fn a_native_app_raised_to_layout_keeps_no_surface() {
+    let sb = Sandbox::new("raised");
+    let script = sb.dir.join("blind.py");
+    std::fs::write(&script, BLIND).unwrap();
+    let script = script.to_str().unwrap();
+    let log = sb.dir.join("log");
+    let mut driver = sb.ptyrc();
+    driver
+        .env("LOG", &log)
+        .args(["run", "--name", "r", "--headless", "--size", "60x16"])
+        .args(["--", "sh", "-c", PANES])
+        .stdin(Stdio::null());
+    let _driver = common::Proc(driver.spawn().unwrap());
+    wait_for(|| Client::connect(&sb.socket("r")).is_ok(), "the socket");
+    let mut client = sb.client("r");
+    client.call("session.info", json!({})).unwrap();
+    let pane = |client: &mut Client, x: u64| {
+        let frames = client.call("frame.list", json!({})).unwrap();
+        (frames["frames"].as_array().unwrap().iter())
+            .find(|f| f["kind"] == "pane" && f["rect"][0] == x && f["state"] == "stable")
+            .map(|f| f["id"].as_u64().unwrap())
+    };
+    let (mut mid, mut right) = (0, 0);
+    wait_for(
+        || {
+            let found = (pane(&mut client, 20), pane(&mut client, 40));
+            found
+                .0
+                .zip(found.1)
+                .map(|(m, r)| (mid, right) = (m, r))
+                .is_some()
+        },
+        "the panes",
+    );
+    // Below `layout`, started on `mid`: its surface.
+    let params = json!({"argv": ["python3", script, "largest"], "frame": mid,
+                        "declares": {"permissions": {"clock": "the time"}}});
+    let started = client.call("app.start", params).unwrap();
+    let id = started["app"]["id"].as_u64().unwrap();
+    wait_for(|| app(&mut client, id)["sprites"] == 1, "the sprite");
+    assert_eq!(app(&mut client, id)["frames"], json!([mid]));
+    let pid = app(&mut client, id)["pid"].clone();
+
+    // Restarted with `layout`: it draws on `mid` by its own choice.
+    let declares = json!({"permissions": {"clock": "the time", "layout": "the panes"}});
+    let argv = json!(["python3", script, mid.to_string()]);
+    let params = json!({"app": id, "argv": argv, "declares": declares});
+    client.call("app.restart", params).unwrap();
+    wait_for(
+        || {
+            let info = app(&mut client, id);
+            info["pid"] != pid && info["sprites"] == 1
+        },
+        "drawn again",
+    );
+    assert_eq!(app(&mut client, id)["frames"], json!([mid]));
+
+    // Moved by the user: told, its sprite left where it put it.
+    let moved = client
+        .call("app.move", json!({"app": id, "frame": right}))
+        .unwrap();
+    assert_eq!(moved["frame"], right);
+    let frames = app(&mut client, id)["frames"].clone();
+    assert!(
+        !frames.as_array().unwrap().contains(&json!(right)),
+        "{frames}"
+    );
+    assert!(frames.as_array().unwrap().contains(&json!(mid)), "{frames}");
 }

@@ -283,12 +283,13 @@ fn catalog_rows(app: &StoreApp) -> Vec<Opt> {
             },
         })
         .collect();
-    options.extend(launcher_rows());
+    options.extend(launcher_rows(m.app.frame.as_deref()));
     options
 }
 
-/// The rows of the launcher's options, the same for every store app.
-fn launcher_rows() -> Vec<Opt> {
+/// The rows of the launcher's options, the same for every store app;
+/// `frame` the manifest's.
+fn launcher_rows(frame: Option<&str>) -> Vec<Opt> {
     let row = |flags: &[&str], kind: Kind, choices: &[&str], help: &str| Opt {
         flags: flags.iter().map(|f| f.to_string()).collect(),
         kind,
@@ -296,10 +297,12 @@ fn launcher_rows() -> Vec<Opt> {
         default: None,
         help: help.to_string(),
     };
+    let mut on = row(&["--frame"], Kind::Value, &[], "the frame it draws on");
+    on.default = Some(frame.unwrap_or("active").to_string());
     vec![
         row(&["--front"], Kind::Flag, &[], "in front of the text"),
         row(&["--back"], Kind::Flag, &[], "behind the text"),
-        row(&["--frame"], Kind::Value, &[], "the frame it draws on"),
+        on,
         row(
             &["--prefer"],
             Kind::Choice,
@@ -313,6 +316,12 @@ fn launcher_rows() -> Vec<Opt> {
             "the opacity of what it draws, 0 to 1",
         ),
         row(&["--border"], Kind::Value, &[], "the border of its widgets"),
+        row(
+            &["--seed"],
+            Kind::Value,
+            &[],
+            "the seed of its random numbers",
+        ),
     ]
 }
 
@@ -388,6 +397,14 @@ mod tests {
                 .any(|o| o.flags == ["--prefer"] && o.choices.len() == 10)
         );
         assert!(rows.iter().any(|o| o.help == "grains (1 to 99)"));
+        let frame = |rows: &[Opt]| {
+            let row = rows.iter().find(|o| o.flags == ["--frame"]).unwrap();
+            row.default.clone()
+        };
+        assert_eq!(frame(rows).as_deref(), Some("active"));
+        let mut largest = app;
+        largest.manifest.app.frame = Some("largest".into());
+        assert_eq!(frame(&catalog_rows(&largest)).as_deref(), Some("largest"));
     }
 
     #[test]

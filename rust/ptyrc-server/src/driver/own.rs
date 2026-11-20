@@ -104,17 +104,16 @@ impl Own {
         }
     }
 
-    /// The frame a draw of a store app is put on, whatever it named:
-    /// its frame; for a bare sprite of `widget`, nowhere. None: as
-    /// named.
-    fn clip(&self, widget: bool) -> Option<Value> {
-        match self.surface? {
-            Surface::Widget if widget => None,
-            Surface::Widget => Some(json!(crate::rpc::NOWHERE)),
-            Surface::Frame(frame) => Some(json!(frame)),
-            Surface::Screen(_) if self.screen_wide => None,
-            Surface::Screen(frame) => Some(json!(frame)),
-        }
+    /// The frame a draw of a store app is put on, whatever it named
+    /// (`ptyrc_rules::surface::clip`). None: as named.
+    fn clip(&self, method: &str, params: &Value) -> Option<u32> {
+        use ptyrc_rules::surface::{self, Surface as Of};
+        let of = match self.surface? {
+            Surface::Widget => Of::Widget,
+            Surface::Frame(frame) => Of::Frame(frame),
+            Surface::Screen(frame) => Of::Screen(frame),
+        };
+        surface::clip(of, self.screen_wide, method, params)
     }
 }
 
@@ -137,8 +136,7 @@ impl Driver {
             front_widget: (app.grants.holds(Permission::Front)
                 || app.grants.holds(Permission::FrontWidget)),
             // Of a native app: the frame the user gave, below `layout`.
-            surface: (app.surface)
-                .filter(|_| app.store().is_some() || app.grants.degree() < Degree::Layout),
+            surface: super::heir::surface(app),
             screen_wide: app.grants.holds(Permission::ScreenWide),
             given: Given {
                 files: Vec::new(),
@@ -186,7 +184,7 @@ impl Driver {
             object.remove("all");
         }
         // The composed picture: its own sprites alone.
-        if matches!(method, "screen.text" | "screen.cells") {
+        if ptyrc_rules::lower::composes_own(method) {
             let owners: Vec<u64> = own.conns.iter().map(|c| c.0).collect();
             object.insert("owners".into(), json!(owners));
         }
@@ -278,18 +276,10 @@ impl Driver {
             }
         }
         // Its surface: clipped, never refused, nothing told.
-        if own.surface.is_some() {
-            let named = object.get("frame").is_some_and(|f| !f.is_null());
-            let clip = match method {
-                "draw.put" => own.clip(false),
-                "draw.ext" if !object.contains_key("id") => own.clip(false),
-                "draw.update" | "draw.ext" if named => own.clip(false),
-                "widget.show" => own.clip(true),
-                _ => None,
-            };
-            if let Some(frame) = clip {
-                object.insert("frame".into(), frame);
-            }
+        if own.surface.is_some()
+            && let Some(frame) = own.clip(method, &Value::Object(object.clone()))
+        {
+            object.insert("frame".into(), json!(frame));
         }
         Ok(())
     }
@@ -379,50 +369,14 @@ impl Driver {
     }
 }
 
-/// Of an app's own sprite in `draw.list`: where an anchor placed by
-/// what the app may not read landed, told at the degree that would
-/// have told it; hidden below it, as a sprite not placed yet. `cut`:
-/// its degree, its words, the user's; `None`: all told. `surface`: of
-/// a store app, the frame told in place of `NOWHERE`, and of every
-/// frame below `layout`: 0.
+/// Of an app's own sprite in `draw.list`: where its anchor landed,
+/// told at the degree that would have told it (`lower::landing`).
 pub(super) fn landing(
     item: &mut Value,
     cut: Option<(Degree, &[String], &grants::Hand)>,
     surface: Option<u32>,
 ) {
-    if let Some((degree, words, hand)) = cut {
-        let anchor = &item["anchor"];
-        let among = |list: &[String], text: &str| list.iter().any(|w| w.eq_ignore_ascii_case(text));
-        let needs = if let Some(text) = anchor.get("text").and_then(Value::as_str) {
-            let literal = anchor.get("regex") != Some(&Value::Bool(true));
-            match () {
-                _ if literal && among(words, text) => Degree::Words,
-                _ if literal && among(&hand.words, text) => Degree::Shape,
-                _ => Degree::Text,
-            }
-        } else if anchor.get("cursor").is_some() || anchor.get("auto").is_some() {
-            Degree::Shape
-        } else {
-            Degree::None
-        };
-        if degree < needs {
-            item["screen"] = Value::Null;
-            item["visible"] = json!(false);
-            item["covered"] = json!(0.0);
-        }
-        if let Some(surface) = surface {
-            let nowhere = item["frame"] == json!(crate::rpc::NOWHERE);
-            if degree < Degree::Layout {
-                item["frame"] = json!(0);
-            } else if nowhere {
-                item["frame"] = json!(surface);
-            }
-        }
-    } else if let Some(surface) = surface
-        && item["frame"] == json!(crate::rpc::NOWHERE)
-    {
-        item["frame"] = json!(surface);
-    }
+    ptyrc_rules::lower::landing(item, cut, surface);
 }
 
 /// Members of a report on a sprite for the driver alone.

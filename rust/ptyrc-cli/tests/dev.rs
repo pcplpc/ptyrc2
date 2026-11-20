@@ -414,7 +414,7 @@ fn script_app(tag: &str, permissions: &str, js: &str) -> PathBuf {
     let manifest = format!(
         "[app]\nid = \"probe\"\nversion = \"0.1.0\"\nsummary = \"A probe.\"\n\
          license = \"GPL-3.0-or-later\"\napi = 1\nscript = \"app.js\"\n\
-         [options]\nwide = {{ type = \"bool\", default = false, doc = \"wide\" }}\n\
+         surface = \"frame\"\n[options]\nwide = {{ type = \"bool\", default = false, doc = \"wide\" }}\n\
          n = {{ type = \"int\", default = 1, doc = \"a number\" }}\n{permissions}"
     );
     std::fs::write(dir.join("ptyrc-app.toml"), manifest).unwrap();
@@ -719,4 +719,40 @@ export function init() { const w = now(); result(`${w.zone} ${w.offsetS}`, 0); }
     assert!(err.contains("--zone Asia/Tokyo: clock not held"), "{err}");
     let out = run("Nowhere/City", &["--deny", "clock"]);
     assert_eq!(out.status.code(), Some(2), "{out:?}");
+}
+
+/// Every usage error of `dev test`: a status not 0, the message on
+/// stderr, nothing on stdout; the app's options listed with their
+/// bounds, the flag named once.
+#[test]
+fn usage_errors_on_stderr_alone() {
+    let more = "m = { type = \"int\", default = 2, min = 1, max = 10, doc = \"many\" }\n";
+    let dir = script_app("usage", more, "export function init() {}\n");
+    let mut cases: Vec<(Vec<&str>, &str)> = vec![
+        (vec!["--size", "9x9", "--size", "8x8"], "--size"),
+        (
+            vec!["--zone", "UTC", "--wide", "--zone", "UTC"],
+            "--zone: given twice",
+        ),
+        (vec!["--size", "nine"], "COLSxROWS"),
+        (vec!["--m", "11"], "--m: 11: 1 to 10\n"),
+        (vec!["--", "--help"], "--m (int, 1 to 10): many"),
+        (vec!["--nope"], "--nope: no such option"),
+        (vec!["--at", "x"], "--at x"),
+        (vec!["--key", "x"], "--key x"),
+        (vec!["--file", "x=y"], "not a file or directory option"),
+        (vec!["--deny", "typing"], "not a permission"),
+        (vec!["--storage", "/nonexistent-dir"], "--storage"),
+    ];
+    if has_js() {
+        cases.push((vec!["--zone", "Nowhere/City"], "not a zone"));
+    }
+    for (args, said) in cases {
+        let out = ptyrc(&dir, &[&["dev", "test", "--for", "0"][..], &args].concat());
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{args:?}: {out:?}");
+        assert!(out.stdout.is_empty(), "{args:?}: {out:?}");
+        assert!(err.contains(said), "{args:?}: {err}");
+        assert!(!err.contains("--m: m:"), "{err}");
+    }
 }

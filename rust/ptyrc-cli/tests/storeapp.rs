@@ -382,13 +382,18 @@ fn a_store_app_is_clipped_to_its_surface() {
         ("inwidget", "widget", ""),
         ("narrow", "screen", ""),
         ("wide", "screen", wide),
+        ("largest", "frame", ""),
     ];
     for (id, surface, permissions) in apps {
         let repo = sb.dir.join(format!("repo-{id}"));
+        let mut manifest = wide_manifest(id, surface, permissions);
+        if id == "largest" {
+            manifest = manifest.replace("surface", "frame = \"largest\"\nsurface");
+        }
         repository(
             &repo,
             &[
-                ("ptyrc-app.toml", wide_manifest(id, surface, permissions)),
+                ("ptyrc-app.toml", manifest),
                 ("app.js", WIDE.to_string()),
                 ("LICENSE", GPL.to_string()),
             ],
@@ -448,6 +453,11 @@ fn a_store_app_is_clipped_to_its_surface() {
     ids.push(start(&mut client, "inwidget", 1, true));
     ids.push(start(&mut client, "narrow", 2, false));
     ids.push(start(&mut client, "wide", 3, false));
+    // No frame given: the manifest's, the right pane (30 columns to 29).
+    let started = client
+        .call("app.start", json!({"store": "largest", "args": {"row": 4}}))
+        .unwrap();
+    ids.push(started["app"]["id"].as_u64().unwrap());
     for id in ids.clone() {
         wait_slow(|| drawn(&mut client, id), "drawn");
     }
@@ -472,6 +482,8 @@ fn a_store_app_is_clipped_to_its_surface() {
     assert_eq!(sides(2), (true, false), "{text}");
     // With it: anywhere.
     assert_eq!(sides(3), (true, true), "{text}");
+    // `[app] frame = "largest"`: the right pane alone.
+    assert_eq!(sides(4), (false, true), "{text}");
 
     // Its widget, shown without a layer, stays behind when focused.
     let mut widget = Value::Null;
@@ -994,7 +1006,7 @@ fn the_launchers_prefer_border_back() {
     assert_eq!(widgets["widgets"][0]["border"], json!("heavy"), "{widgets}");
 }
 
-/// One sprite; it asks to move itself and another.
+/// One sprite, one widget; it asks to move itself and another.
 const MOVED: &str = r#"
 import { call, log, period } from "ptyrc";
 function ask(method, params) {
@@ -1002,8 +1014,10 @@ function ask(method, params) {
   catch (e) { log(method + ": " + e.code); }
 }
 export function init(args) {
-  call("subscribe", { topics: ["move"] });
+  call("subscribe", { topics: ["move", "widgets"] });
   call("draw.put", { content: { rows: ["="] }, anchor: { at: [8, 0], space: "view" } });
+  call("widget.declare", { widgets: [{ tag: "w", size: [4, 1], content: { rows: ["hi"] } }] });
+  call("widget.show", { tag: "w" });
   const me = call("app.list", {}).apps[0].id;
   ask("app.move", { app: me, frame: 0 });
   ask("app.move", { app: 1, frame: 0 });
@@ -1071,16 +1085,27 @@ fn a_store_app_is_where_the_user_moves_it() {
             .map(|s| s["frame"].clone())
     };
     assert_eq!(frame_of_its_sprite(&mut client), Some(json!(left)));
+    let frame_of_its_widget = |client: &mut Client| {
+        let list = client.call("widget.list", json!({})).unwrap();
+        list["widgets"][0]["frame"].clone()
+    };
+    assert_eq!(frame_of_its_widget(&mut client), json!(left));
 
-    // By the user: its sprite goes along; it is told.
+    // By the user: its sprite and its widget go along; it is told.
     let moved = client
         .call("app.move", json!({"app": id, "frame": right}))
         .unwrap();
     assert_eq!(moved["frame"], right);
     assert_eq!(frame_of_its_sprite(&mut client), Some(json!(right)));
+    assert_eq!(frame_of_its_widget(&mut client), json!(right));
     wait_slow(
         || log_of(&mut client, id).contains(&format!("move={{\"frame\":{right}}}")),
         "told",
+    );
+    let told = format!("\"frame\":{right}");
+    wait_slow(
+        || (log_of(&mut client, id).lines()).any(|l| l.contains("widgets=") && l.contains(&told)),
+        "the widget told",
     );
     let text = client
         .call("screen.text", json!({"sprites": true}))
@@ -1709,4 +1734,109 @@ fn a_shipped_app_through_a_live_driver() {
 fn native_confetti(ptyrc: &dyn Fn() -> Command) -> bool {
     let out = ptyrc().args(["app", "--catalog"]).output();
     out.is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("\"confetti\""))
+}
+
+/// Logs four bytes of `random` and one `Math.random()`.
+const DICE: &str = r#"
+import { log, period, random } from "ptyrc";
+export function init(args) {
+  log("dice=" + Array.from(random(4)).join(",") + " " + Math.random());
+  period(0);
+}
+export function tick(now) {}
+export function event(topic, data) {}
+"#;
+
+/// `--seed N`, the launcher's: `random` drawn as `dev test --seed N`
+/// draws it, live; without it, the clock.
+#[test]
+fn the_seed_of_the_launcher() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let sb = Sandbox::new("seed");
+    let manifest = wide_manifest("dice", "frame", "");
+    let origin = install(&sb, "dice", manifest, DICE);
+    let tree = origin.strip_prefix("local:").unwrap().to_string();
+    let headless = |words: &[&str]| {
+        let out = sb
+            .ptyrc()
+            .env("PTYRC_BOX", runner())
+            .env("PTYRC_JS", &js)
+            .args(["dev", "test", &tree])
+            .args(words)
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stdout).into_owned()
+            + &String::from_utf8_lossy(&out.stderr);
+        let dice = text.split("dice=").nth(1).unwrap_or_default();
+        (
+            out.status.code(),
+            dice.lines().next().unwrap_or_default().to_string(),
+        )
+    };
+    let (status, of_seven) = headless(&["--seed", "7"]);
+    assert_eq!(status, Some(0), "{of_seven}");
+    assert!(!of_seven.is_empty());
+    // The launcher's after `--`: the same; both: refused.
+    assert_eq!(headless(&["--", "--seed", "7"]).1, of_seven);
+    assert_ne!(headless(&["--seed", "8"]).1, of_seven);
+    assert_eq!(headless(&["--seed", "7", "--", "--seed", "7"]).0, Some(2));
+
+    let mut driver = sb.ptyrc();
+    driver
+        .env("PTYRC_BOX", runner())
+        .env("PTYRC_JS", &js)
+        .args(["run", "--name", "s", "--headless", "--size", "60x16"])
+        .args(["--", "sh", "-c", "exec sleep 1000"])
+        .stdin(std::process::Stdio::null());
+    let _driver = common::Proc(driver.spawn().unwrap());
+    let socket = sb.socket("s");
+    wait_for(
+        || std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "socket",
+    );
+    let mut client = sb.client("s");
+    let dice_of = |client: &mut Client, params: Value| {
+        let started = client.call("app.start", params).unwrap();
+        let id = started["app"]["id"].as_u64().unwrap();
+        wait_slow(|| log_of(client, id).contains("dice="), "the dice");
+        let log = log_of(client, id);
+        let dice = log.split("dice=").nth(1).unwrap_or_default();
+        dice.lines().next().unwrap_or_default().to_string()
+    };
+    assert_eq!(
+        dice_of(&mut client, json!({"store": "dice", "seed": 7})),
+        of_seven
+    );
+    let a = dice_of(&mut client, json!({"store": "dice"}));
+    let b = dice_of(&mut client, json!({"store": "dice"}));
+    assert!(a != of_seven && a != b, "{a} {b}");
+    // `ptyrc app ID --seed N`: the member.
+    let run = sb.run(&["-s", "s", "app", "dice", "--seed", "7", "--no-wait"]);
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let apps = client.call("app.list", json!({})).unwrap();
+    let last = (apps["apps"].as_array().unwrap().iter())
+        .filter_map(|a| a["id"].as_u64())
+        .max()
+        .unwrap();
+    wait_slow(|| log_of(&mut client, last).contains("dice="), "the dice");
+    assert!(log_of(&mut client, last).contains(&of_seven));
+    for params in [
+        json!({"store": "dice", "seed": -1}),
+        json!({"store": "dice", "seed": "7"}),
+        json!({"argv": ["true"], "seed": 7}),
+    ] {
+        assert_eq!(
+            code(client.call("app.start", params.clone())),
+            "bad-params",
+            "{params}"
+        );
+    }
 }

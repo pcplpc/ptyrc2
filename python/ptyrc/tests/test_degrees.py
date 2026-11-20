@@ -16,7 +16,7 @@ import pytest
 from ptyrc import Pilot
 from tests_support import until
 
-GRANTS = Path(__file__).parents[3] / "rust/ptyrc-server/src/grants.rs"
+GRANTS = Path(__file__).parents[3] / "rust/ptyrc-rules/src/grants.rs"
 
 #: On the screen, and in what the frames remember.
 SECRETS = ("XYZZYQUUX", "PLOVERHOLLOW")
@@ -27,7 +27,7 @@ WORD = "fish"
 def table(name: str) -> list[str]:
     """The names of `grants::METHODS` or `grants::TOPICS`."""
     source = GRANTS.read_text()
-    body = source.split(f"pub(crate) const {name}:")[1].split("];")[0]
+    body = source.split(f"pub const {name}:")[1].split("];")[0]
     return re.findall(r'\("([a-z.]+)",', body)
 
 

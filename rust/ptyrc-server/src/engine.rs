@@ -224,6 +224,10 @@ pub trait Engine {
     /// paused, or resumed): hidden, its clocks stand still.
     fn hide_owner(&mut self, _conn: ConnId, _hidden: bool, _ctx: &mut Ctx) {}
 
+    /// The widgets of the connection on frame `from` are on `to`: the
+    /// pane that took its place, or the frame the user moved its app to.
+    fn move_widgets(&mut self, _conn: ConnId, _from: u32, _to: u32, _ctx: &mut Ctx) {}
+
     /// What the connection owns.
     fn owned(&self, _conn: ConnId) -> Owned {
         Owned::default()

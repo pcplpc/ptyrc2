@@ -454,7 +454,7 @@ fn frame_at(engine: &ScreenEngine, params: Value) -> Res {
 
 /// A frame id no frame has: a sprite there is never shown. The
 /// driver's, for a store app that draws on its widgets alone.
-pub(crate) const NOWHERE: FrameId = FrameId::MAX;
+pub(crate) const NOWHERE: FrameId = ptyrc_rules::lower::NOWHERE;
 
 /// Refuse a sprite on a frame id that does not exist, but `NOWHERE`.
 fn check_frame(engine: &ScreenEngine, sel: &FrameSel) -> Result<(), RpcError> {

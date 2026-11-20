@@ -115,6 +115,25 @@ fn bad_app() {
     );
     assert!(random("random = []").is_empty());
     assert_eq!(random(""), [Vec::<String>::new()]);
+    bad(
+        "surface = \"frame\"",
+        "frame = \"all\"",
+        10,
+        "draws on one frame",
+    );
+    bad(
+        "surface = \"frame\"",
+        "frame = \"biggest\"",
+        10,
+        "not a frame name",
+    );
+    bad("surface = \"frame\"", "frame = 2", 10, "frame");
+    let frame = |line: &str| {
+        let src = GOOD.replacen("surface = \"frame\"", line, 1);
+        manifest::parse(&src).unwrap().app.frame
+    };
+    assert_eq!(frame("frame = \"largest\"").as_deref(), Some("largest"));
+    assert_eq!(frame(""), None);
     bad("tape = \"demo.tape\"", "colour = \"red\"", 11, "unknown");
     bad("[limits]", "[extra]", 17, "unknown");
     bad(

@@ -14,9 +14,11 @@ use ptyrc_core::frames::{FrameConfig, FrameEvent, Frames, ScreenInput};
 use ptyrc_core::plugin::DrawExt;
 use ptyrc_core::scene::{ColorSpec, Scene, SpritePatch, SpriteSpec};
 use ptyrc_core::shape::{Words, shape};
-use ptyrc_core::widgets::{Declare, Set, Show, WidgetConfig, Widgets};
+use ptyrc_core::widgets::{Declare, Set, Show, WidgetConfig, WidgetState, Widgets};
 use ptyrc_core::{FrameId, FrameSel, RAW, Surfaces, TextMatch, TextQuery};
-use ptyrc_vt::{Attrs, Cell, Color, Grid, Rect, Style, Vt, char_width};
+use ptyrc_rules::lower::{self, Plan};
+use ptyrc_rules::surface::{self, Surface};
+use ptyrc_vt::{Attrs, Cell, Color, Grid, Rect, Style, Vt};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -193,7 +195,7 @@ fn base64_encode(bytes: &[u8]) -> String {
 }
 
 /// The state of `random` for `seed`: each seed its own (splitmix64).
-fn mix(seed: u64) -> u64 {
+pub(crate) fn mix(seed: u64) -> u64 {
     let mut z = seed.wrapping_add(0x9e37_79b9_7f4a_7c15);
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
@@ -359,6 +361,9 @@ pub struct Headless {
     pub assets: Option<Assets>,
     /// The launcher's options of the run.
     pub launcher: Launcher,
+    pub surface: Option<Surface>,
+    /// A bare sprite put nowhere by the surface: the first time.
+    nowhere: Option<u64>,
     /// Topic `idle` (`ptyrc-server`, `watch_idle`): heard, the next
     /// look, the last, the frames seen idle.
     idle_watch: bool,
@@ -456,6 +461,8 @@ impl Headless {
             fns: HostFns::default(),
             assets: None,
             launcher: Launcher::default(),
+            surface: None,
+            nowhere: None,
             idle_watch: false,
             idle_due: None,
             idle_looked: 0,
@@ -573,14 +580,27 @@ impl Headless {
                 Some((id, _)) if !text.is_empty() => {
                     (self.pending).push(("input".into(), json!({"widget": id, "paste": text})));
                 }
-                _ if self.grab.as_ref().is_some_and(Vec::is_empty) => {
+                // Under a grab, key by key (`grab::sort_paste`): the
+                // keys taken, the rest to the program.
+                _ if self.grab.is_some() => {
+                    let mut rest = Vec::new();
                     for c in text.chars() {
-                        self.inject(&Inject::Key(c.to_string()));
+                        let key = c.to_string();
+                        match self.grabs(&key) {
+                            true => self.inject(&Inject::Key(key)),
+                            false => rest.extend_from_slice(key.as_bytes()),
+                        }
+                    }
+                    if !rest.is_empty() {
+                        self.forward(&rest, "paste: to the program, nothing focused");
                     }
                 }
-                _ => self
-                    .dropped
-                    .push((self.now, "paste: to the program, nothing focused".into())),
+                _ => {
+                    let mut bytes = b"\x1b[200~".to_vec();
+                    bytes.extend_from_slice(text.as_bytes());
+                    bytes.extend_from_slice(b"\x1b[201~");
+                    self.forward(&bytes, "paste: to the program, nothing focused");
+                }
             },
             Inject::Key(key) if self.widgets.focused().is_some() => {
                 let (id, _) = self.widgets.focused().expect("focused");
@@ -610,10 +630,7 @@ impl Headless {
                 }
             }
             Inject::Key(key) => {
-                let taken = match &self.grab {
-                    Some(keys) => keys.is_empty() || keys.contains(key),
-                    None => false,
-                };
+                let taken = self.grabs(key);
                 if self.grab.is_some() && key == "ctrl+t" {
                     self.grab = None;
                     self.pending
@@ -625,10 +642,27 @@ impl Headless {
                         json!({"key": key, "bytes": base64_encode(&bytes), "grabbed": true}),
                     ));
                 } else {
-                    self.dropped
-                        .push((self.now, format!("key {key}: to the program, not grabbed")));
+                    let bytes = key_bytes(key).unwrap_or_default();
+                    self.forward(&bytes, &format!("key {key}: to the program, not grabbed"));
                 }
             }
+        }
+    }
+
+    /// Whether the grab takes `key`.
+    fn grabs(&self, key: &str) -> bool {
+        (self.grab.as_ref()).is_some_and(|keys| keys.is_empty() || keys.iter().any(|k| k == key))
+    }
+
+    /// Keyboard bytes on their way to the program: `input {bytes}` to
+    /// an app that hears it (`keys-read`), as the driver's
+    /// `forward_app`; else `why`, dropped.
+    fn forward(&mut self, bytes: &[u8], why: &str) {
+        if self.topics.contains("input") && !self.silent.contains("input") {
+            let data = json!({"bytes": base64_encode(bytes)});
+            self.pending.push(("input".into(), data));
+        } else {
+            self.dropped.push((self.now, why.to_owned()));
         }
     }
 
@@ -954,6 +988,7 @@ impl Headless {
 
     fn check_frame(&self, sel: &FrameSel) -> Result<(), CallError> {
         match sel {
+            FrameSel::Id(lower::NOWHERE) => Ok(()),
             FrameSel::Id(id) if self.frames.info(*id).is_none() => {
                 Err(CallError::new("no-frame", format!("no frame {id}")))
             }
@@ -1104,7 +1139,7 @@ impl Headless {
                         if let Gate::Read(d) = grants::topic_gate(t) {
                             self.lack(d.name(), &[]);
                         } else if let Gate::Needs(p) = grants::topic_gate(t) {
-                            self.lack(p, &[]);
+                            self.lack(p.name(), &[]);
                         }
                         self.silent.insert(t.to_owned());
                     }
@@ -1131,13 +1166,28 @@ impl Headless {
                 "headless": true,
             })),
             "screen.text" => {
-                let lines = match params.get("sprites") == Some(&Value::Bool(true)) {
-                    true => self.own_composed().text(),
-                    false => self.vt.grid().text(),
+                let rect = self.view_rect(&params)?;
+                let composed;
+                let grid = match params.get("sprites") == Some(&Value::Bool(true)) {
+                    true => {
+                        composed = self.own_composed();
+                        &composed
+                    }
+                    false => self.vt.grid(),
                 };
-                Ok(json!({"lines": lines, "size": [cols, rows], "rect": [0, 0, cols, rows]}))
+                let lines: Vec<String> = (rect.y..rect.bottom())
+                    .map(|r| {
+                        row_key(grid, rect.x, rect.w, r)
+                            .trim_end_matches(' ')
+                            .to_owned()
+                    })
+                    .collect();
+                Ok(json!({"lines": lines, "size": [rect.w, rect.h],
+                          "rect": [rect.x, rect.y, rect.w, rect.h]}))
             }
             "screen.shape" => {
+                members(&params, &["frame", "rect", "words"])?;
+                let rect = self.view_rect(&params)?;
                 let words: Vec<String> = params
                     .get("words")
                     .map(|w| serde_json::from_value(w.clone()))
@@ -1146,12 +1196,9 @@ impl Headless {
                     .unwrap_or_default();
                 let words =
                     Words::new(&words).map_err(|e| CallError::new("bad-params", e.to_string()))?;
-                let lines = shape(self.vt.grid(), self.vt.grid().rect(), &words);
-                Ok(json!({
-                    "lines": lines,
-                    "size": [cols, rows],
-                    "rect": [0, 0, cols, rows],
-                }))
+                let lines = shape(self.vt.grid(), rect, &words);
+                Ok(json!({"lines": lines, "size": [rect.w, rect.h],
+                          "rect": [rect.x, rect.y, rect.w, rect.h]}))
             }
             "screen.cells" => {
                 let rect = self.view_rect(&params)?;
@@ -1309,7 +1356,7 @@ impl Headless {
                 "not-usable",
                 format!("{method}: answered by the runner"),
             )),
-            _ if grants::METHODS.contains(&method) => Err(CallError {
+            _ if grants::is_method(method) => Err(CallError {
                 hint: Some(
                     "a method of the driver, answered in a session (ptyrc dev run), not in a \
                      test: PROTOCOL.md, Headless"
@@ -1323,7 +1370,7 @@ impl Headless {
             _ => Err(CallError {
                 hint: Some(format!(
                     "{}the methods: PROTOCOL.md",
-                    ptyrc_proto::suggest::did_you_mean(method, grants::METHODS.iter().copied())
+                    ptyrc_proto::suggest::did_you_mean(method, grants::methods())
                 )),
                 ..CallError::new("unknown-method", format!("unknown method: {method}"))
             }),
@@ -1340,12 +1387,17 @@ impl Headless {
             .ok_or_else(|| CallError::new("no-frame", format!("no frame {sel:?}")))
     }
 
-    /// The cells a view reads, as the driver: the frame's rect on the
-    /// screen, `rect` within it.
+    /// The cells a view reads, as the driver (`rpc::view_rect`): the
+    /// frame's rect on the screen, `rect` within it; a frame off screen
+    /// `not-usable`.
     fn view_rect(&self, params: &Value) -> Result<Rect, CallError> {
         let id = self.frame_of(params)?;
         let info = (self.frames.info(id))
             .ok_or_else(|| CallError::new("no-frame", format!("no frame {id}")))?;
+        if info.state == ptyrc_core::FrameState::Inactive {
+            let e = format!("frame {id} is not on screen");
+            return Err(CallError::new("not-usable", e));
+        }
         let view = info.rect.intersect(&self.vt.grid().rect());
         let rect = params.get("rect").filter(|r| !r.is_null());
         Ok(match rect {
@@ -1373,6 +1425,32 @@ impl Headless {
     pub fn shot(&self) -> (Vec<String>, Vec<StyleRun>) {
         let grid = self.scene.compose(self.vt.grid(), &self.frames);
         (grid.text(), style_runs(&grid))
+    }
+
+    /// The app's widgets not laid out at `t`, past the first quiet
+    /// (`quiet_ms`: none is before), each a note: `(tag, line)`.
+    fn hidden_notes(&self, t: u64) -> Vec<(String, String)> {
+        if t < u64::from(WidgetConfig::default().quiet_ms) {
+            return Vec::new();
+        }
+        let (cols, rows) = (self.vt.cols(), self.vt.rows());
+        let hidden = (self.widgets.list().into_iter())
+            .filter(|w| w.owner == OWNER && w.state == WidgetState::Hidden);
+        hidden
+            .map(|w| {
+                let least = (w.variants.iter())
+                    .map(|v| v.size)
+                    .min_by_key(|[w, h]| u32::from(*w) * u32::from(*h));
+                let least = least.map_or("none".into(), |[w, h]| format!("{w}x{h}"));
+                let line = format!(
+                    "widget {} hidden at {t} ms: no room in {cols}x{rows} for its smallest \
+                     variant, {least} inside its border, with the margin and the gaps (from \
+                     text, the cursor's row, other widgets): PROTOCOL.md, Headless",
+                    w.tag
+                );
+                (w.tag, line)
+            })
+            .collect()
     }
 }
 
@@ -1412,6 +1490,16 @@ impl Headless {
         };
         let mut placed = params.clone();
         self.own_layer(&g, method, &mut placed);
+        // Its surface: clipped, never refused (`ptyrc_rules::surface`).
+        if let Some(s) = self.surface
+            && let Some(frame) = surface::clip(s, g.holds("screen-wide"), method, &placed)
+            && let Some(object) = placed.as_object_mut()
+        {
+            object.insert("frame".into(), json!(frame));
+            if frame == lower::NOWHERE {
+                self.nowhere.get_or_insert(self.now);
+            }
+        }
         let params = &placed;
         if let Err(lacks) = grants::judge(&g, grants::gate(method, params)) {
             if let Some(p) = lacks {
@@ -1427,7 +1515,7 @@ impl Headless {
         // is lowered whole.
         if hostfn::is_host(method) {
             let low = match grants::gate(method, params) {
-                Gate::Lowered(p) if !g.holds(p) => Some(p),
+                Gate::Lowered(p) if !g.holds(p.name()) => Some(p.name()),
                 _ => None,
             };
             let writable = g.holds("files-write");
@@ -1449,220 +1537,25 @@ impl Headless {
         if degree >= Degree::Text {
             return (self.answer(method, params), None);
         }
-        let shape = degree >= Degree::Shape;
-        let (cols, rows) = (self.vt.cols(), self.vt.rows());
-        let rows_n = rows;
-        let lines = |h: &Headless, words: &[String]| -> Result<Vec<String>, CallError> {
-            let words =
-                Words::new(words).map_err(|e| CallError::new("bad-params", e.to_string()))?;
-            let lines = shape_lines(h, &words);
-            Ok(match shape {
-                true => lines,
-                false => vec![String::new(); lines.len()],
-            })
-        };
-        let cut = |lines: Vec<String>| {
-            json!({"lines": lines, "size": [cols, rows], "rect": [0, 0, cols, rows],
-                   "degree": degree.name()})
-        };
-        let answer = match method {
-            "screen.text" => {
-                self.lack("text", &[]);
-                if !shape {
-                    self.lack("shape", &[]);
-                }
-                lines(self, &g.held_words()).map(cut)
-            }
-            "screen.cells" => {
-                self.lack("text", &[]);
-                if !shape {
-                    self.lack("shape", &[]);
-                }
-                lines(self, &g.held_words()).map(|lines| {
-                    let rows: Vec<Value> = (lines.into_iter())
-                        .map(|l| match l.is_empty() {
-                            true => json!([]),
-                            false => json!([{"t": l}]),
-                        })
-                        .collect();
-                    json!({"rows": rows, "size": [cols, rows_n], "rect": [0, 0, cols, rows_n],
-                           "degree": degree.name()})
-                })
-            }
-            "frame.text" => {
-                self.lack("text", &[]);
-                if !shape {
-                    self.lack("shape", &[]);
-                    return (
-                        Ok(mark(json!({"lines": [], "y0": 0}), degree)),
-                        Some(degree),
-                    );
-                }
-                let mut p = json!({});
-                for k in ["frame", "y0", "y1"] {
-                    if let Some(v) = params.get(k).filter(|v| !v.is_null())
-                        && (k != "frame" || degree >= Degree::Layout)
-                    {
-                        p[k] = v.clone();
-                    }
-                }
-                let words = g.held_words();
-                self.answer(method, &p).map(|v| {
-                    let lines: Vec<String> = (v["lines"].as_array().into_iter().flatten())
-                        .filter_map(Value::as_str)
-                        .map(|l| text_mask(l, &words))
-                        .collect();
-                    mark(json!({"lines": lines, "y0": v["y0"]}), degree)
-                })
-            }
-            "frame.heat" if !shape => {
-                self.lack("shape", &[]);
-                let mut p = json!({});
-                if let Some(f) = params.get("frame").filter(|_| degree >= Degree::Layout) {
-                    p["frame"] = f.clone();
-                }
-                self.answer(method, &p).map(|v| {
-                    let fill = |member: &str, with: &str| -> Vec<String> {
-                        (v[member].as_array().into_iter().flatten())
-                            .filter_map(Value::as_str)
-                            .map(|row| with.repeat(row.chars().count()))
-                            .collect()
-                    };
-                    mark(
-                        json!({"rows": fill("rows", "9"), "classes": fill("classes", ".")}),
-                        degree,
-                    )
-                })
-            }
-            "screen.shape" => {
-                let asked = params.get("words").and_then(Value::as_array);
-                let asked: Vec<String> = asked
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|w| w.as_str().map(str::to_owned))
-                    .collect();
-                let (kept, gone): (Vec<String>, Vec<String>) =
-                    asked.iter().cloned().partition(|w| g.holds_word(w));
-                if shape && gone.is_empty() {
-                    return (self.answer(method, params), None);
-                }
-                if !shape {
-                    self.lack("shape", &[]);
-                }
-                if !gone.is_empty() {
-                    self.lack("words", &gone);
-                }
-                lines(self, &kept).map(cut)
-            }
-            "screen.find" | "screen.wait" if params.get("pattern").is_some() => {
-                let gone = params.get("gone") == Some(&Value::Bool(true));
-                let none = match method {
-                    "screen.find" => json!({"matches": []}),
-                    _ => json!({"matched": gone, "match": null}),
-                };
-                let pattern = params.get("pattern").and_then(Value::as_str).unwrap_or("");
-                let regex = params.get("regex") == Some(&Value::Bool(true));
-                // The user's pattern, exactly: answered as under `text`.
-                if g.user_pattern(pattern, regex) {
-                    let mut p = params.clone();
-                    if let Some(o) = p.as_object_mut().filter(|_| degree < Degree::Layout) {
-                        o.remove("frame");
-                    }
-                    return (
-                        self.answer(method, &p).map(|v| mark(v, degree)),
-                        Some(degree),
-                    );
-                }
-                let word =
-                    !regex && !pattern.is_empty() && pattern.chars().all(char::is_alphanumeric);
-                if !(word && g.finds_word(pattern)) {
-                    match word {
-                        true => self.lack("words", &[pattern.to_owned()]),
-                        false => self.lack("text", &[]),
-                    }
-                    return (Ok(mark(none, degree)), Some(degree));
-                }
-                let mut query = json!({"pattern": format!(r"\b{pattern}\b"), "regex": true,
-                                       "ignore_case": true});
-                for k in ["frame", "known", "gone"] {
-                    if let Some(v) = params
-                        .get(k)
-                        .filter(|_| k != "frame" || degree >= Degree::Layout)
-                    {
-                        query[k] = v.clone();
-                    }
-                }
-                self.answer(method, &query).map(|v| mark(v, degree))
-            }
-            "screen.wait" | "screen.cursor" | "frame.idle" if !shape => {
-                self.lack("shape", &[]);
-                let still = json!({"score": 1.0, "idle": true, "free": 1.0});
-                Ok(mark(
-                    match method {
-                        "screen.cursor" => {
-                            let mut c = json!({"x": 0, "y": 0, "visible": false,
-                                               "frame": null, "pos": null});
-                            if params.get("trail") == Some(&Value::Bool(true)) {
-                                c["trail"] = json!([]);
-                            }
-                            c
-                        }
-                        "frame.idle" => still,
-                        _ if params.get("idle") == Some(&Value::Bool(true)) => {
-                            json!({"matched": true, "match": null, "frame": RAW, "idle": still})
-                        }
-                        _ => json!({"matched": true, "match": null}),
-                    },
-                    degree,
-                ))
-            }
-            "frame.list" | "frame.get" | "frame.at" => {
-                let mut p = params.clone();
-                if degree < Degree::Layout {
-                    self.lack("layout", &[]);
-                    if let Some(o) = p.as_object_mut() {
-                        o.remove("frame");
-                        o.remove("name");
-                    }
-                }
-                let answer = match method {
-                    "frame.list" if degree < Degree::Layout => self
-                        .answer("frame.get", &json!({}))
-                        .map(|v| json!({"frames": [v["frame"]], "layout": 0})),
-                    "frame.at" if degree < Degree::Layout => {
-                        let (x, y) = (
-                            p.get("x").and_then(Value::as_u64),
-                            p.get("y").and_then(Value::as_u64),
-                        );
-                        Ok(match (x, y) {
-                            (Some(x), Some(y)) => json!({"frame": RAW, "pos": [x, y]}),
-                            _ => json!({"frame": RAW}),
-                        })
-                    }
-                    _ => self.answer(method, &p),
-                };
-                answer.map(|mut v| {
-                    if let Some(f) = v.get_mut("frame") {
-                        frame_info(f, degree);
-                    }
-                    for f in v
-                        .get_mut("frames")
-                        .and_then(Value::as_array_mut)
-                        .into_iter()
-                        .flatten()
-                    {
-                        frame_info(f, degree);
-                    }
-                    mark(v, degree)
-                })
-            }
+        // The driver's cut (`ptyrc_rules::lower`); the lacks, the report's.
+        let rules = g.rules();
+        let planned = lower::plan(method, params, degree, &rules.words, &rules.hand);
+        self.lacks_of(method, params, &planned, &rules, degree);
+        let lowered = matches!(grants::judge(&g, grants::gate(method, params)), Ok(Some(_)));
+        let answer = match planned {
+            // Fail closed: lowered by the table, not planned.
+            Plan::Pass if lowered => Err(CallError {
+                hint: Some(grants::denied_hint(&g, None)),
+                ..CallError::new("denied", format!("{method}: denied"))
+            }),
             // Where an anchor landed, at the degree that finds it.
-            "draw.list" => {
+            Plan::Pass if method == "draw.list" => {
                 let mut answer = self.answer(method, params);
                 let mut needs = Vec::new();
+                let cut = Some((degree, rules.words.as_slice(), &rules.hand));
                 if let Ok(v) = &mut answer {
                     for item in (v["sprites"].as_array_mut().into_iter()).flatten() {
-                        if let Some(d) = grants::landing(item, &g) {
+                        if let Some(d) = lower::landing(item, cut, Some(RAW)) {
                             let word = item["anchor"]["text"].as_str().map(str::to_owned);
                             needs.push((d, word));
                         }
@@ -1676,55 +1569,80 @@ impl Headless {
                 }
                 return (answer, None);
             }
-            // Marked; not told as lowered: it lacks only `host_colors`.
-            "session.info" => {
-                let answer = self.answer(method, params).map(|mut v| {
-                    v["degree"] = json!(degree.name());
-                    v
-                });
-                return (answer, None);
+            Plan::Pass => return (self.answer(method, params), None),
+            Plan::Answer(mut v) => {
+                v["degree"] = json!(degree.name());
+                Ok(v)
             }
-            _ => return (self.answer(method, params), None),
+            Plan::Ask(asked, p, cut) => self.answer(asked, &p).map(|v| cut.apply(v, degree)),
         };
-        (answer, Some(degree))
-    }
-}
-
-/// The shape of a line of text, the words held shown
-/// (`ptyrc-server`, `lower::mask`).
-fn text_mask(line: &str, words: &[String]) -> String {
-    let ink = |c: char, out: &mut String| match (c.is_whitespace(), char_width(c)) {
-        (true, _) => out.push(' '),
-        (false, 2) => out.push_str("##"),
-        (false, 0) => {}
-        (false, _) => out.push('#'),
-    };
-    let held = |w: &str| {
-        let w = w.to_lowercase();
-        words.iter().any(|h| h.to_lowercase() == w)
-    };
-    let chars: Vec<char> = line.chars().collect();
-    let mut out = String::with_capacity(line.len());
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i].is_alphanumeric() {
-            let end = (i..chars.len())
-                .find(|&j| !chars[j].is_alphanumeric())
-                .unwrap_or(chars.len());
-            let word: String = chars[i..end].iter().collect();
-            let narrow = chars[i..end].iter().all(|&c| char_width(c) == 1);
-            match narrow && held(&word) {
-                true => out.push_str(&word),
-                false => chars[i..end].iter().for_each(|&c| ink(c, &mut out)),
+        let answer = answer.map_err(|mut e| {
+            if lower::scrubbed(&e.code) {
+                e.hint = None;
             }
-            i = end;
-        } else {
-            ink(chars[i], &mut out);
-            i += 1;
+            e
+        });
+        // `session.info`: marked; not told as lowered: it lacks only
+        // `host_colors`.
+        (answer, (method != "session.info").then_some(degree))
+    }
+
+    /// The permissions a request below `text` lacks, for the report.
+    fn lacks_of(
+        &mut self,
+        method: &str,
+        params: &Value,
+        planned: &Plan,
+        rules: &ptyrc_rules::grants::Grants,
+        degree: Degree,
+    ) {
+        let shape = degree >= Degree::Shape;
+        match method {
+            "screen.text" | "screen.cells" | "frame.text" => {
+                self.lack("text", &[]);
+                if !shape {
+                    self.lack("shape", &[]);
+                }
+            }
+            "screen.shape" => {
+                let shown = lower::shown(degree, &rules.words, &rules.hand);
+                let asked = params.get("words").and_then(Value::as_array);
+                let gone: Vec<String> = (asked.into_iter().flatten())
+                    .filter_map(Value::as_str)
+                    .filter(|w| !lower::holds(&shown, w))
+                    .map(str::to_owned)
+                    .collect();
+                if !shape {
+                    self.lack("shape", &[]);
+                }
+                if !gone.is_empty() {
+                    self.lack("words", &gone);
+                }
+            }
+            "screen.find" | "screen.wait"
+                if params.get("pattern").is_some_and(|p| !p.is_null()) =>
+            {
+                if let Plan::Answer(_) = planned {
+                    let pattern = params["pattern"].as_str().unwrap_or("");
+                    let regex = params.get("regex") == Some(&Value::Bool(true));
+                    let word =
+                        !regex && !pattern.is_empty() && pattern.chars().all(char::is_alphanumeric);
+                    match word {
+                        true => self.lack("words", &[pattern.to_owned()]),
+                        false => self.lack("text", &[]),
+                    }
+                }
+            }
+            "screen.find" => self.lack("text", &[]),
+            "screen.wait" | "screen.cursor" | "frame.idle" | "frame.heat" if !shape => {
+                self.lack("shape", &[]);
+            }
+            "frame.list" | "frame.get" | "frame.at" if degree < Degree::Layout => {
+                self.lack("layout", &[]);
+            }
+            _ => {}
         }
     }
-    out.truncate(out.trim_end_matches(' ').len());
-    out
 }
 
 /// A row as runs of equal style (`ptyrc-server`, `rpc::row_runs`).
@@ -1772,40 +1690,6 @@ fn row_runs(cells: &[&Cell]) -> Value {
         flush(&mut text, &s);
     }
     Value::Array(runs)
-}
-
-/// `v` marked with the degree it was cut to.
-fn mark(mut v: Value, degree: Degree) -> Value {
-    if v.is_object() {
-        v["degree"] = json!(degree.name());
-    }
-    v
-}
-
-/// A frame info cut to `degree` (`ptyrc-server`, `lower::frame_info`).
-fn frame_info(info: &mut Value, degree: Degree) {
-    let Some(object) = info.as_object_mut() else {
-        return;
-    };
-    for member in ["key", "support"] {
-        if object.contains_key(member) {
-            object.insert(member.into(), Value::Null);
-        }
-    }
-    if degree < Degree::Shape {
-        object.insert("idle".into(), json!(1.0));
-        object.insert("is_idle".into(), json!(true));
-        let rows = object
-            .get("rect")
-            .and_then(|r| r.get(3))
-            .and_then(Value::as_i64);
-        if object.contains_key("origin") {
-            object.insert("origin".into(), json!([0, 0]));
-        }
-        if let Some(rows) = rows {
-            object.insert("extent".into(), json!([0, (rows - 1).max(0)]));
-        }
-    }
 }
 
 fn match_json(m: &TextMatch) -> Value {
@@ -2116,10 +2000,6 @@ impl Headless {
     }
 }
 
-fn shape_lines(h: &Headless, words: &Words) -> Vec<String> {
-    shape(h.vt.grid(), h.vt.grid().rect(), words)
-}
-
 impl Host for Headless {
     fn call(&mut self, method: &str, mut params: Value) -> Result<Value, CallError> {
         if method == "batch" && !self.in_batch {
@@ -2205,6 +2085,9 @@ pub struct Options {
     pub host: HostFns,
     pub assets: Option<Assets>,
     pub launcher: Launcher,
+    /// `[app] surface` on the one frame (`RAW`): draws clipped as the
+    /// driver clips a store app's; `None`: as named.
+    pub surface: Option<Surface>,
 }
 
 impl Default for Options {
@@ -2226,6 +2109,7 @@ impl Default for Options {
             },
             assets: None,
             launcher: Launcher::default(),
+            surface: None,
         }
     }
 }
@@ -2530,6 +2414,9 @@ impl Report {
         for note in &self.notes {
             writeln!(f, "note: {note}")?;
         }
+        if !styles && let Some(note) = styles_unseen(&self.screens, &self.styles) {
+            writeln!(f, "note: {note}")?;
+        }
         for lack in &self.lacks {
             writeln!(f, "{}", lack.line())?;
         }
@@ -2543,11 +2430,8 @@ impl Report {
             };
             writeln!(f, "result: {value} (status {status})")?;
         }
-        if !self.storage.is_empty() {
-            let keys: Vec<String> = (self.storage.iter())
-                .map(|(k, v)| format!("{k} {} bytes", v.len()))
-                .collect();
-            writeln!(f, "storage: {}", keys.join(", "))?;
+        for (k, v) in &self.storage {
+            writeln!(f, "storage: {k} = {}", cut_value(v))?;
         }
         for file in &self.written {
             let size = file.content.bytes.as_ref().map_or(0, Vec::len);
@@ -2561,6 +2445,44 @@ impl Report {
         }
         Ok(())
     }
+}
+
+/// A stored value as the text report shows it: quoted, escaped, cut
+/// past 60 characters, the size then given.
+fn cut_value(v: &str) -> String {
+    const SHOWN: usize = 60;
+    let chars = v.chars().count();
+    match chars > SHOWN {
+        false => format!("\"{}\"", v.escape_debug()),
+        true => {
+            let head: String = v.chars().take(SHOWN).collect();
+            format!("\"{}\"... ({} bytes)", head.escape_debug(), v.len())
+        }
+    }
+}
+
+/// The note on screens whose text hides a style that carries meaning
+/// (`inverse`, `hidden`, `underline`), shown by `--styles` alone.
+fn styles_unseen(screens: &[(u64, Vec<String>)], styles: &[Vec<StyleRun>]) -> Option<String> {
+    const MEANT: [&str; 3] = ["inverse", "hidden", "underline"];
+    let mut found: Vec<&str> = Vec::new();
+    let mut first = None;
+    for ((t, _), runs) in screens.iter().zip(styles) {
+        for (_, _, _, style) in runs {
+            for word in style.split(' ').filter(|w| MEANT.contains(w)) {
+                first.get_or_insert(*t);
+                if !found.contains(&word) {
+                    found.push(word);
+                }
+            }
+        }
+    }
+    let t = first?;
+    found.sort_unstable();
+    Some(format!(
+        "the screen at {t} ms has cells in {}, not seen as text: --styles shows them",
+        found.join(", ")
+    ))
 }
 
 /// `\n` as `\r\n`, from the top left.
@@ -2681,6 +2603,7 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
     host.fns = options.host.clone();
     host.assets = options.assets.clone();
     host.launcher = options.launcher.clone();
+    host.surface = options.surface;
     let args = with_handles(&options.args, &options.host.files);
     let mut texts: Vec<(u64, &str)> = match &options.under {
         Under::Text(text) => vec![(0, text.as_str())],
@@ -2727,6 +2650,8 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
     let mut inject = inject.into_iter().peekable();
     let mut screens = Vec::new();
     let mut styles = Vec::new();
+    // Widgets not laid out at a screen shown: `(key, note)`.
+    let mut hidden: Vec<(String, String)> = Vec::new();
     let mut ticks = 0;
 
     let mut done = runner.init(&args, 0);
@@ -2810,6 +2735,7 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
             let (rows, runs) = runner.host().shot();
             screens.push((now, rows));
             styles.push(runs);
+            hidden.extend(runner.host().hidden_notes(now));
         }
     }
     // Ended early: the screens left show what stays.
@@ -2820,9 +2746,22 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
         let (rows, runs) = host.shot();
         screens.push((t, rows));
         styles.push(runs);
+        hidden.extend(host.hidden_notes(t));
+    }
+    let mut said = BTreeSet::new();
+    for (key, line) in hidden {
+        if said.insert(key) {
+            notes.push(line);
+        }
     }
     let met = runner.met().iter().map(|m| m.to_string()).collect();
     let host = runner.host_mut();
+    if let Some(t) = host.nowhere {
+        notes.push(format!(
+            "surface \"widget\": a sprite drawn at {t} ms is shown nowhere, as the driver \
+             shows it; on a widget, or surface = \"frame\""
+        ));
+    }
     for p in &host.fns.unanswered {
         notes.push(format!(
             "probe.{p}: held, no --probe {p}=FILE.json: answered as not held"
@@ -2932,7 +2871,7 @@ mod tests {
             ("bad-params", "no such topic: sizes")
         );
         for m in SERVED {
-            assert!(grants::METHODS.contains(m), "{m}");
+            assert!(grants::is_method(m), "{m}");
             let e = h.call(m, json!({})).err().map(|e| e.code);
             assert!(
                 !matches!(e.as_deref(), Some("headless" | "unknown-method")),
@@ -2964,6 +2903,41 @@ mod tests {
         h.feed(b"\x1b[2J");
         let s = h.call("screen.shape", json!({})).unwrap();
         assert_eq!(s["lines"], json!(["", "", ""]));
+    }
+
+    /// `frame` and `rect` of a view, as the driver answers them
+    /// (`screen_tests.rs`, `shape_masks_the_apps_cells_and_keeps_the_words`).
+    #[test]
+    fn a_view_of_a_rect() {
+        let mut h = Headless::new((30, 4), 1);
+        h.feed("fish_food fishing\r\n\x1b[31mToy\x1b[0m 世 toys".as_bytes());
+        let cut = h
+            .call(
+                "screen.shape",
+                json!({"frame": "raw", "rect": [2, 0, 6, 2], "words": ["fish", "toy"]}),
+            )
+            .unwrap();
+        assert_eq!(cut["lines"], json!(["sh####", "y ## #"]));
+        assert_eq!(
+            (cut["rect"].clone(), cut["size"].clone()),
+            (json!([2, 0, 6, 2]), json!([6, 2]))
+        );
+        let text = h
+            .call("screen.text", json!({"rect": [10, 0, 4, 2]}))
+            .unwrap();
+        assert_eq!(text["lines"], json!(["fish", "s"]));
+        let e = h
+            .call("screen.shape", json!({"sprites": true}))
+            .unwrap_err();
+        assert_eq!(e.code, "bad-params");
+        let e = h.call("screen.shape", json!({"frame": 9})).unwrap_err();
+        assert_eq!(e.code, "no-frame");
+        // Below `text`, the plan asks the shape of the same view.
+        h.set_grants(Some(Grants::new(&["shape"], &[], &[] as &[&str])));
+        let low = h
+            .call("screen.text", json!({"rect": [0, 1, 3, 1]}))
+            .unwrap();
+        assert_eq!(low["lines"], json!(["###"]));
     }
 
     #[test]
@@ -3170,6 +3144,46 @@ mod tests {
         );
     }
 
+    /// A widget with no room, said past the first quiet; a stored value
+    /// cut; a style the text hides, said.
+    #[test]
+    fn what_the_text_report_says_besides() {
+        let mut h = Headless::new((12, 4), 1);
+        let w = json!({"widgets": [{"tag": "w", "name": "big", "size": [20, 3],
+                                     "content": {"rows": ["hello"]}}]});
+        h.call("widget.declare", w).unwrap();
+        h.call("widget.show", json!({"tag": "w"})).unwrap();
+        for t in [0, 500, 1500] {
+            h.set_now(t);
+            h.settle();
+        }
+        assert_eq!(h.hidden_notes(500), []);
+        let notes = h.hidden_notes(1500);
+        assert_eq!(notes.len(), 1);
+        assert!(
+            notes[0].1.starts_with(
+                "widget w hidden at 1500 ms: no room in 12x4 for its smallest variant, \
+                 20x3 inside its border"
+            ),
+            "{notes:?}"
+        );
+        assert_eq!(cut_value("a\"b"), "\"a\\\"b\"");
+        let long = "x".repeat(70);
+        assert_eq!(
+            cut_value(&long),
+            format!("\"{}\"... (70 bytes)", "x".repeat(60))
+        );
+        let mut h = Headless::new((10, 2), 1);
+        h.feed(b"a\x1b[7mb\x1b[0m");
+        let (rows, runs) = h.shot();
+        let screens = [(0, rows), (5, Vec::new())];
+        assert_eq!(
+            styles_unseen(&screens, &[runs, Vec::new()]).as_deref(),
+            Some("the screen at 0 ms has cells in inverse, not seen as text: --styles shows them")
+        );
+        assert_eq!(styles_unseen(&screens[1..], &[Vec::new()]), None);
+    }
+
     #[test]
     fn text_events_on_a_change() {
         let mut h = host(&["shape"], &[]);
@@ -3198,6 +3212,36 @@ mod tests {
         assert_eq!(h.dropped.len(), 2);
         assert_eq!(key_bytes("ctrl+c"), Some(vec![3]));
         assert_eq!(key_bytes("nope"), None);
+    }
+
+    /// Keys and a paste on their way to the program: heard by an app
+    /// subscribed to `input` with `keys-read`, `{bytes}` as the
+    /// driver's `forward_app`; else dropped.
+    #[test]
+    fn keys_to_the_program_heard_with_keys_read() {
+        let mut h = host(&["keys-read", "keys-grab"], &[]);
+        h.call("subscribe", json!({"topics": ["input"]})).unwrap();
+        h.inject(&Inject::Key("x".into()));
+        h.inject(&Inject::Paste("hi".into()));
+        let events = h.take_events();
+        assert_eq!(events[0], ("input".into(), json!({"bytes": "eA=="})));
+        assert_eq!(events[1].1["bytes"], base64_encode(b"\x1b[200~hi\x1b[201~"));
+        // A grab of some keys: those grabbed, the rest to the program.
+        h.call("input.grab", json!({"keys": ["h"]})).unwrap();
+        h.inject(&Inject::Paste("hi".into()));
+        let events = h.take_events();
+        assert_eq!(
+            events[0].1,
+            json!({"key": "h", "bytes": "aA==", "grabbed": true})
+        );
+        assert_eq!(events[1].1, json!({"bytes": "aQ=="}));
+        assert!(h.dropped.is_empty(), "{:?}", h.dropped);
+        // Subscribed without it: not held, dropped.
+        let mut h = host(&["shape"], &[]);
+        h.call("subscribe", json!({"topics": ["input"]})).unwrap();
+        h.inject(&Inject::Key("x".into()));
+        assert!(h.take_events().is_empty());
+        assert_eq!(h.dropped.len(), 1);
     }
     #[test]
     fn a_batch_as_the_driver() {
@@ -3461,5 +3505,55 @@ mod tests {
         assert!(cells.to_string().contains('^'), "{cells}");
         assert_eq!(shown(&mut h, false).0, json!(""));
         assert!(h.screen()[3].starts_with("OTHER"));
+    }
+    /// `[app] surface`, as the driver clips a store app's draws
+    /// (`ptyrc_rules::surface`): a bare sprite of `widget` nowhere, its
+    /// widgets shown; `frame`, `screen`: on the one frame.
+    #[test]
+    fn the_surface_clips_as_the_driver() {
+        let run = |surface: Option<Surface>, held: &[&str]| {
+            let mut h = Headless::new((30, 10), 1);
+            h.set_grants(Some(Grants::new(held, &[], &[] as &[&str])));
+            h.surface = surface;
+            let put = json!({"content": {"rows": ["BARE"]}, "anchor": {"at": [0, 0]}});
+            let id = h.call("draw.put", put).unwrap()["id"].clone();
+            let w = json!({"widgets": [{"tag": "w", "name": "small", "size": [4, 1],
+                                         "content": {"rows": ["WIDG"]}}]});
+            h.call("widget.declare", w).unwrap();
+            h.call("widget.show", json!({"tag": "w"})).unwrap();
+            for t in [0, 500, 1500] {
+                h.set_now(t);
+                h.settle();
+            }
+            let list = h.call("draw.list", json!({})).unwrap();
+            let frame = list["sprites"][0]["frame"].clone();
+            (h.screen().join("|"), frame, id, h)
+        };
+        let (screen, frame, _, h) = run(Some(Surface::Widget), &[]);
+        assert!(
+            !screen.contains("BARE") && screen.contains("WIDG"),
+            "{screen}"
+        );
+        assert_eq!((frame, h.nowhere), (json!(RAW), Some(0)));
+        for (s, held) in [
+            (Surface::Frame(RAW), &[][..]),
+            (Surface::Screen(RAW), &[][..]),
+            (Surface::Screen(RAW), &["screen-wide"][..]),
+        ] {
+            let (screen, _, _, h) = run(Some(s), held);
+            assert!(
+                screen.contains("BARE") && screen.contains("WIDG"),
+                "{s:?}: {screen}"
+            );
+            assert_eq!(h.nowhere, None);
+        }
+        // An update naming a frame: clipped too.
+        let (_, _, id, mut h) = run(Some(Surface::Widget), &[]);
+        h.nowhere = None;
+        h.call("draw.update", json!({"id": id, "frame": "raw"}))
+            .unwrap();
+        assert_eq!(h.nowhere, Some(1500));
+        let (screen, ..) = run(None, &[]);
+        assert!(screen.contains("BARE"), "{screen}");
     }
 }

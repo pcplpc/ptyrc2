@@ -22,6 +22,8 @@ pub struct Live {
     size: (u32, u32),
     log: Box<dyn Write + Send>,
     urandom: Option<File>,
+    /// `--seed N`: `random` as a headless run of that seed draws it.
+    seeded: Option<u64>,
     gone: Option<String>,
     /// The app's assets, read before the profile.
     pub assets: Option<crate::assets::Assets>,
@@ -40,9 +42,17 @@ impl Live {
             size,
             log,
             urandom: File::open("/dev/urandom").ok(),
+            seeded: None,
             gone: None,
             assets: None,
         }
+    }
+
+    /// `random` drawn from `seed`, as `ptyrc dev test --seed` draws it;
+    /// else from `/dev/urandom`.
+    pub fn seeded(mut self, seed: u64) -> Live {
+        self.seeded = Some(crate::headless::mix(seed));
+        self
     }
 }
 
@@ -78,6 +88,16 @@ impl Host for Live {
     }
 
     fn random(&mut self, buf: &mut [u8]) {
+        if let Some(rng) = &mut self.seeded {
+            // xorshift64, as the headless host.
+            for b in buf {
+                *rng ^= *rng << 13;
+                *rng ^= *rng >> 7;
+                *rng ^= *rng << 17;
+                *b = (*rng >> 32) as u8;
+            }
+            return;
+        }
         let read = self.urandom.as_mut().map(|f| f.read_exact(buf));
         if !matches!(read, Some(Ok(()))) {
             buf.fill(0);

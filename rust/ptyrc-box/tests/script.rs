@@ -917,7 +917,7 @@ fn host_functions_from_memory() {
     assert_eq!(r.written.len(), 1);
     let text = r.to_string();
     assert!(text.contains("result: r (status 3)"), "{text}");
-    assert!(text.contains("storage: k 2 bytes, seed 2 bytes"), "{text}");
+    assert!(text.contains("storage: k = \"v1\"\nstorage: seed = "), "{text}");
     assert!(text.contains("files: save written, 4 bytes"), "{text}");
     let j = r.to_json();
     assert_eq!(j["files"][0]["text"], "done");

@@ -15,8 +15,11 @@ hint }`: `message` says what was refused (manifest errors as
 - `manifest::parse(&str)`, `manifest::parse_bytes(&[u8])` -> `Manifest
   { app, permissions, limits, options, args }`.
 - `App { id, version, summary, license, api, entry: Entry::Script |
-  Entry::Rust, rustc, assets, surface, tape, wait, random }`; `surface`
-  absent: `Widget`; `random`: the option words of each draw of the
+  Entry::Rust, rustc, assets, surface, frame, tape, wait, random }`;
+  `surface` absent: `Widget`; `frame`: one of `manifest::FRAMES`
+  (`active`, `idle`, `largest`, `quietest`, `raw`), the frame of a start
+  without `--frame`, absent `None` (the driver's `active`); `all`
+  refused; `random`: the option words of each draw of the
   menu's random app (`[[], ["-a"]]`), `[]` never drawn, absent `[[]]`;
   bounds `RANDOM_MAX`.
 - `Permission { name, why, words }`; names from `manifest::PERMISSIONS`;
@@ -29,7 +32,9 @@ hint }`: `message` says what was refused (manifest errors as
 - `AppOption { name, ty: OptionType, default: Option<OptionValue>, doc,
   short, choices, list, needs, write, regex, min, max }`; `min`, `max`
   bound a value of an `int` or `float` of `[options]`
-  (`AppOption::range`: `1 to 10`). `[args]`: `Positional { option, min,
+  (`AppOption::range`: `1 to 10`). `default` optional: a `bool`
+  without one is `false`; any other `None`, `null` in `init`, shown
+  nowhere; `min`, `max`, `choices` rule a value given. `[args]`: `Positional { option, min,
   max }`, one list, `min`, `max` the count of values. Types `int`,
   `float`, `bool`, `string`, `word`, `pattern`, `file`, `dir`. Refused
   at parse: a name in `RESERVED_OPTIONS` or `no-NAME`; a short twice or
@@ -46,7 +51,8 @@ hint }`: `message` says what was refused (manifest errors as
 the driver.
 
 - `read(manifest, words, cwd) -> Option<Launch>`: the launcher's
-  options (`Launcher { frame, front, prefer, alpha, border, wait }`),
+  options (`Launcher { frame, front, prefer, alpha, border, wait, seed
+  }`; `--seed N`, a `u64`: the member `seed` of `app.start`),
   then the app's: `--NAME VALUE`, `--NAME=VALUE`, `-S VALUE`, `-SVALUE`,
   `-abc` of bools, `--no-NAME`, `NAME=VALUE`; positionals for
   `[args]`, all after `--`. Files: `name_path` (absolute, canonical; a
@@ -164,7 +170,10 @@ install::install_built(&dirs, &origin, &tree, &checked, Some(&built.wasm), ...)?
   (directories 0700, files 0400) and records it in `apps.lock` (0600).
   A script app. `install::install_built(..., Some(module), ...)`: a Rust
   app, its module written as `app.wasm` at the root of the tree; a Rust
-  app without one, a script app with one: refused.
+  app without one, a script app with one: refused. So is a manifest
+  whose `manifest::todos` is not empty: `[app] summary`, a reason, a
+  `doc` that starts with `TODO` (the template's); `ptyrc dev check`
+  notes them.
 - The old tree is kept until the new one has started once: an
   `Installed` carries `previous` (the last commit that started) and
   `started`. `install::started(dirs, o)` records the start, clears

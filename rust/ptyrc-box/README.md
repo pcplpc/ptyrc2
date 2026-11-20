@@ -4,12 +4,13 @@ The runner of store apps: one WebAssembly guest, its limits, its
 canvases. `plan/store-model.md` is the plan; this file is the ABI.
 
 ```
-ptyrc-box [--no-profile] [--manifest JSON] [--script] MODULE [ARGS]
+ptyrc-box [--no-profile] [--manifest JSON] [--seed N] [--script] MODULE [ARGS]
 ptyrc-box --headless [--no-profile] [--manifest JSON] [--script] MODULE [ARGS] [--size CxR] [--for T]
           [--at T,...] [--seed N] [--tape FILE | --screen FILE] [--json]
           [--grant NAME,...] [--deny NAME,...] [--words WORD,...]
           [--user-word WORD]... [--user-pattern TEXT]... [--user-regex RE]...
           [--front | --back] [--prefer P] [--alpha A] [--border B]
+          [--surface widget|frame|screen]
           [--event T:TOPIC:JSON]... [--key T:KEY]... [--pointer T:X,Y]...
           [--click T:X,Y]... [--press T:X,Y]... [--release T:X,Y]...
 ```
@@ -17,7 +18,8 @@ ptyrc-box --headless [--no-profile] [--manifest JSON] [--script] MODULE [ARGS] [
 Runs `MODULE` (a binary module; with `--script`, `APP.js`) in the
 session of `PTYRC_SOCKET`, presenting `PTYRC_TOKEN`. `ARGS`: the JSON
 given to `init`, default `{}`. The log is stderr. SIGTERM: `stop`, then
-the end. Status: that of `exit`; 0 after SIGTERM; 70 a guest ended by
+the end. `--seed N`: `random` drawn as a headless run of seed `N`
+draws it; absent, from `/dev/urandom`. Status: that of `exit`; 0 after SIGTERM; 70 a guest ended by
 the runner; 2 usage; 5 the connection, or the OS profile refused.
 
 `--manifest JSON`: the manifest as its reader (the driver, `ptyrc dev
@@ -32,41 +34,55 @@ that of `exit`, or 70.
 
 - `--grant`: the permissions declared; `--deny`: those answered no;
   `--words`: the words of `words`. Given, the requests are checked as
-  the driver checks a store app (`grants.rs`): a reading above the
-  degree held is cut to it, marked `"degree"`; an act not held, a
+  the driver checks a store app, by the same code (`ptyrc-rules`,
+  `grants`, `lower`): a reading above the degree held is cut to it,
+  marked `"degree"`; an act not held, a
   method closed to apps: `denied`, the hint naming the permission.
   `draw.list` below `text`: where an anchor landed told at the degree
-  that finds it (`grants::landing`, the driver's `own::landing`).
+  that finds it (`lower::landing`).
   `screen.text`, `screen.cells {sprites: true}`: the app's own sprites
-  composed alone.
+  composed alone. `screen.text`, `screen.shape`, `screen.cells`: the
+  view of `frame` and `rect`, as the driver reads it.
   `--deny` alone: every permission but these. Neither: the whole
   session. `--user-word`: a word the user gave, found at any degree,
   shown from `shape`; `--user-pattern`, `--user-regex`: a pattern the
   user gave, `screen.find`, `screen.wait` of exactly it answered as
-  under `text` (`ptyrc-server`, `lower.rs`).
+  under `text` (`lower::plan`).
 - `--front`, `--back`, `--prefer`, `--alpha`, `--border`: the
   launcher's options, on the app's requests as the driver sets them
   (`own_params`).
+- `--surface`: `[app] surface` (`ptyrc dev test` gives it), on the one
+  frame (`raw`); with the grants, a draw is clipped as the driver
+  clips it (`ptyrc-rules`, `surface::clip`): `widget`, a bare sprite
+  on `NOWHERE` (not shown, a note), a widget as named; `frame`, and
+  `screen` without `screen-wide`, on the frame; never refused.
 - Host functions from memory (`hostfn.rs`), the driver's answers:
   `--clock ISO` the wall time at 0 (default `2000-01-01T00:00:00Z`),
   advancing with session time; `--zone NAME` the local zone (a name of
   the system database, or a POSIX rule; default `UTC`); the database is
   read whole before the profile when `clock` is held; else the zone
   alone, checked, unused (a note). `--storage DIR`:
-  the values, a file a key, never written back. `--file NAME=PATH`: a
+  the values, a file a key: its name the key (`[A-Za-z0-9._-]`), its
+  content the value (UTF-8); other entries skipped; read once, never
+  written back. `--file NAME=PATH`: a
   file or a directory read once, its handle (`f0`, ...) given to
   `init` under `NAME` (a handle there already is kept); read only.
   `--write-file NAME=PATH`: the same, the manifest's `write = true`:
   writes, with `files-write`, stay in memory.
-  `--probe git=FILE.json`, `system=`: the answer as written; none:
+  `--probe git=FILE.json`, `system=`: the answer as written (`ptyrc
+  dev probe git [DIR]`, `ptyrc dev probe system` print the driver's
+  probe now: a fixture); none:
   the not-held answer, and a note. `probe.git`, as the driver: one
   read a second of session time; within it the same params (but
   `since`) get the last answer, others `not-usable`. The report: `result:`, `storage:`
-  (keys, sizes), `files:` (written); `--json`: the values, the
+  (a line a key, `KEY = "VALUE"`, cut past 60 characters, the size
+  then given), `files:` (written); `--json`: the values whole, the
   contents. Status: that of `app.result` when the run ends well.
 - `--event T:TOPIC:JSON`: an event at `T`, to a topic subscribed and
   held. `--key T:KEY`: a key named as `input.send` names it, to the
-  app when it grabbed it (`input.grab`); `ctrl+t` releases the grab.
+  app when it grabbed it (`input.grab`); `ctrl+t` releases the grab;
+  else to the program, heard as the driver's: `input {"bytes"}` (base64)
+  to the app subscribed holding `keys-read`, else `dropped`.
   `--pointer T:X,Y`, `--click T:X,Y`: `hover`, `mouse` on the app's
   sprite at the cell (topmost, no effect), heard on its widget or a
   sprite in front, else with `pointer`, `clicks`. `--press T:X,Y`,
@@ -74,11 +90,12 @@ that of `exit`, or 70.
   once); a release after a press on a sprite is of that sprite, `at`,
   `frame`, `pos` null off it. An effect put with `"pointer": true`,
   `"bomb": true` in its params is tuned as the driver tunes it
-  (`nozzle.rs`): `hover`, `bomb` `[x, y, ms]` or `[x, y, ms, dx, dy]`;
+  (`ptyrc-rules`, `nozzle`): `hover`, `bomb` `[x, y, ms]` or `[x, y, ms, dx, dy]`;
   no permission; a press on it without `clicks-grab`: `lacks`. `--focus T:TAG`: its
   widget that asks is focused; keys then go to it (`{"key", "bytes",
   "widget"}`), its escape and close keys end it (`released`);
-  `--paste T:TEXT`: `{"widget", "paste"}`. `--resize T:CxR`: the host
+  `--paste T:TEXT`: `{"widget", "paste"}`; under a grab, key by key,
+  the rest to the program; else to the program, bracketed. `--resize T:CxR`: the host
   resized, as a tape's resize: the screen first, then `size`.
 
 ## OS profile
@@ -279,8 +296,11 @@ print!("{report}");
   draws: canvases, text sprites (`rows`, `cells`), `frames`, anchors,
   layers (behind the text by default), `ttl_ms`, `motion`, the
   effects and borders of the driver's draw extensions
-  (`plugins/draw-ext`, `headless::draw_ext`), widgets (laid out once
-  the screen is still, under a second). An unknown effect: the hint
+  (`plugins/draw-ext`, `headless::draw_ext`), widgets (laid out as the
+  driver lays them out, `plan/design.md`, Layout: on cells still for
+  1 s, none before; off the cursor's row and a row each side; a cell
+  from the edges of the view; a larger variant taken after 2 s of
+  looks; focused: laid out again, over the text if no room holds it). An unknown effect: the hint
   lists the known. Not: `draw.ext`, the pop-up, other clients.
 - `random`: xorshift64 from the seed mixed (splitmix64): each seed its
   own.
@@ -291,7 +311,10 @@ print!("{report}");
   the permissions lacking (`lacks`: refused or lowered, declared or
   not, with the line of the manifest that would ask for it), what was
   injected and reached nobody (`dropped`), `notes` (a screen file that
-  wraps or scrolls). `Report::to_json`, `Report::text(styles)`.
+  wraps or scrolls; a widget hidden at a screen shown past 1 s: its
+  smallest variant, the screen's size). `Report::to_json`,
+  `Report::text(styles)`; without styles, a note when a screen holds
+  `inverse`, `hidden` or `underline` cells.
 
 `hello`. The guest gets none: no export, no event. Live, the runner
 reads the driver's `hello` at connect (cut below `text`: `protocol`,
@@ -308,8 +331,8 @@ sees it; with `snapshot: true`, the size now, after the answer.
 Headless: at each resize of the tape, the screen resized first;
 `--event T:size:JSON` delivers the data alone, the screen unchanged;
 `snapshot` is ignored.
-- `live::run`: a session (`Live::new(Client, log)`), real time times
-  `PTYRC_CLOCK_RATE`.
+- `live::run`: a session (`Live::new(Client, log)`, `.seeded(N)`), real
+  time times `PTYRC_CLOCK_RATE`.
 - `Runner<H: Host>`: `load`, `init`, `tick`, `event`, `stop`; `Host` is
   the outside (`call`, `size`, `log`, `random`).
 - `engine.rs` alone names wasmtime. One engine a process, its epoch

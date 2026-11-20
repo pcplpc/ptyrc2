@@ -2345,7 +2345,7 @@ impl Driver {
             "app.list" => &[],
             "app.start" => &[
                 "argv", "name", "declares", "store", "args", "frame", "files", "front", "prefer",
-                "alpha", "border",
+                "alpha", "border", "seed",
             ],
             "app.enrol" => &["name", "argv", "declares"],
             "app.restart" => &["app", "argv", "name", "declares", "frame"],
@@ -2434,7 +2434,14 @@ impl Driver {
                 return Err(RpcError::bad_params("app.start: store, or argv: not both")
                     .with_hint(r#"a store app: {"store": ORIGIN, "args": {OPTION: VALUE}}"#));
             }
-            let found = crate::store::find(store, member("args"), member("files"))?;
+            let seed = match member("seed") {
+                None => None,
+                Some(seed) => Some(seed.as_u64().ok_or_else(|| {
+                    RpcError::bad_params("seed: an integer of 0 to 2^64-1")
+                        .with_hint(r#"as in {"store": "sand", "seed": 7}"#)
+                })?),
+            };
+            let found = crate::store::find(store, member("args"), member("files"), seed)?;
             let mut hand = launched(params)?;
             hand.files = found.files.clone();
             if let Some(border) = &hand.border {
@@ -2448,8 +2455,11 @@ impl Driver {
                     .with_hint("ptyrc widget borders lists them"));
                 }
             }
-            // The frame it is clipped to: the one given, else the active.
-            let frame = member("frame").cloned().unwrap_or(json!("active"));
+            // The frame it is clipped to: the one given, else the
+            // manifest's, else the active.
+            let frame = (member("frame").cloned())
+                .or_else(|| found.frame.as_ref().map(|f| json!(f)))
+                .unwrap_or(json!("active"));
             let frame = self.frame_id(conn, frame, engine)?;
             let apps = self.apps.as_mut().expect("checked above");
             let identity = Identity::Store(found.origin.clone());
@@ -2476,7 +2486,9 @@ impl Driver {
             found.started();
             id
         } else if method == "app.start" {
-            let store_only = ["args", "files", "front", "prefer", "alpha", "border"];
+            let store_only = [
+                "args", "files", "front", "prefer", "alpha", "border", "seed",
+            ];
             if let Some(m) = store_only.iter().find(|m| member(m).is_some()) {
                 return Err(
                     RpcError::bad_params(format!("app.start: {m}: of a store app"))
@@ -2709,8 +2721,12 @@ impl Driver {
             );
         }
         // A surface on a frame follows its pane: the driver hears `frames`.
-        let follows = (apps.iter().flat_map(|apps| apps.iter()))
-            .any(|app| matches!(app.surface, Some(Surface::Frame(_) | Surface::Screen(_))));
+        let follows = (apps.iter().flat_map(|apps| apps.iter())).any(|app| {
+            matches!(
+                heir::surface(app),
+                Some(Surface::Frame(_) | Surface::Screen(_))
+            )
+        });
         if follows {
             heard.insert("frames".to_string());
         }

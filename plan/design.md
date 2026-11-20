@@ -13,7 +13,19 @@ rust/ptyrc-core/     lib  frames (raw, extended, dynamic), heatmap, pool,
                           plugin traits
 rust/ptyrc-proto/    lib  wire envelope, framing, blocking client
 rust/ptyrc-server/   lib  the driver: pty, event loop, socket, RPC dispatch
+rust/ptyrc-rules/    lib  the rules of an app's requests: grants, cut
+                          answers, the pointer of an effect, the surface
+rust/ptyrc-box/      bin  the runner of a store app: WebAssembly, ABI 1,
+                          limits, OS profile; headless runs, unit tests
+rust/ptyrc-store/    lib  manifest, fetch, check, install, registry, the
+                          Rust build
+rust/ptyrc-probe/    lib  `probe.git`, `probe.system`: the machine as data
 rust/ptyrc-cli/      bin  `ptyrc <verb>`; links the plugins in
+sdk/js/              the script tier: the interpreter guest (QuickJS),
+                     `ptyrc.d.ts`, the modules `ptyrc`, `ptyrc/deck`
+sdk/rust/ptyrc-app/  the Rust tier's crate (`deck.rs`, `host.rs`)
+sdk/template/        what `ptyrc dev new` writes; `PROTOCOL.md`
+plugins/store-apps/<name>/    a shipped store app, origin `ptyrc/<name>`
 plugins/tui-support/<name>/   Rust crate `ptyrc-tui-<name>`: per-app presets
 plugins/draw-ext/<name>/      Rust crate `ptyrc-draw-<name>`: draw functions
 plugins/client-apps/python/   Python package `ptyrc-apps`: confetti, clock...
@@ -25,8 +37,15 @@ plan/                intent, design, interview, ideas
 One cargo workspace and one uv workspace at the root. Dependency direction:
 
 ```
-ptyrc-cli    -> ptyrc-server, ptyrc-proto, every plugin crate (clap)
-ptyrc-server -> ptyrc-core, ptyrc-vt, ptyrc-proto (rustix, signal-hook, libc)
+ptyrc-cli    -> ptyrc-server, ptyrc-proto, ptyrc-store, ptyrc-probe, every
+                plugin crate (clap)
+ptyrc-server -> ptyrc-core, ptyrc-vt, ptyrc-proto, ptyrc-rules, ptyrc-store,
+                ptyrc-probe (rustix, signal-hook, libc)
+ptyrc-box    -> ptyrc-core, ptyrc-vt, ptyrc-proto, ptyrc-rules, draw plugins
+                (wasmtime, signal-hook; Linux: landlock, seccompiler)
+ptyrc-rules  -> ptyrc-core, ptyrc-vt, ptyrc-proto
+ptyrc-store  -> (rustix, toml, serde; Linux: landlock)
+ptyrc-probe  -> (rustix)
 plugins      -> ptyrc-core
 ptyrc-core   -> ptyrc-vt (serde, serde_json, regex)
 ptyrc-proto  -> serde, serde_json
@@ -209,6 +228,16 @@ frames, the heatmap and the layers:
 Test: `repair` property. For random streams of app bytes and random
 desired grids, after `repair` the host grid equals the desired grid and
 `host.same_state(app)`.
+
+Text from a client reaches the host as glyphs only. Where a character
+enters a cell (`Canvas::draw`, the widget lay-out, the menu), a control
+character (C0, DEL, C1) is a space and a hidden one (`is_hidden`: format
+characters, line and paragraph separators, variation selectors 15 and
+16) is dropped (`drawn`, `glyphs_only`); widths are counted after. The
+painter prints no control nor hidden character whatever a cell holds;
+its own sequences are CSI, G0 and the app's OSC 8. Border glyphs and
+layer names are refused when not plain. `ptyrc-server/src/glyph_tests.rs`
+is the regression suite.
 
 ## ptyrc-core: frames
 
@@ -826,8 +855,9 @@ repaint.
   variants replaced; a widget of it is laid out again; a variant of
   the same name and size, given no `content`, keeps its own. `name`: `WxH`
   when absent, unique in the tag. `content`: optional, the member of a
-  sprite (`{"rows": [...], "style": {...}}` or `{"cells": [[run,
-  ...], ...]}`). Limits: 64 tags a connection, 16 variants a tag,
+  sprite (`{"rows": [...], "style": {...}}`, `{"cells": [[run, ...],
+  ...]}` or `{"grid": [...]}`); a `grid` is taken as the `cells` it
+  spells, a run a cell (a hole: a blank). Limits: 64 tags a connection, 16 variants a tag,
   inner sizes from 1x1 to 200x60. Answer: `{"tags": [...]}`, every tag
   of the connection, in order of first declaration. Nothing is applied
   on error.
@@ -1275,11 +1305,13 @@ An app that can change frame while it runs subscribes to the topic
 connection the event `move`: `{"frame": id}`; the app moves what it
 drew. An app with a surface is moved by the driver besides, as to an
 heir (`driver/heir.rs`): its surface is the frame, its sprites there
-or on `NOWHERE` go along, then `move` and `size` are told. A surface:
-of a store app; of a native app narrowed below `layout`, the frame the
-user gave it (`app.move`, `frame` of `app.start` or `app.restart`;
-`ptyrc manage` sends the `-f` of `ptyrc-app NAME`), which all it names
-is put on: it knows one frame, and the user's hand is not a
+or on `NOWHERE` and its widgets there go along
+(`Widgets::move_owner`, through `Engine::move_widgets`), then `move`
+and `size` are told, each widget in `widgets`. A surface: of a store
+app; of a native app while narrowed below `layout` (raised by a
+restart, it has none), the frame the user gave it (`app.move`, `frame`
+of `app.start` or `app.restart`; `ptyrc manage` sends the `-f` of
+`ptyrc-app NAME`), which all it names is put on: it knows one frame, and the user's hand is not a
 permission. `app.move` is closed to apps. Not `moves`, paused or exited:
 `not-usable`, the hint naming `ptyrc manage move --restart`. The topic
 is sent to the app moved only, never broadcast; it has no snapshot,
@@ -1795,6 +1827,14 @@ the pop-up, `app.start {store}`.
   `Driver::dispatch` and `Driver::subscribe`): every request of a bound
   connection, the calls of a `batch` one by one, before anything else
   looks at it. It answers allow, lower (a degree), or `denied`.
+- **One copy** (`rust/ptyrc-rules`): the table, `Grants`, the check
+  (`grants`), the cut answers and `landing` (`lower`), the pointer told
+  to an effect (`nozzle`), the clip of a store app's draws to its
+  surface (`surface`: `Surface`, `clip`). Pure, no clock. The driver
+  re-exports them (`grants.rs`, `lower.rs`, `driver/nozzle.rs`) and
+  clips in `driver/own.rs`; `ptyrc-box` applies them headless, the
+  surface given by `--surface` (`ptyrc dev test` gives `[app]
+  surface`) on its one frame.
 - **Grants** (`grants::Grants`, on the app's entry): the permissions
   held, or the whole session. Read at each request: a change holds from
   the next one on.
@@ -1928,7 +1968,7 @@ the pop-up, `app.start {store}`.
   `screen.text`, `screen.cells {sprites: true}`, with `text`: the
   sprites of its connections alone (`owners`, set by the driver;
   `Scene::compose_of`).
-- **Where it landed** (`own::landing`, principle 3): in `draw.list`,
+- **Where it landed** (`lower::landing`, principle 3): in `draw.list`,
   `screen`, `visible`, `covered` of a sprite anchored by what the app
   may not read are told at the degree that would have told it: `anchor
   {text}` a listed word (literal) at `words`, a word of the user at
@@ -1948,7 +1988,8 @@ the pop-up, `app.start {store}`.
     lesser form. A widget shown without `layer`: the default (`back`;
     raised while focused) with `front-widget` or `front`; else its band
     behind, focused or not. `layer.*` closed (the table).
-  - Its surface (`[app] surface`; `grants::Surface`): its frame is the
+  - Its surface (`[app] surface`; `grants::Surface`, clipped by
+    `ptyrc_rules::surface::clip`): its frame is the
     one `app.start {store, frame}` names, else `active`, resolved at the
     start; `app.move` moves it. `frame`: `frame` of `draw.put`,
     `draw.ext` without `id`, `widget.show`, and of `draw.update` and
@@ -1961,8 +2002,8 @@ the pop-up, `app.start {store}`.
     (`driver/heir.rs`, the rule of `_cli.heir`: a usable pane of the
     same key over half of the smaller of the two, in proportion after a
     resize; the most overlap), is its frame; the sprites it put there
-    or on `NOWHERE` go along; it is told `move {frame}`, then `size`,
-    when subscribed. No heir: what it draws goes to `NOWHERE` until
+    or on `NOWHERE`, and its widgets there, go along; it is told `move
+    {frame}`, then `size`, when subscribed. No heir: what it draws goes to `NOWHERE` until
     moved.
   - Limits of the driver, all its connections: 256 sprites
     (`draw.put`, `draw.ext` without `id`), 16 widgets (`widget.show` of
@@ -1980,7 +2021,8 @@ the pop-up, `app.start {store}`.
   the program when a listener of the whole session hears it, or one
   told it on its own thing, or one that holds `clicks-grab`; else the
   program has it too.
-- **The pointer told to an effect** (`driver/nozzle.rs`): `pointer`,
+- **The pointer told to an effect** (`nozzle::Nozzles`; sent by
+  `driver/nozzle.rs`): `pointer`,
   `bomb` (booleans) in the `params` of the effect of `draw.put`,
   `draw.update` are the driver's, taken out before the effect sees
   them; any connection. `pointer`: on each host move the driver tunes
@@ -2000,7 +2042,7 @@ the pop-up, `app.start {store}`.
   store app (its band): a layer of the top band (`hud`, 100 and above),
   a modal without `layer`: 99.
 
-**The cut answers** (`lower.rs`: `plan`, `Cut`; `Driver::dispatch`).
+**The cut answers** (`lower`: `plan`, `Cut`; `Driver::dispatch`).
 An app that holds less than `text` is answered in the same form, cut
 to its degree; the answer bears `"degree": NAME` (`none`, `layout`,
 `shape`, `words`). The request is asked of the engine in a lesser form,
@@ -2144,10 +2186,12 @@ Host functions (`driver/hostfn.rs`; the contract:
 
 - What reads a disk or runs `git` runs on a worker (`hostio.rs`), in
   order; the request is pending and completed from the loop, woken by
-  a socket pair. Two lanes, a thread each: the disk (`clock.*`,
-  `storage.*`, `file.*`) and the probes (a `git` that hangs holds its
-  lane 2 s a command, 16 s a probe of every part). 64 waiting a lane,
-  then `not-usable` (`host busy`). Pending: not in a `batch`
+  a socket pair. The disk (`clock.*`, `storage.*`, `file.*`): one
+  lane, one thread. The probes: a lane an app, run by a pool of four
+  threads (`hostio::POOL`), one job of an app at a time, the apps in
+  turn; a `git` that hangs holds a thread 2 s a command, 16 s a probe
+  of every part, and delays its own app's probes only (and the others'
+  past four such). 64 waiting a lane, then `not-usable` (`host busy`). Pending: not in a `batch`
   (`bad-request`). A new kind of request is a job, a function of its
   lane's state; the plumbing does not change.
 - A connection with no app (the user's): `clock.*` answered; the
@@ -2198,8 +2242,8 @@ Host functions (`driver/hostfn.rs`; the contract:
   (`/proc/PID/cwd`, read at each request); a real read a second an
   app; sooner, the last answer to the same params (`unchanged` when
   `since` is its stamp), other params `not-usable`. `probe.system`: a
-  `Sampler` an app, on the probe lane, dropped when the app leaves the
-  table.
+  `Sampler` an app, on its probe lane, dropped with the lane when the
+  app leaves the table.
 - `app.result`: kept with the app's entry, the last of the run; told
   in its info (`result`) and so in the `apps` event at its exit. A
   connection with no app: `not-usable`. `ptyrc app ID --wait` (the
@@ -2347,7 +2391,9 @@ ptyrc store rm ID|ORIGIN [--purge] ; update [ID|ORIGIN...] [--latest]
 ptyrc dev new NAME [--rust] ; dev check [DIR] ; dev entry [DIR]
       [--remote NAME] ; dev test [DIR] [--size CxR] [--for T] [--at T,...]
       [--seed N] [--tape F | --screen F] [--deny P,...] [--key T:KEY]...
-      [--event T:TOPIC:JSON]... [--NAME VALUE...] ; dev run [DIR]
+      [--event T:TOPIC:JSON]... [--NAME VALUE...] ; dev test [DIR]
+      --unit [FILE] ; dev test [DIR] --cases [NAME...] [--bless] ;
+      dev probe git [DIR] | system [--parts P,...] ; dev run [DIR]
       [--NAME VALUE...]           an app's author (store-model.md, Tools)
 ptyrc dev index DIR [--out F] [--html F] ; dev registry-check BASE HEAD
       --author NAME [--maintainers F] [--repo DIR]
@@ -2369,6 +2415,51 @@ id and no native app has that name (a native name first): `app.start
 The verb ends once the app has started (the pop-up answered); the app
 is a child of the driver. In the menu a store app's help begins
 `store, TIER:`; one whose id a native app has goes by its origin.
+
+`ptyrc dev test` runs `ptyrc-box --headless` with what the manifest
+declares, the options resolved as `ptyrc app` resolves them; its
+other flags are the box's (`rust/ptyrc-box/README.md`; `ptyrc dev test
+--help`). A flag of `dev test` is its own before `--`, an app's option
+of the same name goes after.
+
+- `--unit [FILE]` (`ptyrc-box --unit FILE --script APP.js`): the unit
+  tests of a script app, FILE of its tree (`tests.js`), loaded with
+  `"ptyrc:unit": true` in `init`, the app's `init` not called; each
+  export `test_*`, in the order of the names, in an `event` of its own;
+  10 s a test, 60 s the file. No session: `call` answers `not-usable`.
+  `ok NAME` or `FAIL NAME` a line, then the count; status 1 when one
+  fails. A Rust app has none: `cargo test` builds it natively
+  (`ptyrc_app::native`).
+- `--cases [NAME...]` (`dev/cases.rs`): each `tests/CASE.args` of the
+  tree, the words after `ptyrc dev test .` (white space, `#` comments),
+  run in the tree, its report against `tests/CASE.txt`; the NAMEs
+  alone when given. A line a case, a diff for a failure; status 1 when
+  one fails. `--bless`: each `CASE.txt` written from the run.
+  `rust/ptyrc-cli/tests/store_apps.rs` runs it on every tree of
+  `plugins/store-apps/` (`PTYRC_BLESS=1`: `--bless`).
+
+`ptyrc dev probe git [DIR]`, `ptyrc dev probe system` (`dev/probe.rs`):
+what the driver's probe (`ptyrc-probe`) answers now, as JSON, the
+params as an app gives them (`--parts`, `--log N`, `--top N`): a
+fixture for `dev test --probe git=FILE.json` (`system=`). git: the
+repository holding DIR, `days` in UTC; system: a second sample a
+second after the first.
+
+The SDKs speak the protocol and nothing else: an SDK function is a
+`call`, a canvas, or pure. Each tier has the same names: `"ptyrc"`
+(`sdk/js/ptyrc.d.ts`) and `ptyrc-app`; the host functions (`now`,
+`zone`, `civil`, `until`, `storage`, `asset`, `file`, `result`;
+`host.rs`). **The deck**: `"ptyrc/deck"` (`sdk/js/interp`, compiled
+into the interpreter) and `ptyrc_app::deck` (`deck.rs`, vendored into
+each Rust app): widgets declared with their variants and kept drawn.
+A `Deck` declares and shows each widget, renders the variant the
+driver laid out (topic `widgets`), sends what changed at each `tick` in
+one `batch` (one by one where `batch` answers `headless`), and holds
+the handlers of its widgets: `key`, `paste` (`widget.ask`), `hover`,
+`leave`, `closed`. Pieces: `Keys`, `Field`, `Listing`, `cut`, `fit`,
+`wrap`. The Rust `Deck<S>` takes the app's state as `&mut S`. The
+widgets are the driver's (ptyrc-core: widgets); the deck adds no
+method.
 
 `ptyrc run --app APP`: `ptyrc-app` (found as above) with the words of APP
 is a child app of the session once the program has started (Apps and

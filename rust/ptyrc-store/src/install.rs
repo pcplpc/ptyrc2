@@ -328,6 +328,14 @@ pub fn install_built(
             Error::new(ErrorKind::Install, format!("{date:?}: not a date")).with_hint("YYYY-MM-DD"),
         );
     }
+    let todos = crate::manifest::todos(&checked.manifest);
+    if !todos.is_empty() {
+        return Err(Error::new(
+            ErrorKind::Install,
+            format!("ptyrc-app.toml: TODO left in {}", todos.join(", ")),
+        )
+        .with_hint("the author writes them; ptyrc dev check names them"));
+    }
     let rust = matches!(checked.manifest.app.entry, crate::manifest::Entry::Rust(_));
     match (rust, module) {
         (true, None) => {

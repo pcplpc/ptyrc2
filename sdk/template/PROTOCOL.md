@@ -210,21 +210,27 @@ calls a second), `headless`.
 - Host functions, from memory, the driver's answers: `clock.*` from
   `--clock ISO` (default `2000-01-01T00:00:00Z`) advancing with session
   time, local zone `--zone NAME` (default `UTC`); `storage.*` empty,
-  or the files of `--storage DIR` (never written back); `app.result`;
+  or the files of `--storage DIR` (a file a key: its name the key, its
+  content the value; never written back); `app.result`;
   `file.*` on a file option given (`--NAME PATH`, or `--file
-  NAME=PATH`; `ARG#N` names the `N`th value of `[args]`, from 0): its
+  NAME=PATH`; `ARG#N` names the `N`th value of `[args]`, from 0:
+  `[args] todo = { type = "file", min = 1, max = 1, doc = "..." }`,
+  `ptyrc dev test . --file ARG#0=todo.md`, as `ptyrc app ID
+  todo.md`): its
   handle in `init`, writes in memory, only with `write = true` and
-  `files-write`; `probe.*` from `--probe git=FILE.json` (none: the
-  not-held answer; `probe.git` one read a second, as the driver); `asset.*` from `[app] assets`. The report:
-  `result:` (and the status), `storage:`, `files:` (written); `--json`
-  their values.
+  `files-write`; `probe.*` from `--probe git=FILE.json` (written by
+  `ptyrc dev probe git [DIR]`, `system=` by `ptyrc dev probe system`:
+  the driver's probe now; none: the not-held answer; `probe.git` one read a second, as the driver); `asset.*` from `[app] assets`. The report:
+  `result:` (and the status), `storage:` (a line a key, the value cut
+  past 60 characters), `files:` (written); `--json` their values whole.
 - The permissions are those the manifest declares for the run (a
   permission tied to an option by `needs`, or `files`, `files-write`
   to a file option: only when that option asks it; `[limits]`:
   `limit-memory`, `limit-time`); `--deny a,b` answers them no. A
   `word` or `pattern` option given is held as the driver holds it.
   The launcher's options (`--front`, `--back`, `--prefer`, `--alpha`,
-  `--border`) apply as under `ptyrc app`. The
+  `--border`) apply as under `ptyrc app`; one pane: `--frame` and
+  `[app] frame` change nothing. The
   report names each request `refused`, each answer `lowered` and the
   permission it lacked; one not declared is fine if intended: an app
   that declares less is asked less.
@@ -232,11 +238,22 @@ calls a second), `headless`.
   or `front-widget`); else behind the text. `draw.list` tells where an
   anchor landed at the degree that finds it; `screen.text`,
   `screen.cells {sprites: true}` compose the app's own sprites.
+- Widgets laid out as the driver lays them out: on cells without a
+  change for 1 s (none before 1000 ms); never on the row of a visible
+  cursor, and a row kept from it, as from text (2 columns, 1 row);
+  the outer rectangle a cell from the edges of the view (`margin`). A
+  blank screen's cursor at the top left: a widget at the top right sits
+  on row 2. A larger variant that fits is taken after 2 s; focused, the
+  widget is laid out again, over the text when no room holds it. A
+  widget hidden at a screen shown: a `note:` line names it, its
+  smallest variant and the screen's size.
 - Events: `size` on a tape's resize or a `--resize MS:CxR`; `screen` and `text` when the
   screen changes (a tape, a `--screen T:FILE`); `idle` as the driver
   tells it (a frame's idleness changed; a screen nothing was written
-  on is idle from the start); `input` for a grabbed
-  key given by `--key MS:NAME` (`ctrl+t` releases); any topic by
+  on is idle from the start); `input` for a key given by `--key
+  MS:NAME`: grabbed (`ctrl+t` releases), else on its way to the
+  program, `{"bytes"}` with `keys-read` (a `--paste` too, bracketed);
+  any topic by
   `--event MS:TOPIC:JSON`, delivered when subscribed and held;
   `hover` (`--pointer MS:X,Y`) and `mouse` (`--press MS:X,Y`,
   `--release MS:X,Y`; `--click MS:X,Y` both at once) on the app's
@@ -250,9 +267,16 @@ calls a second), `headless`.
   read as a terminal would; a line wider than the screen wraps, rows
   past the last scroll, as in a terminal, and the report says so),
   `--tape FILE` (a recording, played in session time). `--seed N`:
-  `random`. `--styles`: under each screen, a grid of its cells not of
+  `random` (and `Math.random`), as `ptyrc app ID --seed N` draws it live;
+  after `--` the launcher's, the same (both: refused). `--styles`: under each screen, a grid of its cells not of
   the default style, a letter each, and the legend; `--json`: per
-  screen `styles`, `[y, x, w, "fg=11 bold"]`.
+  screen `styles`, `[y, x, w, "fg=11 bold"]`. Without `--styles`, a
+  `note:` when a screen holds `inverse`, `hidden` or `underline`
+  cells, which the text does not show.
+- A flag of `dev test` is its own before `--`; an option of the app of
+  the same name (`--zone`, `--size`, ...) goes after `--`. The
+  flag given, a note on stderr says dev test took it. A flag of one
+  value given twice: refused, status 2, nothing on stdout.
 
 ## Manifest (`ptyrc-app.toml`)
 
@@ -265,10 +289,12 @@ license = "GPL-3.0-or-later"
 api = 1
 script = "app.js"          # or rust = "src/lib.rs", rustc = "1.85"
 surface = "screen"         # "widget" (default), "frame", "screen": where it is clipped
+# frame = "largest"       # without --frame: active (default), largest, quietest, idle, raw
 # assets = "assets/"; tape = "demo.tape"
 # wait = true            # `ptyrc app ID` waits for its result (app.result)
 # random = [[], ["--grab"]]  # the draws of the menu's random app: words of
-#                            # [options], each checked by dev check; [] never
+#                            # [options], each checked by dev check; []: never;
+#                            # absent: [[]], bare, never drawn if bare is refused
 
 [options]                  # --NAME VALUE, --NAME=VALUE, -S VALUE; a bool --NAME, --no-NAME
 size = { type = "int", default = 20, min = 1, max = 99, doc = "one line" }
@@ -278,7 +304,7 @@ word = { type = "word", doc = "..." }                   # the user's word
 mark = { type = "pattern", list = true, doc = "..." }    # repeated; regex = true
 stop = { type = "file", doc = "..." }                    # or "dir"; write = true
 # types: int, float, bool, string, word, pattern, file, dir
-# reserved: alpha, back, border, frame, front, help, no-wait, prefer, wait; no-NAME
+# reserved: alpha, back, border, frame, front, help, no-wait, prefer, seed, wait; no-NAME
 
 [args]                     # one list of positionals, init(args).NAME
 patterns = { type = "pattern", min = 1, max = 16, doc = "..." }  # min, max: how many
@@ -293,8 +319,9 @@ memory-mib = 128
 
 - `init(args)`: every option, its default when not given (`null`
   when it has none; `[]` for a list), the positionals under their name.
-- `default`: required of `int`, `float`, `bool`, `string`; none of a
-  list.
+- `default`: optional; none: a `bool` is false, any other `null`. None
+  of a list. `min`, `max`, `choices` rule a value given; `--help` and
+  the menu show no default when there is none.
 - `min`, `max`: of an `int` or `float` in `[options]`, numbers of its
   type, inclusive, `min <= max`, the default within; each value (each
   of a list) outside is refused at the start, naming the option and
@@ -316,8 +343,13 @@ memory-mib = 128
   directories only; 16 a run.
 - ptyrc's own options, the same for every app and never told to it:
   `--frame F`, `--front`, `--back`, `--prefer SIDE`, `--alpha A` (the
-  opacity of its sprites), `--border B` (of its widgets), `--wait`.
+  opacity of its sprites), `--border B` (of its widgets), `--wait`,
+  `--seed N` (its `random` drawn from `N`, as under `dev test --seed
+  N`; absent, from `/dev/urandom`: an app keeps no seed option of its
+  own).
 - `--help` is made from the manifest; `ptyrc dev check` checks it.
+  A `summary`, a reason or a `doc` that starts with `TODO`: a note of
+  `dev check`, refused by the install.
 
 At `init`, `args["ptyrc:manifest"]`: `{"id", "version", "permissions":
 [{"name", "words"?}], "granted": [name], "limits": {KEY: N}}`, the

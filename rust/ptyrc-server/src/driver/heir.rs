@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The surface follows its pane: when the frame of an app's surface
 //! leaves the screen, the pane that took its place is its frame
-//! (`heir`); its sprites go along; the app is told (`move`, `size`).
+//! (`heir`); its sprites and widgets go along; the app is told (`move`,
+//! `size`; each widget in `widgets`).
 //! So when the user moves it (`app.move`). A surface: of a store app;
 //! of a native app below `layout`, the frame the user gave it.
 
@@ -32,6 +33,13 @@ fn rect(info: &Value) -> Option<[f64; 4]> {
 /// the user gives it is its surface.
 fn blind(app: &App) -> bool {
     app.store().is_none() && app.grants.narrowed() && app.grants.degree() < Degree::Layout
+}
+
+/// The surface of `app`: of a store app; of a native app while it is
+/// narrowed below `layout`. An entry kept from before (restarted with
+/// declarations that raise it) is not one.
+pub(super) fn surface(app: &App) -> Option<Surface> {
+    app.surface.filter(|_| app.store().is_some() || blind(app))
 }
 
 fn size(info: &Value) -> Option<[f64; 2]> {
@@ -77,7 +85,7 @@ impl Driver {
         let stable = |f: &Value| f["state"] == "stable";
         let surfaces: Vec<(u64, u32)> = (self.apps.iter())
             .flat_map(|apps| apps.iter())
-            .filter_map(|app| match app.surface? {
+            .filter_map(|app| match surface(app)? {
                 Surface::Frame(frame) | Surface::Screen(frame) if frame != 0 => {
                     Some((app.id, frame))
                 }
@@ -129,7 +137,7 @@ impl Driver {
         let Some(entry) = apps.get(app) else {
             return;
         };
-        match entry.surface {
+        match surface(entry) {
             Some(surface) => apps.set_surface(app, surface.moved(frame)),
             None if blind(entry) => apps.set_surface(app, Surface::Frame(frame)),
             None => {}
@@ -142,7 +150,7 @@ impl Driver {
         let Some(entry) = self.apps.as_ref().and_then(|apps| apps.get(app)) else {
             return false;
         };
-        let from = match entry.surface {
+        let from = match surface(entry) {
             Some(Surface::Frame(frame) | Surface::Screen(frame)) => frame,
             Some(Surface::Widget) => return false,
             // Its frame so far: the one all it names is put on.
@@ -155,7 +163,8 @@ impl Driver {
     }
 
     /// The surface of `app` from frame `from` to `to`: its sprites
-    /// there, or shown nowhere, go along; it is told.
+    /// there, or shown nowhere, and its widgets there go along; it is
+    /// told.
     fn rehome(&mut self, app: u64, from: u32, to: u32, engine: &mut dyn Engine) {
         let Some(apps) = self.apps.as_mut() else {
             return;
@@ -163,7 +172,7 @@ impl Driver {
         let Some(entry) = apps.get(app) else {
             return;
         };
-        let (Some(surface), conns) = (entry.surface, entry.conns.clone()) else {
+        let (Some(surface), conns) = (surface(entry), entry.conns.clone()) else {
             return;
         };
         apps.set_surface(app, surface.moved(to));
@@ -194,6 +203,10 @@ impl Driver {
             .collect();
         for id in ids {
             call(self, "draw.update", json!({"id": id, "frame": to}));
+        }
+        // Its widgets, by the same rule: each is told in `widgets`.
+        for &conn in &conns {
+            hook!(self, now, |ctx| engine.move_widgets(conn, from, to, ctx));
         }
         let size = json!({"size": [self.info.cols, self.info.rows]});
         for conn in conns {

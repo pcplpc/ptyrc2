@@ -18,6 +18,7 @@ ptyrc-draw-sand = { path = "../../plugins/draw-ext/sand" }
 ptyrc-draw-shapes = { path = "../../plugins/draw-ext/shapes" }
 ptyrc-draw-snow = { path = "../../plugins/draw-ext/snow" }
 ptyrc-proto.workspace = true
+ptyrc-rules = { path = "../ptyrc-rules" }
 ptyrc-vt.workspace = true
 serde_json.workspace = true
 signal-hook = "0.4"

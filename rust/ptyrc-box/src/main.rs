@@ -13,7 +13,8 @@
 //! `--user-word`, `--user-pattern`, `--user-regex`: what the user gave
 //! (`word`, `pattern` options); `--front`, `--back`, `--prefer`,
 //! `--alpha`, `--border`: the launcher's options, applied as the driver
-//! applies them.
+//! applies them. `--surface widget|frame|screen`: the manifest's, on
+//! the one frame: draws clipped as the driver clips them.
 //! `--event`, `--key`, `--pointer`, `--click`, `--press`, `--release`,
 //! `--focus`, `--paste`:
 //! what the user does, at a session time.
@@ -50,6 +51,7 @@ use ptyrc_box::headless::{self, Inject, Options, Tape, Under};
 use ptyrc_box::hostfn::{self, HostFns, Named, Zones};
 use ptyrc_box::{Error, Limits, live, manifest, profile, script};
 use ptyrc_proto::{Client, session};
+use ptyrc_rules::surface::Surface;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -57,7 +59,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 const USAGE: &str =
-    "usage: ptyrc-box [--no-profile] [--manifest JSON] [--assets DIR] [--script] MODULE [ARGS]
+    "usage: ptyrc-box [--no-profile] [--manifest JSON] [--assets DIR] [--seed N] [--script] MODULE [ARGS]
        ptyrc-box --headless [--no-profile] [--manifest JSON] [--assets DIR] [--script] MODULE [ARGS]
                  [--size CxR] [--for T] [--at T,...] [--seed N]
                  [--tape FILE | --screen [T:]FILE...] [--json] [--styles]
@@ -69,6 +71,7 @@ const USAGE: &str =
                  [--write-file NAME=PATH]... [--probe git|system=FILE.json]...
                  [--user-word WORD]... [--user-pattern TEXT]... [--user-regex RE]...
                  [--front | --back] [--prefer P] [--alpha A] [--border B]
+                 [--surface widget|frame|screen]
        ptyrc-box --unit FILE [--no-profile] [--manifest JSON] --script APP.js [ARGS]
 T: milliseconds, or with a unit: 500ms, 2s";
 
@@ -150,6 +153,7 @@ struct Cli {
     /// `(pattern, regex)`.
     patterns: Vec<(String, bool)>,
     launcher: headless::Launcher,
+    surface: Option<Surface>,
     /// `(git | system, file)`.
     probes: Vec<(String, PathBuf)>,
     assets: Option<PathBuf>,
@@ -376,6 +380,12 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
                 cli.launcher.alpha = Some(a.ok_or_else(|| format!("--alpha {v}: 0 to 1"))?);
             }
             "--border" => cli.launcher.border = Some(string(value("--border")?)),
+            "--surface" => {
+                let v = string(value("--surface")?);
+                let s = Surface::parse(&v, ptyrc_core::RAW);
+                cli.surface =
+                    Some(s.ok_or_else(|| format!("--surface {v}: widget, frame or screen"))?);
+            }
             "--probe" => {
                 let v = string(value("--probe")?);
                 let (n, p) = pair("--probe", &v)?;
@@ -398,7 +408,6 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
     let headless_only = cli.size.is_some()
         || cli.duration.is_some()
         || !cli.at.is_empty()
-        || cli.seed.is_some()
         || cli.tape.is_some()
         || !cli.screen.is_empty()
         || cli.json
@@ -414,14 +423,16 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
         || !cli.probes.is_empty()
         || !cli.user_words.is_empty()
         || !cli.patterns.is_empty()
-        || cli.launcher != headless::Launcher::default();
+        || cli.launcher != headless::Launcher::default()
+        || cli.surface.is_some();
     if headless_only && !cli.headless {
         return Err(
-            "--size, --for, --at, --seed, --tape, --screen, --json, --styles, --grant, \
+            "--size, --for, --at, --tape, --screen, --json, --styles, --grant, \
              --deny, --words, --event, --key, --pointer, --click, --press, --release, --focus, \
              --paste, --resize, --clock, \
              --zone, --storage, --file, --write-file, --probe, --user-word, --user-pattern, \
-             --user-regex, --front, --back, --prefer, --alpha, --border: with --headless"
+             --user-regex, --front, --back, --prefer, --alpha, --border, --surface: with \
+             --headless"
                 .into(),
         );
     }
@@ -570,6 +581,7 @@ fn headless_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
         host,
         assets,
         launcher: cli.launcher.clone(),
+        surface: cli.surface,
         ..d
     };
     let report = match headless::run(wasm, &options) {
@@ -727,6 +739,9 @@ fn main() -> ExitCode {
         .unwrap_or_default();
     let (args, limits) = given(&cli, args, &granted);
     let mut host = live::Live::new(client, Box::new(std::io::stderr()));
+    if let Some(seed) = cli.seed {
+        host = host.seeded(seed);
+    }
     host.assets = match read_assets(&cli) {
         Ok(a) => a,
         Err(e) => return fail(2, e),

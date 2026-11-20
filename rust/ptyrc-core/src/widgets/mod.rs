@@ -18,7 +18,7 @@ pub use border::{
 
 use crate::frames::{HeatClass, HeatView};
 use crate::scene::{
-    Anchor, ColorSpec, Content, Layer, Scene, Space, SpritePatch, SpriteSpec, StyleSpec,
+    Anchor, ColorSpec, Content, Layer, Run, Scene, Space, SpritePatch, SpriteSpec, StyleSpec,
 };
 use crate::types::{FrameId, FrameSel, OwnerId, Prefer, RAW, SpriteId, SurfaceInfo, Surfaces};
 use ptyrc_vt::{Color, Grid, Rect};
@@ -509,13 +509,20 @@ impl Widgets {
         }
     }
 
-    fn check_content(content: &Option<Content>) -> Result<(), WidgetError> {
-        match content {
-            Some(c) if c.grid.is_some() => bad("content: grid is for sprites"),
-            Some(c) if c.rows.is_some() && c.cells.is_some() => {
-                bad("content: rows and cells are exclusive")
+    /// Checked; a `grid` taken as the `cells` it spells.
+    fn check_content(content: &mut Option<Content>) -> Result<(), WidgetError> {
+        let Some(c) = content else {
+            return Ok(());
+        };
+        if let Some(rows) = c.grid.take() {
+            if c.rows.is_some() || c.cells.is_some() {
+                return bad("content: rows, cells and grid are exclusive");
             }
-            Some(c) if c.rows.is_none() && c.cells.is_none() => bad("content: rows or cells"),
+            c.cells = Some(grid_cells(&rows)?);
+        }
+        match (&c.rows, &c.cells) {
+            (Some(_), Some(_)) => bad("content: rows and cells are exclusive"),
+            (None, None) => bad("content: rows, cells or grid"),
             _ => Ok(()),
         }
     }
@@ -532,7 +539,7 @@ impl Widgets {
             .map(|b| self.resolve_border(b))
             .transpose()?;
         let mut tags: Vec<(String, Vec<Variant>)> = Vec::new();
-        for v in decl.widgets {
+        for mut v in decl.widgets {
             if v.tag.is_empty() || v.tag.chars().count() > 64 {
                 return bad(format!("tag: 1 to 64 characters, not {:?}", v.tag));
             }
@@ -543,7 +550,7 @@ impl Widgets {
                     v.tag, MAX_SIZE[0], MAX_SIZE[1]
                 ));
             }
-            Widgets::check_content(&v.content)?;
+            Widgets::check_content(&mut v.content)?;
             let name = v.name.unwrap_or_else(|| format!("{w}x{h}"));
             if name.is_empty() {
                 return bad(format!("variant of {}: an empty name", v.tag));
@@ -729,7 +736,7 @@ impl Widgets {
 
     /// Set the content of a variant (absent: the one shown) and, or, the
     /// title. Kept by the driver; a variant never set is blank.
-    pub fn set(&mut self, owner: OwnerId, set: Set) -> Result<(), WidgetError> {
+    pub fn set(&mut self, owner: OwnerId, mut set: Set) -> Result<(), WidgetError> {
         let Some(w) = self
             .widgets
             .iter_mut()
@@ -740,7 +747,7 @@ impl Widgets {
         if set.content.is_none() && set.title.is_none() {
             return bad("content or title: one at least");
         }
-        Widgets::check_content(&set.content)?;
+        Widgets::check_content(&mut set.content)?;
         let Some(variants) = self
             .decls
             .get_mut(&owner)
@@ -974,6 +981,27 @@ impl Widgets {
         }
         self.dirty = true;
         self.urgent = true;
+    }
+
+    /// The widgets of `owner` on frame `from` are on `to` (the pane that
+    /// took its place): laid out there again, at the next look. The
+    /// count moved.
+    pub fn move_owner(&mut self, owner: OwnerId, from: FrameId, to: FrameId) -> usize {
+        let mut n = 0;
+        for w in (self.widgets.iter_mut()).filter(|w| w.owner == owner && w.frame == Some(from)) {
+            w.sel = FrameSel::Id(to);
+            w.frame = Some(to);
+            w.place = None;
+            w.pressed = None;
+            w.grow = None;
+            w.relayout = true;
+            n += 1;
+        }
+        if n > 0 {
+            self.dirty = true;
+            self.urgent = true;
+        }
+        n
     }
 
     /// The widgets of this owner are hidden by `hide_owner`.
@@ -1801,6 +1829,59 @@ impl Widgets {
             place.over.unwrap_or_default(),
         ))
     }
+}
+
+/// A colour of a grid cell (`scene::grid`): kind 1 default, 2 palette,
+/// 3 RGB; another: none.
+fn grid_color(b: &[u8]) -> Option<ColorSpec> {
+    match b[0] {
+        1 => Some(ColorSpec(Color::Default)),
+        2 => Some(ColorSpec(Color::Indexed(b[1]))),
+        3 => Some(ColorSpec(Color::Rgb(b[1], b[2], b[3]))),
+        _ => None,
+    }
+}
+
+/// The `cells` a `grid` spells, cut to `MAX_SIZE`: a run a cell; a hole
+/// (scalar 0) or a glyph not drawn, a blank; the column after a wide
+/// glyph, skipped.
+fn grid_cells(rows: &[String]) -> Result<Vec<Vec<Run>>, WidgetError> {
+    let mut bytes = Vec::new();
+    let mut out = Vec::new();
+    for row in rows.iter().take(MAX_SIZE[1] as usize) {
+        crate::scene::grid::decode_row(row, &mut bytes)
+            .map_err(|e| WidgetError::BadParams(e.to_string()))?;
+        let mut runs = Vec::new();
+        let mut cells = bytes.chunks_exact(crate::scene::grid::CELL);
+        let mut x = 0;
+        while let Some(b) = cells.next().filter(|_| x < MAX_SIZE[0] as usize) {
+            let ch = char::from_u32(u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+            let ch = ch.and_then(ptyrc_vt::drawn);
+            let ch = ch.filter(|c| ptyrc_vt::char_width(*c) > 0).unwrap_or(' ');
+            let bits = u16::from_le_bytes([b[12], b[13]]);
+            let style = StyleSpec {
+                fg: grid_color(&b[4..8]),
+                bg: grid_color(&b[8..12]),
+                bold: bits & 1 != 0,
+                dim: bits & 2 != 0,
+                italic: bits & 4 != 0,
+                underline: bits & 8 != 0,
+                inverse: bits & 16 != 0,
+                strike: bits & 32 != 0,
+                blink: bits & 64 != 0,
+            };
+            runs.push(Run {
+                t: ch.into(),
+                style,
+            });
+            x += ptyrc_vt::char_width(ch);
+            if ptyrc_vt::char_width(ch) == 2 {
+                cells.next();
+            }
+        }
+        out.push(runs);
+    }
+    Ok(out)
 }
 
 /// The screen rect `rect` in the cells of `view`, if it meets it.

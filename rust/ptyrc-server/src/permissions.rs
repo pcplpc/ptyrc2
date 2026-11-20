@@ -15,7 +15,7 @@
 //! identity (`Identity::key`), `allow` and `deny` as arrays of strings
 //! on one line, `#` comments.
 
-use crate::grants::{Grants, Hand, Permission};
+use crate::grants::{Grants, Hand, Permission, ladder};
 use ptyrc_proto::RpcError;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -132,15 +132,7 @@ pub(crate) fn resolve(declared: &Declared, entry: Option<&Entry>, headless: bool
         }
         held.insert(permission);
     }
-    // The ladder: a no to a degree is a no to those above it.
-    let rungs = || declared.permissions.keys().filter(|p| p.degree().is_some());
-    let lowest_lacking = rungs()
-        .filter(|p| !held.contains(p))
-        .filter_map(|p| p.degree())
-        .min();
-    if let Some(lacking) = lowest_lacking {
-        held.retain(|p| p.degree().is_none_or(|d| d < lacking));
-    }
+    ladder(declared.permissions.keys().copied(), &mut held);
     let words = held.contains(&Permission::Words);
     let mut grants = Grants::of(held);
     if words {

@@ -76,7 +76,8 @@ impl Driver {
             {
                 return Ok(false);
             }
-            let Ok(found) = crate::store::find(store, member("args"), member("files")) else {
+            // The pop-up: the seed changes nothing it shows.
+            let Ok(found) = crate::store::find(store, member("args"), member("files"), None) else {
                 return Ok(false);
             };
             let key = Identity::Store(found.origin.clone()).key();

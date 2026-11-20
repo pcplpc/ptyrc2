@@ -147,6 +147,28 @@ fn refused() {
     let e =
         install::install(&dirs, &origin, &tree, &ok, &c, Tier::Untested, "19/11/2026").unwrap_err();
     assert_eq!(e.kind, ErrorKind::Install);
+    // The template's texts left: refused, each named.
+    let mut todo = ok.clone();
+    todo.manifest.app.summary = "TODO: what the app does.".into();
+    todo.manifest.permissions[0].why = "TODO".into();
+    let e = install::install_built(
+        &dirs,
+        &origin,
+        &tree,
+        &todo,
+        Some(b"\0asm\x01\0\0\0"),
+        &c,
+        Tier::Untested,
+        "2026-11-19",
+    )
+    .unwrap_err();
+    assert_eq!(e.kind, ErrorKind::Install);
+    let first = &todo.manifest.permissions[0].name;
+    assert_eq!(
+        e.message,
+        format!("ptyrc-app.toml: TODO left in [app] summary, [permissions] {first}")
+    );
+    assert!(!dirs.app(&origin).exists());
 }
 
 #[test]

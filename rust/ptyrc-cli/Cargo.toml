@@ -15,6 +15,7 @@ ptyrc-proto.workspace = true
 ptyrc-core.workspace = true
 ptyrc-vt.workspace = true
 ptyrc-store = { path = "../ptyrc-store" }
+ptyrc-probe = { path = "../ptyrc-probe" }
 serde_json.workspace = true
 ptyrc-tui-vim = { path = "../../plugins/tui-support/vim" }
 ptyrc-tui-tmux = { path = "../../plugins/tui-support/tmux" }
