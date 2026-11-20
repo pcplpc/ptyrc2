@@ -4,6 +4,7 @@
 
 use crate::{Common, Fail, print_json};
 use clap::{Args, Subcommand};
+use ptyrc_store::build;
 use ptyrc_store::index::Index;
 use ptyrc_store::install::{self, StoreLock};
 use ptyrc_store::registry::{self, Registry};
@@ -79,7 +80,8 @@ pub struct PickArgs {
     /// The head, whatever the registry lists
     #[arg(long)]
     latest: bool,
-    /// Take a yanked version
+    /// Take a yanked version; build a Rust app where the build has no
+    /// OS profile (its sources may then read any file of yours)
     #[arg(long)]
     force: bool,
     /// Take an untested version without asking
@@ -328,13 +330,60 @@ fn obtain(
     {
         return Ok(Outcome::Held { found: tier });
     }
-    install::supported(&checked)?;
     if tier == Tier::Untested {
         confirm(origin, &commit, &checked.manifest.app.id, yes)?;
     }
-    let entry = install::install(dirs, origin, &tree, &checked, &commit, tier, &today())?;
+    let module = match checked.manifest.app.entry {
+        ptyrc_store::Entry::Rust(_) => Some(build_rust(dirs, origin, &tree, &checked, want.force)?),
+        ptyrc_store::Entry::Script(_) => None,
+    };
+    let entry = install::install_built(
+        dirs,
+        origin,
+        &tree,
+        &checked,
+        module.as_deref(),
+        &commit,
+        tier,
+        &today(),
+    )?;
     install::prune(dirs, origin)?;
     Ok(Outcome::Installed(entry))
+}
+
+/// Step 3 of the install for a Rust app: the build, in
+/// `<cache>/ptyrc/build/<origin>/`, removed after. `force`: without the
+/// OS profile where there is none, said on stderr.
+fn build_rust(
+    dirs: &Dirs,
+    origin: &Origin,
+    tree: &dyn ptyrc_store::Tree,
+    checked: &ptyrc_store::Checked,
+    force: bool,
+) -> Result<Vec<u8>, Fail> {
+    let toolchain = build::Toolchain::find()?;
+    let work = dirs.cache.join("ptyrc/build").join(origin.dir_name());
+    let options = build::Options {
+        unconfined: force,
+        ..build::Options::default()
+    };
+    eprintln!(
+        "ptyrc: building {} with rustc {}",
+        checked.manifest.app.id, toolchain.release
+    );
+    let built = build::build(tree, checked, &work, &toolchain, &options);
+    let _ = std::fs::remove_dir_all(&work);
+    let built = built?;
+    match &built.missing {
+        Some(why) => eprintln!(
+            "ptyrc: warning: built without an OS profile ({why}), by --force: its sources could read any file of yours into the module"
+        ),
+        None => eprintln!(
+            "ptyrc: built under the profile: {}",
+            built.profile.join("; ")
+        ),
+    }
+    Ok(built.wasm)
 }
 
 fn said(e: &Installed) -> String {

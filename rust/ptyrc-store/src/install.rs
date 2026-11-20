@@ -281,26 +281,32 @@ fn is_date(s: &str) -> bool {
         })
 }
 
-/// Refuses what [`install`] cannot install yet: a Rust app.
-pub fn supported(checked: &Checked) -> Result<()> {
-    if let crate::manifest::Entry::Rust(_) = checked.manifest.app.entry {
-        return Err(
-            Error::new(ErrorKind::Unsupported, "Rust apps are not built yet")
-                .with_hint("a script app: script = \"app.js\""),
-        );
-    }
-    Ok(())
-}
-
 /// Copies a checked tree to `<data>/ptyrc/apps/<origin>/<commit>/` and
 /// records it in the lock as the commit in use. A tree already there is
 /// kept; earlier commits stay until [`prune`]. The commit in use before,
 /// if it had started, becomes `previous`; if not, `previous` is kept.
+/// A script app; a Rust app: [`install_built`].
 pub fn install(
     dirs: &Dirs,
     origin: &Origin,
     tree: &dyn Tree,
     checked: &Checked,
+    commit: &str,
+    tier: Tier,
+    date: &str,
+) -> Result<Installed> {
+    install_built(dirs, origin, tree, checked, None, commit, tier, date)
+}
+
+/// [`install`], and for a Rust app its module (`build::build`), written
+/// as `app.wasm` at the root of the tree.
+#[allow(clippy::too_many_arguments)]
+pub fn install_built(
+    dirs: &Dirs,
+    origin: &Origin,
+    tree: &dyn Tree,
+    checked: &Checked,
+    module: Option<&[u8]>,
     commit: &str,
     tier: Tier,
     date: &str,
@@ -316,7 +322,23 @@ pub fn install(
             Error::new(ErrorKind::Install, format!("{date:?}: not a date")).with_hint("YYYY-MM-DD"),
         );
     }
-    supported(checked)?;
+    let rust = matches!(checked.manifest.app.entry, crate::manifest::Entry::Rust(_));
+    match (rust, module) {
+        (true, None) => {
+            return Err(Error::new(
+                ErrorKind::Install,
+                "a Rust app is installed with its module",
+            )
+            .with_hint("build::build, then install_built"));
+        }
+        (false, Some(_)) => {
+            return Err(Error::new(
+                ErrorKind::Install,
+                "a module given for a script app",
+            ));
+        }
+        _ => {}
+    }
     let app = dirs.app(origin);
     mkdir(&app)?;
     let dest = app.join(commit);
@@ -329,9 +351,14 @@ pub fn install(
         for d in &checked.dirs {
             mkdir(&tmp.join(&d.path))?;
         }
-        for f in &checked.files {
-            let bytes = tree.read(f)?;
-            let p = tmp.join(&f.path);
+        let built = module.map(|m| (crate::build::MODULE.to_string(), m.to_vec()));
+        let files = checked
+            .files
+            .iter()
+            .map(|f| Ok((f.path.clone(), tree.read(f)?)));
+        for file in files.chain(built.map(Ok)) {
+            let (path, bytes): (String, Vec<u8>) = file?;
+            let p = tmp.join(&path);
             if let Some(parent) = p.parent() {
                 mkdir(parent)?;
             }

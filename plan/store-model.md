@@ -232,25 +232,22 @@ back as text.
   alone still reads any file (`include_str!`, `#[path]`). Either way
   the compiler must run under an OS profile (milestone 6). Once it
   does, cargo inside it costs little more than `rustc` alone.
-- So [proposed], in place of "no cargo" (owner, 2026-11-18: need it
-  be so strict?): cargo, in two steps.
-  1. `cargo fetch --locked`: the network, no code run. `Cargo.lock`
-     is in the tree; crates.io only, checksums from the lock.
-  2. `cargo build --offline --frozen --release --target
-     wasm32-unknown-unknown`, under the profile: no network; read: the
-     tree, the fetched crates, the toolchain; write: the target
-     directory. A build script can then do nothing but build.
-- Without the profile (before milestone 6, a platform that has none):
-  no Rust app is built from the store. No tier lifts this; `--force`
-  does, and says what it means.
-- What strictness would still buy, and why it is not kept: a tree
-  small enough to read whole (`approved` reads the app, not its
-  crates; the wall is the sandbox), and no network at install (the
-  fetch is data).
-- Licences of the crates: compatible with the GPL, checked from their
-  manifests at `check`.
+- [decided, 20] `rustc` alone now: std and `ptyrc-app` (vendored:
+  ptyrc's copy, decision 21), no other crate, no build script, no
+  macro crate. Nothing of the tree runs; `rustc` reads under the
+  profile (`rust/ptyrc-store/BUILD-PROFILE.md`). `dev check` names what
+  breaks the rule.
+- Later tier: cargo under the full profile, in two steps: `cargo
+  fetch --locked` (the network, no code run), then `cargo build
+  --offline --frozen` confined; a build script can then do nothing but
+  build. Spiked, not wired.
+- Without the profile (a platform that has none): no Rust app is built
+  from the store. No tier lifts this; `--force` does, and says what it
+  means.
+- Licences of the crates (the cargo tier): compatible with the GPL,
+  checked from their manifests at `check`.
 - Bounds on a build: 300 s, 4 GiB, a module of 16 MiB.
-- The user needs cargo and the target: the install says how to get
+- The user needs `rustc` and the target: the install says how to get
   them. A script app needs neither.
 
 ### Tools

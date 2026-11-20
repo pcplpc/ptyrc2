@@ -10,9 +10,9 @@ no thread, no clock but `tick`.
 |---|---|
 | `ptyrc-app.toml` | the manifest: id, version, entry, `[options]`, `[permissions]` |
 | `PROTOCOL.md` | the methods, topics, permissions, manifest and limits |
-| `src/lib.rs` | the app |
-| `vendor/ptyrc-app/` | the guest crate, vendored; `README.md` there is the API, whole |
-| `Cargo.toml`, `Cargo.lock` | keep the lock in the tree |
+| `src/lib.rs` | the app, and its modules under `src/` |
+| `vendor/ptyrc-app/` | the guest crate, ptyrc's copy; `README.md` there is the API, whole |
+| `Cargo.toml` | for cargo only (`cargo test`, an editor); the store does not read it |
 | `test.sh`, `expected.txt` | the test: the screen at fixed times |
 | `LICENSE.txt` | GPL-3.0-or-later; the only licence accepted |
 
@@ -36,6 +36,10 @@ ptyrc_app::app!(MyApp);
   last cell.
 - `call(method, params) -> Result<Value, Error>`: a request of the
   protocol (`PROTOCOL.md`); `Error { code, message, hint }`.
+- JSON is `ptyrc_app::json`, not serde: `json!({"k": [x, 1], "s":
+  name})`, `v["k"][0].as_u64()` (`Null` where nothing is, never a
+  panic), `v == "x"`, `v.to_string()`, `json::parse(text)`. A number is
+  an `f64`.
 - The size: `ptyrc_app::size()`, then `subscribe(&["size"])` and
   `event("size", {"size": [c, r]})`.
 
@@ -55,13 +59,21 @@ ptyrc_app::app!(MyApp);
   the screen changes (a tape, `--screen T:FILE`).
 - Keep the run deterministic: everything from `now_ms`, `args` and
   `random`.
-- The store does not install Rust apps yet; `dev check` says so.
+- Built by `rustc` alone, as the store builds it: std and `ptyrc-app`
+  only. No other crate, no `build.rs`, no procedural macro, no
+  `#![feature]`, no `#[link]`, no `extern` block; `include_str!`,
+  `include_bytes!`, `#[path]` name a file of this tree, as a literal.
+  `dev check` names what breaks the rule.
+- `cargo test` runs tests of pure logic natively; a test that calls the
+  host (`period`, `call`, `Canvas`, ...) does not link: test it with
+  `./test.sh`.
 
 ## Commands
 
 ```
 rustup target add wasm32-unknown-unknown    once
-ptyrc dev check            the manifest, the licence, the sizes: what the store checks
+ptyrc dev check            what the store checks, and its build
+cargo test                 the tests of pure logic
 ./test.sh                  ptyrc dev test (it builds) against expected.txt
 ./test.sh --update         after a change meant to change the screen
 ptyrc dev test . --size 80x24 --for 3s --at 0,1s,3s [--screen F | --tape F] [--seed N] [--NAME VALUE]
@@ -86,4 +98,4 @@ method headless does not answer: `headless`; one that does not exist:
 `unknown-method`. Options of `[options]`: `--NAME VALUE`,
 `--NAME`, `--no-NAME`, as `ptyrc app` takes them; after `--` when a
 name is one of ptyrc's.
-The app's log and cargo's go to stderr.
+The app's log and rustc's messages go to stderr.

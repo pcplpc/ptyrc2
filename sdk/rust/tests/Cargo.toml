@@ -11,4 +11,5 @@ publish = false
 
 [dev-dependencies]
 ptyrc-box = { path = "../../../rust/ptyrc-box" }
+ptyrc-store = { path = "../../../rust/ptyrc-store" }
 serde_json = "1"

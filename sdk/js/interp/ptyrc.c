@@ -657,9 +657,10 @@ extern void __wasm_call_ctors(void);
 __attribute__((export_name("init"))) void g_init(const char *ptr, size_t len) {
     __wasm_call_ctors();
     RT = JS_NewRuntime();
-    // Of the 1 MiB stack in memory: past 256 KiB, a RangeError. More
-    // and the runner's stack (512 KiB, its frames) runs out first.
-    JS_SetMaxStackSize(RT, 256 * 1024);
+    // Of the 1 MiB stack in memory: past 352 KiB, a RangeError. More
+    // and the runner's stack (1 MiB) runs out first: at about 430 KiB
+    // for a getter that calls itself, the most runner's stack a byte.
+    JS_SetMaxStackSize(RT, 352 * 1024);
     CTX = JS_NewContext(RT);
     if (!CTX) die("interpreter: no memory");
     JS_SetModuleLoaderFunc(RT, normalize, load, NULL);

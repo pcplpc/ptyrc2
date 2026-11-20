@@ -10,7 +10,7 @@ use crate::store::io_text;
 use crate::{Common, Fail};
 use clap::Subcommand;
 use ptyrc_store::manifest::MANIFEST;
-use ptyrc_store::{DirTree, Pointer, check_all, install};
+use ptyrc_store::{DirTree, Pointer, build, check_all};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
@@ -36,7 +36,8 @@ pub enum Dev {
     /// Run the app headless: the screen at each time as text, then the
     /// requests refused or lowered, the permissions lacking, the limits
     /// met, the end; the log on stderr. The same run every time. A Rust
-    /// app is built first (cargo). It holds what its manifest declares
+    /// app is built first (rustc, as the store builds it). It holds what
+    /// its manifest declares
     #[command(allow_hyphen_values = true)]
     Test {
         /// The app's directory [default: .]
@@ -259,33 +260,43 @@ fn check(dir: &Path) -> Result<ExitCode, Fail> {
     is_dir(dir)?;
     let problems = match check_all(&DirTree::new(dir)) {
         Ok(ok) => {
-            let supported = install::supported(&ok);
+            let tree = DirTree::new(dir);
             let rust = matches!(ok.manifest.app.entry, ptyrc_store::Entry::Rust(_));
-            match supported {
-                // A Rust app: `dev test` builds it here; the store, not yet.
-                Err(e) if !rust => vec![e],
-                _ => {
-                    let a = &ok.manifest.app;
-                    let asks: Vec<&str> = (ok.manifest.permissions.iter())
-                        .map(|p| p.name.as_str())
-                        .collect();
-                    let asks = match asks.is_empty() {
-                        true => "asks no permission".to_string(),
-                        false => format!("asks {}", asks.join(", ")),
-                    };
-                    println!(
-                        "ok: {} {}: {} files, {} bytes; {asks}",
-                        a.id,
-                        a.version,
-                        ok.files.len(),
-                        ok.size
-                    );
-                    if let Err(e) = supported {
-                        eprintln!("ptyrc: note: {}: `ptyrc store add` refuses it", e.message);
-                    }
-                    return Ok(ExitCode::SUCCESS);
+            // A Rust app: the rule, then the build of the store.
+            let mut problems = match rust {
+                true => build::sources(&tree, &ok),
+                false => Vec::new(),
+            };
+            let mut built = None;
+            if rust && problems.is_empty() {
+                match app::build_checked(dir, &tree, &ok) {
+                    Ok(m) => built = Some(m),
+                    Err(e) => problems.push(e),
                 }
             }
+            if problems.is_empty() {
+                let a = &ok.manifest.app;
+                let asks: Vec<&str> = (ok.manifest.permissions.iter())
+                    .map(|p| p.name.as_str())
+                    .collect();
+                let asks = match asks.is_empty() {
+                    true => "asks no permission".to_string(),
+                    false => format!("asks {}", asks.join(", ")),
+                };
+                println!(
+                    "ok: {} {}: {} files, {} bytes; {asks}",
+                    a.id,
+                    a.version,
+                    ok.files.len(),
+                    ok.size
+                );
+                if let Some(m) = built {
+                    let size = std::fs::metadata(&m).map_or(0, |m| m.len());
+                    eprintln!("ptyrc: built {}, {size} bytes", m.display());
+                }
+                return Ok(ExitCode::SUCCESS);
+            }
+            problems
         }
         Err(v) => v,
     };

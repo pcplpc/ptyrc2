@@ -38,6 +38,11 @@ const SCRIPT: &[File] = &[
         false,
     ),
     (
+        "tests.js",
+        include_str!("../../../../sdk/template/script/tests.js"),
+        false,
+    ),
+    (
         "AGENTS.md",
         include_str!("../../../../sdk/template/script/AGENTS.md"),
         false,
@@ -58,11 +63,6 @@ const RUST: &[File] = &[
     (
         "Cargo.toml",
         include_str!("../../../../sdk/template/rust/Cargo.toml.in"),
-        false,
-    ),
-    (
-        "Cargo.lock",
-        include_str!("../../../../sdk/template/rust/Cargo.lock.in"),
         false,
     ),
     (
@@ -93,6 +93,11 @@ const RUST: &[File] = &[
     (
         "vendor/ptyrc-app/src/ffi.rs",
         include_str!("../../../../sdk/rust/ptyrc-app/src/ffi.rs"),
+        false,
+    ),
+    (
+        "vendor/ptyrc-app/src/json.rs",
+        include_str!("../../../../sdk/rust/ptyrc-app/src/json.rs"),
         false,
     ),
 ];

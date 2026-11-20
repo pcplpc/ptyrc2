@@ -15,7 +15,7 @@ const MAX_DEPTH: usize = 3;
 
 /// The offset in force at an instant.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Offset {
+pub struct Offset {
     pub offset_s: i32,
     pub abbr: String,
     /// When the offset or the abbreviation changes next.
@@ -47,7 +47,7 @@ enum Date {
 
 /// A zone: its transitions, then its rule.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Zone {
+pub struct Zone {
     pub name: String,
     times: Vec<i64>,
     /// The kind in force from `times[i]` on.
@@ -58,7 +58,7 @@ pub(crate) struct Zone {
 
 /// Why a zone is not had.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Missing {
+pub enum Missing {
     /// Not a zone name, or no such zone.
     Unknown,
     /// No database on this machine.
@@ -414,7 +414,7 @@ fn month_days(y: i64, m: u8) -> i64 {
 }
 
 /// Days since 1970-01-01 of a civil date (H. Hinnant's algorithm).
-pub(crate) fn days_from_civil(y: i64, m: u8, d: u8) -> i64 {
+pub fn days_from_civil(y: i64, m: u8, d: u8) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = y.div_euclid(400);
     let yoe = y - era * 400;
@@ -425,7 +425,7 @@ pub(crate) fn days_from_civil(y: i64, m: u8, d: u8) -> i64 {
 }
 
 /// The civil date of a count of days since 1970-01-01.
-pub(crate) fn civil_from_days(z: i64) -> (i64, u8, u8) {
+pub fn civil_from_days(z: i64) -> (i64, u8, u8) {
     let z = z + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z - era * 146_097;
@@ -461,7 +461,7 @@ fn day_of(y: i64, date: Date) -> i64 {
 
 /// An IANA zone name: components of `[A-Za-z0-9._+-]`, 1 to 64 bytes,
 /// none starting with `.`; 3 at most.
-pub(crate) fn valid_name(name: &str) -> bool {
+pub fn valid_name(name: &str) -> bool {
     let parts: Vec<&str> = name.split('/').collect();
     parts.len() <= MAX_DEPTH
         && parts.iter().all(|p| {
@@ -473,7 +473,7 @@ pub(crate) fn valid_name(name: &str) -> bool {
 }
 
 /// The database: `$TZDIR`, else `/usr/share/zoneinfo`.
-pub(crate) fn database() -> PathBuf {
+pub fn database() -> PathBuf {
     match std::env::var_os("TZDIR") {
         Some(dir) if Path::new(&dir).is_absolute() => PathBuf::from(dir),
         _ => PathBuf::from("/usr/share/zoneinfo"),
@@ -481,7 +481,7 @@ pub(crate) fn database() -> PathBuf {
 }
 
 /// The zone `name` of the database `dir`. `UTC` is had without one.
-pub(crate) fn load(dir: &Path, name: &str) -> Result<Zone, Missing> {
+pub fn load(dir: &Path, name: &str) -> Result<Zone, Missing> {
     if !valid_name(name) {
         return Err(Missing::Unknown);
     }
@@ -525,7 +525,7 @@ fn read_regular(path: &Path) -> Option<Vec<u8>> {
 /// The machine's zone: `$TZ` (a name of the database, an absolute path,
 /// or a POSIX rule), else `/etc/localtime`, else UTC. Its name: that of
 /// the database when known, else `local`.
-pub(crate) fn local(dir: &Path, tz: Option<&str>, localtime: &Path) -> Zone {
+pub fn local(dir: &Path, tz: Option<&str>, localtime: &Path) -> Zone {
     let named = |name: &str, zone: Option<Zone>| {
         zone.map(|mut z| {
             z.name = name.to_string();

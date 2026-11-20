@@ -220,7 +220,7 @@ fn errors_name_the_place_and_the_cure() {
             "import fs from 'fs';\nexport function init() {}",
             &[
                 "import \"fs\": no such module",
-                "hint: \"ptyrc\", or a file",
+                "hint: \"ptyrc\", \"ptyrc/deck\", or a file",
             ],
         ),
         (
@@ -404,6 +404,41 @@ fn hostile_recursion() {
             "{text}\n{r}"
         );
     }
+}
+
+/// Recursion of the script, through natives too: a `RangeError` the
+/// script catches, before the runner's stack runs out.
+#[test]
+fn recursion_is_a_range_error() {
+    let text = r#"
+        import { log } from "ptyrc";
+        let depth = 0;
+        function f(n) { depth = n; return f(n + 1) + 1; }
+        function g(n) { depth = n; return [1].map(() => g(n + 1))[0]; }
+        function h(n) { depth = n; return JSON.parse("1", () => h(n + 1)); }
+        function s(n) { depth = n; return String({ toString: () => s(n + 1) }); }
+        function r(n) { depth = n; return "a".replace(/a/, () => r(n + 1)); }
+        function p(n) { depth = n; return new Proxy({}, { get: () => p(n + 1).x }).x; }
+        function q(n) { depth = n; return [2, 1].sort(() => q(n + 1)); }
+        function e(n) { depth = n; return eval("e(n + 1)"); }
+        const o = { get x() { depth++; return this.x; } };
+        export function init() {
+          for (const [name, run] of Object.entries({ f, g, h, s, r, p, q, e, o: () => o.x })) {
+            depth = 0;
+            try { run(0); } catch (err) { log(name, err.name, depth); }
+          }
+        }"#;
+    let Some(r) = app(text) else { return };
+    assert_eq!(r.end, None, "{r}");
+    for name in ["f", "g", "h", "s", "r", "p", "q", "e", "o"] {
+        let line = (r.log.iter())
+            .find(|l| l.split_whitespace().nth(1) == Some(name))
+            .unwrap_or_else(|| panic!("{name}: {r}"));
+        assert!(line.contains("RangeError"), "{line}");
+    }
+    let f = (r.log.iter()).find(|l| l.split_whitespace().nth(1) == Some("f"));
+    let depth = f.and_then(|l| l.split_whitespace().last()?.parse::<u32>().ok());
+    assert!(depth.unwrap_or(0) > 900, "{f:?}");
 }
 
 /// The API is not the app's to replace, nor the host functions its to
@@ -711,6 +746,119 @@ fn text_bytes_and_base64() {
           ]);
         }
     "##;
+    let Some((lines, status)) = unit(&[("tests.js", tests)], Limits::default()) else {
+        return;
+    };
+    assert_eq!(status, 0, "{lines:#?}");
+}
+
+/// A deck: two variants, a canvas, headless: the variant that fits.
+const DECK: &str = r#"
+    import { Canvas, period } from "ptyrc";
+    import { Deck } from "ptyrc/deck";
+    let deck, big;
+    export function init(args) {
+      deck = new Deck({ border: "ascii", every: args.every });
+      big = new Canvas(6, 2);
+      deck.add("w", { big: [6, 2], small: [3, 1] }, (w, h) => {
+        if (h === 1) return `${deck.now / 1000}s`;
+        big.clear().text(0, 0, "BIG", { fg: 9 });
+        big.text(0, 1, `${deck.now}`);
+        return big;
+      }, { key: () => {} });
+      period(1000);
+    }
+    export function tick(now) { deck.tick(now); }
+    export function event(topic, data) { deck.event(topic, data); }
+"#;
+
+fn deck(size: (u32, u32), args: Value) -> Option<Report> {
+    let wasm = interpreter()?;
+    let mut o = options(&[("app.js", DECK)], args);
+    (o.size, o.duration_ms, o.at) = (size, 2000, vec![2000]);
+    Some(run(wasm, &o).unwrap())
+}
+
+#[test]
+fn a_deck_draws_the_variant_that_fits() {
+    let Some(r) = deck((40, 8), json!({})) else {
+        return;
+    };
+    assert_eq!(r.end, None, "{r}");
+    let screen = r.screens[0].1.join("\n");
+    assert!(
+        screen.contains("|BIG   |") && screen.contains("|2000  |"),
+        "{r}"
+    );
+    let Some(r) = deck((12, 6), json!({})) else {
+        return;
+    };
+    assert!(r.screens[0].1.join("\n").contains("|2s |"), "{r}");
+    // Until headless serves them (PROTOCOL.md, Headless): asked one by one.
+    for q in &r.requests {
+        if let Some(code) = &q.refused {
+            assert!(
+                code == "headless" && ["batch", "widget.ask"].contains(&q.method.as_str()),
+                "{r}"
+            );
+        }
+    }
+}
+
+/// Waits on headless `batch` (gap 6, `headless.rs`): then no refusal.
+#[test]
+#[ignore = "headless answers batch: headless"]
+fn a_deck_sends_one_batch_a_tick() {
+    let Some(r) = deck((40, 8), json!({"every": true})) else {
+        return;
+    };
+    assert!(
+        r.requests
+            .iter()
+            .all(|q| q.method != "batch" || q.refused.is_none()),
+        "{r}"
+    );
+}
+
+#[test]
+fn deck_pieces() {
+    let tests = r#"
+        import { assertEqual } from "ptyrc";
+        import { Field, Listing, Keys, cut, fit, wrap } from "ptyrc/deck";
+        export function test_field() {
+          const f = new Field("ab");
+          for (const k of ["left", "x", "end", "space", "日"]) f.key(k);
+          assertEqual([f.text, f.cursor], ["axb 日", 5]);
+          f.key("ctrl+w"); assertEqual(f.text, "axb ");
+          f.key("ctrl+a"); f.key("delete"); assertEqual(f.text, "xb ");
+          assertEqual(f.key("f1"), false);
+          assertEqual(f.render(4, true), [{ t: "x", inverse: true }, { t: "b " }, { t: " " }]);
+          assertEqual(new Field("").render(3, false, "name"), [{ t: "nam", dim: true }]);
+        }
+        export function test_listing() {
+          const l = new Listing(10);
+          assertEqual(l.window(3), [0, 1, 2]);
+          l.key("pagedown"); l.key("j");
+          assertEqual([l.sel, l.window(3), l.mark(3)], [4, [2, 3, 4], "5/10"]);
+          l.key("end"); assertEqual(l.window(3), [7, 8, 9]);
+        }
+        export function test_keys() {
+          const k = new Keys();
+          assertEqual(k.feed({ key: "a", bytes: "YQ==" }), { key: "a" });
+          assertEqual(k.feed({ bytes: btoa("\x1b[1;5D") }), { key: "ctrl+left" });
+          assertEqual(k.feed({ bytes: btoa("\x1b[3;2~") }), { key: "shift+delete" });
+          assertEqual(k.feed({ bytes: btoa("\x1b[200~") }), null);
+          assertEqual(k.feed({ bytes: new Uint8Array([0xc3, 0xa9, 13]).toBase64() }), null);
+          assertEqual(k.feed({ bytes: btoa("\x1b[201~") }), { paste: "é\n" });
+          assertEqual(k.feed({ paste: "a\r\nb" }), { paste: "a\nb" });
+        }
+        export function test_cells() {
+          assertEqual(cut("日本語", 4), "日…");
+          assertEqual(fit([{ t: "ab", fg: 1 }, { t: "cd" }], 3), [{ t: "ab", fg: 1 }, { t: "c" }]);
+          assertEqual(fit("a", 3), [{ t: "a" }, { t: "  " }]);
+          assertEqual(wrap("one two three four", 9, 2), ["one two", "three fo…"]);
+        }
+    "#;
     let Some((lines, status)) = unit(&[("tests.js", tests)], Limits::default()) else {
         return;
     };

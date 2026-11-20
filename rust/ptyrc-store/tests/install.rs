@@ -112,9 +112,26 @@ fn refused() {
     let ok = check(&tree).unwrap();
     let e =
         install::install(&dirs, &origin, &tree, &ok, &c, Tier::Untested, "2026-11-19").unwrap_err();
-    assert_eq!(e.kind, ErrorKind::Unsupported);
-    assert_eq!(e.message, "Rust apps are not built yet");
+    assert_eq!(e.kind, ErrorKind::Install);
+    assert_eq!(e.message, "a Rust app is installed with its module");
     assert!(!dirs.app(&origin).exists());
+    // With it: `app.wasm` beside the sources, read-only.
+    let module = b"\0asm\x01\0\0\0";
+    let at = install::install_built(
+        &dirs,
+        &origin,
+        &tree,
+        &ok,
+        Some(module),
+        &c,
+        Tier::Untested,
+        "2026-11-19",
+    )
+    .unwrap();
+    let wasm = dirs.tree(&origin, &at.commit).join("app.wasm");
+    assert_eq!(std::fs::read(&wasm).unwrap(), module);
+    assert_eq!(wasm.metadata().unwrap().permissions().mode() & 0o777, 0o400);
+    install::remove(&dirs, &origin.id()).unwrap();
 
     let e = install::install(
         &dirs,

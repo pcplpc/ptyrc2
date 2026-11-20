@@ -181,7 +181,7 @@ bytes in the guest's memory, no terminator. JSON is a text.
 | canvas cells, in all | 4 screens | `canvas` answers 0 |
 | log | 1 MiB | dropped |
 | a text read by the host | 4 MiB | `bad-pointer` |
-| stack | 512 KiB | `stack` |
+| stack | 1 MiB | `stack` |
 
 Time is bounded by epoch interruption (a thread, 10 ms): wall time,
 the host's included. A limit met is logged once (`limit: NAME`):

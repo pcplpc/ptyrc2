@@ -15,7 +15,7 @@ use wasmtime::{
 };
 
 const EPOCH: Duration = Duration::from_millis(10);
-const STACK: usize = 512 << 10;
+const STACK: usize = 1 << 20;
 const TABLE: usize = 1 << 16;
 const RANDOM: usize = 1 << 16;
 

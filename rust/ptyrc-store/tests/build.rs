@@ -228,7 +228,7 @@ fn a_macro_that_doubles_is_ended() {
     let Some(got) = build_src("macro", &[("src/lib.rs", &src)], &quick(15, BOUNDS.module)) else {
         return;
     };
-    let e = got.err().expect("built");
+    let e = got.expect_err("built");
     assert!(e.message.starts_with("src/lib.rs: "), "{e}");
 }
 

@@ -343,6 +343,35 @@ pub fn build(
     })
 }
 
+/// The sources of `vendor/ptyrc-app/` (the copy a template keeps for
+/// cargo) that are not ptyrc's own, which the build uses: changed,
+/// missing or added. Empty without that directory.
+pub fn vendored_differs(tree: &dyn Tree, checked: &Checked) -> Vec<String> {
+    let mine: Vec<_> = (checked.files.iter())
+        .filter(|f| f.path.starts_with(VENDORED) && f.path.ends_with(".rs"))
+        .collect();
+    if mine.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for (path, text) in PTYRC_APP {
+        let full = format!("{VENDORED}{path}");
+        match mine.iter().find(|f| f.path == full) {
+            Some(f) if tree.read(f).is_ok_and(|b| b == text.as_bytes()) => {}
+            _ => out.push(full),
+        }
+    }
+    for f in mine {
+        if !PTYRC_APP
+            .iter()
+            .any(|(p, _)| f.path == format!("{VENDORED}{p}"))
+        {
+            out.push(f.path.clone());
+        }
+    }
+    out
+}
+
 /// `work`, empty: made, or emptied when it holds the mark.
 fn fresh(work: &Path) -> Result<()> {
     if work.exists() {

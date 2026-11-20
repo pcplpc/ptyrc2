@@ -59,7 +59,12 @@ fn has_target() -> bool {
         o.status.success() && Path::new(String::from_utf8_lossy(&o.stdout).trim()).is_dir()
     });
     if !ok {
-        skipped("no wasm32 target; rustup target add wasm32-unknown-unknown");
+        let what = "no wasm32 target; rustup target add wasm32-unknown-unknown";
+        assert!(
+            std::env::var_os("PTYRC_REQUIRE_RUSTC").is_none_or(|v| v != "1"),
+            "PTYRC_REQUIRE_RUSTC=1: {what}"
+        );
+        skipped(what);
     }
     ok
 }
@@ -153,6 +158,8 @@ fn new_script_app() {
     }
     let app = new_app("script", false);
     assert!(app.join("ptyrc.d.ts").is_file());
+    let unit = ok(&ptyrc(&app, &["dev", "test", "--unit"]));
+    assert_eq!(unit, "ok   test_sum\n1 passed, 0 failed\n");
     // test.sh compared a run to the template's: the same text again.
     let expected = std::fs::read_to_string(app.join("expected.txt")).unwrap();
     assert!(expected.contains("t = 0.5 s"), "{expected}");
@@ -190,6 +197,34 @@ fn new_rust_app() {
     let a = ok(&ptyrc(&app, &args));
     assert!(a.contains("x = 2.0 s"), "{a}");
     assert_eq!(a, ok(&ptyrc(&app, &args)));
+}
+
+/// `dev check` of a Rust app: the rule named; a vendored copy that is
+/// not ptyrc's said.
+#[test]
+fn check_rust_rule() {
+    if !has_target() {
+        return;
+    }
+    let top = scratch("rule");
+    ok(&ptyrc(&top, &["dev", "new", "clock", "--rust"]));
+    let app = top.join("clock");
+    let lib = app.join("vendor/ptyrc-app/src/lib.rs");
+    let text = std::fs::read_to_string(&lib).unwrap();
+    std::fs::write(&lib, format!("{text}\n// mine\n")).unwrap();
+    let out = ptyrc(&app, &["dev", "check"]);
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(out.status.success(), "{err}");
+    assert!(
+        err.contains("vendor/ptyrc-app/src/lib.rs: not ptyrc's own ptyrc-app"),
+        "{err}"
+    );
+    std::fs::write(app.join("build.rs"), "fn main() {}\n").unwrap();
+    let out = ptyrc(&app, &["dev", "check"]);
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(out.status.code(), Some(1), "{err}");
+    assert!(err.contains("build.rs: a build script"), "{err}");
+    assert!(err.contains("built by rustc alone"), "{err}");
 }
 
 #[test]

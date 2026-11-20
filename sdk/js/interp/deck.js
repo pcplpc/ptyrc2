@@ -96,6 +96,7 @@ export class Widget {
     this.#deck = deck;
     this.tag = tag;
     this.info = {};
+    this.hidden = false;
     this.render = render;
     this.options = options;
   }

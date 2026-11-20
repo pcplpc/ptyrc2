@@ -5,8 +5,9 @@
 use crate::store::io_text;
 use crate::{Common, Fail};
 use ptyrc_proto::session;
+use ptyrc_store::build;
 use ptyrc_store::manifest::{self, MANIFEST};
-use ptyrc_store::{Entry, Manifest, OptionValue};
+use ptyrc_store::{Checked, DirTree, Entry, ErrorKind, Manifest, OptionValue, check};
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -17,7 +18,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 const BOX: &str = "ptyrc-box";
-const TARGET: &str = "wasm32-unknown-unknown";
 
 /// The program that runs apps: beside this one, else on `PATH`.
 fn runner() -> Result<PathBuf, Fail> {
@@ -98,57 +98,56 @@ fn guest(dir: &Path, m: &Manifest) -> Result<Vec<OsString>, Fail> {
     }
 }
 
-/// `cargo build --release --target wasm32-unknown-unknown`; its
-/// messages on stderr. The module it made.
-fn build(dir: &Path) -> Result<PathBuf, Fail> {
-    let toml = dir.join("Cargo.toml");
-    let out = Command::new("cargo")
-        .args(["build", "--release", "--target", TARGET])
-        .args(["--message-format", "json-render-diagnostics"])
-        .arg("--manifest-path")
-        .arg(&toml)
-        .stdin(Stdio::null())
-        .stderr(Stdio::inherit())
-        .output()
-        .map_err(|e| Fail {
-            status: 127,
-            message: format!("cargo: {}", io_text(&e)),
-            hint: Some("a Rust app needs cargo: https://rustup.rs".into()),
-        })?;
-    if !out.status.success() {
-        return Err(Fail {
-            status: 1,
-            message: format!("{}: the build failed", toml.display()),
-            hint: Some(format!(
-                "the errors above; the target, once: rustup target add {TARGET}"
-            )),
-        });
+/// The build of the store (`build::build`: `rustc` alone, ptyrc's own
+/// `ptyrc-app`) in `DIR/target/ptyrc/`, under the profile where there is
+/// one, else without (the author's own tree; said). `rustc`'s messages
+/// on stderr. The module.
+pub(super) fn build_checked(
+    dir: &Path,
+    tree: &DirTree,
+    checked: &Checked,
+) -> ptyrc_store::Result<PathBuf> {
+    let toolchain = build::Toolchain::find()?;
+    let target = dir.join("target");
+    let io = |p: &Path, e: std::io::Error| {
+        ptyrc_store::Error::new(ErrorKind::Io, format!("{}: {}", p.display(), io_text(&e)))
+    };
+    std::fs::create_dir_all(&target).map_err(|e| io(&target, e))?;
+    let tag = target.join("CACHEDIR.TAG");
+    if !tag.exists() {
+        // Skipped by the tree check and `dev run`, as cargo's.
+        std::fs::write(&tag, "Signature: 8a477f597d28d172789f06886806bc55\n")
+            .map_err(|e| io(&tag, e))?;
     }
-    let text = String::from_utf8_lossy(&out.stdout);
-    let module = text
-        .lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter(|v| v["reason"] == "compiler-artifact")
-        .filter(|v| {
-            v.pointer("/target/kind")
-                .and_then(Value::as_array)
-                .is_some_and(|k| k.iter().any(|k| k == "cdylib"))
-        })
-        .flat_map(|v| {
-            v["filenames"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default()
-                .into_iter()
-                .filter_map(|f| f.as_str().map(PathBuf::from))
-                .collect::<Vec<_>>()
-        })
-        .find(|f| f.extension().is_some_and(|e| e == "wasm"));
-    module.ok_or_else(|| Fail {
-        status: 1,
-        message: format!("{}: no .wasm built", toml.display()),
-        hint: Some("[lib] crate-type = [\"cdylib\"]".into()),
-    })
+    for p in build::vendored_differs(tree, checked) {
+        eprintln!("ptyrc: note: {p}: not ptyrc's own ptyrc-app, which the build uses");
+    }
+    let options = build::Options {
+        unconfined: true,
+        ..build::Options::default()
+    };
+    let work = target.join("ptyrc");
+    let built = build::build(tree, checked, &work, &toolchain, &options)?;
+    if !built.messages.trim().is_empty() {
+        eprintln!("{}", built.messages.trim_end());
+    }
+    if let Some(why) = &built.missing {
+        eprintln!("ptyrc: note: built without an OS profile: {why}");
+    }
+    Ok(work.join("out").join(build::MODULE))
+}
+
+/// [`build_checked`] of the tree at `dir`, checked first.
+fn build(dir: &Path) -> Result<PathBuf, Fail> {
+    let tree = DirTree::new(dir);
+    let checked = check(&tree).map_err(|e| Fail {
+        hint: Some(match &e.hint {
+            Some(h) => format!("{h}; `ptyrc dev check` lists every problem"),
+            None => "`ptyrc dev check` lists every problem".into(),
+        }),
+        ..Fail::from(e)
+    })?;
+    Ok(build_checked(dir, &tree, &checked)?)
 }
 
 fn status_of(status: std::process::ExitStatus) -> ExitCode {

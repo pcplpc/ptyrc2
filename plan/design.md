@@ -2064,7 +2064,7 @@ Host functions (`driver/hostfn.rs`; the contract:
   function of the worker's state; the plumbing does not change.
 - `clock.*`: the wall clock of the server (`PTYRC_CLOCK_RATE` does not
   scale it). Zones: the system database (`$TZDIR`, else
-  `/usr/share/zoneinfo`), read by `zone.rs` (TZif v2+, the POSIX
+  `/usr/share/zoneinfo`), read by `ptyrc-core/src/zone.rs` (TZif v2+, the POSIX
   footer past the last transition; no crate). `local`: `$TZ` of the
   driver (a name, an absolute path, a POSIX rule), else
   `/etc/localtime`, else UTC; named as in the database, else `local`.

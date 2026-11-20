@@ -109,9 +109,9 @@ impl Table {
 
     /// The keys and their sizes: the regular files of a valid name.
     pub fn keys(&self) -> Result<Vec<(String, u64)>, RpcError> {
-        let mut dir = Dir::read_from(&self.dir).map_err(|e| io_error("list", e))?;
+        let dir = Dir::read_from(&self.dir).map_err(|e| io_error("list", e))?;
         let mut keys = Vec::new();
-        while let Some(entry) = dir.next() {
+        for entry in dir {
             let entry = entry.map_err(|e| io_error("list", e))?;
             let Ok(name) = entry.file_name().to_str() else {
                 continue;

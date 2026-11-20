@@ -25,6 +25,13 @@
 // At least one of `init`, `tick`, `event` is exported. They may be
 // `async`; nothing awaited outlives the call.
 //
+// Widgets the driver places and sizes: the module "ptyrc/deck", below.
+// Unit tests: `tests.js`, its exports `test_*` (`ptyrc dev test --unit`),
+// `assert`, `assertEqual`, `assertThrows`.
+//
+// Bytes: `Uint8Array.fromBase64(s)`, `bytes.toBase64()`, `atob`,
+// `btoa`; `TextEncoder`, `TextDecoder` (UTF-8 only) are global.
+//
 // There is no timer, no network, no file, no console, no `require`:
 // `tick` is the only clock. `Date.now()` is session time (0 at the
 // start), not the wall clock. `Math.random()` draws from the host.
@@ -136,6 +143,11 @@ declare module "ptyrc" {
     /** Empties every cell. */
     clear(): this;
     /**
+     * The cells as rows of runs, the `cells` form of a content
+     * (`widget.set`); a hole is a blank. A deck takes the canvas itself.
+     */
+    runs(): Run[][];
+    /**
      * Shows the canvas as it is now, at `place`; again after changes.
      * Only what changed is sent. `false`: refused (the log says why).
      */
@@ -175,4 +187,229 @@ declare module "ptyrc" {
 
   /** Ends the app. Does not return. */
   export function exit(code?: number): never;
+
+  /** A run of a row: text in one style (`PROTOCOL.md`, `cells`). */
+  export interface Run {
+    t: string;
+    fg?: Color;
+    bg?: Color;
+    bold?: boolean;
+    dim?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+    inverse?: boolean;
+    strike?: boolean;
+    blink?: boolean;
+  }
+
+  /** Columns of `text` on a terminal: a wide glyph 2, a mark 0. */
+  export function cells(text: string): number;
+
+  /** What `assert*` throw. */
+  export class AssertionError extends Error {}
+  /** @throws AssertionError when `value` is falsy. */
+  export function assert(value: unknown, message?: string): void;
+  /**
+   * Deep equality: arrays, plain objects, typed arrays, `Map`, `Set`
+   * by their contents; numbers by `Object.is`.
+   * @throws AssertionError naming both.
+   */
+  export function assertEqual(actual: unknown, expected: unknown, message?: string): void;
+  /**
+   * `f()` throws, an instance of `kind` when given. Returns the error.
+   * @throws AssertionError when it does not.
+   */
+  export function assertThrows(f: () => unknown, kind?: Function, message?: string): Error;
+}
+
+/**
+ * Widgets: small windows the driver places where there is room, in one
+ * of the sizes the app gives (its variants), and moves or resizes when
+ * the room changes. A deck keeps them drawn.
+ *
+ *   import { period } from "ptyrc";
+ *   import { Deck } from "ptyrc/deck";
+ *   let deck;
+ *   export function init() {
+ *     deck = new Deck({ border: "round", prefer: "top-right" });
+ *     deck.add("clock", { long: [8, 1], short: [5, 1] },
+ *       (w, h) => [w >= 8 ? `t=${deck.now} ms` : `${deck.now / 1000 | 0}s`]);
+ *     period(1000);
+ *   }
+ *   export function tick(now) { deck.tick(now); }
+ *   export function event(topic, data) { deck.event(topic, data); }
+ *
+ * Give the deck every `tick` and every `event`: it follows the topics
+ * `widgets` (the variant shown), `move`, `hover`, `input`.
+ */
+declare module "ptyrc/deck" {
+  import { Canvas, Run, StyleSpec } from "ptyrc";
+
+  /** A variant's content: lines (a string, `\n` between), rows of strings or runs, or a canvas. */
+  export type Content = string | (string | Run[])[] | Canvas;
+
+  /** Inner sizes `[w, h]`, 1x1 to 200x60: named `WxH`, or by name. At most 16. */
+  export type Sizes = [number, number][] | { [name: string]: [number, number] };
+
+  /** Members of `widget.show` (`PROTOCOL.md`). */
+  export interface Show {
+    /** A preset (`round`, `heavy`, `double`, `ascii`, `none`, `painting`, ...) or its object. */
+    border?: string | object;
+    /** On the bottom edge; the tag when absent; `""`: none. */
+    title?: string;
+    /** A frame id or name. */
+    frame?: number | string;
+    /** `top-left`, `top`, `top-right`, `left`, `center`, `right`, `bottom-left`, `bottom`, `bottom-right`, `any`. */
+    prefer?: string;
+    /** About that much of the room, 0.1 to 1 (0.5). */
+    fill?: number;
+    /** Cells kept from the edges, 0 to 4 (1). */
+    margin?: number;
+    /** `back` (default); `front` needs `front-widget`. */
+    layer?: number | string;
+    /** Always shown, in front; needs `keys-grab`. */
+    modal?: boolean;
+  }
+
+  export interface DeckOptions extends Show {
+    /** `tick` renders every variant, not only the one shown (the driver keeps each). */
+    every?: boolean;
+    /** Session ms without a move after which a hover ends: 1500; null: never. */
+    hoverTimeout?: number | null;
+  }
+
+  /** What a handler returns: `false` when nothing changed (not drawn again). */
+  type Changed = boolean | void;
+
+  export interface AddOptions extends Show {
+    /**
+     * A key of the host keyboard while the user focused the widget
+     * (ctrl+t twice): `a`, `space`, `enter`, `backspace`, `up`,
+     * `shift+up`, `ctrl+a`, ... The widget asks for the keyboard
+     * (quietly) when `key` or `paste` is given. Escape (`esc`) and
+     * close (`ctrl+x`) never come: the driver takes them.
+     */
+    key?(name: string, widget: Widget): Changed;
+    /** A bracketed paste, its lines parted by `\n`. */
+    paste?(text: string, widget: Widget): Changed;
+    /** The pointer on the cell `(x, y)` of the inner box. */
+    hover?(x: number, y: number, widget: Widget): Changed;
+    /** The pointer left, the widget moved, or `hoverTimeout` passed. */
+    leave?(widget: Widget): Changed;
+    /** Closed by the user (ctrl+x): out of the deck. */
+    closed?(widget: Widget): void;
+    /** `widget.ask`: `quiet` (true: waits for no answer), `escape`, `close` (key names, or false: none). */
+    ask?: { quiet?: boolean; escape?: string | false; close?: string | false };
+  }
+
+  export class Deck {
+    /** Defaults for every widget's `widget.show`. */
+    constructor(options?: DeckOptions);
+    readonly widgets: Widget[];
+    /** Session time of the last `tick`. */
+    readonly now: number;
+    hoverTimeout: number | null;
+    /**
+     * Declares the tag, each variant rendered once, and shows it.
+     * `render(w, h, widget)`: the content of the variant of that size;
+     * `widget.focused` tells the focus.
+     * @throws PtyrcError when refused (16 widgets, sizes out of bounds, ...).
+     */
+    add(tag: string, sizes: Sizes, render: (w: number, h: number, widget: Widget) => Content, options?: AddOptions): Widget;
+    /**
+     * At each `tick`: renders the variant shown of every widget (each
+     * variant with `every`; each until the driver told which shows) and
+     * sends what changed in one `batch`. Ends a hover past its timeout.
+     */
+    tick(now: number): void;
+    /** Takes `widgets`, `move`, `hover`, `input`; false: not the deck's. */
+    event(topic: string, data: any): boolean;
+    /** Renders now: `widget` alone, or all; `every`: each variant. */
+    draw(widget?: Widget, every?: boolean): void;
+    /** Other sizes: declared again, laid out again. */
+    resize(widget: Widget, sizes: Sizes): void;
+    /** Every widget shown again on `frame` (the topic `move` does it). */
+    move(frame: number | string): void;
+    /** Out of the deck; the driver is not told (`widget.hide` first). */
+    drop(widget: Widget): void;
+    /** Ends the hover under way. */
+    leave(): void;
+  }
+
+  /** A widget of a deck: `info` is what the driver last told. */
+  export class Widget {
+    readonly tag: string;
+    /** `{id, tag, state, variant, size, rect, sprite, title, variants, focused, asks, ...}`: `PROTOCOL.md`. */
+    info: any;
+    readonly id: number | null;
+    /** The variant shown; null while hidden or not told yet. */
+    readonly variant: string | null;
+    /** Inner size of the variant shown. */
+    readonly size: [number, number] | null;
+    /** Outer rectangle, screen cells. */
+    readonly rect: [number, number, number, number] | null;
+    readonly placed: boolean;
+    /** A modal over the text, for want of room. */
+    readonly over: boolean;
+    /** `loud`, `quiet`, or null: it does not ask the keyboard. */
+    readonly asks: string | null;
+    /** The keys of the host keyboard are its own. */
+    readonly focused: boolean;
+    /** Hidden by `hide()`. */
+    readonly hidden: boolean;
+    /** New content of a variant (the one shown when not named), and, or, a title. */
+    set(content: Content | null, options?: { variant?: string; title?: string }): void;
+    hide(): void;
+    /** Asks for the keyboard; the user gives it. */
+    ask(options?: { quiet?: boolean; escape?: string | false; close?: string | false }): void;
+    release(): void;
+  }
+
+  /** The `input` events of a focused widget as keys and pastes; one a widget. */
+  export class Keys {
+    /** `{key}`, `{paste}`, or null: nothing yet, or no name. */
+    feed(data: { key?: string; bytes?: string; paste?: string }): { key: string } | { paste: string } | null;
+    /** A paste under way dropped: the focus went. */
+    reset(): void;
+    /** `shift+up`, `ctrl+alt+end`, ... of a modified arrow, home, end, insert, delete, page key; else null. */
+    static name(bytes: Uint8Array | string): string | null;
+  }
+
+  /** A line of text and its cursor (code units). */
+  export class Field {
+    constructor(text?: string);
+    text: string;
+    cursor: number;
+    /** Typed at the cursor; a control character is a blank. */
+    insert(text: string): void;
+    /**
+     * `left`, `right`, `home`, `end`, `backspace`, `delete`, `ctrl+a`,
+     * `ctrl+e`, `ctrl+b`, `ctrl+f`, `ctrl+d`, `ctrl+h`, `ctrl+u`,
+     * `ctrl+k`, `ctrl+w`, `space`; a character is typed. False: not one.
+     */
+    key(name: string): boolean;
+    /** `w` cells. Focused: the cursor an inverse cell, scrolled to it; else the start, or `placeholder`, dim. */
+    render(w: number, focused: boolean, placeholder?: string, style?: StyleSpec): Run[];
+  }
+
+  /** A bar on a list of `count` rows, of which a window shows. */
+  export class Listing {
+    constructor(count?: number, sel?: number);
+    count: number;
+    sel: number;
+    top: number;
+    /** `up`, `down`, `tab`, `home`, `end`, `pageup`, `pagedown`; `j`, `k` with `letters`. */
+    key(name: string, letters?: boolean): boolean;
+    /** The indices shown in `h` rows; the bar among them. */
+    window(h: number): number[];
+    /** `3/12` when the list does not fit `h` rows; else `""`. */
+    mark(h: number): string;
+  }
+
+  /** `text` in `n` cells at most, cut with `…`. */
+  export function cut(text: string, n: number): string;
+  /** A row in exactly `w` cells: cut, padded with blanks. */
+  export function fit(row: string | Run[], w: number): Run[];
+  /** `text` on `n` lines of `w` cells, cut at blanks; the rest ends the last line with `…`. */
+  export function wrap(text: string, w: number, n: number): string[];
 }

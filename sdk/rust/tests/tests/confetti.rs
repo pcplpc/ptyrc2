@@ -1,34 +1,29 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `examples/confetti`, built for `wasm32-unknown-unknown`, run headless.
+//! `examples/confetti`, built as the store builds it, run headless.
 
 use ptyrc_box::headless::{Options, Report, run};
+use ptyrc_store::build::{self, Toolchain};
+use ptyrc_store::{DirTree, check};
 use serde_json::json;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
 use std::sync::OnceLock;
 
-/// The release module of the example crate `name`, built once.
+/// The module of the example `name`, built once as the store builds it:
+/// `rustc` alone, ptyrc's own `ptyrc-app`.
 fn build(name: &str) -> Vec<u8> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../examples")
-        .join(name);
-    let status = Command::new(env!("CARGO"))
-        .args([
-            "build",
-            "--release",
-            "--locked",
-            "--target",
-            "wasm32-unknown-unknown",
-        ])
-        .current_dir(&dir)
-        .env_remove("CARGO_TARGET_DIR")
-        .env_remove("RUSTFLAGS")
-        .env_remove("CARGO_ENCODED_RUSTFLAGS")
-        .status()
-        .expect("cargo");
-    assert!(status.success(), "the build of {name} failed");
-    let wasm: PathBuf = dir.join(format!("target/wasm32-unknown-unknown/release/{name}.wasm"));
-    std::fs::read(&wasm).expect("the module")
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tree = DirTree::new(root.join("../examples").join(name));
+    let checked = check(&tree).expect("the tree check");
+    let work = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let toolchain = Toolchain::find().expect("rustc and its wasm target");
+    let built = build::build(
+        &tree,
+        &checked,
+        &work,
+        &toolchain,
+        &build::Options::default(),
+    );
+    built.unwrap_or_else(|e| panic!("{name}: {e}")).wasm
 }
 
 fn confetti() -> &'static [u8] {
@@ -36,56 +31,16 @@ fn confetti() -> &'static [u8] {
     WASM.get_or_init(|| build("confetti"))
 }
 
-fn leb(b: &[u8], i: &mut usize) -> usize {
-    let (mut n, mut shift) = (0, 0);
-    loop {
-        let x = b[*i];
-        *i += 1;
-        n |= ((x & 0x7f) as usize) << shift;
-        shift += 7;
-        if x < 0x80 {
-            return n;
-        }
-    }
-}
-
-fn name(b: &[u8], i: &mut usize) -> String {
-    let n = leb(b, i);
-    let s = String::from_utf8(b[*i..*i + n].to_vec()).unwrap();
-    *i += n;
-    s
-}
-
-/// `(module, field, kind)` of the import section.
-fn imports(b: &[u8]) -> Vec<(String, String, u8)> {
-    assert_eq!(&b[..8], b"\0asm\x01\0\0\0");
-    let (mut i, mut out) = (8, Vec::new());
-    while i < b.len() {
-        let id = b[i];
-        i += 1;
-        let size = leb(b, &mut i);
-        let end = i + size;
-        if id == 2 {
-            for _ in 0..leb(b, &mut i) {
-                let (m, f) = (name(b, &mut i), name(b, &mut i));
-                let kind = b[i];
-                i += 1;
-                // A function: its type; the rest is refused below.
-                assert_eq!(kind, 0, "{m}.{f}: not a function");
-                leb(b, &mut i);
-                out.push((m, f, kind));
-            }
-        }
-        i = end;
-    }
-    out
+/// `(module, field)` of the import section.
+fn imports(b: &[u8]) -> Vec<(String, String)> {
+    build::imports(b).unwrap()
 }
 
 #[test]
 fn imports_ptyrc_only() {
     let found = imports(confetti());
     assert!(!found.is_empty());
-    for (m, f, _) in &found {
+    for (m, f) in &found {
         assert_eq!(m, "ptyrc", "{m}.{f}");
     }
 }

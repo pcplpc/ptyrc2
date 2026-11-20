@@ -26,7 +26,16 @@ const ZONE_HINT: &str = "an IANA name, as Europe/Paris; \"local\": the machine's
 
 /// A method served here.
 pub(super) fn is_host(method: &str) -> bool {
-    method.starts_with("clock.") || method.starts_with("storage.") || method == "app.result"
+    matches!(
+        method,
+        "clock.now"
+            | "clock.zone"
+            | "storage.get"
+            | "storage.set"
+            | "storage.remove"
+            | "storage.list"
+            | "app.result"
+    )
 }
 
 /// The params of `clock.*`: the zone, the instants (None: now).
@@ -290,6 +299,16 @@ mod tests {
             let e = clock_params("clock.zone", &bad).unwrap_err();
             assert_eq!(e.code, ErrorCode::BadParams, "{bad}");
         }
+    }
+
+    #[test]
+    fn the_host_methods_are_listed() {
+        let listed = crate::grants::METHODS
+            .iter()
+            .filter(|m| is_host(m.0))
+            .count();
+        assert_eq!(listed, 7);
+        assert!(!is_host("clock.later") && !is_host("storage.wipe"));
     }
 
     #[test]

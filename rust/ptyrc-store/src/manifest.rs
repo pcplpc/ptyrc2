@@ -538,11 +538,7 @@ impl Cx<'_> {
             Some((_, v)) => match v.get_ref() {
                 DeValue::Boolean(b) => *b,
                 _ => {
-                    return Err(self.err(
-                        v.span(),
-                        "[app] wait: not true or false".to_string(),
-                        "wait = true",
-                    ));
+                    return Err(self.err(v.span(), "[app] wait: not true or false", "wait = true"));
                 }
             },
         };

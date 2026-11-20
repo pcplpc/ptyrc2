@@ -1,9 +1,10 @@
 # ptyrc-store
 
 Store apps without the engine: the manifest, the origin, the fetch, the
-tree check, the install, the registry, its index, page and review.
-Plan: `plan/store-model.md`. Not here: the Rust build, the runner, the
-CLI (`ptyrc store`, `ptyrc dev` in `ptyrc-cli`), the grants.
+tree check, the build of a Rust app, the install, the registry, its
+index, page and review. Plan: `plan/store-model.md`. Not here: the
+runner, the CLI (`ptyrc store`, `ptyrc dev` in `ptyrc-cli`), the
+grants.
 
 Every fallible call returns `Result<T, Error>`; `Error { kind, message,
 hint }`: `message` says what was refused (manifest errors as
@@ -61,6 +62,52 @@ let checked = check(&tree)?;                         // or DirTree::new(dir)
 - `DirTree` skips, at its root, `.git` and a directory holding
   `CACHEDIR.TAG` (cargo's `target/`).
 
+## Build
+
+A Rust app by `rustc` alone (decision 20): std and `ptyrc-app`, no
+other crate, no build script, no macro crate. `BUILD-PROFILE.md`: the
+profile, what it holds, what is left.
+
+```rust
+let toolchain = build::Toolchain::find()?;            // PTYRC_RUSTC, else rustc
+let built = build::build(&tree, &checked, &work, &toolchain, &build::Options::default())?;
+install::install_built(&dirs, &origin, &tree, &checked, Some(&built.wasm), ...)?;
+```
+
+- `Toolchain::find`: `PTYRC_RUSTC` or `rustc` on `PATH`, asked its
+  sysroot from `/`; then `<sysroot>/bin/rustc`, not the rustup proxy.
+  No `rustc`, or no standard library for `wasm32-unknown-unknown`:
+  `ErrorKind::Build`, the hint says how to get them.
+- `build::sources(tree, checked) -> Vec<Error>`: the rule (`RULE`,
+  named in each hint). Refused: `build.rs`; in `Cargo.toml` a
+  dependency other than `ptyrc-app` (`[dev-dependencies]` stay the
+  author's), `[package] build`, `[lib] proc-macro`; a root `app.wasm`;
+  in the sources `#![feature]`, `#[link]`, `#[proc_macro*]`,
+  `#![crate_type]`, `extern crate` of a crate but `std`, `core`,
+  `alloc`, `ptyrc_app`; `include_str!`, `include_bytes!`, `include!`,
+  `#[path]` but with a literal path inside the tree; one of these macros
+  named other than as called. `vendor/ptyrc-app/` is not read.
+- `build::build(tree, checked, work, toolchain, options) -> Built {
+  wasm, profile, missing, rustc, messages }`: `sources` first; the
+  manifest's `rustc` against the toolchain; in `work` (made, or emptied
+  if it holds `.ptyrc-build`): the tree but `vendor/ptyrc-app/`, and
+  `PTYRC_APP`, the sources of `sdk/rust/ptyrc-app` embedded in this
+  crate. `ptyrc-app` as an rlib, then the app as a `cdylib` with
+  `--extern ptyrc_app`; `--edition 2024`, `-C opt-level=s`, `panic=abort`,
+  `codegen-units=1`, `lto`, `strip=symbols`; the environment cleared;
+  paths in messages from the app's root.
+- Each `rustc` under the profile (Linux, Landlock), from a thread that
+  restricts itself and spawns it; the rest of the process is not
+  restricted. No profile: refused, unless `Options::unconfined` (`store
+  add --force`; `ptyrc dev`, the author's own tree): built, `missing`
+  says why.
+- `Bounds` (`BOUNDS`): 300 s for both runs, then the process group
+  killed; `RLIMIT_AS` 4 GiB; `RLIMIT_FSIZE` four times the module; the
+  module 16 MiB. `build::imports(wasm)`: every import is of `ptyrc`,
+  else refused (the runner refuses it too).
+- `build::vendored_differs`: the files of `vendor/ptyrc-app/` that are
+  not `PTYRC_APP` (`ptyrc dev check` says so).
+
 ## Install
 
 - `Dirs { data, state, cache, config }`: `Dirs::from_env()` (XDG, else
@@ -73,8 +120,9 @@ let checked = check(&tree)?;                         // or DirTree::new(dir)
 - `install::install(dirs, origin, tree, checked, commit, tier, date)`
   -> `Installed`: copies to `<data>/ptyrc/apps/<origin>/<commit>/`
   (directories 0700, files 0400) and records it in `apps.lock` (0600).
-  A Rust app: `ErrorKind::Unsupported`, "Rust apps are not built yet";
-  `install::supported(checked)` says it before.
+  A script app. `install::install_built(..., Some(module), ...)`: a Rust
+  app, its module written as `app.wasm` at the root of the tree; a Rust
+  app without one, a script app with one: refused.
 - The old tree is kept until the new one has started once: an
   `Installed` carries `previous` (the last commit that started) and
   `started`. `install::started(dirs, o)` records the start, clears
@@ -153,4 +201,6 @@ maintainer's. `Repo::commit(rev)` resolves BASE and HEAD.
 3. `choose`.
 4. `Repo::open`, `fetch`, `tree`, `check`, `tier_of`; `untested`: ask
    the user.
-5. `install::install(..., date)`, `install::prune`.
+5. A Rust app: `build::build` in `<cache>/ptyrc/build/<origin>/`,
+   removed after.
+6. `install::install_built(..., date)`, `install::prune`.

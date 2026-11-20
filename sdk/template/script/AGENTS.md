@@ -12,6 +12,7 @@ in a sandbox (WebAssembly): no file, no network, no clock but `tick`.
 | `app.js` | the app; it may import `./other.js` files of this tree |
 | `ptyrc.d.ts` | the API, typed: the whole of it. Read it first |
 | `test.sh`, `expected.txt` | the test: the screen at fixed times |
+| `tests.js` | unit tests: each export `test_*` (`ptyrc dev test --unit`) |
 | `LICENSE.txt` | GPL-3.0-or-later; the only licence accepted |
 
 ## The API
@@ -29,6 +30,10 @@ export function stop() {}          // optional; 500 ms to end
   after a change. A cell never set is a hole. Negative `at`: the right
   or bottom edge of the canvas from the right or bottom, `-1` the last
   cell.
+- A widget (a small window the driver places, in the size that fits):
+  `import { Deck } from "ptyrc/deck"`; `deck.add(tag, {big: [17, 3],
+  small: [5, 1]}, (w, h) => rows or a Canvas, {key(name) {}})`; give it
+  every `tick(now)` and `event(topic, data)`. `ptyrc.d.ts`, "ptyrc/deck".
 - `call(method, params)`: a request of the protocol (`PROTOCOL.md`);
   throws a `PtyrcError` with `code` and `hint` when refused.
 - The size: `call("session.info").size` is `[columns, rows]`; then
@@ -56,6 +61,7 @@ export function stop() {}          // optional; 500 ms to end
 ptyrc dev check            the manifest, the licence, the sizes: what the store checks
 ./test.sh                  ptyrc dev test against expected.txt
 ./test.sh --update         after a change meant to change the screen
+ptyrc dev test --unit [FILE]   the test_* exports of tests.js (or FILE): ok/FAIL, file:line:col
 ptyrc dev test . --size 80x24 --for 3s --at 0,1s,3s [--screen F | --tape F] [--seed N] [--NAME VALUE]
 ptyrc dev test . --deny shape --key 500:up --event 1s:TOPIC:JSON    a no, a key, an event
 ptyrc dev run [--NAME VALUE]   in a live session (ptyrc run -- $SHELL), restarted on save

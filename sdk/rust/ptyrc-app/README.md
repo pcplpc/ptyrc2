@@ -12,34 +12,11 @@ at the root of an app made by `ptyrc dev new` (here:
 
 ```
 myapp/
-  Cargo.toml        crate-type = ["cdylib"], depends on ptyrc-app
-  Cargo.lock
-  ptyrc-app.toml    the manifest (PROTOCOL.md, Manifest)
+  ptyrc-app.toml    the manifest (PROTOCOL.md, Manifest): rust = "src/lib.rs"
   LICENSE.txt       the GPL text
-  src/lib.rs
-```
-
-```toml
-[package]
-name = "myapp"
-version = "0.1.0"
-edition = "2024"
-license = "GPL-3.0-or-later"
-
-[workspace]
-
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-ptyrc-app = { path = "../ptyrc-app" }
-
-[profile.release]
-opt-level = "s"
-lto = true
-codegen-units = 1
-panic = "abort"
-strip = true
+  src/lib.rs        and its modules
+  Cargo.toml        optional: for cargo (`cargo test`, an editor)
+  vendor/ptyrc-app/ optional: this crate, for cargo
 ```
 
 ```rust
@@ -64,14 +41,29 @@ impl App for Clock {
 ptyrc_app::app!(Clock);
 ```
 
+## The build
+
+By `rustc` alone, at the install and by `ptyrc dev check`, `test`,
+`run` (`rust/ptyrc-store/README.md`, Build): std and this crate, ptyrc's
+own copy of it. No other crate, no `build.rs`, no procedural macro, no
+`#![feature]`, no `#[link]`; `include_str!`, `include_bytes!`, `#[path]`
+name a file of the tree. `rustup target add wasm32-unknown-unknown`
+once. By hand, the same:
+
 ```
-cargo build --release --target wasm32-unknown-unknown
-# target/wasm32-unknown-unknown/release/myapp.wasm
-ptyrc-box target/wasm32-unknown-unknown/release/myapp.wasm '{"opt": 1}'
+rustc --edition 2024 --target wasm32-unknown-unknown -C opt-level=s -C panic=abort \
+  -C codegen-units=1 --crate-type rlib --crate-name ptyrc_app -o out/libptyrc_app.rlib \
+  ptyrc-app/src/lib.rs
+rustc --edition 2024 --target wasm32-unknown-unknown -C opt-level=s -C panic=abort \
+  -C codegen-units=1 -C lto -C strip=symbols --crate-type cdylib --crate-name app \
+  --extern ptyrc_app=out/libptyrc_app.rlib -L dependency=out -o out/app.wasm src/lib.rs
+ptyrc-box out/app.wasm '{"opt": 1}'
 ```
 
-`rustup target add wasm32-unknown-unknown` once. `ptyrc-box` runs in a
-session (`PTYRC_SOCKET`); headless, through the library (Test).
+`ptyrc-box` runs in a session (`PTYRC_SOCKET`); headless, through the
+library (Test). With a `Cargo.toml` (`ptyrc-app` by path, `crate-type
+= ["cdylib"]`), `cargo test` runs the tests of pure logic natively; a
+test that reaches the host does not link.
 
 ## The model
 
@@ -104,7 +96,7 @@ session (`PTYRC_SOCKET`); headless, through the library (Test).
 | `put(sprite) -> id` | `draw.put` of a sprite as JSON (`PROTOCOL.md`, Methods) |
 | `text(x, y, rows, style) -> id` | `draw.put` of text rows at `(x, y)` of the raw frame; `style`: `{"fg": 11, "bold": true}`; a space is a hole |
 | `remove(id)` | `draw.remove` |
-| `Value`, `json!`, `json` | `serde_json` |
+| `Value`, `Map`, `json!`, `json::parse` | JSON (below) |
 
 Anything else goes through `call`: `draw.update`, `widget.*`,
 `screen.*`, `frame.*`, `batch`, effects (`put(json!({"effect":
@@ -112,6 +104,24 @@ Anything else goes through `call`: `draw.update`, `widget.*`,
 grants answers `denied`, or a result cut to the degree held
 (`"degree"` in it). `screen.*` reads the program's cells, never a
 sprite.
+
+### JSON
+
+`json`, a module of its own (no dependency):
+
+| | |
+|---|---|
+| `Value` | `Null`, `Bool(bool)`, `Number(f64)`, `String(String)`, `Array(Vec<Value>)`, `Object(Map)`; `Map`: `BTreeMap<String, Value>` |
+| `json!(...)` | JSON syntax; a value is a literal, an array, an object or any expression of a type `Into<Value>` (numbers, `bool`, `&str`, `String`, `Vec`, slices, arrays, `Option`, `Value`, references to these). Keys: string literals, `(expr)` for one computed |
+| `v["k"]`, `v[0]` | never panics: `Null` where nothing is. `v["k"] = x`: `Null` becomes an object |
+| `get(k)`, `get_mut(k)`, `pointer("/a/0")` | `Option` |
+| `as_str`, `as_bool`, `as_f64`, `as_i64`, `as_u64`, `as_array`, `as_object` (`_mut`), `is_null`, `take` | `as_i64`, `as_u64`: an integral number in range |
+| `v == "x"`, `v == 3`, `v == true` | |
+| `v.to_string()` | compact JSON; a number not finite: `null` |
+| `json::parse(&str)`, `json::parse_bytes(&[u8])`, `"..".parse::<Value>()` | `Err(json::Error { at, message })` |
+
+A number is an `f64`: an integer is exact up to 2^53; `3.0` is the
+integer 3. Keys are kept sorted.
 
 ### Canvas
 
@@ -157,9 +167,14 @@ driver: `headless`; a name the driver does not know: `unknown-method`.
 what the user does (`PROTOCOL.md`, Headless).
 
 ```rust
-// dev-dependencies: ptyrc-box = { path = ".../rust/ptyrc-box" }, serde_json
+// dev-dependencies: ptyrc-box, ptyrc-store (rust/), serde_json
 use ptyrc_box::headless::{Options, run};
-let wasm = std::fs::read("target/wasm32-unknown-unknown/release/myapp.wasm")?;
+use ptyrc_store::{DirTree, build, check};
+let tree = DirTree::new("myapp");
+let checked = check(&tree)?;
+let toolchain = build::Toolchain::find()?;
+let wasm = build::build(&tree, &checked, Path::new("work"), &toolchain,
+    &build::Options::default())?.wasm;
 let report = run(&wasm, &Options { size: (80, 24), duration_ms: 1000,
     at: vec![0, 500], args: serde_json::json!({}), seed: 1,
     ..Options::default() })?;
@@ -167,8 +182,9 @@ print!("{report}");   // the screens, the requests refused, the limits met, the 
 assert_eq!(report.end, None);
 ```
 
-`sdk/rust/tests`: builds `sdk/rust/examples/*` for the target, checks
-that every import is of `ptyrc`, runs each twice and compares the text.
+`sdk/rust/tests`: builds `sdk/rust/examples/confetti` as the store
+does, checks that every import is of `ptyrc`, runs it twice and
+compares the text.
 
 ```
 cd sdk/rust/tests && cargo test

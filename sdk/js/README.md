@@ -7,7 +7,8 @@ JavaScript interpreter that is itself a guest of ABI 1
 | | |
 |---|---|
 | `ptyrc.d.ts` | the API, typed: the whole of it. An app is written from this file |
-| `interp/` | the interpreter guest (`ptyrc-js.wasm`): QuickJS-ng and `ptyrc.c` (the natives, the loader), the module `"ptyrc"` (`prelude.js`), `build.sh`, `NOTICES` |
+| `interp/` | the interpreter guest (`ptyrc-js.wasm`): QuickJS-ng and `ptyrc.c` (the natives, the loader), the modules `"ptyrc"` (`prelude.js`) and `"ptyrc/deck"` (`deck.js`), `build.sh`, `NOTICES` |
+| `examples/clockface/` | a deck of widgets: two sizes, a canvas, a key of its widget, unit tests; the model of a deck app |
 | `examples/confetti/` | an app |
 | `examples/sand/` | one effect of the driver started, no permission; the twin of `sdk/rust/examples/sand` |
 | `examples/snake/` | `screen.shape`, `input.grab` of the arrows, each denied in turn; the twin of `sdk/rust/examples/snake` |
@@ -79,12 +80,37 @@ unchanged.
 
 ## Modules
 
-- `"ptyrc"`: the API. No file answers to that name: a file `ptyrc.js`
+- `"ptyrc"`: the API.
+- `"ptyrc/deck"`: widgets kept drawn (`Deck`, `Widget`), and the
+  pieces of an interactive one (`Keys`, `Field`, `Listing`, `cut`,
+  `fit`, `wrap`); on `"ptyrc"` alone. `deck.tick(now)` sends what
+  changed in one `batch` (one by one where `batch` answers `headless`);
+  until a `widgets` event names the variant shown, it renders each. A
+  `Canvas` goes as `cells` (runs): the driver refuses `grid` in a
+  widget. No file answers to that name: a file `ptyrc.js`
   is `"./ptyrc.js"`.
 - `"./x.js"`, `"../lib/y.js"`: files of the tree, by path relative to
   the importing file. Outside the tree, absolute, a URL: refused.
 - `"ptyrc:native"`, the host functions under the API, is served to the
   API alone, before any file of the app is read.
+
+## Bytes
+
+The engine's base64: `Uint8Array.fromBase64`, `toBase64`, `atob`,
+`btoa`. `TextEncoder`, `TextDecoder`: the prelude's, UTF-8 only, an
+invalid sequence a U+FFFD.
+
+## Unit tests
+
+`ptyrc dev test --unit [FILE]` (`ptyrc-box --unit FILE --script
+APP.js`): FILE (`tests.js`) of the app's tree loaded with `"ptyrc:unit":
+true` in `init`; `init` of the app is not called. Each export `test_*`,
+in the order of the names, runs in an `event` of its own, under its
+limits; `ok   NAME` or `FAIL NAME` and the error as logged
+(`file:line:col`); then `P passed, F failed`. A test ended by the
+runner (`time`, `stack`): the rest not run. Status 0 when all passed.
+No session: `call` answers `not-usable`. `assert`, `assertEqual`
+(deep), `assertThrows`: of `"ptyrc"`.
 
 ## Errors
 
@@ -111,8 +137,8 @@ The runner's. A loop without end, a queue of jobs without end
 (`then`, `queueMicrotask`, `await` in a loop): `time` (the epoch); the
 jobs run inside the call that queued them. Memory without end: the
 growth is refused at 64 MiB, the script gets `InternalError: out of
-memory` and the app ends. Recursion: a `RangeError` past 256 KiB of
-the interpreter's stack (about 700 frames of a small function); the
+memory` and the app ends. Recursion: a `RangeError` past 352 KiB of
+the interpreter's stack (about 1000 frames of a small function); the
 parser nested deeper: `stack`, the runner's.
 
 ## Speed

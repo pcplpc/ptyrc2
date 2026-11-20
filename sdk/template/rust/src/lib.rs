@@ -11,9 +11,14 @@ struct Clock {
     label: String,
 }
 
+/// What is shown at `now_ms`. Pure: `cargo test` runs its test natively.
+fn shown(label: &str, now_ms: u64) -> String {
+    format!("{label} = {:.1} s", now_ms as f64 / 1000.0)
+}
+
 impl Clock {
     fn draw(&mut self, now_ms: u64) {
-        let text = format!("{} = {:.1} s", self.label, now_ms as f64 / 1000.0);
+        let text = shown(&self.label, now_ms);
         self.canvas.fill(Cell {
             fg: Color::Palette(11),
             attrs: attr::BOLD,
@@ -44,3 +49,11 @@ impl App for Clock {
 }
 
 ptyrc_app::app!(Clock);
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn shown() {
+        assert_eq!(super::shown("t", 1250), "t = 1.2 s");
+    }
+}

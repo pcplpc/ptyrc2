@@ -38,7 +38,7 @@ pub mod start;
 mod storage;
 mod store;
 pub mod veil;
-mod zone;
+use ptyrc_core::zone;
 
 pub use driver::{Config, Exit, replay, run};
 pub use engine::{ConnId, Ctx, Engine, Owned, PassThrough, Reply, SessionInfo, Token};

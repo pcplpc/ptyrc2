@@ -198,14 +198,11 @@ fn of_tree(
         ))
     })?;
     let manifest = manifest::parse_bytes(&source).map_err(refused)?;
-    let script = match &manifest.app.entry {
-        Entry::Script(path) => tree.join(path),
-        Entry::Rust(_) => {
-            return Err(
-                RpcError::new(ErrorCode::NotUsable, "store: Rust apps are not built yet")
-                    .with_hint("a script app (script = \"app.js\") runs today"),
-            );
-        }
+    let text = |p: PathBuf| p.to_string_lossy().into_owned();
+    // A script, or the module built at the install.
+    let guest = match &manifest.app.entry {
+        Entry::Script(path) => vec!["--script".into(), text(tree.join(path))],
+        Entry::Rust(_) => vec![text(tree.join(ptyrc_store::build::MODULE))],
     };
     // `native/...` is the key of the shipped apps in `permissions.toml`.
     if installed.origin.starts_with("native/") {
@@ -216,18 +213,12 @@ fn of_tree(
     }
     let init = init_args(&manifest.options, args)?;
     let (declared, unknown) = declared(&manifest);
-    let text = |p: PathBuf| p.to_string_lossy().into_owned();
     let commit: String = installed.commit.chars().take(10).collect();
     Ok(Found {
         origin: installed.origin.clone(),
         name: manifest.app.id.clone(),
         tier: format!("{} {commit}", installed.tier.as_str()),
-        base: vec![
-            text(runner()?),
-            "--script".into(),
-            text(script),
-            init.to_string(),
-        ],
+        base: [vec![text(runner()?)], guest, vec![init.to_string()]].concat(),
         given: given(&manifest),
         declared,
         unknown,
