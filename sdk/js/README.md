@@ -11,6 +11,7 @@ JavaScript interpreter that is itself a guest of ABI 1
 | `examples/clockface/` | a deck of widgets: two sizes, a canvas, a key of its widget, unit tests; the model of a deck app |
 | `examples/confetti/` | an app |
 | `examples/sand/` | one effect of the driver started, no permission; the twin of `sdk/rust/examples/sand` |
+| `examples/tally/` | storage, the wall clock, `civil`, the result, each denied; the twin of `sdk/rust/examples/tally` |
 | `examples/snake/` | `screen.shape`, `input.grab` of the arrows, each denied in turn; the twin of `sdk/rust/examples/snake` |
 | `../template/` | what `ptyrc dev new` writes (embedded in `ptyrc`) |
 
@@ -93,6 +94,16 @@ unchanged.
   the importing file. Outside the tree, absolute, a URL: refused.
 - `"ptyrc:native"`, the host functions under the API, is served to the
   API alone, before any file of the app is read.
+
+## Host functions
+
+In `"ptyrc"`, over `call` (`PROTOCOL.md`, Methods; the same names as
+`ptyrc-app`'s): `now()`, `zone(name, at)`, `civil(unixMs, offsetS)`;
+`storage.get`, `.set`, `.remove`, `.keys`; `asset(name)`,
+`assetBytes(name)`, `assets()`; `file(handle)` and its `text`,
+`bytes`, `stat`, `write`, `list`, `child`; `result(value, status)`.
+Members in camelCase (`unixMs`, `offsetS`, `mtimeMs`); reads by pieces
+of 1 MiB. `Date.now()` stays session time.
 
 ## Bytes
 

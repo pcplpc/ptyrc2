@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The host functions in the driver: `clock.*`, `storage.*`,
-//! `app.result`. What reads a disk goes to the worker (`hostio`) and is
-//! answered later; the rest here. `plan/design.md`, "Host functions".
+//! `app.result`, `file.*`, `probe.*`. What reads a disk or runs `git`
+//! goes to a worker (`hostio`) and is answered later; the rest here.
+//! `plan/design.md`, "Host functions".
 
 use super::Driver;
 use crate::engine::{ConnId, Token};
+use crate::files;
 use crate::grants::Verdict;
-use crate::hostio::{Job, State};
+use crate::hostio::{Job, Lane, State};
 use crate::storage;
 use crate::zone::{self, Missing, Zone};
 use ptyrc_proto::{ErrorCode, RpcError};
@@ -17,7 +19,7 @@ use std::time::{Duration, Instant};
 const MAX_INSTANTS: usize = 64;
 /// The range of an instant, ms: that of a `Date` in a script.
 const MAX_MS: i64 = 8_640_000_000_000_000;
-/// `storage.set` a second an app, at most.
+/// `storage.set` and `file.write` a second an app, at most.
 pub(super) const WRITES_A_SECOND: u32 = 16;
 /// A result, serialised, at most.
 const MAX_RESULT: usize = 64 * 1024;
@@ -35,7 +37,101 @@ pub(super) fn is_host(method: &str) -> bool {
             | "storage.remove"
             | "storage.list"
             | "app.result"
+            | "file.stat"
+            | "file.read"
+            | "file.list"
+            | "file.write"
+            | "probe.git"
+            | "probe.system"
     )
+}
+
+/// `file.*`, as a static name.
+const FILE_METHODS: [&str; 4] = ["file.stat", "file.read", "file.list", "file.write"];
+
+/// A real `probe.git` a second an app, at most.
+const PROBE_EVERY: Duration = Duration::from_secs(1);
+
+fn not_in_batch(method: &str) -> RpcError {
+    RpcError::new(
+        ErrorCode::BadRequest,
+        format!("{method}: not allowed in a batch"),
+    )
+}
+
+/// Where `probe.git` looks: a directory named, or the working
+/// directory of the session's child, read when the job runs.
+enum Repo {
+    Named(std::path::PathBuf),
+    Child(u32),
+}
+
+/// The wall clock, epoch seconds, and the local offset then.
+fn wall(state: &mut State) -> ptyrc_probe::git::Now {
+    let ms = state.wall_ms();
+    let offset = state
+        .zone("local")
+        .map_or(0, |z| z.at(ms.div_euclid(1000)).offset_s as i64);
+    ptyrc_probe::git::Now {
+        at: ms as f64 / 1000.0,
+        offset,
+    }
+}
+
+/// `probe.git` of app `app` on the probe lane: one real read a second;
+/// sooner, the last answer to the same request.
+fn git_job(app: u64, repo: Repo, ask: ptyrc_probe::git::Ask) -> Job {
+    Box::new(move |state: &mut State| {
+        let dir = match repo {
+            Repo::Named(dir) => Some(dir),
+            // Followed when it moves: read each time.
+            Repo::Child(pid) => std::fs::read_link(format!("/proc/{pid}/cwd")).ok(),
+        };
+        let Some(dir) = dir else {
+            return Ok(json!({"repo": null, "stamp": ""}));
+        };
+        let parts: Vec<&str> = ask.parts.iter().map(|p| p.name()).collect();
+        let key = json!([dir.to_string_lossy(), parts, ask.log]);
+        let now = wall(state);
+        let at = Instant::now();
+        let git = state.git.clone();
+        let probes = state.probes.entry(app).or_default();
+        if let Some((last, asked, answer)) = &probes.git
+            && at.duration_since(*last) < PROBE_EVERY
+        {
+            if *asked != key {
+                return Err(
+                    RpcError::new(ErrorCode::NotUsable, "probe.git: one read a second").with_hint(
+                        "asked again within the second, the same params get the last answer",
+                    ),
+                );
+            }
+            let stamp = &answer["stamp"];
+            return Ok(match ask.since.as_deref() == stamp.as_str() {
+                true => json!({"unchanged": true, "stamp": stamp}),
+                false => answer.clone(),
+            });
+        }
+        let answer = ptyrc_probe::git::probe_with(&git, &dir, &ask, now);
+        match (answer.get("unchanged").is_some(), &mut probes.git) {
+            (true, Some(kept)) if kept.1 == key => kept.0 = at,
+            (true, _) => {}
+            (false, kept) => *kept = Some((at, key, answer.clone())),
+        }
+        Ok(answer)
+    })
+}
+
+/// `probe.system` of app `app` on the probe lane, its sampler kept.
+fn system_job(app: u64, ask: ptyrc_probe::system::Ask) -> Job {
+    Box::new(move |state: &mut State| {
+        let now = state.wall_ms() as f64 / 1000.0;
+        let probes = state.probes.entry(app).or_default();
+        let sampler = probes
+            .sampler
+            .get_or_insert_with(ptyrc_probe::system::Sampler::new);
+        Ok(sampler.probe(&ask, now))
+    })
 }
 
 /// The params of `clock.*`: the zone, the instants (None: now).
@@ -150,6 +246,7 @@ impl Driver {
             Err(_) => None,
         };
         let lowered = matches!(self.verdict(conn, method, &params), Verdict::Lower(_));
+        let mut lane = Lane::Disk;
         let job: Job = match method {
             "clock.now" | "clock.zone" => {
                 let method = if method == "clock.now" {
@@ -167,6 +264,51 @@ impl Driver {
                 clock_job(method, zone, at)
             }
             "app.result" => return Some(self.app_result(app, &params)),
+            "probe.git" | "probe.system" => {
+                if lowered {
+                    return Some(Ok(match method {
+                        "probe.git" => ptyrc_probe::git::not_held(),
+                        _ => ptyrc_probe::system::not_held(&Default::default()),
+                    }));
+                }
+                if in_batch {
+                    return Some(Err(not_in_batch(method)));
+                }
+                let Some(app) = app.filter(|_| identity.is_some()) else {
+                    return Some(Err(no_app("a probe")));
+                };
+                lane = Lane::Probe;
+                match self.probe_job(conn, app, method, &params) {
+                    Ok(job) => job,
+                    Err(e) => return Some(Err(e)),
+                }
+            }
+            "file.stat" | "file.read" | "file.list" | "file.write" => {
+                if in_batch {
+                    return Some(Err(not_in_batch(method)));
+                }
+                let Some(app) = app.filter(|_| identity.is_some()) else {
+                    return Some(Err(no_app("a file")));
+                };
+                let handle = params.get("file").and_then(Value::as_str).unwrap_or("");
+                let Some((path, kind, writable)) = self.file_of(conn, handle) else {
+                    return Some(Err(files::no_handle(&params)));
+                };
+                let method = FILE_METHODS
+                    .into_iter()
+                    .find(|m| *m == method)
+                    .expect("listed");
+                let request = match files::request(method, &params, path, kind, writable) {
+                    Ok(request) => request,
+                    Err(e) => return Some(Err(e)),
+                };
+                if method == "file.write"
+                    && let Err(e) = self.count_write(app, method)
+                {
+                    return Some(Err(e));
+                }
+                Box::new(move |_: &mut State| request.run())
+            }
             _ => {
                 let Some(who) = identity else {
                     return Some(Err(no_app("storage")));
@@ -182,14 +324,11 @@ impl Driver {
             }
         };
         if in_batch {
-            return Some(Err(RpcError::new(
-                ErrorCode::BadRequest,
-                format!("{method}: not allowed in a batch"),
-            )));
+            return Some(Err(not_in_batch(method)));
         }
         if method == "storage.set"
             && let Some(app) = app
-            && let Err(e) = self.count_write(app)
+            && let Err(e) = self.count_write(app, method)
         {
             return Some(Err(e));
         }
@@ -200,7 +339,7 @@ impl Driver {
             )));
         };
         let token = Token(self.next_token);
-        if let Err(e) = hostio.submit(token, job) {
+        if let Err(e) = hostio.submit(lane, token, job) {
             return Some(Err(e));
         }
         // `pump_conn` keeps it pending under the token allocated last.
@@ -245,8 +384,60 @@ impl Driver {
         Ok(json!({}))
     }
 
-    /// One `storage.set` of app `id`: refused past the rate.
-    fn count_write(&mut self, id: u64) -> Result<(), RpcError> {
+    /// `probe.*` held: the params checked, the job.
+    fn probe_job(
+        &self,
+        conn: ConnId,
+        app: u64,
+        method: &str,
+        params: &Value,
+    ) -> Result<Job, RpcError> {
+        let bad = |e: String| RpcError::bad_params(format!("{method}: {e}"));
+        if method == "probe.system" {
+            let ask = ptyrc_probe::system::Ask::from_json(params).map_err(bad)?;
+            return Ok(system_job(app, ask));
+        }
+        let ask = ptyrc_probe::git::Ask::from_json(params).map_err(bad)?;
+        let repo = match params.get("repo") {
+            None | Some(Value::Null) => Repo::Child(self.info.pid),
+            Some(handle) => {
+                let named = handle.as_str().and_then(|h| self.file_of(conn, h));
+                let Some((path, kind, _)) = named else {
+                    let mut params = params.clone();
+                    params["file"] = handle.clone();
+                    return Err(files::no_handle(&params));
+                };
+                if kind != ptyrc_store::FileKind::Dir {
+                    return Err(RpcError::bad_params(format!(
+                        "probe.git: repo: {} is a file, not a directory",
+                        path.file_name().unwrap_or_default().to_string_lossy()
+                    ))
+                    .with_hint("repo: a dir handle, or absent: the directory of the program"));
+                }
+                Repo::Named(path)
+            }
+        };
+        Ok(git_job(app, repo, ask))
+    }
+
+    /// The probes of the apps that left the table, dropped.
+    pub(super) fn probes_gone(&mut self, ids: &[u64]) {
+        let Some(hostio) = &self.hostio else {
+            return;
+        };
+        for &id in ids {
+            // Answered under a token no request holds: dropped.
+            let job: Job = Box::new(move |state: &mut State| {
+                state.probes.remove(&id);
+                Ok(Value::Null)
+            });
+            let _ = hostio.submit(Lane::Probe, Token(u64::MAX), job);
+        }
+    }
+
+    /// One `storage.set` or `file.write` of app `id`: refused past the
+    /// rate.
+    fn count_write(&mut self, id: u64, method: &str) -> Result<(), RpcError> {
         let now = Instant::now();
         if self.writes.len() > 256 {
             let second = Duration::from_secs(1);
@@ -257,7 +448,7 @@ impl Driver {
             true => Ok(()),
             false => Err(RpcError::new(
                 ErrorCode::NotUsable,
-                format!("storage.set: {WRITES_A_SECOND} a second at most"),
+                format!("{method}: {WRITES_A_SECOND} a second at most"),
             )
             .with_hint("keep the value in memory; write it when it changes, or on `stop`")),
         }
@@ -307,7 +498,7 @@ mod tests {
             .iter()
             .filter(|m| is_host(m.0))
             .count();
-        assert_eq!(listed, 7);
+        assert_eq!(listed, 13);
         assert!(!is_host("clock.later") && !is_host("storage.wipe"));
     }
 
@@ -334,5 +525,84 @@ mod tests {
         let zone = clock_answer("clock.zone", &paris, t, Some(vec![1_774_746_000_000]));
         assert_eq!(zone["offsets"][0]["offset_s"], 7200);
         assert_eq!(zone["offsets"][0]["abbr"], "CEST");
+    }
+    fn repository(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("ptyrc-probe-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = std::process::Command::new("git")
+            .args(["init", "-q", "-b", "main"])
+            .current_dir(&dir)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+        dir.canonicalize().unwrap()
+    }
+
+    #[test]
+    fn a_probe_a_second_then_the_last_answer() {
+        let dir = repository("rate");
+        let mut state = State::bare();
+        let ask = |p: Value| ptyrc_probe::git::Ask::from_json(&p).unwrap();
+        let git = |state: &mut State, p: Value| git_job(1, Repo::Named(dir.clone()), ask(p))(state);
+        let first = git(&mut state, json!({"parts": ["head"]})).unwrap();
+        assert_eq!(
+            first["repo"]["name"],
+            dir.file_name().unwrap().to_str().unwrap()
+        );
+        assert!(
+            !first.to_string().contains(dir.to_str().unwrap()),
+            "{first}"
+        );
+        let stamp = first["stamp"].clone();
+        // Sooner than a second: the last answer, or unchanged.
+        assert_eq!(git(&mut state, json!({"parts": ["head"]})).unwrap(), first);
+        assert_eq!(
+            git(&mut state, json!({"parts": ["head"], "since": stamp})).unwrap(),
+            json!({"unchanged": true, "stamp": stamp})
+        );
+        let e = git(&mut state, json!({"parts": ["log"]})).unwrap_err();
+        assert_eq!(e.code, ErrorCode::NotUsable);
+        // Another app is not limited by this one; gone, its state too.
+        let other = git_job(2, Repo::Named(dir.clone()), ask(json!({})))(&mut state);
+        assert!(other.unwrap()["repo"].is_object());
+        let sys = ptyrc_probe::system::Ask::from_json(&json!({"parts": ["glance"]})).unwrap();
+        let answer = system_job(2, sys)(&mut state).unwrap();
+        assert!(answer["glance"].is_object(), "{answer}");
+        assert!(state.probes[&2].sampler.is_some());
+        state.probes.remove(&2);
+        // No such directory, or none: no repository.
+        let none = git_job(3, Repo::Child(u32::MAX), ask(json!({})))(&mut state).unwrap();
+        assert_eq!(none, json!({"repo": null, "stamp": ""}));
+    }
+
+    /// A `git` that answers where the repository is, then hangs: each
+    /// command is cut at 2 s. All the parts: 8 commands, 16 s on the
+    /// probe lane (measured); `head`: one.
+    #[test]
+    fn a_hung_git_is_cut() {
+        let dir = repository("hung");
+        let real = ["/usr/bin/git", "/bin/git", "/usr/local/bin/git"]
+            .into_iter()
+            .find(|p| std::path::Path::new(p).is_file())
+            .expect("git");
+        let fake = dir.with_extension("git");
+        let script = format!(
+            "#!/bin/sh\ncase \"$*\" in *rev-parse*) exec {real} \"$@\";; esac\nexec sleep 30\n"
+        );
+        std::fs::write(&fake, script).unwrap();
+        let mode = std::os::unix::fs::PermissionsExt::from_mode(0o755);
+        std::fs::set_permissions(&fake, mode).unwrap();
+        let mut state = State::bare();
+        state.git = fake;
+        let t0 = Instant::now();
+        let ask = ptyrc_probe::git::Ask::from_json(&json!({"parts": ["head"]})).unwrap();
+        let answer = git_job(1, Repo::Named(dir), ask)(&mut state).unwrap();
+        let took = t0.elapsed();
+        assert!(answer["repo"]["head"].is_object(), "{answer}");
+        assert!(took > Duration::from_millis(1900), "{took:?}");
+        assert!(took < Duration::from_secs(6), "{took:?}");
     }
 }

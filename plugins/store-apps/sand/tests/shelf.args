@@ -1,0 +1,2 @@
+# test_sand: the grains rest on a shelf of words, never over a letter.
+--size 40x10 --for 3s --at 1s,2s,3s --rate 400 --now --screen tests/shelf.screen

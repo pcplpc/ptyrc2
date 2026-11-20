@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "sand"
+version = "0.2.0"
+summary = "A thin stream of sand piles on the text of an idle pane."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "frame"
+random = [["--now"]]
+
+# The effect `sand` of the driver reads the text under it as its walls
+# and answers nothing: the app learns nothing of the screen but whether
+# the pane is idle.
+
+[permissions]
+shape = "waits until the pane is idle before pouring"
+pointer = "the pointer takes the sand it is over (--hover)"
+clicks = "a click on the pile blows it up (--bomb)"
+clicks-grab = "the clicks on the pile do not reach the program (--bomb)"
+
+[options]
+rate = { type = "float", default = 60.0, doc = "grains a second" }
+cursor = { type = "bool", default = false, doc = "pour over the cursor's column; from the middle while the cursor is out of the pane or on its first column" }
+hover = { type = "bool", default = false, needs = ["pointer"], doc = "the pointer takes the sand it is over; the pile falls in" }
+bomb = { type = "bool", default = false, needs = ["clicks", "clicks-grab"], doc = "a click on the pile blows it up, the longer held the stronger (1.5 s at most), towards where it is released" }
+now = { type = "bool", default = false, doc = "do not wait for the pane to be idle" }
+all = { type = "bool", default = false, short = "a", needs = ["clicks", "clicks-grab"], doc = "--cursor, --bomb and --now" }

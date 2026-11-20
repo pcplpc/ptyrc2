@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The host functions through a session: `clock.*`, `storage.*`,
-//! `app.result`, held, not held, and of the user's connection.
+//! `app.result`, `file.*`, `probe.*`, held, not held, and of the
+//! user's connection.
 
 mod common;
 
@@ -80,6 +81,8 @@ fn held_by_an_app() {
             "batch",
             json!({"calls": [{"method": "storage.list"}, {"method": "app.result", "params": {"value": "last", "status": 4}}]}),
         ),
+        // A native app is given no file.
+        ("file.stat", json!({"file": "f0"})),
     ];
     let (out, info) = run(&sb, "keeper", &calls);
     let now = answer(&out, 0).unwrap();
@@ -114,6 +117,7 @@ fn held_by_an_app() {
     let batch = answer(&out, 8).unwrap();
     assert_eq!(batch["results"][0]["error"]["code"], "bad-request");
     assert_eq!(batch["results"][1]["result"], json!({}));
+    assert!(answer(&out, 9).unwrap_err().contains("no-file"));
     // The last result holds, told with the entry.
     assert_eq!(info["result"], json!({"value": "last", "status": 4}));
     let file = sb.dir.join("state/ptyrc/storage/native%2Fkeeper/scores");
@@ -135,6 +139,9 @@ fn not_held_lowered_or_denied() {
         ("clock.now", json!({})),
         ("clock.zone", json!({"zone": "Asia/Tokyo", "at": [5]})),
         ("storage.get", json!({"key": "scores"})),
+        ("probe.git", json!({})),
+        ("probe.system", json!({"parts": ["disks"]})),
+        ("file.write", json!({"file": "f0", "text": "x"})),
     ];
     let (out, info) = run(&sb, "plain", &calls);
     let now = answer(&out, 0).unwrap();
@@ -154,6 +161,17 @@ fn not_held_lowered_or_denied() {
     );
     let e = answer(&out, 2).unwrap_err();
     assert!(e.contains("denied") && e.contains("`storage`"), "{e}");
+    // Not held: the probes answered empty, a write denied.
+    assert_eq!(
+        answer(&out, 3).unwrap(),
+        json!({"repo": null, "degree": "none"})
+    );
+    assert_eq!(
+        answer(&out, 4).unwrap(),
+        json!({"glance": {}, "logins": {}, "listeners": [], "disks": [], "degree": "none"})
+    );
+    let e = answer(&out, 5).unwrap_err();
+    assert!(e.contains("denied") && e.contains("`files-write`"), "{e}");
     assert_eq!(info["result"], Value::Null);
 }
 
@@ -170,6 +188,9 @@ fn the_users_connection() {
     for (method, params) in [
         ("storage.get", json!({"key": "a"})),
         ("app.result", json!({"value": 1})),
+        ("file.read", json!({"file": "f0"})),
+        ("probe.git", json!({})),
+        ("probe.system", json!({})),
     ] {
         let Err(ClientError::Rpc(e)) = client.call(method, params) else {
             panic!("{method}: answered");
@@ -339,4 +360,115 @@ fn a_result_to_the_caller() {
     let out = sb.run(&["store", "rm", "answers", "--purge"]);
     assert!(out.status.success(), "{out:?}");
     assert!(!kept.exists() && !kept.parent().unwrap().exists());
+}
+
+const FILES_MANIFEST: &str = "[permissions]\nfiles = \"the files named\"\n\
+    files-write = \"written back\"\nprobe-git = \"the branch\"\nprobe-system = \"the load\"\n\
+    [options]\nsave = { type = \"file\", write = true, doc = \"kept\" }\n\
+    pics = { type = \"dir\", doc = \"pictures\" }\n";
+
+const FILES: &str = r#"
+import { call, exit } from "ptyrc";
+function t(m, p) { try { return call(m, p); } catch (e) { return { error: e.code }; } }
+export function init(args) {
+  const f = args.save.file, d = args.pics.file;
+  const out = [
+    t("file.stat", { file: f }),
+    t("file.write", { file: f, text: "saved" }),
+    t("file.read", { file: f }),
+    t("file.list", { file: d }),
+    t("file.read", { file: d, name: "ship.pic" }),
+    t("file.read", { file: d, name: "../x" }),
+    t("file.read", { file: d, name: "link" }),
+    t("file.read", { file: "f9" }),
+    t("file.read", { file: "/etc/passwd" }),
+    t("probe.git", { parts: ["head"] }),
+    t("probe.git", { repo: f }),
+    t("probe.git", { repo: d, parts: ["head"] }),
+    t("probe.system", { parts: ["glance"] }),
+    t("batch", { calls: [{ method: "file.stat", params: { file: f } }] }),
+    args,
+  ];
+  call("app.result", { value: out });
+  exit(0);
+}
+export function tick(now) {}
+export function event(topic, data) {}
+"#;
+
+#[test]
+fn files_and_probes_of_a_store_app() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        assert!(
+            std::env::var_os("PTYRC_REQUIRE_JS").is_none(),
+            "no interpreter"
+        );
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let runner = Path::new(BIN).with_file_name("ptyrc-box");
+    if !runner.is_file() {
+        let built = std::process::Command::new(env!("CARGO"))
+            .args(["build", "-p", "ptyrc-box", "--bin", "ptyrc-box"])
+            .status()
+            .unwrap();
+        assert!(built.success());
+    }
+    let sb = Sandbox::new("hostfn-files");
+    install(&sb, "files", FILES_MANIFEST, FILES);
+    let save = sb.dir.join("save.txt");
+    std::fs::write(&save, "old").unwrap();
+    std::fs::set_permissions(&save, std::os::unix::fs::PermissionsExt::from_mode(0o640)).unwrap();
+    let pics = sb.dir.join("pics");
+    std::fs::create_dir_all(&pics).unwrap();
+    std::fs::write(pics.join("ship.pic"), "<>").unwrap();
+    std::os::unix::fs::symlink("/etc/passwd", pics.join("link")).unwrap();
+    let mut driver = sb.ptyrc();
+    driver
+        .env("PTYRC_BOX", &runner)
+        .env("PTYRC_JS", &js)
+        .args(["run", "--name", "h", "--headless", "--", "cat"])
+        .stdin(std::process::Stdio::null());
+    let _driver = common::Proc(driver.spawn().unwrap());
+    common::wait_for(
+        || std::os::unix::net::UnixStream::connect(sb.socket("h")).is_ok(),
+        "socket",
+    );
+    let (save_arg, pics_arg) = (save.to_str().unwrap(), pics.to_str().unwrap());
+    let out = sb.run(&[
+        "-s", "h", "--json", "app", "files", "--save", save_arg, "--pics", pics_arg, "--wait",
+    ]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let got: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(got[0]["exists"], true, "{got}");
+    assert_eq!(got[0]["size"], 3);
+    assert_eq!(got[1]["size"], 5, "{got}");
+    assert_eq!(std::fs::read_to_string(&save).unwrap(), "saved");
+    let mode =
+        std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&save).unwrap().permissions());
+    assert_eq!(mode & 0o777, 0o640);
+    assert_eq!(got[2]["text"], "saved");
+    assert_eq!(got[2]["mtime_ms"], got[1]["mtime_ms"]);
+    assert_eq!(
+        got[3],
+        json!({"entries": [{"name": "ship.pic", "size": 2}]})
+    );
+    assert_eq!(got[4]["text"], "<>");
+    assert_eq!(got[5], json!({"error": "bad-params"}));
+    assert_eq!(got[6], json!({"error": "no-file"}));
+    assert_eq!(got[7], json!({"error": "no-file"}));
+    assert_eq!(got[8], json!({"error": "no-file"}));
+    assert!(got[9]["stamp"].is_string(), "{got}");
+    assert_eq!(got[10], json!({"error": "bad-params"}));
+    // Another request within the second of a real read.
+    assert_eq!(got[11], json!({"error": "not-usable"}));
+    assert!(got[12]["glance"]["cores"].is_array(), "{got}");
+    assert_eq!(got[13]["results"][0]["error"]["code"], "bad-request");
+    // No path reached the guest.
+    let text = got.to_string();
+    assert!(
+        !text.contains(save_arg) && !text.contains(pics_arg),
+        "{text}"
+    );
 }

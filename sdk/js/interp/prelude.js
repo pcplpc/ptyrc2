@@ -272,6 +272,141 @@ class TextDecoder {
 globalThis.TextEncoder = TextEncoder;
 globalThis.TextDecoder = TextDecoder;
 
+// ---- host functions: clock, storage, assets, files, result ----
+
+const PIECE = 1 << 20;
+
+function offsetOf(o) {
+  return { at: o.at, offsetS: o.offset_s, abbr: o.abbr, next: o.next ?? null };
+}
+
+export function now() {
+  const r = call("clock.now");
+  const out = { unixMs: r.unix_ms, zone: r.zone, offsetS: r.offset_s, abbr: r.abbr, next: r.next ?? null };
+  if (r.degree) out.degree = r.degree;
+  return out;
+}
+
+export function zone(name, at) {
+  const p = { zone: name };
+  if (at !== undefined) p.at = Array.isArray(at) ? at : [at];
+  const r = call("clock.zone", p);
+  const out = { zone: r.zone, offsets: r.offsets.map(offsetOf) };
+  if (r.degree) out.degree = r.degree;
+  return out;
+}
+
+export function civil(unixMs, offsetS = 0) {
+  const d = new Date((Math.floor(unixMs / 1000) + offsetS) * 1000);
+  return {
+    year: d.getUTCFullYear(),
+    month: d.getUTCMonth() + 1,
+    day: d.getUTCDate(),
+    hour: d.getUTCHours(),
+    minute: d.getUTCMinutes(),
+    second: d.getUTCSeconds(),
+    weekday: d.getUTCDay(),
+  };
+}
+
+export const storage = Object.freeze({
+  get(key) {
+    return call("storage.get", { key }).value ?? null;
+  },
+  set(key, value) {
+    if (typeof value !== "string") throw new TypeError("storage.set(key, value): value is a string (JSON.stringify it)");
+    return call("storage.set", { key, value }).used;
+  },
+  remove(key) {
+    call("storage.remove", { key });
+  },
+  keys() {
+    return call("storage.list").keys.map((k) => k.key);
+  },
+});
+
+// Bytes of `method` whole, by pieces of 1 MiB.
+function readAll(method, params) {
+  const pieces = [];
+  let size = 0;
+  for (;;) {
+    const r = call(method, { ...params, as: "base64", offset: size, len: PIECE });
+    const b = Uint8Array.fromBase64(r.base64);
+    pieces.push(b);
+    size += b.length;
+    if (r.eof !== false || !b.length) break;
+  }
+  const all = new Uint8Array(size);
+  let at = 0;
+  for (const b of pieces) all.set(b, at), (at += b.length);
+  return all;
+}
+
+function readText(method, params) {
+  const r = call(method, { ...params, as: "text" });
+  return r.eof !== false ? r.text : new TextDecoder().decode(readAll(method, params));
+}
+
+export function asset(name) {
+  return readText("asset.read", { name });
+}
+
+export function assetBytes(name) {
+  return readAll("asset.read", { name });
+}
+
+export function assets() {
+  return call("asset.list").assets.map((a) => a.name);
+}
+
+class HostFile {
+  #child;
+  constructor(handle, name, child) {
+    this.handle = handle;
+    this.name = name;
+    this.#child = child;
+  }
+  get #params() {
+    return this.#child === null ? { file: this.handle } : { file: this.handle, name: this.#child };
+  }
+  text() {
+    return readText("file.read", this.#params);
+  }
+  bytes() {
+    return readAll("file.read", this.#params);
+  }
+  stat() {
+    const r = call("file.stat", this.#params);
+    return { exists: !!r.exists, size: r.size ?? 0, mtimeMs: r.mtime_ms ?? 0 };
+  }
+  write(content, { ifMtime } = {}) {
+    const p = this.#params;
+    if (typeof content === "string") p.text = content;
+    else if (content instanceof Uint8Array) p.base64 = content.toBase64();
+    else throw new TypeError("file.write(content): a string or a Uint8Array");
+    if (ifMtime != null) p.if_mtime_ms = ifMtime;
+    const r = call("file.write", p);
+    return { size: r.size, mtimeMs: r.mtime_ms };
+  }
+  list() {
+    return call("file.list", this.#params).entries.map((e) => e.name);
+  }
+  child(name) {
+    return new HostFile(this.handle, name, name);
+  }
+}
+
+export function file(handle) {
+  if (Array.isArray(handle)) handle = handle[0];
+  if (typeof handle === "string") return new HostFile(handle, "", null);
+  if (typeof handle?.file === "string") return new HostFile(handle.file, handle.name ?? "", null);
+  throw new TypeError('file(handle): "f0", or the value of a file option in init(args): {file, name}');
+}
+
+export function result(value, status = 0) {
+  call("app.result", { value, status });
+}
+
 // ---- unit tests ----
 
 export class AssertionError extends Error {

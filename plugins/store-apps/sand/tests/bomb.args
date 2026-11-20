@@ -1,0 +1,5 @@
+# --bomb (_cli.Nozzle): a press on the pile held 600 ms, released in
+# place: the sand around is thrown up.
+--size 30x6 --for 3s --at 1.5s,2s,2.5s,3s --rate 300 --now --bomb
+--event 2000:mouse:{"sprite":2,"action":"press","at":[15,5],"x":15,"y":5}
+--event 2600:mouse:{"sprite":2,"action":"release","at":[15,5],"x":15,"y":5}

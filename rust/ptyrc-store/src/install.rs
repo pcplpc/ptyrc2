@@ -12,6 +12,7 @@ use crate::error::{Error, ErrorKind, Result};
 use crate::git::is_oid;
 use crate::origin::Origin;
 use crate::registry::Tier;
+use crate::shipped::Shipped;
 use crate::tree::{Checked, Tree};
 
 /// The base directories; each path below appends `ptyrc/`.
@@ -21,6 +22,8 @@ pub struct Dirs {
     pub state: PathBuf,
     pub cache: PathBuf,
     pub config: PathBuf,
+    /// The shipped trees ([`crate::shipped::root`]); none: no shipped app.
+    pub shipped: Option<PathBuf>,
 }
 
 impl Dirs {
@@ -44,21 +47,24 @@ impl Dirs {
                 .with_hint("set HOME")
             })
         };
+        let data = pick("XDG_DATA_HOME", ".local/share")?;
         Ok(Dirs {
-            data: pick("XDG_DATA_HOME", ".local/share")?,
+            shipped: crate::shipped::root(&data),
+            data,
             state: pick("XDG_STATE_HOME", ".local/state")?,
             cache: pick("XDG_CACHE_HOME", ".cache")?,
             config: pick("XDG_CONFIG_HOME", ".config")?,
         })
     }
 
-    /// All four under one root: `root/{data,state,cache,config}`.
+    /// All under one root: `root/{data,state,cache,config,shipped}`.
     pub fn under(root: &Path) -> Dirs {
         Dirs {
             data: root.join("data"),
             state: root.join("state"),
             cache: root.join("cache"),
             config: root.join("config"),
+            shipped: Some(root.join("shipped")),
         }
     }
 
@@ -443,10 +449,50 @@ pub fn prune(dirs: &Dirs, origin: &Origin) -> Result<Vec<String>> {
     Ok(removed)
 }
 
-/// The tree of an installed app, by origin or `id` ([`Lock::resolve`]):
-/// what `ptyrc app ID|ORIGIN` starts.
+/// Every installed app, sorted by origin, then the shipped ones
+/// ([`crate::shipped`]) whose manifest reads.
+pub fn all(dirs: &Dirs) -> Result<Vec<Installed>> {
+    let mut apps = list(dirs)?;
+    let shipped = crate::shipped::list(dirs).into_iter().flatten();
+    apps.extend(shipped.map(|s| s.installed()));
+    Ok(apps)
+}
+
+/// An installed app ([`Lock::resolve`]) or a shipped one: `ptyrc/NAME`,
+/// or its id when no installed app has it (an installed app hides a
+/// shipped one of its id, which then goes by its origin).
+pub fn resolve(dirs: &Dirs, name: &str) -> Result<(Installed, Option<Shipped>)> {
+    if crate::shipped::name_of(name).is_some() {
+        let s = crate::shipped::get(dirs, name).ok_or_else(|| {
+            Error::new(
+                ErrorKind::Install,
+                format!("{name}: not shipped with this ptyrc"),
+            )
+            .with_hint("ptyrc store ls")
+        })??;
+        return Ok((s.installed(), Some(s)));
+    }
+    match Lock::load(dirs)?.resolve(name) {
+        Ok(e) => Ok((e.clone(), None)),
+        Err(e) => match crate::shipped::get(dirs, name) {
+            Some(s) => {
+                let s = s?;
+                Ok((s.installed(), Some(s)))
+            }
+            None => Err(e),
+        },
+    }
+}
+
+/// The tree of an installed or shipped app, by origin or `id`
+/// ([`resolve`]): what `ptyrc app ID|ORIGIN` starts. A shipped Rust app:
+/// [`Shipped::tree`].
 pub fn locate(dirs: &Dirs, name: &str) -> Result<(Installed, PathBuf)> {
-    let entry = Lock::load(dirs)?.resolve(name)?.clone();
+    let (entry, shipped) = resolve(dirs, name)?;
+    if let Some(s) = shipped {
+        let dir = s.tree(dirs)?;
+        return Ok((entry, dir));
+    }
     let origin = Origin::parse(&entry.origin)?;
     let dir = dirs.tree(&origin, &entry.commit);
     if !dir.is_dir() {

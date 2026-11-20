@@ -1,7 +1,8 @@
 # {{id}}: a ptyrc store app
 
 A script that draws over a terminal program wrapped by ptyrc. It runs
-in a sandbox (WebAssembly): no file, no network, no clock but `tick`.
+in a sandbox (WebAssembly): no path, no network; the files it reads
+are those the user names, the wall clock is asked.
 
 ## Files
 
@@ -34,6 +35,12 @@ export function stop() {}          // optional; 500 ms to end
   `import { Deck } from "ptyrc/deck"`; `deck.add(tag, {big: [17, 3],
   small: [5, 1]}, (w, h) => rows or a Canvas, {key(name) {}})`; give it
   every `tick(now)` and `event(topic, data)`. `ptyrc.d.ts`, "ptyrc/deck".
+- Host functions (`ptyrc.d.ts`): `now()`, `zone(name, at)`,
+  `civil(unixMs, offsetS)` (permission `clock`); `storage.get`, `.set`,
+  `.remove`, `.keys` (strings; `storage`); `asset(name)`,
+  `assetBytes`, `assets()` (`[app] assets`); `file(args.opt).text()`,
+  `.bytes()`, `.stat()`, `.write(text)`, `.list()`, `.child(name)` (an
+  option of type `file` or `dir`); `result(value, status)`.
 - `call(method, params)`: a request of the protocol (`PROTOCOL.md`);
   throws a `PtyrcError` with `code` and `hint` when refused.
 - The size: `call("session.info").size` is `[columns, rows]`; then

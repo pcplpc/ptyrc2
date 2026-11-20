@@ -34,15 +34,34 @@ that of `exit`, or 70.
   method closed to apps: `denied`, the hint naming the permission.
   `--deny` alone: every permission but these. Neither: the whole
   session.
+- Host functions from memory (`hostfn.rs`), the driver's answers:
+  `--clock ISO` the wall time at 0 (default `2000-01-01T00:00:00Z`),
+  advancing with session time; `--zone NAME` the local zone (a name of
+  the system database, or a POSIX rule; default `UTC`); the database is
+  read whole before the profile when `clock` is held. `--storage DIR`:
+  the values, a file a key, never written back. `--file NAME=PATH`: a
+  file or a directory read once, its handle (`f0`, ...) given to
+  `init` under `NAME`; writes stay in memory, with `files-write`.
+  `--probe git=FILE.json`, `system=`: the answer as written; none:
+  the not-held answer, and a note. The report: `result:`, `storage:`
+  (keys, sizes), `files:` (written); `--json`: the values, the
+  contents. Status: that of `app.result` when the run ends well.
 - `--event T:TOPIC:JSON`: an event at `T`, to a topic subscribed and
   held. `--key T:KEY`: a key named as `input.send` names it, to the
   app when it grabbed it (`input.grab`); `ctrl+t` releases the grab.
+  `--pointer T:X,Y`, `--click T:X,Y`: `hover`, `mouse` on the app's
+  sprite at the cell (topmost, no effect), heard on its widget or a
+  sprite in front, else with `pointer`, `clicks`. `--focus T:TAG`: its
+  widget that asks is focused; keys then go to it (`{"key", "bytes",
+  "widget"}`), its escape and close keys end it (`released`);
+  `--paste T:TEXT`: `{"widget", "paste"}`.
 
 ## OS profile
 
 `profile::apply`: the third wall (plan, Model). Live: once the module
 is read, compiled and instantiated, and the socket open; before `init`.
-Headless: once the files (`--tape`, `--screen`) are read; the report
+Headless: once the files (`--tape`, `--screen`, `--assets`,
+`--storage`, `--file`, `--probe`, the zones) are read; the report
 goes to stdout, open already. Not undone. Linux, every thread:
 
 - Landlock, every right handled, no rule: no file opened, created,
@@ -126,11 +145,13 @@ bytes in the guest's memory, no terminator. JSON is a text.
   `(ptr << 32) | len`. The guest frees it. 0: `alloc` gave none.
 - `{"result": ...}`, or `{"error": {"code", "message", "hint"?}}`. The
   codes of the protocol, and `limit` (the rate), `gone` (the driver),
-  `headless` (a run without a session answers only `headless::SERVED`:
-  `draw.put`, `update`, `remove`, `clear`, `widget.declare`, `show`,
-  `set`, `hide`, `subscribe`, `session.info`, `screen.text`, `shape`,
-  `cells`, `find`, `wait`, `cursor`, `frame.list`, `get`, `at`,
-  `idle`, `text`, `heat`, `input.grab`, `input.release`).
+  `headless` (a run without a session answers only `headless::SERVED`
+  and the host functions, `hostfn::is_host`).
+- `asset.list`, `asset.read`: answered by the runner from the tree of
+  `--assets DIR`, read whole before the profile (8 MiB at most; regular
+  files, links not followed, names by the rule of `assets::valid_name`);
+  none given, an empty tree. Never sent to the driver; in a `batch`,
+  `bad-request`.
 - Methods and topics: `plan/design.md`, Protocol.
 
 `canvas`, `cells`

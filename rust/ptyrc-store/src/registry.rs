@@ -13,13 +13,16 @@ use crate::install::Dirs;
 use crate::manifest::MANIFEST;
 use crate::origin::{Origin, Reference};
 
-/// A word on a commit. Ordered: `Untested < Tested < Approved`.
+/// A word on a commit. Ordered: `Untested < Tested < Approved <
+/// Shipped`. `Shipped`: an app of ptyrc itself (`crate::shipped`),
+/// never in a registry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Tier {
     Untested,
     Tested,
     Approved,
+    Shipped,
 }
 
 impl Tier {
@@ -28,6 +31,7 @@ impl Tier {
             Tier::Untested => "untested",
             Tier::Tested => "tested",
             Tier::Approved => "approved",
+            Tier::Shipped => "shipped",
         }
     }
 }
@@ -93,6 +97,12 @@ impl Pointer {
                 return Err(reg_err(
                     format!("{name}: commit {:?}", v.commit),
                     "a full commit id, lower-case hex",
+                ));
+            }
+            if v.tier == Tier::Shipped {
+                return Err(reg_err(
+                    format!("{name}: commit {}: tier shipped", v.commit),
+                    "untested, tested or approved; shipped is ptyrc's own apps",
                 ));
             }
         }

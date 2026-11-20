@@ -15,8 +15,10 @@ hint }`: `message` says what was refused (manifest errors as
 - `manifest::parse(&str)`, `manifest::parse_bytes(&[u8])` -> `Manifest
   { app, permissions, limits, options, args }`.
 - `App { id, version, summary, license, api, entry: Entry::Script |
-  Entry::Rust, rustc, assets, surface, tape }`; `surface` absent:
-  `Widget`.
+  Entry::Rust, rustc, assets, surface, tape, wait, random }`; `surface`
+  absent: `Widget`; `random`: the option words of each draw of the
+  menu's random app (`[[], ["-a"]]`), `[]` never drawn, absent `[[]]`;
+  bounds `RANDOM_MAX`.
 - `Permission { name, why, words }`; names from `manifest::PERMISSIONS`;
   `words = { list = [...], why = "..." }`: 1 to 32 words, 3 to 32
   letters or digits, distinct ignoring case.
@@ -144,8 +146,9 @@ install::install_built(&dirs, &origin, &tree, &checked, Some(&built.wasm), ...)?
 
 ## Install
 
-- `Dirs { data, state, cache, config }`: `Dirs::from_env()` (XDG, else
-  `HOME`), `Dirs::under(root)`. Paths: `apps()`, `app(o)`, `tree(o, c)`,
+- `Dirs { data, state, cache, config, shipped }`: `Dirs::from_env()`
+  (XDG, else `HOME`; `shipped` by `shipped::root`), `Dirs::under(root)`
+  (`shipped`: `root/shipped`). Paths: `apps()`, `app(o)`, `tree(o, c)`,
   `lock()`, `store_lock()`, `storage(o)`, `git(o)`, `registry()`,
   `permissions()`, `store()`.
 - `StoreLock::take(dirs, on_wait)`: one writer of the trees and the
@@ -161,14 +164,40 @@ install::install_built(&dirs, &origin, &tree, &checked, Some(&built.wasm), ...)?
   `Installed` carries `previous` (the last commit that started) and
   `started`. `install::started(dirs, o)` records the start, clears
   `previous` and prunes.
-- `install::locate(dirs, ID|ORIGIN)` -> `(Installed, tree dir)`: what
-  `ptyrc app` starts.
+- `install::resolve(dirs, ID|ORIGIN) -> (Installed, Option<Shipped>)`:
+  an installed app, else a shipped one (`ptyrc/NAME`, or its id when no
+  installed app has it). `install::locate(dirs, ID|ORIGIN)` ->
+  `(Installed, tree dir)`: what `ptyrc app` starts. `install::all`: the
+  lock's apps, then the shipped ones.
 - `install::list`, `install::trees(dirs, o)`, `install::prune(dirs, o)`
   (all but the commit in use and `previous`), `install::remove(dirs,
   ID|ORIGIN)` (lock entry and trees), `install::purge_storage(dirs, o)`,
   `install::purge_grants(dirs, o)` (the table `[app."<origin>"]` of
   `permissions.toml`).
 - `Lock::load`, `save`, `get(origin)`, `resolve(ID|ORIGIN)`.
+
+## Shipped
+
+The store apps of ptyrc itself (`plugins/store-apps/README.md`).
+
+- `shipped::root(data)`: `$PTYRC_STORE_APPS` (absolute; not a directory:
+  none); else `plugins/store-apps/` of the first ancestor of the
+  program's directory that has it (a checkout); else
+  `<data>/ptyrc/shipped/` (an installed ptyrc). The first found is the
+  only one.
+- A tree `NAME/` (its `[app] id`); origin `ptyrc/NAME`, which
+  `Origin::parse` refuses: none is fetched, added or collides with one.
+  `Shipped::installed()`: tier `Tier::Shipped`, commit the version of
+  ptyrc, `started`. Not in `apps.lock`; `install::remove` does not know
+  it.
+- `shipped::list(dirs)`, `shipped::get(dirs, NAME|ptyrc/NAME)`.
+- `Shipped::tree(dirs)`: a script's tree; a Rust app's, when `app.wasm`
+  is in it (installed); else its build in `<cache>/ptyrc/shipped/NAME/`
+  when built from the tree as it is (a hash of its files, `PTYRC_APP`,
+  ptyrc's version), else `ErrorKind::Build`, "not built".
+  `Shipped::build(dirs, on_build)`: `build::build` (`unconfined`: our
+  own sources) into that cache, the tree copied beside `app.wasm`;
+  nothing fetched.
 
 ## Registry
 
@@ -185,7 +214,8 @@ install::install_built(&dirs, &origin, &tree, &checked, Some(&built.wasm), ...)?
 - `choose(Option<&Pointer>, &Want { reference, latest, force }) -> Pick
   { reference, tier }`; after fetching a name or `HEAD`,
   `registry::tier_of(pointer, commit, force)`.
-- `Tier::Untested < Tested < Approved`.
+- `Tier::Untested < Tested < Approved < Shipped`; `shipped` in a
+  pointer: refused.
 
 ## Sync
 

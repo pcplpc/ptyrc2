@@ -807,7 +807,6 @@ fn a_deck_draws_the_variant_that_fits() {
 
 /// Waits on headless `batch` (gap 6, `headless.rs`): then no refusal.
 #[test]
-#[ignore = "headless answers batch: headless"]
 fn a_deck_sends_one_batch_a_tick() {
     let Some(r) = deck((40, 8), json!({"every": true})) else {
         return;
@@ -863,4 +862,72 @@ fn deck_pieces() {
         return;
     };
     assert_eq!(status, 0, "{lines:#?}");
+}
+
+/// Clock, storage, result, files, assets from memory, as the driver
+/// answers them; nothing of the machine read.
+#[test]
+fn host_functions_from_memory() {
+    let Some(wasm) = interpreter() else { return };
+    let text = r#"
+        import { call } from "ptyrc";
+        const ask = (m, p, k) => {
+          try { const r = call(m, p || {}); return k ? r[k] : r; } catch (e) { return e.code; }
+        };
+        export function init(args) {
+          const out = [];
+          out.push(ask("clock.now", {}, "unix_ms"));
+          out.push(ask("storage.set", { key: "k", value: "v1" }, "used"));
+          out.push(ask("storage.get", { key: "seed" }, "value"));
+          out.push(ask("file.read", { file: args.save.file }, "text"));
+          out.push(ask("file.write", { file: args.save.file, text: "done" }, "size"));
+          out.push(ask("asset.read", { name: "a/b.txt" }, "text"));
+          out.push(ask("asset.read", { name: "../ptyrc-app.toml" }));
+          const b = ask("batch", { calls: [{ method: "clock.now" }, { method: "app.result",
+                                             params: { value: "r", status: 3 } }] });
+          out.push((b.results[0].error || { code: "ok" }).code, JSON.stringify(b.results[1].result));
+          call("draw.put", { anchor: { at: [0, 0] }, content: { rows: [out.join(" ")] } });
+        }"#;
+    let mut o = options(&[("app.js", text)], json!({}));
+    o.size = (80, 4);
+    o.host.wall0 = 1_000_000;
+    o.host.storage.insert("seed".into(), "s0".into());
+    o.host.files.push(ptyrc_box::hostfn::Named {
+        option: "save".into(),
+        name: "TODO.md".into(),
+        entries: None,
+        content: ptyrc_box::hostfn::Content {
+            bytes: Some(b"todo".to_vec()),
+            mtime_ms: 1,
+        },
+        written: false,
+    });
+    let mut assets = ptyrc_box::assets::Assets::default();
+    assets.files.insert("a/b.txt".into(), b"asset".to_vec());
+    o.assets = Some(assets);
+    let r = run(wasm, &o).unwrap();
+    assert_eq!(r.end, None, "{r}");
+    assert_eq!(
+        r.screens[0].1[0],
+        "1000000 4 s0 todo 4 asset bad-params bad-request {}",
+        "{r}"
+    );
+    assert_eq!(r.result, Some((json!("r"), 3)));
+    assert_eq!(r.storage.get("k").map(String::as_str), Some("v1"));
+    assert_eq!(r.written.len(), 1);
+    let text = r.to_string();
+    assert!(text.contains("result: r (status 3)"), "{text}");
+    assert!(text.contains("storage: k 2 bytes, seed 2 bytes"), "{text}");
+    assert!(text.contains("files: save written, 4 bytes"), "{text}");
+    let j = r.to_json();
+    assert_eq!(j["files"][0]["text"], "done");
+    assert_eq!(j["storage"]["k"], "v1");
+    // Not held: the clock lowered, storage and writes denied.
+    o.grants = Some(ptyrc_box::grants::Grants::new(&[] as &[&str], &[], &[] as &[&str]));
+    let r = run(wasm, &o).unwrap();
+    assert_eq!(
+        r.screens[0].1[0],
+        "0 denied denied todo denied asset bad-params ok {}",
+        "{r}"
+    );
 }

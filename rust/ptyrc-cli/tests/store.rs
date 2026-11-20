@@ -94,6 +94,8 @@ impl Root {
             ("XDG_CACHE_HOME", s(&d.cache)),
             ("XDG_CONFIG_HOME", s(&d.config)),
             ("XDG_RUNTIME_DIR", s(&self.dir.join("run"))),
+            // No shipped store app: a path that is no directory.
+            ("PTYRC_STORE_APPS", s(&self.dir.join("shipped"))),
             ("PTYRC_TEST_GIT_ROOT", s(&self.dir.join("hosts"))),
             ("GIT_CONFIG_GLOBAL", "/dev/null".into()),
             ("GIT_CONFIG_NOSYSTEM", "1".into()),

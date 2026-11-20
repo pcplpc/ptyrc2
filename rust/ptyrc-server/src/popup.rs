@@ -74,8 +74,8 @@ pub(crate) fn told(permission: Permission, declared: &Declared) -> (String, Colo
         Storage => ("keep files in a directory of its own", Plain),
         Files => ("read a file you name", Plain),
         FilesWrite => ("write a file you name", Red),
-        ProbeGit => ("read the state of git repositories", Plain),
-        ProbeSystem => ("read the state of the machine", Plain),
+        ProbeGit => ("run git in the directory of your program", Plain),
+        ProbeSystem => ("see the processes, the logins, the listening ports", Plain),
         LimitMemory | LimitTime => return (limits(permission, declared), Plain),
     };
     (text.to_string(), colour)

@@ -317,6 +317,12 @@ pub(crate) const METHODS: &[(&str, Gate)] = &[
     ("storage.set", Needs(Permission::Storage)),
     ("storage.remove", Needs(Permission::Storage)),
     ("storage.list", Needs(Permission::Storage)),
+    ("file.stat", Open),
+    ("file.read", Open),
+    ("file.list", Open),
+    ("file.write", Needs(Permission::FilesWrite)),
+    ("probe.git", Lowered(Permission::ProbeGit)),
+    ("probe.system", Lowered(Permission::ProbeSystem)),
     ("debug.overlay", Never),
     ("debug.dump", Never),
 ];

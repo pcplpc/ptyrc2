@@ -1882,13 +1882,17 @@ the pop-up, `app.start {store}`.
   | `keys-read` | | `input` |
   | `clock` (lowered) | `clock.now`, `clock.zone` | |
   | `storage` | `storage.get`, `.set`, `.remove`, `.list` | |
+  | the handle given | `file.stat`, `.read`, `.list` | |
+  | `files-write` | `file.write` | |
+  | `probe-git`, `probe-system` (lowered) | `probe.git`, `probe.system` | |
   | never | `session.resize`, `.colors`, `.handoff`, `input.send`, `input.click`, `tape.*`, `layer.*`, `widget.focus`, `widget.blur`, the other `app.*`, `debug.*` | `apps` |
 
 - A degree not held: lowered to the degree held (`Verdict::Lower`);
   see The cut answers. A topic not held, a degree or a permission:
   subscribed, no event comes. A closed topic: `denied`.
 - An act not held, a closed method: `denied`, the hint naming the
-  permission (`grants::denied`). A method `Gate::Lowered` (`clock.*`)
+  permission (`grants::denied`). A method `Gate::Lowered` (`clock.*`,
+  `probe.*`)
   is answered without it, in a lesser form marked `"degree": "none"`;
   never `denied`.
 - A bound connection whose app left the table: `denied`, every request.
@@ -2066,7 +2070,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `widget.list` | | `{"widgets":[info,...]}`, every connection's |
 | `widget.borders` | | `{"borders":[name,...]}` |
 | `app.list`, `app.start`, `app.stop`, `app.pause`, `app.resume`, `app.restart`, `app.forget`, `app.move`, `app.permissions` | | see Apps and the manager, Methods; Permissions |
-| `clock.now`, `clock.zone`, `storage.get`, `.set`, `.remove`, `.list`, `app.result` | | see Host functions |
+| `clock.now`, `clock.zone`, `storage.get`, `.set`, `.remove`, `.list`, `app.result`, `file.stat`, `.read`, `.list`, `.write`, `probe.git`, `probe.system` | | see Host functions |
 | `batch` | `calls`: `[{"method","params"}]` | `{"results":[{"result"} or {"error"},...]}`, applied in one repaint |
 | `subscribe` | `topics`: `screen`, `cursor`, `frames`, `text`, `idle`, `draw`, `input`, `mouse`, `hover`, `size`, `colors`, `widgets`, `apps`, `move`, `exit`; `snapshot` | `{}`; with `snapshot`, then the state now as events, to this client: `idle` per frame on screen, `cursor`, `frames`, `size`, `widgets` per widget, `apps` per app |
 | `debug.overlay` | `what`: `frames`, `heat`, `off` | `{}` |
@@ -2084,12 +2088,24 @@ Host functions (`driver/hostfn.rs`; the contract:
 | `storage.remove` | `key` | `{}` |
 | `storage.list` | | `{"keys":[{"key","size"}],"used","quota"}` |
 | `app.result` | `value`: any JSON, 64 KiB serialised; `status`: 0..255, default 0 | `{}` |
+| `file.stat` | `file`: a handle; `name`: a file of a `dir` | `{"exists","size","mtime_ms"}`; absent: `{"exists":false}` |
+| `file.read` | `file`, `name`, `as`: `text`, `base64`; `offset`, `len` (1 MiB at most) | `{"text"\|"base64","size","mtime_ms","eof"}` |
+| `file.list` | `file`: a `dir` | `{"entries":[{"name","size"}]}` |
+| `file.write` | `file`; `text` or `base64`: the whole, 1 MiB; `if_mtime_ms` | `{"size","mtime_ms"}` |
+| `probe.git` | `repo`: a `dir` handle, absent: the program's directory; `parts`, `log`: 1..200, `since`: a stamp | `{"repo":{...}\|null,"stamp"}`, or `{"unchanged":true,"stamp"}` |
+| `probe.system` | `parts`: `glance`, `logins`, `listeners`, `disks`; `top`: 0..16 | `{"glance","logins","listeners","disks"}` |
 
-- What reads a disk runs on one worker thread (`hostio.rs`), in
+- What reads a disk or runs `git` runs on a worker (`hostio.rs`), in
   order; the request is pending and completed from the loop, woken by
-  a socket pair. 64 waiting, then `not-usable` (`host busy`). Pending:
-  not in a `batch` (`bad-request`). A new kind of request is a job, a
-  function of the worker's state; the plumbing does not change.
+  a socket pair. Two lanes, a thread each: the disk (`clock.*`,
+  `storage.*`, `file.*`) and the probes (a `git` that hangs holds its
+  lane 2 s a command, 16 s a probe of every part). 64 waiting a lane,
+  then `not-usable` (`host busy`). Pending: not in a `batch`
+  (`bad-request`). A new kind of request is a job, a function of its
+  lane's state; the plumbing does not change.
+- A connection with no app (the user's): `clock.*` answered; the
+  rest `not-usable` (`no app: ...`). A native app is served as a store
+  app, its storage under `native/NAME`; it is given no file.
 - `clock.*`: the wall clock of the server (`PTYRC_CLOCK_RATE` does not
   scale it). Zones: the system database (`$TZDIR`, else
   `/usr/share/zoneinfo`), read by `ptyrc-core/src/zone.rs` (TZif v2+, the POSIX
@@ -2113,6 +2129,30 @@ Host functions (`driver/hostfn.rs`; the contract:
   written over: replaced). `storage.set`: 16 a second an app, then
   `not-usable`. A connection with no app: `not-usable`. Kept by an
   update; removed by `ptyrc store rm --purge`.
+- `file.*` (`files.rs`): a handle of the app's `app.start {files}`
+  (`App::file`), never a path; else `no-file`, the hint naming
+  `[options] x = { type = "file" }`. `name`: a file of a `dir`
+  handle, as a key. The directory holding the name is opened and its
+  real path (`/proc/self/fd`) compared with the one named: moved,
+  `not-usable`. The name is opened under it `O_NOFOLLOW |
+  O_NONBLOCK`: a regular file, else absent (`stat`: `{"exists":
+  false}`; `read`: `no-file`). A file read: 16 MiB at most, 1 MiB an
+  answer. `file.list`: the regular files of a valid name, by name,
+  1024 at most. `file.write`: the handle writable (`write = true` and
+  `files-write`), else `denied`; a file handle; the whole, 1 MiB; a
+  temp file beside it, the mode of the file replaced (0600 new),
+  `fsync`, a rename: a link in its place is replaced, not followed.
+  `if_mtime_ms` not the file's: `not-usable`, nothing written. 16 a
+  second an app with `storage.set`.
+- `probe.*` (`ptyrc-probe`): not held, `{"repo": null, "degree":
+  "none"}`, every part empty with `"degree": "none"`, at once, in a
+  `batch` too. `probe.git`: `repo` a `dir` handle (a `file` one:
+  `bad-params`), absent: the working directory of the session's child
+  (`/proc/PID/cwd`, read at each request); a real read a second an
+  app; sooner, the last answer to the same params (`unchanged` when
+  `since` is its stamp), other params `not-usable`. `probe.system`: a
+  `Sampler` an app, on the probe lane, dropped when the app leaves the
+  table.
 - `app.result`: kept with the app's entry, the last of the run; told
   in its info (`result`) and so in the `apps` event at its exit. A
   connection with no app: `not-usable`. `ptyrc app ID --wait` (the

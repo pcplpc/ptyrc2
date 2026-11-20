@@ -4,6 +4,7 @@ name = "ptyrc-app"
 description = "ptyrc: the guest crate of store apps (WebAssembly, ABI 1)"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 license = "GPL-3.0-or-later"
 publish = false
 

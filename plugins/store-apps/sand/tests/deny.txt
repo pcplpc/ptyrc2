@@ -1,0 +1,8 @@
+--- 1000 ms
+--- 2000 ms
+              ⣏⡇
+              ⡿⡂
+              ⡿⡅
+              ⣷⠃
+lowered at 0 ms: frame.idle, to the degree none
+lowered: shape, declared and answered no

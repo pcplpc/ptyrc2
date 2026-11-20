@@ -58,8 +58,8 @@ fn init_args(m: &Manifest, given: &[String]) -> Result<Value, Fail> {
     let names = match m.options.is_empty() {
         true => "the manifest has no [options]".to_string(),
         false => {
-            let each = (m.options.iter())
-                .map(|o| format!("--{} ({}): {}", o.name, o.type_name(), o.doc));
+            let each =
+                (m.options.iter()).map(|o| format!("--{} ({}): {}", o.name, o.type_name(), o.doc));
             format!("[options]: {}", each.collect::<Vec<_>>().join("; "))
         }
     };
@@ -70,16 +70,24 @@ fn init_args(m: &Manifest, given: &[String]) -> Result<Value, Fail> {
         return Err(Fail::usage("--help: the options of the manifest", names));
     };
     let args = Value::Object(launch.args);
-    Ok(Value::Object(options::resolve(m, Some(&args), &launch.files)?.init))
+    Ok(Value::Object(
+        options::resolve(m, Some(&args), &launch.files)?.init,
+    ))
 }
 
 /// The arguments of `ptyrc-box` that name the guest: `--script APP.js`,
 /// or the module, built.
 fn guest(dir: &Path, m: &Manifest) -> Result<Vec<OsString>, Fail> {
+    // `[app] assets`: read by the runner, answered by it (`asset.*`).
+    let mut out: Vec<OsString> = match &m.app.assets {
+        Some(a) => vec!["--assets".into(), dir.join(a).into()],
+        None => Vec::new(),
+    };
     match &m.app.entry {
-        Entry::Script(main) => Ok(vec!["--script".into(), dir.join(main).into()]),
-        Entry::Rust(_) => Ok(vec![build(dir)?.into()]),
+        Entry::Script(main) => out.extend(["--script".into(), dir.join(main).into()]),
+        Entry::Rust(_) => out.push(build(dir)?.into()),
     }
+    Ok(out)
 }
 
 /// The build of the store (`build::build`: `rustc` alone, ptyrc's own

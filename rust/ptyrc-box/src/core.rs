@@ -87,6 +87,10 @@ pub trait Host: Send + 'static {
     /// A line of the app's log.
     fn log(&mut self, text: &str);
     fn random(&mut self, buf: &mut [u8]);
+    /// The app's assets, answered by the runner (`asset.*`).
+    fn assets(&self) -> Option<&crate::assets::Assets> {
+        None
+    }
 }
 
 struct Canvas {
@@ -197,6 +201,11 @@ impl<H: Host> Core<H> {
             serde_json::from_slice(params)
                 .map_err(|e| CallError::new("bad-request", format!("params: {e}")))?
         };
+        // Assets: the runner's, never the driver's.
+        if method.starts_with("asset.") {
+            let none = crate::assets::Assets::default();
+            return self.host.assets().unwrap_or(&none).call(method, &params);
+        }
         self.host.call(method, params)
     }
 

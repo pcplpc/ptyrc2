@@ -1,0 +1,2 @@
+# test_confetti (--fancy): explosions of the effect `confetti`.
+--size 30x8 --for 3s --at 0.5s,1s,1.5s,2s,2.5s,3s --one-shot --bursts 2 --sparkle --fancy --duration 0.6

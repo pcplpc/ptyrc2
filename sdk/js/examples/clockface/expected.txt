@@ -6,7 +6,7 @@
                     │█▀█ █▀█   █▀█ ▀▀█│
                     │█ █ █ █ ▪ █ █ █▀▀│
                     │▀▀▀ ▀▀▀   ▀▀▀ ▀▀▀│
-                    ╰────── clockface ╯
+                    ╰── >>> clockface ╯
 --- 3000 ms
 
 
@@ -14,14 +14,10 @@
                     │█▀█ █▀█   █▀█ ▀▀█│
                     │█ █ █ █ ▪ █ █  ▀█│
                     │▀▀▀ ▀▀▀   ▀▀▀ ▀▀▀│
-                    ╰────── clockface ╯
-refused at 0 ms: widget.ask (headless)
-refused at 1000 ms: batch (headless)
+                    ╰── >>> clockface ╯
 --- 1000 ms
 
 
             ╭─────╮
             │00:01│
             ╰ cl… ╯
-refused at 0 ms: widget.ask (headless)
-refused at 1000 ms: batch (headless)

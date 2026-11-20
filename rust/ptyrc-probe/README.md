@@ -4,7 +4,8 @@ What the driver reads of the machine for store apps: `probe.git`,
 `probe.system` (`temp/20112026-01-store/design/host-functions.md`,
 "Probes"). Ported from `_gitprobe.py` and `_probe.py`. Parsers
 (`git::parse`, `system::parse`): text in, typed values out, no clock,
-no I/O. Readers: blocking, for the driver's worker. Not wired here.
+no I/O. Readers: blocking, run on the probe lane of the driver's
+worker (`ptyrc-server`, `driver/hostfn.rs`).
 
 ## `git`
 

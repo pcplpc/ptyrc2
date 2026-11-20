@@ -1,0 +1,41 @@
+--- 2000 ms
+00000000000000000000000000000
+00000000000000000000000000000
+00000000000000000000000000000
+00000000000000000000000000000
+00000000000000000000000000000
+00000000000000000000000000000
+
+               ·
+--- 2500 ms
+00000000000000000000000000000
+00000000000000000000000000000
+00000000000000000000000000000
+00000000000000000000000000000
+00000000000000000000000000000
+00000000000000000000000000000
+--- 3000 ms
+ooooooooooooooooooooooooooooo
+ooooooooooooooooooooooooooooo
+ooooooooooooooooooooooooooooo
+ooooooooooooooooooooooooooooo
+ooooooooooooooooooooooooooooo
+ooooooooooooooooooooooooooooo
+--- 3500 ms
+ooooooooooooooooooooooooooooo
+ooooooooooooooooooooooooooooo
+ooooooooooooooooooooooooooooo
+ooooooooooooooooooooooooooooo
+ooooooooooooooooooooooooooooo
+ooooooooooooooooooooooooooooo
+
+          ❋✦*✦
+        **✦**··
+        ·✦✦❋··❋
+--- 4000 ms
+ooooooooooooooooooooooooooooo
+ooooooooooooooooooooooooooooo
+ooooooooooooooooooooooooooooo
+ooooooooooooooooooooooooooooo
+ooooooooooooooooooooooooooooo
+ooooooooooooooooooooooooooooo

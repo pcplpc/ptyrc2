@@ -1,0 +1,4 @@
+# test_confetti: one round of two bursts, the pop of the first ptyrc
+# (· · / o / · ·), a sparkle; the app exits once the last is sent, the
+# sprites persist and the driver ends them.
+--size 30x8 --for 5s --at 1s,1.5s,2s,3s,5s --one-shot --bursts 2 --sparkle

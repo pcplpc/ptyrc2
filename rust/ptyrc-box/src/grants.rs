@@ -184,6 +184,12 @@ pub const METHODS: &[&str] = &[
     "storage.set",
     "storage.remove",
     "storage.list",
+    "file.stat",
+    "file.read",
+    "file.list",
+    "file.write",
+    "probe.git",
+    "probe.system",
     "debug.overlay",
     "debug.dump",
 ];
@@ -252,6 +258,9 @@ pub fn gate(method: &str, params: &serde_json::Value) -> Gate {
         }
         "clock.now" | "clock.zone" => Gate::Lowered("clock"),
         _ if method.starts_with("storage.") => Gate::Needs("storage"),
+        "file.write" => Gate::Needs("files-write"),
+        "probe.git" => Gate::Lowered("probe-git"),
+        "probe.system" => Gate::Lowered("probe-system"),
         _ => Gate::Open,
     }
 }
@@ -262,8 +271,7 @@ pub fn topic_gate(topic: &str) -> Gate {
         "screen" | "cursor" | "text" | "idle" | "colors" => Gate::Read(Degree::Shape),
         "frames" => Gate::Read(Degree::Layout),
         "input" => Gate::Needs("keys-read"),
-        "mouse" => Gate::Needs("clicks"),
-        "hover" => Gate::Needs("pointer"),
+        // Open, as the driver's: what is heard is judged by event.
         "apps" => Gate::Never,
         _ => Gate::Open,
     }
@@ -355,6 +363,10 @@ mod tests {
         assert_eq!(gate("clock.zone", &json!({})), Gate::Lowered("clock"));
         assert_eq!(gate("storage.set", &json!({})), Gate::Needs("storage"));
         assert_eq!(gate("app.result", &json!({})), Gate::Open);
+        assert_eq!(gate("file.write", &json!({})), Gate::Needs("files-write"));
+        assert_eq!(gate("file.read", &json!({})), Gate::Open);
+        assert_eq!(gate("probe.git", &json!({})), Gate::Lowered("probe-git"));
+        assert_eq!(gate("asset.read", &json!({})), Gate::Open);
         assert_eq!(topic_gate("input"), Gate::Needs("keys-read"));
         assert_eq!(topic_gate("size"), Gate::Open);
         let none = g(&[], &[]);

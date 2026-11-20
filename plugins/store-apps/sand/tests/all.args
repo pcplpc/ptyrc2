@@ -1,0 +1,2 @@
+# -a: --cursor, --bomb, --now: at once, over the cursor's column.
+--size 30x6 --for 2s --at 0.5s,1s,1.5s,2s --rate 200 -a --screen tests/cursor.screen

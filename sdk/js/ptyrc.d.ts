@@ -32,11 +32,13 @@
 // Bytes: `Uint8Array.fromBase64(s)`, `bytes.toBase64()`, `atob`,
 // `btoa`; `TextEncoder`, `TextDecoder` (UTF-8 only) are global.
 //
-// There is no timer, no network, no file, no console, no `require`:
+// There is no timer, no network, no path, no console, no `require`:
 // `tick` is the only clock. `Date.now()` is session time (0 at the
-// start), not the wall clock. `Math.random()` draws from the host.
-// Modules: "ptyrc", and files of the app: "./lib/util.js". State does
-// not survive a restart.
+// start); the wall clock is `now()` (permission `clock`). A file is one
+// the user named (`file(handle)`); state that outlives a run goes to
+// `storage` (permission `storage`); the app's own files are `asset`s.
+// `Math.random()` draws from the host. Modules: "ptyrc", and files of
+// the app: "./lib/util.js".
 //
 // An error left uncaught is logged with its file and line. A
 // `PtyrcError` (a request refused) left uncaught in `tick` or `event`
@@ -187,6 +189,79 @@ declare module "ptyrc" {
 
   /** Ends the app. Does not return. */
   export function exit(code?: number): never;
+
+  /**
+   * The wall clock (`clock.now`). Without `clock` held: session time as
+   * the epoch, UTC, `degree: "none"`. `Date.now()` stays session time.
+   */
+  export function now(): { unixMs: number; zone: string; offsetS: number; abbr: string; next: number | null; degree?: "none" };
+  /**
+   * The offsets of `zone` (an IANA name, or `"local"`) at each instant
+   * of `at` (ms, 1 to 64; absent: now) (`clock.zone`).
+   * @throws PtyrcError `bad-params`: no such zone.
+   */
+  export function zone(
+    zone: string,
+    at?: number | number[],
+  ): { zone: string; offsets: { at: number; offsetS: number; abbr: string; next: number | null }[]; degree?: "none" };
+  /** The date and time of `unixMs` at `offsetS` east of UTC; `weekday` 0: Sunday. */
+  export function civil(
+    unixMs: number,
+    offsetS?: number,
+  ): { year: number; month: number; day: number; hour: number; minute: number; second: number; weekday: number };
+
+  /**
+   * The app's named values (`storage.*`): strings, 256 KiB each, 64
+   * keys, 1 MiB in all. A key: `[A-Za-z0-9._-]`, 1 to 64 bytes.
+   * @throws PtyrcError `denied` without `storage`; `not-usable` when full.
+   */
+  export const storage: {
+    get(key: string): string | null;
+    /** The bytes used after it. */
+    set(key: string, value: string): number;
+    remove(key: string): void;
+    keys(): string[];
+  };
+
+  /** An asset of `[app] assets` as text (UTF-8, invalid bytes replaced). @throws PtyrcError `no-file` */
+  export function asset(name: string): string;
+  /** An asset's bytes. @throws PtyrcError `no-file` */
+  export function assetBytes(name: string): Uint8Array;
+  /** The names of the assets: `pictures/ship.pic`. */
+  export function assets(): string[];
+
+  /**
+   * A file or directory the user named at the start (`file.*`), by its
+   * handle: `"f0"`, or the value `init(args)` gets for a file option,
+   * `{file: "f0", name: "TODO.md"}` (a list: the first).
+   */
+  export function file(handle: string | { file: string; name?: string } | { file: string; name?: string }[]): File;
+  export interface File {
+    readonly handle: string;
+    /** The last component, as typed. */
+    readonly name: string;
+    /** UTF-8, invalid bytes replaced. @throws PtyrcError `no-file` */
+    text(): string;
+    bytes(): Uint8Array;
+    /** A file absent: `exists: false`. */
+    stat(): { exists: boolean; size: number; mtimeMs: number };
+    /**
+     * The whole content, 1 MiB at most. Needs `write = true` and
+     * `files-write`, else `denied`; `ifMtime`: `not-usable` when the file
+     * changed since.
+     */
+    write(content: string | Uint8Array, options?: { ifMtime?: number }): { size: number; mtimeMs: number };
+    /** The regular files of a directory, by name. */
+    list(): string[];
+    /** The file `name` of this directory. */
+    child(name: string): File;
+  }
+
+  /**
+   * What `ptyrc app ID --wait` prints, and its exit status (0..255)
+   * (`app.result`). The last one holds; then `exit`.
+   */
+  export function result(value: unknown, status?: number): void;
 
   /** A run of a row: text in one style (`PROTOCOL.md`, `cells`). */
   export interface Run {

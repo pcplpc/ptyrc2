@@ -1,8 +1,9 @@
 # {{id}}: a ptyrc store app
 
 Rust built for `wasm32-unknown-unknown` that draws over a terminal
-program wrapped by ptyrc. It runs in a sandbox: no file, no network,
-no thread, no clock but `tick`.
+program wrapped by ptyrc. It runs in a sandbox: no path, no network,
+no thread; the files it reads are those the user names, the wall
+clock is asked.
 
 ## Files
 
@@ -34,6 +35,17 @@ ptyrc_app::app!(MyApp);
   it, again after a change. `ch: None` is a hole. Negative `at`: the
   right or bottom edge of the canvas from the right or bottom, `-1` the
   last cell.
+- A widget (a small window the driver places, in the size that fits):
+  `ptyrc_app::deck`: `Deck<S>`, `deck.add(Spec::new(tag, [("big", 17,
+  3), ("line", 5, 1)], |state, w, h, widget| content).key(|state, name,
+  widget| changed), &mut state)`; give it every `tick` and `event` with
+  `&mut state`. `Field`, `Listing`, `cut`, `fit`, `wrap`.
+- Host functions: `clock::now()`, `clock::zone(name, &[at])`,
+  `clock::civil(unix_ms, offset_s)` (permission `clock`);
+  `storage::{get, set, remove, keys}` (`storage`); `asset::{text,
+  bytes, list}` (`[app] assets`); `File::of(&args["opt"])`: `text`,
+  `bytes`, `stat`, `write`, `list`, `child` (an option of type `file`
+  or `dir`); `result(value, status)`; `base64::{encode, decode}`.
 - `call(method, params) -> Result<Value, Error>`: a request of the
   protocol (`PROTOCOL.md`); `Error { code, message, hint }`.
 - JSON is `ptyrc_app::json`, not serde: `json!({"k": [x, 1], "s":
@@ -64,16 +76,17 @@ ptyrc_app::app!(MyApp);
   `#![feature]`, no `#[link]`, no `extern` block; `include_str!`,
   `include_bytes!`, `#[path]` name a file of this tree, as a literal.
   `dev check` names what breaks the rule.
-- `cargo test` runs tests of pure logic natively; a test that calls the
-  host (`period`, `call`, `Canvas`, ...) does not link: test it with
-  `./test.sh`.
+- `cargo test` runs the tests of `src/` natively (`#[cfg(test)]`, as
+  `src/lib.rs` shows): a `Canvas` is cells in memory (`runs()` reads
+  them), `call` answers `native` unless `ptyrc_app::native::serve`
+  answers it; the screen is `./test.sh`'s.
 
 ## Commands
 
 ```
 rustup target add wasm32-unknown-unknown    once
 ptyrc dev check            what the store checks, and its build
-cargo test                 the tests of pure logic
+cargo test                 the unit tests of src/, natively (`dev test --unit` is for scripts)
 ./test.sh                  ptyrc dev test (it builds) against expected.txt
 ./test.sh --update         after a change meant to change the screen
 ptyrc dev test . --size 80x24 --for 3s --at 0,1s,3s [--screen F | --tape F] [--seed N] [--NAME VALUE]

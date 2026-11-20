@@ -10,8 +10,12 @@
 //! `--headless`: no session; `headless::run`, the report on stdout
 //! (`--json`: one JSON value), the log on stderr. `--grant`, `--deny`,
 //! `--words`: the requests checked as the driver checks a store app.
-//! `--event`, `--key`: what the user does, at a session time.
+//! `--event`, `--key`, `--pointer`, `--click`, `--focus`, `--paste`:
+//! what the user does, at a session time.
 //! `--screen [T:]FILE`, again for each: the screen from T on.
+//! `--clock ISO`, `--zone NAME`, `--storage DIR`, `--file NAME=PATH`,
+//! `--probe git|system=FILE.json`: the host functions (`hostfn`).
+//! `--assets DIR`, live too: `asset.*`, answered by the runner.
 //! `--styles`: under each screen, its styles.
 //!
 //! `--unit FILE --script APP.js`: the unit tests of a script app:
@@ -33,8 +37,10 @@
 //! Status: that of `exit`; 0 after SIGTERM; 70 a guest ended by the
 //! runner; 2 usage; 5 the connection, or the profile refused.
 
+use ptyrc_box::assets::Assets;
 use ptyrc_box::grants::Grants;
 use ptyrc_box::headless::{self, Inject, Options, Tape, Under};
+use ptyrc_box::hostfn::{self, HostFns, Named, Zones};
 use ptyrc_box::{Error, Limits, live, manifest, profile, script};
 use ptyrc_proto::{Client, session};
 use std::ffi::OsString;
@@ -43,12 +49,16 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-const USAGE: &str = "usage: ptyrc-box [--no-profile] [--manifest JSON] [--script] MODULE [ARGS]
-       ptyrc-box --headless [--no-profile] [--manifest JSON] [--script] MODULE [ARGS]
+const USAGE: &str =
+    "usage: ptyrc-box [--no-profile] [--manifest JSON] [--assets DIR] [--script] MODULE [ARGS]
+       ptyrc-box --headless [--no-profile] [--manifest JSON] [--assets DIR] [--script] MODULE [ARGS]
                  [--size CxR] [--for T] [--at T,...] [--seed N]
                  [--tape FILE | --screen [T:]FILE...] [--json] [--styles]
                  [--grant NAME,...] [--deny NAME,...] [--words WORD,...]
-                 [--event T:TOPIC:JSON]... [--key T:KEY]...
+                 [--event T:TOPIC:JSON]... [--key T:KEY]... [--pointer T:X,Y]...
+                 [--click T:X,Y]... [--focus T:TAG]... [--paste T:TEXT]...
+                 [--clock ISO] [--zone NAME] [--storage DIR] [--file NAME=PATH]...
+                 [--probe git|system=FILE.json]...
        ptyrc-box --unit FILE [--no-profile] [--manifest JSON] --script APP.js [ARGS]
 T: milliseconds, or with a unit: 500ms, 2s";
 
@@ -120,6 +130,74 @@ struct Cli {
     deny: Vec<String>,
     words: Vec<String>,
     inject: Vec<(u64, Inject)>,
+    /// `--clock`: Unix ms at session time 0.
+    clock: Option<i64>,
+    zone: Option<String>,
+    storage: Option<PathBuf>,
+    /// `(option, path)`.
+    files: Vec<(String, PathBuf)>,
+    /// `(git | system, file)`.
+    probes: Vec<(String, PathBuf)>,
+    assets: Option<PathBuf>,
+}
+
+/// `2026-11-20T12:00:00Z`, `...T12:00:00.250+01:00`: Unix ms.
+fn iso_ms(text: &str) -> Option<i64> {
+    let b = text.as_bytes();
+    let num = |r: std::ops::Range<usize>| -> Option<i64> {
+        let s = text.get(r)?;
+        s.bytes()
+            .all(|c| c.is_ascii_digit())
+            .then(|| s.parse().ok())?
+    };
+    if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || !matches!(b[10], b'T' | b't' | b' ') {
+        return None;
+    }
+    if b[13] != b':' || b[16] != b':' {
+        return None;
+    }
+    let (y, mo, d) = (num(0..4)?, num(5..7)?, num(8..10)?);
+    let (h, mi, sec) = (num(11..13)?, num(14..16)?, num(17..19)?);
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) || h > 23 || mi > 59 || sec > 60 {
+        return None;
+    }
+    let mut rest = &text[19..];
+    let mut ms = 0;
+    if let Some(frac) = rest.strip_prefix('.') {
+        let n = frac.bytes().take_while(u8::is_ascii_digit).count();
+        if n == 0 {
+            return None;
+        }
+        let digits = format!("{:0<3}", &frac[..n.min(3)]);
+        ms = digits.parse::<i64>().ok()?;
+        rest = &frac[n..];
+    }
+    let offset_s = match rest {
+        "Z" | "z" => 0,
+        _ => {
+            let sign = match rest.as_bytes().first()? {
+                b'+' => 1,
+                b'-' => -1,
+                _ => return None,
+            };
+            let (oh, om) = rest[1..].split_once(':')?;
+            if oh.len() != 2 || om.len() != 2 {
+                return None;
+            }
+            let (oh, om): (i64, i64) = (oh.parse().ok()?, om.parse().ok()?);
+            sign * (oh * 3600 + om * 60)
+        }
+    };
+    let days = ptyrc_core::zone::days_from_civil(y, mo as u8, d as u8);
+    Some((days * 86_400 + h * 3600 + mi * 60 + sec - offset_s) * 1000 + ms)
+}
+
+/// `NAME=VALUE` of `flag`.
+fn pair(flag: &str, v: &str) -> Result<(String, PathBuf), String> {
+    match v.split_once('=') {
+        Some((n, p)) if !n.is_empty() && !p.is_empty() => Ok((n.to_owned(), PathBuf::from(p))),
+        _ => Err(format!("{flag} {v}: NAME=PATH")),
+    }
 }
 
 fn list(v: &str) -> Vec<String> {
@@ -209,6 +287,30 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
                 }
                 cli.inject.push((t, Inject::Key(key.to_owned())));
             }
+            flag @ ("--pointer" | "--click") => {
+                let v = string(value(flag)?);
+                let (t, xy) = timed(flag, &v)?;
+                let cell = (xy.split_once(','))
+                    .and_then(|(x, y)| Some((x.trim().parse().ok()?, y.trim().parse().ok()?)));
+                let (x, y) = cell.ok_or_else(|| format!("{flag} {v}: T:X,Y"))?;
+                cli.inject.push((
+                    t,
+                    match flag {
+                        "--pointer" => Inject::Pointer(x, y),
+                        _ => Inject::Click(x, y),
+                    },
+                ));
+            }
+            "--focus" => {
+                let v = string(value("--focus")?);
+                let (t, tag) = timed("--focus", &v)?;
+                cli.inject.push((t, Inject::Focus(tag.to_owned())));
+            }
+            "--paste" => {
+                let v = string(value("--paste")?);
+                let (t, text) = timed("--paste", &v)?;
+                cli.inject.push((t, Inject::Paste(text.to_owned())));
+            }
             "--tape" => cli.tape = Some(value("--tape")?.into()),
             "--screen" => {
                 let v = value("--screen")?;
@@ -221,6 +323,24 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
                 });
             }
             "--styles" => cli.styles = true,
+            "--clock" => {
+                let v = string(value("--clock")?);
+                let ms = iso_ms(&v)
+                    .ok_or_else(|| format!("--clock {v}: an instant, as 2026-11-20T12:00:00Z"))?;
+                cli.clock = Some(ms);
+            }
+            "--zone" => cli.zone = Some(string(value("--zone")?)),
+            "--storage" => cli.storage = Some(value("--storage")?.into()),
+            "--file" => cli.files.push(pair("--file", &string(value("--file")?))?),
+            "--probe" => {
+                let v = string(value("--probe")?);
+                let (n, p) = pair("--probe", &v)?;
+                if n != "git" && n != "system" {
+                    return Err(format!("--probe {v}: git=FILE.json or system=FILE.json"));
+                }
+                cli.probes.push((n, p));
+            }
+            "--assets" => cli.assets = Some(value("--assets")?.into()),
             "--manifest" => {
                 cli.manifest = Some(manifest::Given::parse(&string(value("--manifest")?))?);
             }
@@ -242,13 +362,22 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
         || cli.grant.is_some()
         || !cli.deny.is_empty()
         || !cli.words.is_empty()
-        || !cli.inject.is_empty();
+        || !cli.inject.is_empty()
+        || cli.clock.is_some()
+        || cli.zone.is_some()
+        || cli.storage.is_some()
+        || !cli.files.is_empty()
+        || !cli.probes.is_empty();
     if headless_only && !cli.headless {
         return Err(
             "--size, --for, --at, --seed, --tape, --screen, --json, --styles, --grant, \
-             --deny, --words, --event, --key: with --headless"
+             --deny, --words, --event, --key, --pointer, --click, --focus, --paste, --clock, \
+             --zone, --storage, --file, --probe: with --headless"
                 .into(),
         );
+    }
+    if cli.files.len() > hostfn::MAX_HANDLES {
+        return Err(format!("--file: {} at most", hostfn::MAX_HANDLES));
     }
     if cli.tape.is_some() && (!cli.screen.is_empty() || cli.size.is_some()) {
         return Err("--tape gives the screen and its size: no --screen, no --size".into());
@@ -347,9 +476,6 @@ fn headless_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
             Under::Screens(screens)
         }
     };
-    if let Err(e) = confine(cli, false) {
-        return fail(5, e);
-    }
     let d = Options::default();
     let grants = match (&cli.grant, cli.deny.is_empty()) {
         (Some(grant), _) => Some(Grants::new(grant, &cli.deny, &cli.words)),
@@ -365,6 +491,17 @@ fn headless_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
         Some(g) => g.held(),
         None => ALL.iter().map(|s| s.to_string()).collect(),
     };
+    let host = match host_fns(cli, &granted) {
+        Ok(h) => h,
+        Err(e) => return fail(2, e),
+    };
+    let assets = match read_assets(cli) {
+        Ok(a) => a,
+        Err(e) => return fail(2, e),
+    };
+    if let Err(e) = confine(cli, false) {
+        return fail(5, e);
+    }
     let (args, limits) = given(cli, args, &granted);
     let options = Options {
         size: cli.size.unwrap_or(d.size),
@@ -376,6 +513,8 @@ fn headless_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
         inject: cli.inject.clone(),
         grants,
         limits,
+        host,
+        assets,
         ..d
     };
     let report = match headless::run(wasm, &options) {
@@ -390,11 +529,71 @@ fn headless_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
     } else {
         print!("{}", report.text(cli.styles));
     }
+    let status = report.result.as_ref().map_or(0, |r| r.1);
     match report.end {
-        None | Some(Error::Exit(0)) => ExitCode::SUCCESS,
+        None | Some(Error::Exit(0)) => ExitCode::from(status),
         Some(Error::Exit(code)) => ExitCode::from(code.clamp(1, 255) as u8),
         Some(_) => ExitCode::from(70),
     }
+}
+
+/// `--assets DIR`, read whole.
+fn read_assets(cli: &Cli) -> Result<Option<Assets>, String> {
+    cli.assets.as_deref().map(Assets::read).transpose()
+}
+
+/// The clock, the zones, the storage, the files and the probes of a
+/// headless run, read before the profile.
+fn host_fns(cli: &Cli, granted: &[String]) -> Result<HostFns, String> {
+    use ptyrc_core::zone::{self, Zone};
+    let mut h = HostFns {
+        wall0: cli.clock.unwrap_or(headless::DEFAULT_CLOCK),
+        ..HostFns::default()
+    };
+    // The database read whole, only for an app that holds the clock.
+    if granted.iter().any(|g| g == "clock") {
+        h.zones = Zones::read(&zone::database());
+    }
+    if let Some(name) = &cli.zone {
+        let zone = match h.zones.get(name) {
+            Ok(z) => Some(z),
+            Err(_) if name == "UTC" => Some(Zone::utc()),
+            Err(_) => Zone::posix(name, name),
+        };
+        h.zone = Some(zone.ok_or_else(|| {
+            format!("--zone {name}: not a zone of the database, nor a POSIX rule (UTC-2)")
+        })?);
+    }
+    if let Some(dir) = &cli.storage {
+        let list =
+            std::fs::read_dir(dir).map_err(|e| format!("--storage {}: {e}", dir.display()))?;
+        for entry in list.flatten() {
+            let Some(key) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            if !ptyrc_box::assets::valid_component(&key)
+                || !entry.file_type().is_ok_and(|t| t.is_file())
+            {
+                continue;
+            }
+            let bytes = std::fs::read(entry.path())
+                .map_err(|e| format!("--storage {}: {e}", entry.path().display()))?;
+            h.storage
+                .insert(key, String::from_utf8_lossy(&bytes).into_owned());
+        }
+    }
+    for (option, path) in &cli.files {
+        h.files
+            .push(Named::read(option, path).map_err(|e| format!("--file {option}: {e}"))?);
+    }
+    for (name, path) in &cli.probes {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| format!("--probe {name}: {}: {e}", path.display()))?;
+        let answer = serde_json::from_str(&text)
+            .map_err(|e| format!("--probe {name}: {}: {e}", path.display()))?;
+        h.probes.insert(name.clone(), answer);
+    }
+    Ok(h)
 }
 
 fn unit_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
@@ -458,7 +657,11 @@ fn main() -> ExitCode {
         .and_then(|m| m.granted.clone())
         .unwrap_or_default();
     let (args, limits) = given(&cli, args, &granted);
-    let host = live::Live::new(client, Box::new(std::io::stderr()));
+    let mut host = live::Live::new(client, Box::new(std::io::stderr()));
+    host.assets = match read_assets(&cli) {
+        Ok(a) => a,
+        Err(e) => return fail(2, e),
+    };
     let confined = || confine(&cli, true).map_err(Error::Host);
     match live::run_confined(&wasm, host, &args, limits, rate, term, confined) {
         Ok(code) => ExitCode::from(code.clamp(0, 255) as u8),

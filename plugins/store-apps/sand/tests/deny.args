@@ -1,0 +1,2 @@
+# shape answered no: the pane is idle at once, the sand comes at once.
+--size 30x6 --for 2s --at 1s,2s --rate 200 --deny shape

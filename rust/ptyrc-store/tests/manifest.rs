@@ -97,6 +97,24 @@ fn bad_app() {
     bad("surface = \"frame\"", "wait = \"yes\"", 10, "wait");
     let waits = GOOD.replacen("surface = \"frame\"", "wait = true", 1);
     assert!(manifest::parse(&waits).unwrap().app.wait);
+    bad("surface = \"frame\"", "random = [\"-a\"]", 10, "random");
+    bad("surface = \"frame\"", "random = [[1]]", 10, "random");
+    bad(
+        "surface = \"frame\"",
+        "random = [[\"a\\u0007\"]]",
+        10,
+        "random",
+    );
+    let random = |line: &str| {
+        let src = GOOD.replacen("surface = \"frame\"", line, 1);
+        manifest::parse(&src).unwrap().app.random
+    };
+    assert_eq!(
+        random("random = [[], [\"-a\"]]"),
+        [vec![], vec!["-a".to_string()]]
+    );
+    assert!(random("random = []").is_empty());
+    assert_eq!(random(""), [Vec::<String>::new()]);
     bad("tape = \"demo.tape\"", "colour = \"red\"", 11, "unknown");
     bad("[limits]", "[extra]", 17, "unknown");
     bad(

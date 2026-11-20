@@ -37,7 +37,10 @@ pub enum Dev {
     /// requests refused or lowered, the permissions lacking, the limits
     /// met, the end; the log on stderr. The same run every time. A Rust
     /// app is built first (rustc, as the store builds it). It holds what
-    /// its manifest declares
+    /// its manifest declares. Also, as ptyrc-box takes them: --clock ISO,
+    /// --zone NAME, --storage DIR, --file NAME=PATH, --probe
+    /// git=FILE.json, --pointer T:X,Y, --click T:X,Y, --focus T:TAG,
+    /// --paste T:TEXT
     #[command(allow_hyphen_values = true)]
     Test {
         /// The app's directory [default: .]
@@ -171,7 +174,10 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
                     "--arg" => args.push(value()),
                     "--deny" => deny.push(value()),
                     "--size" | "--for" | "--at" | "--seed" | "--tape" | "--screen" | "--event"
-                    | "--key" => flags.extend([name.clone().into(), value().into()]),
+                    | "--key" | "--clock" | "--zone" | "--storage" | "--file" | "--probe"
+                    | "--pointer" | "--click" | "--focus" | "--paste" => {
+                        flags.extend([name.clone().into(), value().into()])
+                    }
                     _ => args.push(w),
                 }
             }

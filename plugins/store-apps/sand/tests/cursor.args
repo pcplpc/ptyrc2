@@ -1,0 +1,2 @@
+# test_sand_cursor: the stream falls on the cursor's column (8).
+--size 30x6 --for 2s --at 0.5s,1s,1.5s,2s --rate 200 --now --cursor --screen tests/cursor.screen

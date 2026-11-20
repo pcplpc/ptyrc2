@@ -146,7 +146,6 @@ impl Driver {
     /// The file `handle` of the app `conn` is bound to: its path, its
     /// kind, whether it may be written. `None`: no app, or not one of
     /// its handles. For `file.*`.
-    #[allow(dead_code)]
     pub(super) fn file_of(
         &self,
         conn: ConnId,

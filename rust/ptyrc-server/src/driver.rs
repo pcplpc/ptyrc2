@@ -588,7 +588,11 @@ impl Driver {
             topics: HashSet::new(),
             pending: HashMap::new(),
             cuts: HashMap::new(),
-            hostio: crate::hostio::Hostio::spawn(crate::hostio::State::from_env()).ok(),
+            hostio: crate::hostio::Hostio::spawn(
+                crate::hostio::State::from_env(),
+                crate::hostio::State::from_env(),
+            )
+            .ok(),
             writes: HashMap::new(),
             after: Vec::new(),
             next_conn: 1,
@@ -660,7 +664,11 @@ impl Driver {
             topics: HashSet::new(),
             pending: HashMap::new(),
             cuts: HashMap::new(),
-            hostio: crate::hostio::Hostio::spawn(crate::hostio::State::from_env()).ok(),
+            hostio: crate::hostio::Hostio::spawn(
+                crate::hostio::State::from_env(),
+                crate::hostio::State::from_env(),
+            )
+            .ok(),
             writes: HashMap::new(),
             next_conn: 1,
             next_token: 1,
@@ -1734,7 +1742,7 @@ impl Driver {
         if let Verdict::Denied(why) = self.verdict(conn, method, &params) {
             return Some(Err(grants::denied(method, why)));
         }
-        // Clock, storage, result: answered by the driver, nothing cut.
+        // Host functions: answered by the driver.
         if hostfn::is_host(method) {
             return self.host_call(conn, method, params, in_batch);
         }
@@ -2212,6 +2220,11 @@ impl Driver {
         if changed.is_empty() && infos.is_empty() {
             return;
         }
+        let gone: Vec<u64> = infos.iter().filter_map(|i| i["id"].as_u64()).collect();
+        self.probes_gone(&gone);
+        let Some(apps) = &mut self.apps else {
+            return;
+        };
         self.hotkey_app.take_if(|id| apps.get(*id).is_none());
         if !self.topics.contains("apps") {
             return;

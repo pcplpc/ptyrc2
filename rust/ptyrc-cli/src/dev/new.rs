@@ -91,13 +91,28 @@ const RUST: &[File] = &[
         false,
     ),
     (
+        "vendor/ptyrc-app/src/deck.rs",
+        include_str!("../../../../sdk/rust/ptyrc-app/src/deck.rs"),
+        false,
+    ),
+    (
         "vendor/ptyrc-app/src/ffi.rs",
         include_str!("../../../../sdk/rust/ptyrc-app/src/ffi.rs"),
         false,
     ),
     (
+        "vendor/ptyrc-app/src/host.rs",
+        include_str!("../../../../sdk/rust/ptyrc-app/src/host.rs"),
+        false,
+    ),
+    (
         "vendor/ptyrc-app/src/json.rs",
         include_str!("../../../../sdk/rust/ptyrc-app/src/json.rs"),
+        false,
+    ),
+    (
+        "vendor/ptyrc-app/src/native.rs",
+        include_str!("../../../../sdk/rust/ptyrc-app/src/native.rs"),
         false,
     ),
 ];

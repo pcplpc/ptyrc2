@@ -38,12 +38,24 @@ pub const PTYRC_APP: &[(&str, &str)] = &[
         include_str!("../../../sdk/rust/ptyrc-app/src/lib.rs"),
     ),
     (
+        "src/deck.rs",
+        include_str!("../../../sdk/rust/ptyrc-app/src/deck.rs"),
+    ),
+    (
         "src/ffi.rs",
         include_str!("../../../sdk/rust/ptyrc-app/src/ffi.rs"),
     ),
     (
+        "src/host.rs",
+        include_str!("../../../sdk/rust/ptyrc-app/src/host.rs"),
+    ),
+    (
         "src/json.rs",
         include_str!("../../../sdk/rust/ptyrc-app/src/json.rs"),
+    ),
+    (
+        "src/native.rs",
+        include_str!("../../../sdk/rust/ptyrc-app/src/native.rs"),
     ),
 ];
 

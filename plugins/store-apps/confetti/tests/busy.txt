@@ -1,0 +1,67 @@
+--- 500 ms
+ab cd ef gh ij kl mn   ·*  · ❋
+ab cd ef gh ij kl mn❋ · ✦*✦ ·
+ab cd ef gh ij kl*mn✦ * ·❋❋✦··
+ab cd ef gh ij✦kl✦mn❋*❋✦*· ❋❋❋
+ab·cd ef gh ij✦kl✦mn·* ··❋✦ ·
+ab cd ef gh ij❋kl mn❋❋✦· ✦✦*❋❋
+ab cd ef gh ij✦kl❋mn❋❋     ·✦·
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab*cd ef gh ij kl mn
+--- 1000 ms
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn ❋   *
+ab cd ef gh ij kl mn     ·
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+--- 1500 ms
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn     *
+ab cd ef gh ij kl mn     ✦
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij·kl mn
+--- 2000 ms
+ab cd ef✦gh ij kl mn *
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn❋
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij✦kl mn
+--- 2500 ms
+ab cd ef·gh ij kl mn *
+ab cd ef gh ij kl mn     *   ✦
+ab cd ef gh ij kl mn
+ab cd ef gh❋ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+--- 3000 ms
+ab cd ef gh ij kl mn·
+ab cd ef gh ij kl mn     *   ·
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn❋
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn  ✦
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ab cd ef gh ij kl mn
+ended: exit: 0

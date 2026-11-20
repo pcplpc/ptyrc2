@@ -1,0 +1,5 @@
+# test_confetti_stays_behind_busy_text: every other cell holds text;
+# the pieces show between the words, never over a letter. `--size`
+# of the app after `--`: before it, the screen's.
+--size 30x10 --for 3s --at 0.5s,1s,1.5s,2s,2.5s,3s --one-shot --fancy --duration 0.8 --sparkle
+--screen tests/busy.screen -- --size 200

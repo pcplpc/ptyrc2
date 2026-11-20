@@ -441,7 +441,22 @@ fn installed(dirs: &Dirs, name: &str) -> Result<Installed, Fail> {
     Ok(e.clone())
 }
 
+/// A shipped app named (`ptyrc/NAME`, or an id no installed app has):
+/// it goes with ptyrc, never by the store.
+fn shipped_named(dirs: &Dirs, name: &str) -> Option<String> {
+    match install::resolve(dirs, name) {
+        Ok((e, Some(_))) => Some(e.origin),
+        _ => None,
+    }
+}
+
 fn rm(dirs: &Dirs, args: Rm) -> Result<ExitCode, Fail> {
+    if let Some(origin) = shipped_named(dirs, &args.name) {
+        return Err(Fail::usage(
+            format!("{origin}: shipped with ptyrc: removed with it, not by the store"),
+            "its grants: ptyrc manage, or the table of permissions.toml",
+        ));
+    }
     let _lock = lock(dirs)?;
     let gone = match installed(dirs, &args.name) {
         Ok(e) => Some(install::remove(dirs, &e.origin)?),
@@ -478,7 +493,13 @@ fn update(dirs: &Dirs, args: Update) -> Result<ExitCode, Fail> {
     } else {
         let mut v = Vec::new();
         for n in &args.names {
-            v.push(installed(dirs, n)?);
+            match shipped_named(dirs, n) {
+                Some(origin) => println!("{origin}: shipped with ptyrc: updated with it"),
+                None => v.push(installed(dirs, n)?),
+            }
+        }
+        if v.is_empty() {
+            return Ok(ExitCode::SUCCESS);
         }
         v
     };
@@ -623,7 +644,7 @@ fn yanked_line(origin: &str, tty: bool) {
 }
 
 fn ls(dirs: &Dirs, json: bool) -> Result<ExitCode, Fail> {
-    let apps = install::list(dirs)?;
+    let apps = install::all(dirs)?;
     let registries = Registries::load(dirs).unwrap_or_default();
     let now: Vec<Option<Now>> = apps.iter().map(|a| now_of(&registries, a)).collect();
     if json {
@@ -686,6 +707,19 @@ fn ls(dirs: &Dirs, json: bool) -> Result<ExitCode, Fail> {
 }
 
 fn show(dirs: &Dirs, name: &str) -> Result<ExitCode, Fail> {
+    if let Ok((e, Some(s))) = install::resolve(dirs, name) {
+        let tty = std::io::stdout().is_terminal();
+        println!("origin       {}", e.origin);
+        println!("id           {}", s.manifest.app.id);
+        println!("version      {}", s.manifest.app.version);
+        println!("summary      {}", s.manifest.app.summary);
+        println!(
+            "commit       ptyrc {} ({})",
+            e.commit,
+            tier_word(e.tier, tty)
+        );
+        return Ok(describe(&s.manifest, &s.dir));
+    }
     let entry = match installed(dirs, name) {
         Ok(e) => Some(e),
         Err(f) if f.status == 4 => None,
@@ -740,20 +774,7 @@ fn show(dirs: &Dirs, name: &str) -> Result<ExitCode, Fail> {
         if let Some(p) = &e.previous {
             println!("previous     {p} (kept until the new one has started)");
         }
-        println!("surface      {}", m.app.surface.as_str());
-        println!("tree         {}", dir.display());
-        if !m.permissions.is_empty() {
-            println!("permissions");
-            for p in &m.permissions {
-                println!("  {}: {}", p.name, p.why);
-            }
-        }
-        if !m.options.is_empty() {
-            println!("options");
-            for o in &m.options {
-                println!("  {} ({}): {}", o.name, o.type_name(), o.doc);
-            }
-        }
+        describe(&m, &dir);
     }
     if let Some((registry, p)) = &found {
         if entry.is_none()
@@ -791,6 +812,26 @@ fn show(dirs: &Dirs, name: &str) -> Result<ExitCode, Fail> {
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// The lines of `show` from the manifest: surface, tree, permissions,
+/// options.
+fn describe(m: &ptyrc_store::Manifest, dir: &Path) -> ExitCode {
+    println!("surface      {}", m.app.surface.as_str());
+    println!("tree         {}", dir.display());
+    if !m.permissions.is_empty() {
+        println!("permissions");
+        for p in &m.permissions {
+            println!("  {}: {}", p.name, p.why);
+        }
+    }
+    if !m.options.is_empty() {
+        println!("options");
+        for o in &m.options {
+            println!("  {} ({}): {}", o.name, o.type_name(), o.doc);
+        }
+    }
+    ExitCode::SUCCESS
 }
 
 fn search(dirs: &Dirs, word: &str, json: bool) -> Result<ExitCode, Fail> {

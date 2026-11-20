@@ -160,6 +160,9 @@ pub struct App {
     pub tape: Option<String>,
     /// `ptyrc app ID` waits for its result by default (`--wait`).
     pub wait: bool,
+    /// `random = [[], ["-a"]]`: the option words of each draw of the
+    /// menu's random app; `[]`: never drawn. Absent: `[[]]`.
+    pub random: Vec<Vec<String>>,
 }
 
 /// The program: a script, or the root of a Rust crate.
@@ -213,9 +216,11 @@ pub struct Limit {
 pub use crate::options::{AppOption, OptionType, OptionValue, Positional};
 
 const APP_KEYS: &[&str] = &[
-    "api", "assets", "id", "license", "rust", "rustc", "script", "summary", "surface", "tape",
-    "version", "wait",
+    "api", "assets", "id", "license", "random", "rust", "rustc", "script", "summary", "surface",
+    "tape", "version", "wait",
 ];
+/// `[app] random`: lists, words of a list, bytes of a word.
+pub const RANDOM_MAX: (usize, usize, usize) = (16, 16, 64);
 const SECTIONS: &[&str] = &["app", "args", "limits", "options", "permissions"];
 
 /// Parses raw bytes: UTF-8, at most [`MAX_MANIFEST`].
@@ -533,6 +538,10 @@ impl Cx<'_> {
                 }
             },
         };
+        let random = match field(t, "random") {
+            None => vec![Vec::new()],
+            Some((_, v)) => self.random(v)?,
+        };
         Ok(App {
             id,
             version,
@@ -545,7 +554,39 @@ impl Cx<'_> {
             surface,
             tape,
             wait,
+            random,
         })
+    }
+
+    fn random(&self, v: &Spanned<DeValue<'_>>) -> Result<Vec<Vec<String>>> {
+        let (lists, words, bytes) = RANDOM_MAX;
+        let bad = || {
+            self.err(
+                v.span(),
+                format!(
+                    "[app] random: not a list of at most {lists} lists of at most {words} \
+                     option words, {bytes} bytes each, no control character"
+                ),
+                "random = [[], [\"--fast\"]]; random = [] never drawn",
+            )
+        };
+        let DeValue::Array(a) = v.get_ref() else {
+            return Err(bad());
+        };
+        if a.len() > lists {
+            return Err(bad());
+        }
+        let word = |w: &Spanned<DeValue<'_>>| match w.get_ref() {
+            DeValue::String(s) if s.len() <= bytes && !s.chars().any(char::is_control) => {
+                Some(s.to_string())
+            }
+            _ => None,
+        };
+        let list = |l: &Spanned<DeValue<'_>>| match l.get_ref() {
+            DeValue::Array(ws) if ws.len() <= words => ws.iter().map(word).collect(),
+            _ => None,
+        };
+        a.iter().map(list).collect::<Option<_>>().ok_or_else(bad)
     }
 
     fn why(&self, name: &str, v: &Spanned<DeValue<'_>>, s: &str) -> Result<String> {

@@ -44,6 +44,8 @@ impl Sandbox {
             .env("XDG_DATA_HOME", self.dir.join("data"))
             .env("XDG_STATE_HOME", self.dir.join("state"))
             .env("XDG_CACHE_HOME", self.dir.join("cache"))
+            // No shipped store app: a path that is no directory.
+            .env("PTYRC_STORE_APPS", self.dir.join("shipped"))
             .env_remove("PTYRC_SESSION")
             .env_remove("PTYRC_SOCKET");
         command
@@ -93,6 +95,11 @@ impl Sandbox {
             (
                 "XDG_CONFIG_HOME".to_string(),
                 self.config().to_string_lossy().into_owned(),
+            ),
+            // No shipped store app: a path that is no directory.
+            (
+                "PTYRC_STORE_APPS".to_string(),
+                self.dir.join("shipped").to_string_lossy().into_owned(),
             ),
             ("PS1".to_string(), "$ ".to_string()),
             ("ENV".to_string(), String::new()),

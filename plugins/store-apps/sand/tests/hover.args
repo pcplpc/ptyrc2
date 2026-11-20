@@ -1,0 +1,4 @@
+# --hover (_cli.Nozzle): the pointer on the pad (sprite 2) at the foot
+# of the stream takes the sand there.
+--size 30x6 --for 3s --at 1.5s,2s,2.5s,3s --rate 300 --now --hover
+--event 2000:hover:{"sprite":2,"at":[15,5],"x":15,"y":5}

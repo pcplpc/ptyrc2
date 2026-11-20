@@ -1,0 +1,5 @@
+# test_sand_waits_for_idle: a pane that changed until 2 s gets no sand
+# while it is busy; once still long enough (headless: about 8 s), the
+# frame turns idle and the sand comes.
+--size 30x6 --for 13s --at 4s,8s,10s,11s,12s,13s --rate 200
+--screen 0:tests/busy1.screen --screen 1s:tests/busy2.screen --screen 2s:tests/busy3.screen

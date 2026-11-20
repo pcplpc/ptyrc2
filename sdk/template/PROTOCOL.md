@@ -40,7 +40,10 @@ its own widget, or its own sprite in front of the text.
 | `limit-time` | `[limits]` `tick-ms`, `init-ms`, `calls-per-second` | the default | plain |
 | `clock` | `clock.now`, `clock.zone`: the wall clock, zones | session time as the epoch, UTC, `"degree": "none"` | plain |
 | `storage` | `storage.*`: 64 named values, 1 MiB, its own | `denied` | plain |
-| `files`, `files-write`, `probe-git`, `probe-system` | nothing yet: accepted, unused | | `files-write` red; the rest plain |
+| `files` | `file.*` of a file or directory the user names (`[options] x = { type = "file" }`); asked when the manifest's default is used | `no-file` | plain |
+| `files-write` | `file.write` of a file whose option says `write = true` | `denied` | red |
+| `probe-git` | `probe.git`: `git` run by the driver in the program's directory, or a `dir` named | `{"repo": null, "degree": "none"}` | plain |
+| `probe-system` | `probe.system`: processes, logins, listening ports, disks | every part empty, `"degree": "none"` | plain |
 
 - A reading not held is answered in the same form, cut to the degree
   held, with `"degree": "none" | "layout" | "shape" | "words"` in the
@@ -112,6 +115,12 @@ Cut answers:
 | `storage.set` | `key`, `value` (a string, 256 KiB) | `{"used","quota"}`; past 64 keys or 1 MiB: `not-usable`, nothing written; 16 a second | `storage` |
 | `storage.remove` | `key` | `{}` | `storage` |
 | `storage.list` | | `{"keys":[{"key","size"}],"used","quota"}` | `storage` |
+| `file.stat` | `file` (a handle), `name` (a file of a `dir`) | `{"exists", "size", "mtime_ms"}`; absent: `{"exists": false}` | — |
+| `file.read` | `file`, `name`, `as` (`"text"`, `"base64"`), `offset`, `len` (1 MiB at most) | `{"text" \| "base64", "size", "mtime_ms", "eof"}`; a file of 16 MiB at most | — |
+| `file.list` | `file` (a `dir`) | `{"entries":[{"name","size"}]}`: its regular files of a valid name, 1024 at most | — |
+| `file.write` | `file`, `text` or `base64` (the whole, 1 MiB), `if_mtime_ms` | `{"size","mtime_ms"}`; another mtime: `not-usable`; 16 a second with `storage.set` | `files-write`, and `write = true` |
+| `probe.git` | `repo` (a `dir` handle; absent: the program's directory), `parts`, `log` (1..200), `since` (a stamp) | `{"repo": {...} \| null, "stamp"}`; `since` the stamp now: `{"unchanged": true, "stamp"}`; a real read a second | `probe-git` |
+| `probe.system` | `parts` (`glance`, `logins`, `listeners`, `disks`), `top` (0..16) | `{"glance", "logins", "listeners", "disks"}`; shares between two samples, the first zeros | `probe-system` |
 
 Sprite (`draw.put`; a `Canvas` makes one):
 `{"frame", "anchor", "content": {"rows": [str], "style": {...}},
@@ -125,13 +134,19 @@ negative, behind the text; in front only with `front` (else behind).
 Effects: `draw.exts`. Limits of the driver: 256 sprites, 16 widgets,
 32 subscriptions; past one, `not-usable`.
 
-Host functions (`clock.*`, `storage.*`, `app.result`):
+Host functions (`clock.*`, `storage.*`, `app.result`, `file.*`,
+`probe.*`):
 
 - A `key`: 1 to 64 bytes of `[A-Za-z0-9._-]`, not starting with `.`;
   else `bad-params`. The values are the app's origin's: kept by an
   update, removed by `ptyrc store rm --purge`.
-- `clock.*` held and `storage.*` read the disk: not in a `batch`
-  (`bad-request`).
+- `clock.*` held, `storage.*`, `file.*`, `probe.*` held read the
+  disk or run `git`: not in a `batch` (`bad-request`).
+- A file is a handle, never a path: `init(args)` gets `{"file": "f0",
+  "name": "TODO.md"}` for an option of type `file` or `dir`. A handle
+  not given: `no-file`. `name`: as a `key`. A link in place of the
+  file, or of a file of the directory, is not followed: absent. A
+  directory moved since it was named: `not-usable`.
 - A tick on the second: `period(1000 - unix_ms % 1000)` once, then
   `period(1000)`. At `next`, ask `clock.now` again.
 
@@ -144,7 +159,7 @@ Host functions (`clock.*`, `storage.*`, `app.result`):
 | `size` | `{"size":[c,r]}` | — |
 | `draw` | `{"removed":[id],"frame","rows":[from,to]\|null}`: its sprites removed by the driver | — |
 | `widgets` | widget info, when it changes | — |
-| `move` | `{"frame":id}`: the user moved the app | — |
+| `move` | `{"frame":id}`: the user moved the app, or its frame left the screen and a pane took its place (its sprites moved along; `size` follows) | — |
 | `exit` | `{"status"}`: the program ended | — |
 | `frames` | frame infos | `layout` |
 | `screen` | `{"rows":[y]}`: screen rows changed | `shape` |
@@ -186,6 +201,15 @@ calls a second), `headless`.
   wait). Another method of the table above: `headless`
   (the hint says so; a session answers it, `ptyrc dev run`). A name
   not in it: `unknown-method`, with the nearest.
+- Host functions, from memory, the driver's answers: `clock.*` from
+  `--clock ISO` (default `2000-01-01T00:00:00Z`) advancing with session
+  time, local zone `--zone NAME` (default `UTC`); `storage.*` empty,
+  or the files of `--storage DIR` (never written back); `app.result`;
+  `file.*` on `--file NAME=PATH` (the handle under `NAME` in `init`;
+  writes in memory); `probe.*` from `--probe git=FILE.json` (none: the
+  not-held answer); `asset.*` from `[app] assets`. The report:
+  `result:` (and the status), `storage:`, `files:` (written); `--json`
+  their values.
 - The permissions are those the manifest declares (`[limits]`:
   `limit-memory`, `limit-time`); `--deny a,b` answers them no. The
   report names each request `refused`, each answer `lowered` and the
@@ -196,7 +220,12 @@ calls a second), `headless`.
 - Events: `size` on a tape's resize; `screen` and `text` when the
   screen changes (a tape, a `--screen T:FILE`); `input` for a grabbed
   key given by `--key MS:NAME` (`ctrl+t` releases); any topic by
-  `--event MS:TOPIC:JSON`, delivered when subscribed and held.
+  `--event MS:TOPIC:JSON`, delivered when subscribed and held;
+  `hover` (`--pointer MS:X,Y`) and `mouse` (`--click MS:X,Y`: press,
+  release) on the app's sprite under the cell, heard as the driver
+  hears them; `--focus MS:TAG` gives the keys to its widget that asks,
+  then `--key` goes to it (its escape and close keys too) and
+  `--paste MS:TEXT`; `widgets` when a widget is laid out.
 - The screen: `--screen [T:]FILE`, again for each change (text: the
   screen cleared at T, the text written from the top left; escapes
   read as a terminal would; a line wider than the screen wraps, rows

@@ -3,9 +3,11 @@
 //! (empty, a text, a tape), the clock an argument. The same module,
 //! options and seed give the same report.
 
+use crate::assets::Assets;
 use crate::core::{CallError, Host, Limits};
 use crate::error::Error;
 use crate::grants::{self, Degree, Gate, Grants};
+use crate::hostfn::{self, HostFns, Named};
 use crate::runner::Runner;
 use ptyrc_core::frames::{FrameConfig, FrameEvent, Frames, ScreenInput};
 use ptyrc_core::plugin::DrawExt;
@@ -91,8 +93,20 @@ pub enum Inject {
     /// subscribed and held.
     Event(String, Value),
     /// A key of the host keyboard, named as `input.send` names it: to
-    /// the app when it grabbed it; `ctrl+t` releases the grab.
+    /// the app when it grabbed it; `ctrl+t` releases the grab. To the
+    /// focused widget, when one is: its escape key takes the focus back,
+    /// its close key hides it.
     Key(String),
+    /// The host mouse moved to a cell, no button down: `hover`.
+    Pointer(u16, u16),
+    /// A left click on a cell: `mouse`, press then release.
+    Click(u16, u16),
+    /// The user gives the keys to the app's widget of this tag, when
+    /// it asks (`widget.ask`), as the hotkey does.
+    Focus(String),
+    /// Text pasted: the focused widget's; under a grab of every key,
+    /// key by key.
+    Paste(String),
 }
 
 /// The draw extensions of the driver (`ptyrc-cli`, `plugins.rs`).
@@ -320,9 +334,14 @@ pub struct Headless {
     in_batch: bool,
     /// Per widget that asks: its escape and close keys; empty: none.
     escapes: BTreeMap<u64, (String, String)>,
+    /// The sprite the pointer is on, last told (`hover`).
+    hovered: Option<Value>,
     /// `app.list`: the app's name and origin.
     pub name: String,
     pub store: Option<String>,
+    /// Clock, storage, result, files, probes.
+    pub fns: HostFns,
+    pub assets: Option<Assets>,
 }
 
 /// A frame at the last look: rect, origin, the text of its rows.
@@ -386,8 +405,11 @@ impl Headless {
             exts,
             in_batch: false,
             escapes: BTreeMap::new(),
+            hovered: None,
             name: "app".into(),
             store: None,
+            fns: HostFns::default(),
+            assets: None,
         };
         h.observe();
         h
@@ -466,6 +488,60 @@ impl Headless {
                 self.dropped
                     .push((self.now, format!("event {topic}: {why}")));
             }
+            Inject::Pointer(x, y) => self.pointer("hover", *x, *y),
+            Inject::Click(x, y) => self.pointer("mouse", *x, *y),
+            Inject::Focus(tag) => {
+                let id = (self.widgets.list().into_iter())
+                    .find(|w| w.owner == OWNER && w.tag == *tag && w.asks.is_some())
+                    .map(|w| w.id);
+                match id.map(|id| self.widgets.focus(id)) {
+                    Some(Ok(())) => self.settle(),
+                    _ => self.dropped.push((
+                        self.now,
+                        format!("focus {tag}: no widget of this tag asks (widget.ask)"),
+                    )),
+                }
+            }
+            Inject::Paste(text) => match self.widgets.focused() {
+                Some((id, _)) if !text.is_empty() => {
+                    (self.pending).push(("input".into(), json!({"widget": id, "paste": text})));
+                }
+                _ if self.grab.as_ref().is_some_and(Vec::is_empty) => {
+                    for c in text.chars() {
+                        self.inject(&Inject::Key(c.to_string()));
+                    }
+                }
+                _ => self
+                    .dropped
+                    .push((self.now, "paste: to the program, nothing focused".into())),
+            },
+            Inject::Key(key) if self.widgets.focused().is_some() => {
+                let (id, _) = self.widgets.focused().expect("focused");
+                let (escape, close) = self.escapes.get(&id).cloned().unwrap_or_default();
+                let reason = match key.as_str() {
+                    k if k == escape => Some("escape"),
+                    k if k == close => Some("close"),
+                    _ => None,
+                };
+                match reason {
+                    Some(reason) => {
+                        if reason == "close" {
+                            self.widgets.hide(OWNER, id);
+                        } else {
+                            self.widgets.blur();
+                        }
+                        self.settle();
+                        let data = json!({"widget": id, "released": reason});
+                        self.pending.push(("input".into(), data));
+                    }
+                    None => {
+                        let bytes = key_bytes(key).unwrap_or_default();
+                        let data =
+                            json!({"key": key, "bytes": base64_encode(&bytes), "widget": id});
+                        self.pending.push(("input".into(), data));
+                    }
+                }
+            }
             Inject::Key(key) => {
                 let taken = match &self.grab {
                     Some(keys) => keys.is_empty() || keys.contains(key),
@@ -487,6 +563,76 @@ impl Headless {
                 }
             }
         }
+    }
+
+    /// The app's sprite at a cell, as the driver hit-tests it
+    /// (`screen::sprite_at`): the topmost, no effect; and whether it
+    /// is heard without `pointer`/`clicks`: a widget, or in front.
+    fn sprite_at(&self, x: u16, y: u16) -> Option<(Value, bool)> {
+        let (cx, cy) = (i64::from(x), i64::from(y));
+        let sprites = self.scene.list();
+        let (hit, [sx, sy]) = sprites.iter().rev().find_map(|s| {
+            let [sx, sy] = s.screen?;
+            let [w, h] = s.size;
+            let inside = cx >= sx && cx < sx + i64::from(w) && cy >= sy && cy < sy + i64::from(h);
+            (inside && !s.kind.starts_with("effect")).then_some((s, [sx, sy]))
+        })?;
+        let at = self.frames.at(x, y);
+        let widget = self.widgets.list().iter().any(|w| w.sprite == Some(hit.id));
+        let data = json!({
+            "sprite": hit.id, "at": [cx - sx, cy - sy], "x": x, "y": y,
+            "frame": at.map(|(id, _)| id), "pos": at.map(|(_, pos)| [pos.x, pos.y]),
+            "mods": [],
+        });
+        Some((data, widget || hit.layer > 0))
+    }
+
+    /// `hover` or `mouse` (a left click) at a cell, as the driver tells
+    /// them to a store app: on its own widget or front sprite; else
+    /// with `pointer` (`hover`), `clicks` (`mouse`).
+    fn pointer(&mut self, topic: &str, x: u16, y: u16) {
+        self.settle();
+        let hit = self.sprite_at(x, y);
+        let what = format!(
+            "{} {x},{y}",
+            if topic == "hover" { "pointer" } else { "click" }
+        );
+        let permission = if topic == "hover" {
+            "pointer"
+        } else {
+            "clicks"
+        };
+        let heard =
+            |h: &Headless, own: bool| own || h.grants.as_ref().is_none_or(|g| g.holds(permission));
+        let why = match hit {
+            None if topic == "hover" && self.hovered.take().is_some() => {
+                let data = json!({"sprite": null, "at": null, "x": x, "y": y,
+                                  "frame": null, "pos": null, "mods": []});
+                self.emit(topic, data);
+                return;
+            }
+            None => "on no sprite of the app",
+            Some(_) if !self.topics.contains(topic) => "not subscribed",
+            Some((_, own)) if !heard(self, own) => {
+                self.lack(permission, &[]);
+                "not held"
+            }
+            Some((data, _)) => {
+                if topic == "hover" {
+                    self.hovered = Some(data["sprite"].clone());
+                    self.emit(topic, data);
+                } else {
+                    for action in ["press", "release"] {
+                        let mut d = data.clone();
+                        d["button"] = json!("left");
+                        d["action"] = json!(action);
+                        self.emit(topic, d);
+                    }
+                }
+                return;
+            }
+        };
+        self.dropped.push((self.now, format!("{what}: {why}")));
     }
 
     fn emit(&mut self, topic: &str, data: Value) {
@@ -594,13 +740,17 @@ impl Headless {
         }
     }
 
-    /// Lay the widgets out, advance the scene to now.
+    /// Lay the widgets out (topic `widgets`), advance the scene to now.
     pub fn settle(&mut self) {
         let now = self.at();
         let cursor = self.vt.cursor();
         let cursor = cursor.visible.then_some((cursor.col, cursor.row));
-        self.widgets
-            .tick(now, self.vt.grid(), cursor, &self.frames, &mut self.scene);
+        let changed =
+            (self.widgets).tick(now, self.vt.grid(), cursor, &self.frames, &mut self.scene);
+        // Topic `widgets`: each widget laid out anew.
+        for info in changed {
+            self.emit("widgets", json!(info));
+        }
         self.scene.tick_on(now, self.vt.grid(), &self.frames);
     }
 
@@ -954,6 +1104,11 @@ impl Headless {
                 let idle = self.frames.idle(id, now);
                 Ok(json!(idle))
             }
+            _ if method.starts_with("asset.") && self.in_batch => Err(hostfn::not_in_batch(method)),
+            _ if method.starts_with("asset.") => Err(CallError::new(
+                "not-usable",
+                format!("{method}: answered by the runner"),
+            )),
             _ if grants::METHODS.contains(&method) => Err(CallError {
                 hint: Some(
                     "a method of the driver, answered in a session (ptyrc dev run), not in a \
@@ -1024,6 +1179,10 @@ impl Headless {
         params: &Value,
     ) -> (Result<Value, CallError>, Option<Degree>) {
         let Some(g) = self.grants.clone() else {
+            if hostfn::is_host(method) {
+                let answer = (self.fns).call(method, params, self.now, false, true, self.in_batch);
+                return (answer, None);
+            }
             return (self.answer(method, params), None);
         };
         let mut placed = params.clone();
@@ -1038,6 +1197,28 @@ impl Headless {
                 ..CallError::new("denied", format!("{method}: denied"))
             };
             return (Err(e), None);
+        }
+        // Clock, storage, result, files, probes: nothing cut but what
+        // is lowered whole.
+        if hostfn::is_host(method) {
+            let low = match grants::gate(method, params) {
+                Gate::Lowered(p) if !g.holds(p) => Some(p),
+                _ => None,
+            };
+            let writable = g.holds("files-write");
+            let answer = (self.fns).call(
+                method,
+                params,
+                self.now,
+                low.is_some(),
+                writable,
+                self.in_batch,
+            );
+            if let Some(p) = low {
+                self.lack(p, &[]);
+                return (answer, Some(Degree::None));
+            }
+            return (answer, None);
         }
         let degree = g.degree();
         if degree >= Degree::Text {
@@ -1677,6 +1858,10 @@ impl Host for Headless {
         (u32::from(self.vt.cols()), u32::from(self.vt.rows()))
     }
 
+    fn assets(&self) -> Option<&Assets> {
+        self.assets.as_ref()
+    }
+
     fn log(&mut self, text: &str) {
         self.log.push(format!("{:>6} {text}", self.now));
     }
@@ -1715,6 +1900,10 @@ pub struct Options {
     /// Seed of `random`.
     pub seed: u64,
     pub limits: Limits,
+    /// Clock, zone, storage, files, probes as given (`hostfn`); each
+    /// file under its option in `args`, as a handle.
+    pub host: HostFns,
+    pub assets: Option<Assets>,
 }
 
 impl Default for Options {
@@ -1730,9 +1919,17 @@ impl Default for Options {
             grants: None,
             seed: 1,
             limits: Limits::default(),
+            host: HostFns {
+                wall0: DEFAULT_CLOCK,
+                ..HostFns::default()
+            },
+            assets: None,
         }
     }
 }
+
+/// `--clock` by default: 2000-01-01T00:00:00Z.
+pub const DEFAULT_CLOCK: i64 = 946_684_800_000;
 
 /// What a headless run gives back.
 #[derive(Clone, Debug, PartialEq)]
@@ -1755,6 +1952,12 @@ pub struct Report {
     pub lacks: Vec<Lack>,
     /// What was injected and reached nobody: `(ms, what)`.
     pub dropped: Vec<(u64, String)>,
+    /// `app.result`: `(value, status)`, the last.
+    pub result: Option<(Value, u8)>,
+    /// The storage at the end.
+    pub storage: BTreeMap<String, String>,
+    /// The files the app wrote, in memory.
+    pub written: Vec<Named>,
 }
 
 impl Lack {
@@ -1899,7 +2102,9 @@ impl Report {
 
     /// The report as one JSON value: `screens` (`t`, `rows`, `styles`:
     /// `[y, x, w, style]`), `refused`, `lowered`, `dropped`, `notes`,
-    /// `lacks`, `limits`, `end`.
+    /// `lacks`, `limits`, `end`, `result` (`{value, status}` or null),
+    /// `storage` (key: value), `files` (written: `option`, `name`,
+    /// `size`, `text` or `base64`).
     pub fn to_json(&self) -> Value {
         let screens: Vec<Value> = self
             .screens
@@ -1938,6 +2143,17 @@ impl Report {
                        "refused": l.refused, "words": l.words, "line": l.line()})
             })
             .collect();
+        let files: Vec<Value> = (self.written.iter())
+            .map(|f| {
+                let bytes = f.content.bytes.as_deref().unwrap_or_default();
+                let mut v = json!({"option": f.option, "name": f.name, "size": bytes.len()});
+                match std::str::from_utf8(bytes) {
+                    Ok(text) => v["text"] = json!(text),
+                    Err(_) => v["base64"] = json!(crate::assets::base64_encode(bytes)),
+                }
+                v
+            })
+            .collect();
         json!({
             "screens": screens,
             "refused": refused,
@@ -1947,6 +2163,9 @@ impl Report {
             "lacks": lacks,
             "limits": self.met,
             "end": self.end.as_ref().map(|e| e.to_string()),
+            "result": self.result.as_ref().map(|(v, s)| json!({"value": v, "status": s})),
+            "storage": self.storage,
+            "files": files,
         })
     }
 }
@@ -2014,6 +2233,23 @@ impl Report {
         }
         if self.lacks.iter().any(|l| !l.declared) {
             writeln!(f, "{LESS}")?;
+        }
+        if let Some((value, status)) = &self.result {
+            let value = match value {
+                Value::String(s) => s.escape_debug().to_string(),
+                v => v.to_string(),
+            };
+            writeln!(f, "result: {value} (status {status})")?;
+        }
+        if !self.storage.is_empty() {
+            let keys: Vec<String> = (self.storage.iter())
+                .map(|(k, v)| format!("{k} {} bytes", v.len()))
+                .collect();
+            writeln!(f, "storage: {}", keys.join(", "))?;
+        }
+        for file in &self.written {
+            let size = file.content.bytes.as_ref().map_or(0, Vec::len);
+            writeln!(f, "files: {} written, {size} bytes", file.option)?;
         }
         for limit in &self.met {
             writeln!(f, "limit met: {limit}")?;
@@ -2098,6 +2334,27 @@ fn fit_note(t: u64, text: &str, (cols, rows): (u16, u16)) -> Option<String> {
     })
 }
 
+/// `args` with each file named under its option: `{"file": "f0",
+/// "name": "TODO.md"}`; an option given twice, a list of them.
+fn with_handles(args: &Value, files: &[Named]) -> Value {
+    let mut args = args.clone();
+    if !args.is_object() {
+        args = json!({});
+    }
+    for (i, f) in files.iter().enumerate() {
+        let handle = json!({"file": format!("f{i}"), "name": f.name});
+        let slot = &mut args[f.option.as_str()];
+        match slot {
+            Value::Array(list) => list.push(handle),
+            Value::Object(o) if o.contains_key("file") => {
+                *slot = json!([slot.clone(), handle]);
+            }
+            _ => *slot = handle,
+        }
+    }
+    args
+}
+
 /// Run a module headless. `Err`: it did not load.
 pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
     let (size, tape) = match &options.under {
@@ -2110,6 +2367,9 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
     if let Some(id) = manifest.and_then(|m| m.get("id")).and_then(Value::as_str) {
         host.name = id.to_owned();
     }
+    host.fns = options.host.clone();
+    host.assets = options.assets.clone();
+    let args = with_handles(&options.args, &options.host.files);
     let mut texts: Vec<(u64, &str)> = match &options.under {
         Under::Text(text) => vec![(0, text.as_str())],
         Under::Screens(s) => s.iter().map(|(t, text)| (*t, text.as_str())).collect(),
@@ -2157,7 +2417,7 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
     let mut styles = Vec::new();
     let mut ticks = 0;
 
-    let mut done = runner.init(&options.args, 0);
+    let mut done = runner.init(&args, 0);
     let mut period = runner.period();
     let mut next_tick = (period > 0).then_some(u64::from(period));
     // At one time: the tape, the events, the tick, the screen.
@@ -2227,10 +2487,19 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
     }
     let met = runner.met().iter().map(|m| m.to_string()).collect();
     let host = runner.host_mut();
+    for p in &host.fns.unanswered {
+        notes.push(format!(
+            "probe.{p}: held, no --probe {p}=FILE.json: answered as not held"
+        ));
+    }
+    let fns = std::mem::take(&mut host.fns);
     Ok(Report {
         screens,
         styles,
         notes,
+        result: fns.result,
+        storage: fns.storage,
+        written: fns.files.into_iter().filter(|f| f.written).collect(),
         requests: std::mem::take(&mut host.requests),
         lacks: std::mem::take(&mut host.lacks),
         dropped: std::mem::take(&mut host.dropped),
@@ -2615,5 +2884,70 @@ mod tests {
         let apps = h.call("app.list", json!({})).unwrap();
         assert_eq!(apps["apps"][0]["widgets"], 1);
         assert_eq!(apps["apps"][0]["me"], true);
+    }
+    #[test]
+    fn the_hands_on_the_scene() {
+        let mut h = host(&["shape"], &[]);
+        h.call("subscribe", json!({"topics": ["hover", "mouse", "input"]}))
+            .unwrap();
+        let put = json!({"content": {"rows": ["xx"]}, "anchor": {"at": [3, 1]}});
+        let id = h.call("draw.put", put).unwrap()["id"].as_u64().unwrap();
+        h.settle();
+        // Behind the text, not a widget: not heard without the permission.
+        h.inject(&Inject::Click(4, 1));
+        assert!(h.take_events().is_empty());
+        assert_eq!(h.dropped.last().unwrap().1, "click 4,1: not held");
+        let mut h = host(&["shape", "pointer", "clicks"], &[]);
+        h.call("subscribe", json!({"topics": ["hover", "mouse", "input"]}))
+            .unwrap();
+        let put = json!({"content": {"rows": ["xx"]}, "anchor": {"at": [3, 1]}});
+        assert_eq!(h.call("draw.put", put).unwrap()["id"], id);
+        h.settle();
+        h.inject(&Inject::Pointer(4, 1));
+        h.inject(&Inject::Pointer(0, 0));
+        h.inject(&Inject::Click(4, 1));
+        h.inject(&Inject::Click(0, 2));
+        let e = h.take_events();
+        assert_eq!(
+            e[0].1,
+            json!({"sprite": id, "at": [1, 0], "x": 4, "y": 1, "frame": 1,
+                                  "pos": [4, 1], "mods": []})
+        );
+        assert_eq!(e[1].1["sprite"], Value::Null);
+        assert_eq!(
+            (e[2].0.as_str(), &e[2].1["action"]),
+            ("mouse", &json!("press"))
+        );
+        assert_eq!(e[3].1["action"], "release");
+        assert_eq!(e[3].1["button"], "left");
+        assert_eq!(e.len(), 4);
+        assert_eq!(
+            h.dropped.last().unwrap().1,
+            "click 0,2: on no sprite of the app"
+        );
+        // The focus, the keys, the paste, the escape.
+        let w = json!({"widgets": [{"tag": "w", "name": "small", "size": [5, 1],
+                                     "content": {"rows": ["hello"]}}]});
+        h.call("widget.declare", w).unwrap();
+        h.inject(&Inject::Focus("w".into()));
+        assert!(
+            h.dropped
+                .last()
+                .unwrap()
+                .1
+                .starts_with("focus w: no widget")
+        );
+        let wid = h.call("widget.show", json!({"tag": "w"})).unwrap()["widget"]["id"].clone();
+        h.call("widget.ask", json!({"id": wid})).unwrap();
+        h.inject(&Inject::Focus("w".into()));
+        h.inject(&Inject::Key("a".into()));
+        h.inject(&Inject::Paste("pasted".into()));
+        h.inject(&Inject::Key("esc".into()));
+        h.inject(&Inject::Key("b".into()));
+        let e = h.take_events();
+        assert_eq!(e[0].1, json!({"key": "a", "bytes": "YQ==", "widget": wid}));
+        assert_eq!(e[1].1, json!({"widget": wid, "paste": "pasted"}));
+        assert_eq!(e[2].1, json!({"widget": wid, "released": "escape"}));
+        assert_eq!(e.len(), 3);
     }
 }

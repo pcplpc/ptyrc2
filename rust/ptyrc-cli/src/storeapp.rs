@@ -7,6 +7,7 @@ use crate::manage::catalog::{self, Kind, Opt};
 use crate::{Common, Fail};
 use ptyrc_store::manifest;
 use ptyrc_store::options::{self, OptionType};
+use ptyrc_store::shipped::{self, Shipped};
 use ptyrc_store::{Dirs, Installed, install};
 use ptyrc_store::{Launch, Manifest, OptionValue};
 use serde_json::Value;
@@ -15,10 +16,12 @@ use std::process::ExitCode;
 
 const MANIFEST: &str = "ptyrc-app.toml";
 
-/// An installed app and its manifest.
+/// An installed or shipped app and its manifest.
 pub struct StoreApp {
     pub installed: Installed,
     pub manifest: Manifest,
+    /// A shipped app (`ptyrc_store::shipped`).
+    pub shipped: Option<Shipped>,
 }
 
 fn read(installed: Installed, tree: &std::path::Path) -> Result<StoreApp, Fail> {
@@ -34,33 +37,67 @@ fn read(installed: Installed, tree: &std::path::Path) -> Result<StoreApp, Fail> 
     Ok(StoreApp {
         installed,
         manifest,
+        shipped: None,
     })
 }
 
-/// A word that can only be an origin: `host/owner/repo`, `local:/dir`.
+fn of_shipped(s: Shipped) -> StoreApp {
+    StoreApp {
+        installed: s.installed(),
+        manifest: s.manifest.clone(),
+        shipped: Some(s),
+    }
+}
+
+/// A word that can only be an origin: `host/owner/repo`, `local:/dir`,
+/// `ptyrc/NAME`.
 pub fn is_origin(word: &str) -> bool {
     word.contains('/') || word.contains(':')
 }
 
-/// The installed app `name` (an id or an origin); `None`: none such.
+/// The installed or shipped app `name` (an id or an origin); `None`:
+/// none such.
 pub fn find(name: &str) -> Option<Result<StoreApp, Fail>> {
     let dirs = Dirs::from_env().ok()?;
-    let (installed, tree) = install::locate(&dirs, name).ok()?;
-    Some(read(installed, &tree))
+    match install::resolve(&dirs, name) {
+        Ok((_, Some(s))) => Some(Ok(of_shipped(s))),
+        Ok((_, None)) => {
+            let (installed, tree) = install::locate(&dirs, name).ok()?;
+            Some(read(installed, &tree))
+        }
+        // A shipped tree that does not read: said.
+        Err(e) if shipped::name_of(name).is_some() || !e.message.ends_with("not installed") => {
+            Some(Err(e.into()))
+        }
+        Err(_) => None,
+    }
 }
 
-/// Every installed app whose manifest reads.
+/// Every installed app whose manifest reads, then the shipped ones.
 pub fn installed() -> Vec<StoreApp> {
     let Ok(dirs) = Dirs::from_env() else {
         return Vec::new();
     };
     let list = install::list(&dirs).unwrap_or_default();
-    list.into_iter()
-        .filter_map(|a| {
-            let (installed, tree) = install::locate(&dirs, &a.origin).ok()?;
-            read(installed, &tree).ok()
-        })
-        .collect()
+    let installed = list.into_iter().filter_map(|a| {
+        let (installed, tree) = install::locate(&dirs, &a.origin).ok()?;
+        read(installed, &tree).ok()
+    });
+    let shipped = shipped::list(&dirs).into_iter().flatten().map(of_shipped);
+    installed.chain(shipped).collect()
+}
+
+/// A shipped Rust app built when its tree has changed (`Shipped::build`):
+/// before the driver starts it.
+pub fn prepare(app: &StoreApp) -> Result<(), Fail> {
+    let Some(s) = app.shipped.as_ref().filter(|s| s.is_rust()) else {
+        return Ok(());
+    };
+    let dirs = Dirs::from_env()?;
+    s.build(&dirs, |t| {
+        eprintln!("ptyrc: building {} with rustc {}", s.origin(), t.release)
+    })?;
+    Ok(())
 }
 
 /// `--help`: the manifest's (`options::help`), its origin, tier and
@@ -102,7 +139,11 @@ pub fn parse_options(app: &StoreApp, words: &[String]) -> Result<Option<Launch>,
 
 /// The params of `app.start` for `app` with the option words `words`.
 pub fn start_params(app: &StoreApp, words: &[String]) -> Result<Option<Value>, Fail> {
-    Ok(parse_options(app, words)?.map(|launch| launch.params(&app.installed.origin)))
+    let Some(launch) = parse_options(app, words)? else {
+        return Ok(None);
+    };
+    prepare(app)?;
+    Ok(Some(launch.params(&app.installed.origin)))
 }
 
 /// `ptyrc app ID|ORIGIN [--wait|--no-wait] [OPTION...]`: the driver
@@ -115,6 +156,7 @@ pub fn run(common: &Common, app: &StoreApp, words: &[String]) -> Result<ExitCode
         return Ok(ExitCode::SUCCESS);
     };
     let wait = launch.launcher.wait.unwrap_or(app.manifest.app.wait);
+    prepare(app)?;
     let params = launch.params(&app.installed.origin);
     let mut client = crate::connect(common)?;
     let info = crate::manage::start_with(&mut client, params)?;
@@ -197,12 +239,17 @@ pub fn catalog_apps(names: &[&str]) -> Vec<catalog::App> {
                 help: p.option.doc.clone(),
             })
             .collect();
+        // `[app] random`: the draws that read.
+        let random = (m.app.random.iter())
+            .filter(|words| matches!(parse_options(app, words), Ok(Some(_))))
+            .cloned()
+            .collect();
         out.push(catalog::App {
             name,
             help: format!("store, {}: {}", app.installed.tier.as_str(), m.app.summary),
             options,
             positionals,
-            random: Vec::new(),
+            random,
             widgets: false,
         });
     }
@@ -288,6 +335,7 @@ mod tests {
         StoreApp {
             installed,
             manifest,
+            shipped: None,
         }
     }
 

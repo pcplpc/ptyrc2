@@ -9,6 +9,7 @@ mod apps;
 mod conn;
 pub mod driver;
 pub mod engine;
+mod files;
 pub mod focus;
 mod grab;
 mod grants;

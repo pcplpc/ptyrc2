@@ -1,0 +1,7 @@
+--- 1000 ms
+
+  ·               ·
+--- 2000 ms
+lowered at 924 ms: frame.heat, to the degree none, 4 times
+lowered: shape, declared and answered no
+ended: exit: 0

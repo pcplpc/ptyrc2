@@ -23,6 +23,8 @@ pub struct Live {
     log: Box<dyn Write + Send>,
     urandom: Option<File>,
     gone: Option<String>,
+    /// The app's assets, read before the profile.
+    pub assets: Option<crate::assets::Assets>,
 }
 
 fn size_of(v: &Value) -> Option<(u32, u32)> {
@@ -39,11 +41,16 @@ impl Live {
             log,
             urandom: File::open("/dev/urandom").ok(),
             gone: None,
+            assets: None,
         }
     }
 }
 
 impl Host for Live {
+    fn assets(&self) -> Option<&crate::assets::Assets> {
+        self.assets.as_ref()
+    }
+
     fn call(&mut self, method: &str, params: Value) -> Result<Value, CallError> {
         if let Some(gone) = &self.gone {
             return Err(CallError::new("gone", gone.clone()));

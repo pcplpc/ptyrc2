@@ -3,11 +3,13 @@
 //! its canvases. See `README.md` and `plan/store-model.md`.
 
 pub mod abi;
+pub mod assets;
 pub mod core;
 mod engine;
 pub mod error;
 pub mod grants;
 pub mod headless;
+pub mod hostfn;
 pub mod live;
 pub mod manifest;
 pub mod profile;

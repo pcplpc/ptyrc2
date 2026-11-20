@@ -15,6 +15,7 @@ pub mod origin;
 pub mod page;
 pub mod registry;
 pub mod review;
+pub mod shipped;
 pub mod sync;
 pub mod tree;
 

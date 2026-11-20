@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The worker of the host functions: what may block (a disk, later
-//! `git`) runs on one thread, in order, never on the driver's loop. A
-//! job is a function of the worker's state; its answer completes the
-//! pending reply from the loop, woken by a byte on a socket pair.
+//! The workers of the host functions: what may block runs off the
+//! driver's loop, in order. Two lanes, a thread each: the disk
+//! (`clock.*`, `storage.*`, `file.*`) and the probes (`probe.*`: `git`
+//! may take 2 s a command). A job is a function of its lane's state;
+//! its answer completes the pending reply from the loop, woken by a
+//! byte on a socket pair.
 
 use crate::engine::Token;
 use crate::zone::{self, Zone};
@@ -31,6 +33,18 @@ pub(crate) struct State {
     zones: HashMap<String, Zone>,
     /// `<state>/ptyrc/storage`; None: no home.
     pub storage: Option<PathBuf>,
+    /// The probes of each app (the probe lane).
+    pub probes: HashMap<u64, Probes>,
+    /// The `git` run (`git` of `$PATH`).
+    pub git: PathBuf,
+}
+
+/// What the probe lane keeps of an app; dropped with it.
+#[derive(Default)]
+pub(crate) struct Probes {
+    pub sampler: Option<ptyrc_probe::system::Sampler>,
+    /// The last real `probe.git`: when, what was asked, the answer.
+    pub git: Option<(std::time::Instant, Value, Value)>,
 }
 
 impl State {
@@ -41,6 +55,22 @@ impl State {
             localtime: PathBuf::from("/etc/localtime"),
             zones: HashMap::new(),
             storage: crate::storage::root(),
+            probes: HashMap::new(),
+            git: PathBuf::from("git"),
+        }
+    }
+
+    /// No database, no storage (tests).
+    #[cfg(test)]
+    pub fn bare() -> State {
+        State {
+            tzdir: PathBuf::from("/nonexistent"),
+            tz: None,
+            localtime: PathBuf::from("/nonexistent"),
+            zones: HashMap::new(),
+            storage: None,
+            probes: HashMap::new(),
+            git: PathBuf::from("git"),
         }
     }
 
@@ -74,41 +104,75 @@ impl State {
 
 pub(crate) type Job = Box<dyn FnOnce(&mut State) -> Result<Value, RpcError> + Send>;
 
+/// Which worker a job runs on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Lane {
+    Disk,
+    Probe,
+}
+
 /// The driver's end.
 pub(crate) struct Hostio {
-    jobs: SyncSender<(Token, Job)>,
+    disk: SyncSender<(Token, Job)>,
+    probe: SyncSender<(Token, Job)>,
     done: Receiver<(Token, Result<Value, RpcError>)>,
     wake: UnixStream,
 }
 
+/// A thread running the jobs of `inbox` on `state`.
+fn worker(
+    name: &str,
+    mut state: State,
+    inbox: Receiver<(Token, Job)>,
+    outbox: mpsc::Sender<(Token, Result<Value, RpcError>)>,
+    mut ring: UnixStream,
+) -> io::Result<()> {
+    std::thread::Builder::new()
+        .name(name.into())
+        .spawn(move || {
+            // Ends when the driver's end is dropped.
+            while let Ok((token, job)) = inbox.recv() {
+                let answer = job(&mut state);
+                if outbox.send((token, answer)).is_err() {
+                    break;
+                }
+                // Full: a byte already waits, the loop will drain.
+                let _ = ring.write(&[1]);
+            }
+        })
+        .map(drop)
+}
+
 impl Hostio {
-    /// The worker, started.
-    pub fn spawn(state: State) -> io::Result<Hostio> {
-        let (jobs, inbox) = mpsc::sync_channel::<(Token, Job)>(QUEUE);
+    /// The workers, started: `disk` and `probe` their states.
+    pub fn spawn(disk: State, probe: State) -> io::Result<Hostio> {
         let (outbox, done) = mpsc::channel();
-        let (wake, mut ring) = UnixStream::pair()?;
+        let (wake, ring) = UnixStream::pair()?;
         wake.set_nonblocking(true)?;
         ring.set_nonblocking(true)?;
-        std::thread::Builder::new()
-            .name("ptyrc-hostio".into())
-            .spawn(move || {
-                let mut state = state;
-                // Ends when the driver's end is dropped.
-                while let Ok((token, job)) = inbox.recv() {
-                    let answer = job(&mut state);
-                    if outbox.send((token, answer)).is_err() {
-                        break;
-                    }
-                    // Full: a byte already waits, the loop will drain.
-                    let _ = ring.write(&[1]);
-                }
-            })?;
-        Ok(Hostio { jobs, done, wake })
+        let lane = |name, state| {
+            let (jobs, inbox) = mpsc::sync_channel::<(Token, Job)>(QUEUE);
+            worker(name, state, inbox, outbox.clone(), ring.try_clone()?)?;
+            io::Result::Ok(jobs)
+        };
+        let disk = lane("ptyrc-hostio", disk)?;
+        let probe = lane("ptyrc-probe", probe)?;
+        Ok(Hostio {
+            disk,
+            probe,
+            done,
+            wake,
+        })
     }
 
-    /// Queue `job`, answered under `token`. Refused when the queue is full.
-    pub fn submit(&self, token: Token, job: Job) -> Result<(), RpcError> {
-        match self.jobs.try_send((token, job)) {
+    /// Queue `job` on `lane`, answered under `token`. Refused when the
+    /// queue is full.
+    pub fn submit(&self, lane: Lane, token: Token, job: Job) -> Result<(), RpcError> {
+        let jobs = match lane {
+            Lane::Disk => &self.disk,
+            Lane::Probe => &self.probe,
+        };
+        match jobs.try_send((token, job)) {
             Ok(()) => Ok(()),
             Err(TrySendError::Full(_)) => Err(RpcError::new(ErrorCode::NotUsable, "host busy")
                 .with_hint(format!(
@@ -148,13 +212,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     fn state() -> State {
-        State {
-            tzdir: PathBuf::from("/nonexistent"),
-            tz: None,
-            localtime: PathBuf::from("/nonexistent"),
-            zones: HashMap::new(),
-            storage: None,
-        }
+        State::bare()
     }
 
     fn wait(io: &mut Hostio, n: usize) -> Vec<(Token, Result<Value, RpcError>)> {
@@ -173,9 +231,9 @@ mod tests {
 
     #[test]
     fn in_order_and_woken() {
-        let mut io = Hostio::spawn(state()).unwrap();
+        let mut io = Hostio::spawn(state(), state()).unwrap();
         for i in 0..10u64 {
-            io.submit(Token(i), Box::new(move |_| Ok(json!(i))))
+            io.submit(Lane::Disk, Token(i), Box::new(move |_| Ok(json!(i))))
                 .unwrap();
         }
         let got = wait(&mut io, 10);
@@ -185,12 +243,13 @@ mod tests {
     }
 
     #[test]
-    fn a_full_queue_is_refused() {
-        let mut io = Hostio::spawn(state()).unwrap();
+    fn a_full_queue_is_refused_and_a_lane_held_stalls_not_the_other() {
+        let mut io = Hostio::spawn(state(), state()).unwrap();
         let gate = Arc::new(Barrier::new(2));
         let held = gate.clone();
         let (started, on) = mpsc::channel();
         io.submit(
+            Lane::Probe,
             Token(0),
             Box::new(move |_| {
                 started.send(()).unwrap();
@@ -202,15 +261,20 @@ mod tests {
         // The worker holds the first; the queue takes 64 more.
         on.recv().unwrap();
         for i in 1..=QUEUE as u64 {
-            io.submit(Token(i), Box::new(|_| Ok(json!(null)))).unwrap();
+            io.submit(Lane::Probe, Token(i), Box::new(|_| Ok(json!(null))))
+                .unwrap();
         }
         let e = io
-            .submit(Token(99), Box::new(|_| Ok(json!(null))))
+            .submit(Lane::Probe, Token(99), Box::new(|_| Ok(json!(null))))
             .unwrap_err();
         assert_eq!(
             (e.code, e.message.as_str()),
             (ErrorCode::NotUsable, "host busy")
         );
+        // The disk answers meanwhile.
+        io.submit(Lane::Disk, Token(100), Box::new(|_| Ok(json!("disk"))))
+            .unwrap();
+        assert_eq!(wait(&mut io, 1)[0].0, Token(100));
         gate.wait();
         assert_eq!(wait(&mut io, QUEUE + 1).len(), QUEUE + 1);
     }

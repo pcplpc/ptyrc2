@@ -12,14 +12,45 @@
 //! ptyrc_app::app!(Hello);
 //! ```
 
+pub mod deck;
+#[cfg(target_arch = "wasm32")]
 mod ffi;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "native.rs"]
+mod ffi;
+mod host;
 pub mod json;
 
 use std::fmt;
 use std::sync::OnceLock;
 
 pub use ffi::{alloc, free};
+pub use host::{File, Stat, asset, base64, clock, result, storage};
 pub use json::{Map, Value};
+
+/// Off `wasm32` (`cargo test`): no host. A canvas is cells in memory,
+/// `present` shows nothing; `log` goes to stderr; `random` is a fixed
+/// sequence; `exit` panics; `call` answers `native` unless `serve` set
+/// a handler for the thread.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod native {
+    use super::{Error, Value, json};
+
+    /// Answers each `call` of this thread from now: `f(method, params)`;
+    /// `params`: `Null` for `{}`.
+    pub fn serve(mut f: impl FnMut(&str, Value) -> Result<Value, Error> + 'static) {
+        super::ffi::serve(Box::new(move |method, params| {
+            let params = json::parse_bytes(params).unwrap_or(Value::Null);
+            let answer = match f(method, params) {
+                Ok(result) => crate::json!({ "result": result }),
+                Err(e) => crate::json!({"error": {
+                    "code": (e.code), "message": (e.message), "hint": (e.hint),
+                }}),
+            };
+            answer.to_string().into_bytes()
+        }))
+    }
+}
 
 /// An app. One value of it lives from `init` to the end.
 pub trait App: Sized + 'static {
@@ -320,6 +351,130 @@ impl Color {
     }
 }
 
+/// A run of a row: text in one style (`PROTOCOL.md`, `cells`).
+/// `Color::Below`: absent.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Run {
+    pub t: String,
+    pub fg: Color,
+    pub bg: Color,
+    pub attrs: u16,
+}
+
+const ATTRS: [(u16, &str); 7] = [
+    (attr::BOLD, "bold"),
+    (attr::DIM, "dim"),
+    (attr::ITALIC, "italic"),
+    (attr::UNDERLINE, "underline"),
+    (attr::INVERSE, "inverse"),
+    (attr::STRIKE, "strike"),
+    (attr::BLINK, "blink"),
+];
+
+impl Run {
+    /// `t` in no style.
+    pub fn new(t: impl Into<String>) -> Run {
+        Run {
+            t: t.into(),
+            ..Run::default()
+        }
+    }
+
+    pub fn fg(self, fg: Color) -> Run {
+        Run { fg, ..self }
+    }
+
+    pub fn bg(self, bg: Color) -> Run {
+        Run { bg, ..self }
+    }
+
+    /// The attributes `attr::*` added.
+    pub fn attrs(self, attrs: u16) -> Run {
+        Run {
+            attrs: self.attrs | attrs,
+            ..self
+        }
+    }
+
+    /// The style of `self` on another text.
+    pub fn with(&self, t: impl Into<String>) -> Run {
+        Run {
+            t: t.into(),
+            ..self.clone()
+        }
+    }
+
+    /// `{"t", "fg", "bg", "bold", ...}`: a colour a palette index,
+    /// `"#rrggbb"` or `"default"`.
+    pub fn to_value(&self) -> Value {
+        let color = |c: Color| match c {
+            Color::Below => None,
+            Color::Default => Some(Value::from("default")),
+            Color::Palette(i) => Some(Value::from(i)),
+            Color::Rgb(r, g, b) => Some(Value::from(format!("#{r:02x}{g:02x}{b:02x}"))),
+        };
+        let mut v = crate::json!({ "t": (self.t.as_str()) });
+        if let Some(c) = color(self.fg) {
+            v["fg"] = c;
+        }
+        if let Some(c) = color(self.bg) {
+            v["bg"] = c;
+        }
+        for (bit, name) in ATTRS {
+            if self.attrs & bit != 0 {
+                v[name] = Value::Bool(true);
+            }
+        }
+        v
+    }
+}
+
+/// Columns of a glyph on a terminal, coarsely (the runner has the last
+/// word): 0 a mark that joins the glyph before, 2 wide, else 1.
+pub fn width(c: char) -> usize {
+    const ZERO: [(u32, u32); 7] = [
+        (0x0300, 0x036f),
+        (0x200b, 0x200f),
+        (0x202a, 0x202e),
+        (0x2060, 0x2064),
+        (0xfe00, 0xfe0f),
+        (0xfeff, 0xfeff),
+        (0xe0000, 0xe0fff),
+    ];
+    const WIDE: [(u32, u32); 14] = [
+        (0x1100, 0x115f),
+        (0x2e80, 0x303e),
+        (0x3041, 0x33ff),
+        (0x3400, 0x4dbf),
+        (0x4e00, 0x9fff),
+        (0xa000, 0xa4cf),
+        (0xac00, 0xd7a3),
+        (0xf900, 0xfaff),
+        (0xfe30, 0xfe4f),
+        (0xff00, 0xff60),
+        (0xffe0, 0xffe6),
+        (0x1f300, 0x1f64f),
+        (0x1f900, 0x1f9ff),
+        (0x20000, 0x3fffd),
+    ];
+    let c = u32::from(c);
+    let within = |t: &[(u32, u32)]| t.iter().any(|(a, b)| (*a..=*b).contains(&c));
+    if c < 0x300 {
+        1
+    } else if within(&ZERO) {
+        0
+    } else if within(&WIDE) {
+        2
+    } else {
+        1
+    }
+}
+
+/// Columns of `text` on a terminal ([`width`] of each glyph).
+pub fn cells(text: &str) -> usize {
+    text.chars().map(width).sum()
+}
+
 /// The attributes of a cell, or'ed.
 pub mod attr {
     pub const BOLD: u16 = 1;
@@ -453,6 +608,45 @@ impl Canvas {
     /// Every cell to nothing drawn.
     pub fn clear(&mut self) {
         self.fill(Cell::default());
+    }
+
+    /// Rows of runs: a widget's content as `cells`; a cell with no
+    /// glyph is a blank of no style.
+    pub fn runs(&mut self) -> Vec<Vec<Run>> {
+        let w = self.w as usize;
+        let rows = self.cells.get().chunks(w.max(1));
+        let rows = rows.map(|row| {
+            let mut out: Vec<Run> = Vec::new();
+            let mut key: Option<[u8; 10]> = None;
+            let mut x = 0;
+            while x < row.len() {
+                let cell = Cell::of(&row[x]);
+                let k = cell
+                    .ch
+                    .map_or([0xff; 10], |_| row[x][4..14].try_into().unwrap());
+                if out.is_empty() || key != Some(k) {
+                    out.push(match cell.ch {
+                        Some(_) => Run {
+                            t: String::new(),
+                            fg: cell.fg,
+                            bg: cell.bg,
+                            attrs: cell.attrs,
+                        },
+                        None => Run::default(),
+                    });
+                    key = Some(k);
+                }
+                let ch = cell.ch.unwrap_or(' ');
+                out.last_mut().expect("a run").t.push(ch);
+                x += if cell.ch.is_some() && cells(&ch.to_string()) == 2 {
+                    2
+                } else {
+                    1
+                };
+            }
+            out
+        });
+        rows.collect()
     }
 
     /// Shows the canvas. `place`: the members of a sprite but its content

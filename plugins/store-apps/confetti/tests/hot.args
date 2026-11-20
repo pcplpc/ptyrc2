@@ -1,0 +1,4 @@
+# test_confetti_party_avoids_hot: rows 0 to 5 rewritten five times a
+# second; every explosion lands below them.
+--size 30x12 --for 4s --at 2s,2.5s,3s,3.5s,4s --bursts 2 --duration 0.3 --fancy
+ --screen 0:tests/hot-a.screen --screen 200:tests/hot-b.screen --screen 400:tests/hot-a.screen --screen 600:tests/hot-b.screen --screen 800:tests/hot-a.screen --screen 1000:tests/hot-b.screen --screen 1200:tests/hot-a.screen --screen 1400:tests/hot-b.screen --screen 1600:tests/hot-a.screen --screen 1800:tests/hot-b.screen --screen 2000:tests/hot-a.screen --screen 2200:tests/hot-b.screen --screen 2400:tests/hot-a.screen --screen 2600:tests/hot-b.screen --screen 2800:tests/hot-a.screen --screen 3000:tests/hot-b.screen --screen 3200:tests/hot-a.screen --screen 3400:tests/hot-b.screen --screen 3600:tests/hot-a.screen --screen 3800:tests/hot-b.screen
