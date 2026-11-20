@@ -64,7 +64,7 @@ summary = "A file read and written back."
 license = "GPL-3.0-or-later"
 api = 1
 rust = "src/lib.rs"
-rustc = "1.85"
+rustc = "1.88"
 surface = "screen"
 
 [options]

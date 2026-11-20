@@ -187,6 +187,7 @@ fn the_time_of_a_tick() {
     let v: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
     assert_eq!(v["ticks"], 20);
     assert!(v["tick_ms"]["max"].as_f64().unwrap() >= v["tick_ms"]["mean"].as_f64().unwrap());
+    assert_eq!(v["slow"], serde_json::json!([]));
     let cases = ptyrc(&dir, &["dev", "test", ".", "--cases", "--timing"]);
     assert_eq!(cases.status.code(), Some(2), "{}", said(&cases));
 }

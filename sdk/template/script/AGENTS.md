@@ -29,9 +29,13 @@ export function stop() {}          // optional; 500 ms to end
 
 - `new Canvas(w, h)`: cells; `set`, `text`, `fill`, `clear`;
   `present({anchor: {at: [x, y], space: "view"}})` shows it, again
-  after a change. A cell never set is a hole. Negative `at`: the right
-  or bottom edge of the canvas from the right or bottom, `-1` the last
-  cell.
+  after a change. A cell never set is a hole. Negative `at`: the
+  canvas's right or bottom edge from the view's, `-1` on the last
+  column or row. `Half` (`ptyrc/canvas`) has no transparent pixel:
+  empty the cells to leave holes (`canvas.set(x, y, "")`).
+- The pointer on a canvas behind the text (the default): `hover` needs
+  `pointer`, `mouse` needs `clicks`; on a widget, or a canvas in front,
+  neither. Tell it from another by `canvas.sprite()`.
 - A widget (a small window the driver places, in the size that fits):
   `import { Deck } from "ptyrc/deck"`; `deck.add(tag, {big: [17, 3],
   small: [5, 1]}, (w, h) => rows or a Canvas, {key(name) {}})`; give it
@@ -51,6 +55,10 @@ export function stop() {}          // optional; 500 ms to end
   throws a `PtyrcError` with `code` and `hint` when refused.
 - The size: `call("session.info").size` is `[columns, rows]`; then
   `call("subscribe", {topics: ["size"]})` and `event("size", {size: [c, r]})`.
+  `subscribe` adds to the topics held (a `Sight`, a `Deck` add theirs);
+  hand each event to them, then use it.
+- The frame told at `init`, `manifest()?.frame`: a real id live with
+  `layout` held, else 0; headless always 0 (`PROTOCOL.md`, Manifest).
 
 ## Rules
 
@@ -72,7 +80,7 @@ export function stop() {}          // optional; 500 ms to end
 
 ```
 ptyrc dev check            the manifest, the licence, the sizes: what the store checks
-./test.sh                  each case, then dev test --unit
+./test.sh                  dev test . --cases (each case), then dev test --unit
 ./test.sh --update         rewrites each tests/CASE.txt: after a change meant to change it
 ptyrc dev test --unit [FILE]   the test_* exports of tests.js (or FILE): ok/FAIL, file:line:col
 ptyrc dev test . --size 80x24 --for 3s --at 0,1s,3s [--screen F | --tape F] [--seed N] [--NAME VALUE]
@@ -83,7 +91,8 @@ ptyrc dev run [--NAME VALUE]   in a live session (ptyrc run -- $SHELL), restarte
 A case: `tests/NAME.args`, words split on white space, `#` to the end
 of a line a comment, no quoting (JSON without spaces); a new one:
 write the `.args`, then `./test.sh --update`. A report that differs
-is left in `tests/NAME.got`.
+is printed as a diff (`-` expected, `+` got); `ptyrc dev test . --cases
+NAME` runs one.
 
 `ptyrc dev test` prints the screen at each time (`--- T ms`), then
 `refused at T ms: METHOD (CODE)`, `lowered at T ms: METHOD, to the
@@ -111,3 +120,18 @@ frames, then `hint:` the cure when known. In `init` or a module it
 ends the app (`ended: exit: 1`); in `tick` or `event` a `PtyrcError`
 is logged once and the app goes on. `ended: time`: a call ran past its
 bound (a loop); `ended: memory`: 64 MiB.
+
+An act the user may refuse, in `init`: catch it, go on without.
+
+```js
+import { call, PtyrcError } from "ptyrc";
+let grabbed = false;
+try {
+  call("input.grab", { keys: ["up", "down", "left", "right"] });
+  grabbed = true;
+} catch (e) {
+  if (!(e instanceof PtyrcError) || e.code !== "denied") throw e;
+}
+```
+
+A reading not held throws nothing: it is cut (`"degree"` in it).

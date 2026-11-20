@@ -1,0 +1,2 @@
+# a first run: storage empty, the clock
+--size 50x2 --for 1s --at 0,1s

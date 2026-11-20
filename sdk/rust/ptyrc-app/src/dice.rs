@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Random draws for code that takes its source as an argument: the
 //! host's `random` ([`Host`]), or a sequence of its own ([`Seeded`],
-//! splitmix64), seeded once from the host or by a test.
+//! splitmix64), seeded once from the host or by a test. Pure code that
+//! draws from a `&mut impl Dice` gives the same run for a seed.
 
 /// A source of random numbers, and the draws made from it.
 pub trait Dice {
@@ -9,7 +10,17 @@ pub trait Dice {
 
     /// An integer in `0..n`; 0 when `n` is 0.
     fn below(&mut self, n: usize) -> usize {
-        ((u128::from(self.next_u64()) * n as u128) >> 64) as usize
+        self.below_u64(n as u64) as usize
+    }
+
+    /// An integer in `0..n`; 0 when `n` is 0.
+    fn below_u64(&mut self, n: u64) -> u64 {
+        ((u128::from(self.next_u64()) * u128::from(n)) >> 64) as u64
+    }
+
+    /// `true` with the chance `p` (`0..=1`).
+    fn chance(&mut self, p: f64) -> bool {
+        self.unit() < p
     }
 
     /// A number in `[0, 1)`.
@@ -47,7 +58,7 @@ pub struct Host;
 impl Dice for Host {
     fn next_u64(&mut self) -> u64 {
         let mut b = [0; 8];
-        ptyrc_app::random(&mut b);
+        crate::random(&mut b);
         u64::from_le_bytes(b)
     }
 }
@@ -86,7 +97,13 @@ mod tests {
             assert!((0.5..1.5).contains(&u));
         }
         assert!(seen.iter().all(|&n| (800..1200).contains(&n)), "{seen:?}");
-        assert_eq!(d.below(0), 0);
+        assert_eq!((d.below(0), d.below_u64(0)), (0, 0));
+        let big = 1u64 << 62;
+        assert!((0..1000).all(|_| d.below_u64(big) < big));
+        assert!((0..1000).any(|_| d.below_u64(big) >= big / 2));
+        assert!(!d.chance(0.0) && d.chance(1.0));
+        let n = (0..4000).filter(|_| d.chance(0.25)).count();
+        assert!((800..1200).contains(&n), "{n}");
     }
 
     #[test]

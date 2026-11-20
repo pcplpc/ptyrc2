@@ -47,7 +47,7 @@ fn good() {
 #[test]
 fn minimal_and_rust() {
     let m = manifest::parse(
-        "[app]\nid = \"a\"\nversion = \"1\"\nsummary = \"s\"\nlicense = \"GPL-3.0-or-later\"\napi = 1\nrust = \"src/lib.rs\"\nrustc = \"1.85\"\n",
+        "[app]\nid = \"a\"\nversion = \"1\"\nsummary = \"s\"\nlicense = \"GPL-3.0-or-later\"\napi = 1\nrust = \"src/lib.rs\"\nrustc = \"1.88\"\n",
     )
     .unwrap();
     assert_eq!(m.app.entry, Entry::Rust("src/lib.rs".into()));
@@ -93,7 +93,7 @@ fn bad_app() {
         10,
         "surface",
     );
-    bad("surface = \"frame\"", "rustc = \"1.85\"", 10, "rustc");
+    bad("surface = \"frame\"", "rustc = \"1.88\"", 10, "rustc");
     bad("surface = \"frame\"", "wait = \"yes\"", 10, "wait");
     let waits = GOOD.replacen("surface = \"frame\"", "wait = true", 1);
     assert!(manifest::parse(&waits).unwrap().app.wait);

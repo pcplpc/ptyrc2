@@ -19,8 +19,9 @@ const STACK: usize = 1 << 20;
 const TABLE: usize = 1 << 16;
 const RANDOM: usize = 1 << 16;
 
-const IMPORTS: [&str; 9] = [
-    "call", "canvas", "cells", "present", "release", "period", "log", "random", "exit",
+/// A module may import any of them: one built before `sprite` loads.
+const IMPORTS: [&str; 10] = [
+    "call", "canvas", "cells", "present", "sprite", "release", "period", "log", "random", "exit",
 ];
 
 struct Ctx<H: Host> {
@@ -255,6 +256,11 @@ fn link<H: Host>(linker: &mut Linker<Ctx<H>>) -> wasmtime::Result<()> {
             };
             Ok(ctx.core.present(id as u32, &place, cells))
         },
+    )?;
+    linker.func_wrap(
+        MODULE,
+        "sprite",
+        |caller: Caller<'_, Ctx<H>>, id: i32| -> i64 { caller.data().core.sprite(id as u32) },
     )?;
     linker.func_wrap(
         MODULE,

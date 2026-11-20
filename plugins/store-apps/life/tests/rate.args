@@ -1,0 +1,2 @@
+# test_life_options: --rate -1 refused (the manifest's min).
+--size 20x4 --for 1s -g --rate -1

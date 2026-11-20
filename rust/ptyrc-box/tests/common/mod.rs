@@ -11,6 +11,7 @@ pub const PRELUDE: &str = r#"
   (import "ptyrc" "canvas" (func $canvas (param i32 i32) (result i32)))
   (import "ptyrc" "cells" (func $cells (param i32) (result i32)))
   (import "ptyrc" "present" (func $present (param i32 i32 i32) (result i32)))
+  (import "ptyrc" "sprite" (func $sprite (param i32) (result i64)))
   (import "ptyrc" "release" (func $release (param i32)))
   (import "ptyrc" "period" (func $period (param i32)))
   (import "ptyrc" "log" (func $log (param i32 i32)))

@@ -6,7 +6,7 @@ summary = "Small pops of colour, as in the first ptyrc."
 license = "GPL-3.0-or-later"
 api = 1
 rust = "src/lib.rs"
-rustc = "1.85"
+rustc = "1.88"
 surface = "screen"
 
 [options]

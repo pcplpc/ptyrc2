@@ -254,6 +254,7 @@ fn gone_is_fine(r: Result<Value, Error>) -> Result<(), Error> {
 type Render<S> = Box<dyn FnMut(&mut S, u32, u32, &Widget) -> Content>;
 type OnText<S> = Box<dyn FnMut(&mut S, &str, &Widget) -> bool>;
 type OnHover<S> = Box<dyn FnMut(&mut S, u32, u32, &Widget) -> bool>;
+type OnClick<S> = Box<dyn FnMut(&mut S, u32, u32, &str, &Widget) -> bool>;
 type OnWidget<S> = Box<dyn FnMut(&mut S, &Widget) -> bool>;
 type OnClosed<S> = Box<dyn FnMut(&mut S, &Widget)>;
 
@@ -267,6 +268,7 @@ pub struct Spec<S> {
     key: Option<OnText<S>>,
     paste: Option<OnText<S>>,
     hover: Option<OnHover<S>>,
+    click: Option<OnClick<S>>,
     leave: Option<OnWidget<S>>,
     closed: Option<OnClosed<S>>,
     ask: Value,
@@ -288,6 +290,7 @@ impl<S> Spec<S> {
             key: None,
             paste: None,
             hover: None,
+            click: None,
             leave: None,
             closed: None,
             ask: Value::Null,
@@ -312,6 +315,18 @@ impl<S> Spec<S> {
     /// variant shown. Subscribes `hover`.
     pub fn hover(mut self, f: impl FnMut(&mut S, u32, u32, &Widget) -> bool + 'static) -> Spec<S> {
         self.hover = Some(Box::new(f));
+        self
+    }
+
+    /// `click(state, x, y, button, widget)`: a press or a wheel turn on
+    /// a cell of the variant shown; `button`: `left`, `middle`, `right`,
+    /// `wheel-up`, `wheel-down`, `wheel-left`, `wheel-right`. Subscribes
+    /// `mouse`.
+    pub fn click(
+        mut self,
+        f: impl FnMut(&mut S, u32, u32, &str, &Widget) -> bool + 'static,
+    ) -> Spec<S> {
+        self.click = Some(Box::new(f));
         self
     }
 
@@ -527,6 +542,9 @@ impl<S> Deck<S> {
         if spec.hover.is_some() || spec.leave.is_some() {
             self.subscribe(&["hover"]);
         }
+        if spec.click.is_some() {
+            self.subscribe(&["mouse"]);
+        }
         let keys = (spec.key.is_some() || spec.paste.is_some()).then(Keys::default);
         let w = Widget {
             tag: spec.tag.clone(),
@@ -644,16 +662,15 @@ impl<S> Deck<S> {
         Ok(())
     }
 
-    fn hover(&mut self, data: &Value, state: &mut S) -> Result<(), Error> {
+    /// The widget under `data` (`hover`, `mouse`) of those `has`
+    /// picks, and the cell of its variant.
+    fn under(&self, data: &Value, has: impl Fn(&Spec<S>) -> bool) -> Option<(String, u32, u32)> {
         let mut found = None;
         for e in &self.entries {
             let (Some(r), Some((w, h))) = (e.w.rect(), e.w.size()) else {
                 continue;
             };
-            if e.spec.hover.is_none()
-                || data["sprite"].is_null()
-                || e.w.info["sprite"] != data["sprite"]
-            {
+            if !has(&e.spec) || data["sprite"].is_null() || e.w.info["sprite"] != data["sprite"] {
                 continue;
             }
             let (Some(px), Some(py)) = (data["x"].as_i64(), data["y"].as_i64()) else {
@@ -665,6 +682,28 @@ impl<S> Deck<S> {
                 found = Some((e.w.tag.clone(), x as u32, y as u32));
             }
         }
+        found
+    }
+
+    fn mouse(&mut self, data: &Value, state: &mut S) -> Result<(), Error> {
+        if data["action"] != "press" && data["action"] != "wheel" {
+            return Ok(());
+        }
+        let Some((tag, x, y)) = self.under(data, |s| s.click.is_some()) else {
+            return Ok(());
+        };
+        let button = data["button"].as_str().unwrap_or_default().to_string();
+        let i = self.at(&tag).expect("a widget of the deck");
+        let e = &mut self.entries[i];
+        let changed = (e.spec.click.as_mut()).is_some_and(|f| f(state, x, y, &button, &e.w));
+        if changed {
+            return self.draw(Some(&tag), false, state);
+        }
+        Ok(())
+    }
+
+    fn hover(&mut self, data: &Value, state: &mut S) -> Result<(), Error> {
+        let found = self.under(data, |s| s.hover.is_some());
         if found.as_ref().map(|f| &f.0) != self.over.as_ref() {
             self.leave(state)?;
         }
@@ -759,13 +798,14 @@ impl<S> Deck<S> {
         Ok(true)
     }
 
-    /// An event: `widgets`, `move`, `hover`, `input` are the deck's
+    /// An event: `widgets`, `move`, `hover`, `mouse`, `input` are the deck's
     /// (`true`); another: `false`.
     pub fn event(&mut self, topic: &str, data: &Value, state: &mut S) -> Result<bool, Error> {
         match topic {
             "widgets" => self.widgets_event(data, state),
             "move" => self.move_to(data["frame"].clone(), state).map(|_| true),
             "hover" => self.hover(data, state).map(|_| true),
+            "mouse" => self.mouse(data, state).map(|_| true),
             "input" => self.input(data, state),
             _ => Ok(false),
         }
@@ -1271,6 +1311,42 @@ mod tests {
         deck.event("input", &json!({"widget": 1, "released": "close"}), &mut s)
             .unwrap();
         assert_eq!(deck.widgets().count(), 0);
+    }
+
+    /// A press or a wheel turn on the inner box; a release, a motion, a
+    /// cell of the border, another sprite: nothing.
+    #[test]
+    fn clicks() {
+        let log = host();
+        let mut s = State::default();
+        let mut deck = Deck::new(Value::Null);
+        let clicked: Rc<RefCell<Vec<(u32, u32, String)>>> = Rc::default();
+        let c = clicked.clone();
+        let spec = spec().click(move |s: &mut State, x, y, button, _| {
+            c.borrow_mut().push((x, y, button.to_string()));
+            s.n += 1;
+            button == "left"
+        });
+        deck.add(spec, &mut s).unwrap();
+        let subscribed: Vec<Value> = (log.borrow().iter())
+            .filter(|(m, _)| m == "subscribe")
+            .map(|(_, p)| p["topics"].clone())
+            .collect();
+        assert!(subscribed.contains(&json!(["mouse"])), "{subscribed:?}");
+        log.borrow_mut().clear();
+        let mouse = |action: &str, button: &str, sprite: u64, x: i64, y: i64| json!({"action": action, "button": button, "sprite": sprite, "x": x, "y": y});
+        let mut ev = |d: Value| deck.event("mouse", &d, &mut s).unwrap();
+        assert!(ev(mouse("press", "left", 7, 11, 3)));
+        assert!(ev(mouse("wheel", "wheel-up", 7, 27, 5)));
+        assert!(ev(mouse("release", "left", 7, 11, 3)));
+        assert!(ev(mouse("press", "left", 7, 10, 3)));
+        assert!(ev(mouse("press", "left", 8, 11, 3)));
+        assert_eq!(
+            clicked.borrow().as_slice(),
+            [(0, 0, "left".to_string()), (16, 2, "wheel-up".to_string())]
+        );
+        // `left` changed something: drawn again; the wheel did not say so.
+        assert_eq!(methods(&log), ["widget.set"]);
     }
 
     #[test]

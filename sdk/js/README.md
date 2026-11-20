@@ -75,8 +75,9 @@ unchanged.
   of the tree; 1 MiB, 512 files) and `script::init_args(main, sources,
   args)`. The reserved members win over arguments of their names.
 - `ptyrc:manifest`, set by the runner from `--manifest`: what the app
-  may know of its manifest, the grants and limits among it;
-  `manifest()` returns a copy, `null` without one.
+  may know of its manifest, the grants and limits among it, and its
+  frame at the start (`frame`); `manifest()` returns a copy, `null`
+  without one.
 - `ptyrc:unit`, set by `--unit`: the tests run, not `init`.
 - The interpreter takes the four out; the script's `init(args)` gets
   the rest.
@@ -95,7 +96,8 @@ unchanged.
   `palette`, `named`, `hex`, `channels`); pure, the twin of
   `_canvas.py`.
 - `"ptyrc/sight"`: `Sight`, the shape of the view of a frame kept by
-  the topics `frames`, `text`, `size`, `move`, `cursor` (`_cli.Sight`).
+  the topics `frames`, `text`, `size`, `move`, `cursor` (`_cli.Sight`);
+  by default of the app's frame told at `init`.
 - The four are compiled only when imported. No file answers to their
   names: a file `ptyrc.js` is `"./ptyrc.js"`.
 - `"./x.js"`, `"../lib/y.js"`: files of the tree, by path relative to

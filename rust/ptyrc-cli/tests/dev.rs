@@ -154,29 +154,31 @@ fn new_app(tag: &str, rust: bool) -> PathBuf {
         said.contains("ok   tests/clock\nok   tests/label\n"),
         "{said}"
     );
-    assert!(!app.join("tests/clock.got").exists());
-    // A report that differs, a case that fails: status 1, each named.
+    // A report that differs, a case that fails: status 1, each named,
+    // the difference printed, nothing left in the tree.
     std::fs::write(app.join("tests/label.txt"), "--- 0 ms\n").unwrap();
     std::fs::write(app.join("tests/bad.args"), "--size nine\n").unwrap();
     std::fs::write(app.join("tests/bad.txt"), "").unwrap();
     let out = sh(&app, "test.sh");
-    let err = String::from_utf8_lossy(&out.stderr).into_owned();
-    assert_eq!(out.status.code(), Some(1), "{err}");
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert_eq!(out.status.code(), Some(1), "{said}");
     assert!(
-        err.contains("FAIL tests/bad: ptyrc dev test exited 2"),
-        "{err}"
+        said.contains("FAIL tests/bad: ptyrc dev test ended with status 2\n"),
+        "{said}"
     );
     assert!(
-        err.contains("FAIL tests/label: the report differs"),
-        "{err}"
+        said.contains("FAIL tests/label: the report differs from tests/label.txt"),
+        "{said}"
     );
-    assert!(app.join("tests/label.got").is_file());
-    for f in [
-        "tests/bad.args",
-        "tests/bad.txt",
-        "tests/bad.got",
-        "tests/label.got",
-    ] {
+    assert!(said.lines().any(|l| l.starts_with('+')), "{said}");
+    assert!(said.contains("ok   tests/clock\n"), "{said}");
+    let left: Vec<_> = std::fs::read_dir(app.join("tests"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .filter(|n| !n.ends_with(".args") && !n.ends_with(".txt"))
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
+    for f in ["tests/bad.args", "tests/bad.txt"] {
         std::fs::remove_file(app.join(f)).unwrap();
     }
     let update = Command::new(app.join("test.sh"))
@@ -343,16 +345,45 @@ fn examples() {
         .collect();
     dirs.sort();
     assert!(dirs.len() >= 2, "{dirs:?}");
-    // The twins print the same text.
+    // The twins have the same cases: `tests/` the same files, byte for
+    // byte (each runs its own by its `test.sh`).
+    let cases = |d: &Path| -> Vec<(String, Vec<u8>)> {
+        let mut out: Vec<(String, Vec<u8>)> = std::fs::read_dir(d.join("tests"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_file())
+            .map(|p| {
+                let name = p.file_name().unwrap().to_string_lossy().into_owned();
+                (name, std::fs::read(&p).unwrap())
+            })
+            .collect();
+        out.sort();
+        out
+    };
+    let mut twins = 0;
     for js in dirs.iter().filter(|d| d.starts_with(root().join("sdk/js"))) {
         let rs = root()
             .join("sdk/rust/examples")
             .join(js.file_name().unwrap());
-        let read = |d: &Path| std::fs::read_to_string(d.join("expected.txt")).ok();
-        if let (Some(a), Some(b)) = (read(js), read(&rs)) {
-            assert_eq!(a, b, "{} and its twin", js.display());
+        if !rs.join("ptyrc-app.toml").is_file() {
+            continue;
         }
+        let (a, b) = (cases(js), cases(&rs));
+        let names = |c: &[(String, Vec<u8>)]| c.iter().map(|f| f.0.clone()).collect::<Vec<_>>();
+        assert_eq!(
+            names(&a),
+            names(&b),
+            "{}: tests/ and its twin's",
+            js.display()
+        );
+        for ((name, x), (_, y)) in a.iter().zip(&b) {
+            assert!(x == y, "{}: tests/{name} and its twin's", js.display());
+        }
+        twins += usize::from(!a.is_empty());
     }
+    assert!(twins >= 4, "{twins} twins with cases");
     for dir in dirs {
         ok(&ptyrc(&dir, &["dev", "check"]));
         let rust = dir.join("Cargo.toml").is_file();
@@ -445,6 +476,54 @@ fn run_restarts_on_change() {
         || sb.client("s").call("draw.list", json!({})).is_ok(),
         "the session",
     );
+    let _ = driver.0.kill();
+}
+
+/// `dev run` tells the frame a start draws on, as the driver does:
+/// `active` by default, its id with `layout`.
+#[test]
+fn run_tells_the_frame() {
+    if !has_js() {
+        return;
+    }
+    let js = r#"
+import { log, manifest } from "ptyrc";
+export function init(args) { log("frame=" + JSON.stringify(manifest().frame)); }
+export function tick(now) {}
+export function event(topic, data) {}
+"#;
+    let app = script_app("run-frame", "[permissions]\nlayout = \"the panes\"\n", js);
+    let sb = Sandbox::new("told-frame");
+    let mut driver = sb.headless("s", "40x4", &["sleep", "120"]);
+    build_runner();
+    let log = sb.dir.join("run.log");
+    let mut run = common::Proc(
+        sb.ptyrc()
+            .args(["-s", "s", "dev", "run"])
+            .arg(&app)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(std::fs::File::create(&log).unwrap())
+            .spawn()
+            .unwrap(),
+    );
+    let active = sb
+        .client("s")
+        .call("frame.get", json!({"frame": "active"}))
+        .unwrap();
+    let id = active["frame"]["id"].as_u64().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !std::fs::read_to_string(&log)
+        .unwrap_or_default()
+        .contains("frame=")
+    {
+        let said = std::fs::read_to_string(&log).unwrap_or_default();
+        assert!(Instant::now() < deadline, "not told: {said}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let said = std::fs::read_to_string(&log).unwrap();
+    assert!(said.contains(&format!("frame={id}\n")), "{said}");
+    let _ = run.0.kill();
     let _ = driver.0.kill();
 }
 

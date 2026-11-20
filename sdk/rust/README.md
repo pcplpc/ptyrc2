@@ -10,12 +10,14 @@ names nothing outside an app. What only the repository holds is here.
 | `examples/confetti/` | pops of colour, the twin of the Python `confetti` without `--fancy`, `--random`, `--fireworks`, `--sparkle`; `one-shot` exits once the last pop is played |
 | `examples/sand/` | the effect `sand` of the driver, one `draw.put`, no permission; where the effect is missing (the test host), a pile of its own |
 | `examples/snake/` | the text is the wall (`screen.shape`); `grab`: the arrows steer it (`input.grab`); each denied, it plays on |
-| `examples/clockface/` | a stopwatch in a widget, the deck |
+| `examples/clockface/` | a stopwatch in a widget, the deck; a click pauses, a right click resets |
 | `examples/tally/` | storage, the clock, the result |
-| `tests/` | the examples built as the store builds them, every import of `ptyrc`, run headless; the host functions of both SDKs (`tests/host.rs`) |
+| `tests/` | the examples built as the store builds them, every import of `ptyrc`, run headless; the host functions of both SDKs (`tests/tests/host.rs`) |
 
 `sand`, `snake`, `clockface`, `tally` are twins of `sdk/js/examples/`:
-the same seed, the same screens (`expected.txt`).
+the same cases, `tests/CASE.args` and `tests/CASE.txt` byte for byte
+(`rust/ptyrc-cli/tests/dev.rs`). `./test.sh`: `ptyrc dev test .
+--cases`, then `cargo test`; `--update` blesses.
 
 ```
 cd sdk/rust/tests && cargo test

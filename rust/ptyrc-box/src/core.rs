@@ -285,6 +285,13 @@ impl<H: Host> Core<H> {
         Some(span)
     }
 
+    /// `sprite`: the id of the sprite of a canvas presented; -1 none
+    /// (not presented, refused, or no such canvas).
+    pub fn sprite(&self, id: u32) -> i64 {
+        let sprite = self.get(id).and_then(|c| c.sprite);
+        sprite.and_then(|s| i64::try_from(s).ok()).unwrap_or(-1)
+    }
+
     /// `present`: 0, or 1 when the driver refused (the reason is
     /// logged). Nothing is sent when nothing changed.
     pub fn present(&mut self, id: u32, place: &[u8], cells: &[u8]) -> i32 {
@@ -426,6 +433,43 @@ mod tests {
         fn random(&mut self, _: &mut [u8]) {}
     }
 
+    /// A driver that removed every sprite once put: each `draw.update`
+    /// answers `no-sprite`, each `draw.put` a new id.
+    struct Forgets(u64);
+
+    impl Host for Forgets {
+        fn call(&mut self, method: &str, _: Value) -> Result<Value, CallError> {
+            match method {
+                "draw.put" => {
+                    self.0 += 1;
+                    Ok(json!({"id": self.0}))
+                }
+                _ => Err(CallError::new("no-sprite", "gone")),
+            }
+        }
+        fn size(&self) -> (u32, u32) {
+            (80, 24)
+        }
+        fn log(&mut self, _: &str) {}
+        fn random(&mut self, _: &mut [u8]) {}
+    }
+
+    /// `sprite`: the id of the last `draw.put`, a sprite put again
+    /// included; -1 once released.
+    #[test]
+    fn sprite_of_a_canvas() {
+        let mut core = Core::new(Forgets(4), Limits::default());
+        let id = core.canvas(1, 1);
+        let mut cells = [0u8; CELL];
+        assert_eq!(core.present(id, b"", &cells), 0);
+        assert_eq!(core.sprite(id), 5);
+        cells[0] = b'x';
+        assert_eq!(core.present(id, b"", &cells), 0);
+        assert_eq!(core.sprite(id), 6);
+        core.release(id);
+        assert_eq!(core.sprite(id), -1);
+    }
+
     /// Cells as sent: base64, bytes 14..16 the repeats.
     fn b64_of(cells: &[(Cell, u16)]) -> Value {
         let mut bytes = Vec::new();
@@ -454,6 +498,7 @@ mod tests {
             attrs: 1,
         };
         cells[CELL..2 * CELL].copy_from_slice(&a.bytes());
+        assert_eq!(core.sprite(id), -1);
         assert_eq!(core.present(id, b"", &cells), 0);
         assert_eq!(core.present(id, b"", &cells), 0);
         cells[3 * CELL..4 * CELL].copy_from_slice(&a.bytes());
@@ -464,6 +509,8 @@ mod tests {
             bg: Color::None,
             attrs: 0,
         };
+        assert_eq!(core.sprite(id), 9);
+        assert_eq!((core.sprite(id + 1), core.sprite(0)), (-1, -1));
         let calls = &core.host.0;
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].0, "draw.put");

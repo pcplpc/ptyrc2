@@ -17,7 +17,8 @@ Tiers of authoring > Rust, milestone 6.
 - `ptyrc-app` is ptyrc's: its sources embedded in the binary
   (`include_str!`, `build::PTYRC_APP`), written to the work directory at
   each build. Never fetched, never the tree's copy; no install path to
-  find or to go stale; the version is that of ptyrc. 40 KiB.
+  find or to go stale; the version is that of ptyrc. 172 KiB, nine
+  files (2026-11-20).
 
 Two runs of the toolchain's `rustc` (`<sysroot>/bin/rustc`, not the
 rustup proxy), the environment cleared but `TMPDIR`, from

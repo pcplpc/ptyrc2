@@ -4,52 +4,83 @@ The runner of store apps: one WebAssembly guest, its limits, its
 canvases. `plan/store-model.md` is the plan; this file is the ABI.
 
 ```
-ptyrc-box [--no-profile] [--manifest JSON] [--seed N] [--script] MODULE [ARGS]
-ptyrc-box --headless [--no-profile] [--manifest JSON] [--script] MODULE [ARGS] [--size CxR] [--for T]
-          [--at T,...] [--seed N] [--tape FILE | --screen FILE] [--json] [--timing]
+ptyrc-box [--no-profile] [--manifest JSON] [--assets DIR] [--seed N] [--script] MODULE [ARGS]
+ptyrc-box --headless [--no-profile] [--manifest JSON] [--assets DIR] [--script] MODULE [ARGS]
+          [--size CxR] [--for T] [--at T,...] [--seed N]
+          [--tape FILE | --screen [T:]FILE...] [--json] [--styles] [--timing]
           [--grant NAME,...] [--deny NAME,...] [--words WORD,...]
+          [--event T:TOPIC:JSON]... [--key T:KEY]... [--pointer T:X,Y]...
+          [--click T:X,Y]... [--press T:X,Y]... [--release T:X,Y]...
+          [--focus T:TAG]... [--paste T:TEXT]... [--resize T:CxR]...
+          [--clock ISO] [--zone NAME] [--storage DIR] [--storage-out FILE] [--file NAME=PATH]...
+          [--write-file NAME=PATH]... [--probe git|system=FILE.json]...
           [--user-word WORD]... [--user-pattern TEXT]... [--user-regex RE]...
           [--front | --back] [--prefer P] [--alpha A] [--border B]
           [--surface widget|frame|screen]
-          [--event T:TOPIC:JSON]... [--key T:KEY]... [--pointer T:X,Y]...
-          [--click T:X,Y]... [--press T:X,Y]... [--release T:X,Y]...
+ptyrc-box --unit FILE [--no-profile] [--manifest JSON] --script APP.js [ARGS]
 ```
 
 Runs `MODULE` (a binary module; with `--script`, `APP.js`) in the
 session of `PTYRC_SOCKET`, presenting `PTYRC_TOKEN`. `ARGS`: the JSON
 given to `init`, default `{}`. The log is stderr; once `init`
-returned, the line `ptyrc-box: init done` (`ptyrc app` waits for it). SIGTERM: `stop`, then
-the end. `--seed N`: `random` drawn as a headless run of seed `N`
-draws it; absent, from `/dev/urandom`. Status: that of `exit`; 0 after SIGTERM; 70 a guest ended by
-the runner; 2 usage; 5 the connection, or the OS profile refused.
+returned, the line `ptyrc-box: init done` (`ptyrc app` waits for it).
+SIGTERM: `stop`, then the end. `--seed N`: `random` drawn as a
+headless run of seed `N` draws it; absent, from `/dev/urandom`.
+Status: that of `exit`; 0 after SIGTERM; 70 a guest ended by the
+runner; 2 usage; 5 the connection, or the OS profile refused.
 
 `--manifest JSON`: the manifest as its reader (the driver, `ptyrc dev
 test`) read it: handed to `init` under `ptyrc:manifest`; its
 `[limits]` applied as far as `granted` (headless: the grants) holds
-`limit-memory`, `limit-time`.
+`limit-memory`, `limit-time`. `frame`: the app's frame at the start,
+given by the driver (headless: 0, raw); told as given with `layout`,
+else 0.
+
+`--assets DIR`, live and headless: the tree `asset.list`, `asset.read`
+answer (Imports, `call`).
+
+`--unit FILE --script APP.js`: the unit tests of a script app. `FILE`,
+a script of the tree of `APP.js` by relative path; its exports
+`test_*` run in order, each in an `event` under the limits of one but
+time: 10 s a test, 60 s the file (`script::UNIT_TEST`, `UNIT_FILE`).
+No session, no `--headless`; `call` refused. The report on stdout;
+status 0 when all passed, else 1 (`script::unit`).
 
 `--headless`: no session; `headless::run` (Library). The report on
 stdout (`--json`: one JSON value), the log on stderr. `T`: ms, or
 `500ms`, `2s`. Defaults: 80x24, 1 s, the end, seed 1. Status: 0, or
 that of `exit`, or 70.
 
-- `--timing`: a last line, `ticks: N; a tick, wall time: mean M ms,
-  max X ms`: the `tick` calls entered and the wall time of each, host
-  calls in it (what the 50 ms bound measures). Not in the report
-  otherwise: it differs from run to run, and the report is compared
-  whole (`ptyrc dev test --cases`). `--json` has it always: `ticks`,
-  `tick_ms` (`{mean, max}`, null without a tick).
-
+- `--tape FILE`: a tape played under the app (`Under::Tape`); it gives
+  the size, so no `--size`, no `--screen`. `--screen [T:]FILE`, again
+  for each change: a text file as the program's screen from `T` on
+  (default 0; `Under::Screens`).
+- `--styles`: under each screen, a grid of its styles: a letter per
+  style that is not the default, and the legend (`Report::text`).
+- `--timing`: the wall time of each `tick` and `event` entered, host
+  calls in it (what the bound `tick-ms`, 50 ms, measures). A line for
+  each call over the bound, in order, `slow at T ms: tick, X ms` or
+  `slow at T ms: event TOPIC, X ms` (`T` session time), then a last
+  line, `ticks: N; a tick, wall time: mean M ms, max X ms; events: E,
+  max Y ms` (the events part when one came). A slow call: status 1,
+  unless the app's own is not 0. Not in the report otherwise: it
+  differs from run to run, and the report is compared whole (`ptyrc
+  dev test --cases`). `--json` has it always: `ticks`, `tick_ms`
+  (`{mean, max}`, null without a tick), `events`, `event_ms` (`{max}`,
+  null without one), `slow` (`[{t, call, topic, ms}]`, `topic` of an
+  event); the status as above with `--timing`. A measure of the
+  machine: run alone, on a quiet machine, with the release runner.
 - `--grant`: the permissions declared; `--deny`: those answered no;
   `--words`: the words of `words`. Given, the requests are checked as
   the driver checks a store app, by the same code (`ptyrc-rules`,
   `grants`, `lower`): a reading above the degree held is cut to it,
-  marked `"degree"`; an act not held, a
-  method closed to apps: `denied`, the hint naming the permission.
-  `draw.list` below `text`: where an anchor landed told at the degree
-  that finds it (`lower::landing`).
-  `screen.text`, `screen.cells {sprites: true}`: the app's own sprites
-  composed alone. `screen.text`, `screen.shape`, `screen.cells`: the
+  marked `"degree"`; an act not held, a method closed to apps:
+  `denied`, the hint naming the permission; a method the driver's
+  table does not list (`ptyrc_rules::grants::METHODS`): `denied`, `not
+  open to apps`, as live; `asset.*`, the runner's, open. `draw.list`
+  below `text`: where an anchor landed told at the degree that finds
+  it (`lower::landing`). `screen.text`, `screen.cells {sprites:
+  true}`: the app's own sprites composed alone. `screen.text`, `screen.shape`, `screen.cells`: the
   view of `frame` and `rect`, as the driver reads it.
   `--deny` alone: every permission but these. Neither: the whole
   session. `--user-word`: a word the user gave, found at any degree,
@@ -64,52 +95,56 @@ that of `exit`, or 70.
   clips it (`ptyrc-rules`, `surface::clip`): `widget`, a bare sprite
   on `NOWHERE` (not shown, a note), a widget as named; `frame`, and
   `screen` without `screen-wide`, on the frame; never refused.
-- Host functions from memory (`hostfn.rs`), the driver's answers:
-  `--clock ISO` the wall time at 0 (default `2000-01-01T00:00:00Z`),
-  advancing with session time; `--zone NAME` the local zone (a name of
-  the system database, or a POSIX rule; default `UTC`); the database is
-  read whole before the profile when `clock` is held; else the zone
-  alone, checked, unused (a note). `--storage DIR`:
-  the values, a file a key: its name the key (`[A-Za-z0-9._-]`), its
-  content the value (UTF-8); other entries skipped; read once, never
-  written back. `--storage-out FILE`: the storage at the end, one JSON
-  object (key: value), FILE opened before the profile (`ptyrc dev test
-  --storage-out DIR` writes DIR from it). `--file NAME=PATH`: a
-  file or a directory read once, its handle (`f0`, ...) given to
-  `init` under `NAME` (a handle there already is kept); read only.
-  `--write-file NAME=PATH`: the same, the manifest's `write = true`:
-  writes, with `files-write`, stay in memory.
-  `--probe git=FILE.json`, `system=`: the answer as written (`ptyrc
+- Host functions from memory (`hostfn.rs`), the driver's answers.
+  `--clock ISO`: the wall time at 0 (default `2000-01-01T00:00:00Z`),
+  advancing with session time. `--zone NAME`: the local zone (a name
+  of the system database, or a POSIX rule; default `UTC`); the
+  database is read whole before the profile when `clock` is held;
+  else the zone alone, checked, unused (a note).
+- `--storage DIR`: the values, a file a key: its name the key
+  (`[A-Za-z0-9._-]`), its content the value (UTF-8); other entries
+  skipped; read once, never written back. `--storage-out FILE`: the
+  storage at the end, one JSON object (key: value), FILE opened before
+  the profile (`ptyrc dev test --storage-out DIR` writes DIR from it).
+- `--file NAME=PATH`: a file or a directory read once, its handle
+  (`f0`, ...) given to `init` under `NAME` (a handle there already is
+  kept); read only. `--write-file NAME=PATH`: the same, the manifest's
+  `write = true`: writes, with `files-write`, stay in memory.
+- `--probe git=FILE.json`, `system=`: the answer as written (`ptyrc
   dev probe git [DIR]`, `ptyrc dev probe system` print the driver's
-  probe now: a fixture); none:
-  the not-held answer, and a note. `probe.git`, as the driver: one
-  read a second of session time; within it the same params (but
-  `since`) get the last answer, others `not-usable`. The report: `result:`, `storage:`
-  (a line a key: written by the app, `KEY = "VALUE"` or `KEY removed`;
-  given and not written, `KEY = "VALUE" (given, not written)`; a value
-  cut past 60 characters, the size then given; `storage` not held, one
-  line: the storage given not used), `files:` (written); `--json`: the
-  values whole (`storage` at the end, `storage_given`,
-  `storage_written`, `storage_held`), the contents. Status: that of `app.result` when the run ends well.
+  probe now: a fixture); none: the not-held answer, and a note.
+  `probe.git`, as the driver: one read a second of session time;
+  within it the same params (but `since`) get the last answer, others
+  `not-usable`.
+- The report, beside the screens: `result:`, `storage:` (a line a key: written by
+  the app, `KEY = "VALUE"` or `KEY removed`; given and not written,
+  `KEY = "VALUE" (given, not written)`; a value cut past 60
+  characters, the size then given; `storage` not held, one line: the
+  storage given not used), `files:` (written); `--json`: the values
+  whole (`storage` at the end, `storage_given`, `storage_written`,
+  `storage_held`), the contents. Status: that of `app.result` when the
+  run ends well.
 - `--event T:TOPIC:JSON`: an event at `T`, to a topic subscribed and
   held. `--key T:KEY`: a key named as `input.send` names it, to the
   app when it grabbed it (`input.grab`); `ctrl+t` releases the grab;
-  else to the program, heard as the driver's: `input {"bytes"}` (base64)
-  to the app subscribed holding `keys-read`, else `dropped`.
-  `--pointer T:X,Y`, `--click T:X,Y`: `hover`, `mouse` on the app's
+  else to the program, heard as the driver's: `input {"bytes"}`
+  (base64) to the app subscribed holding `keys-read`, else `dropped`.
+- `--pointer T:X,Y`, `--click T:X,Y`: `hover`, `mouse` on the app's
   sprite at the cell (topmost, no effect), heard on its widget or a
   sprite in front, else with `pointer`, `clicks`. `--press T:X,Y`,
   `--release T:X,Y`: the left button down, up (`--click`: both at
   once); a release after a press on a sprite is of that sprite, `at`,
   `frame`, `pos` null off it. An effect put with `"pointer": true`,
   `"bomb": true` in its params is tuned as the driver tunes it
-  (`ptyrc-rules`, `nozzle`): `hover`, `bomb` `[x, y, ms]` or `[x, y, ms, dx, dy]`;
-  no permission; a press on it without `clicks-grab`: `lacks`. `--focus T:TAG`: its
-  widget that asks is focused; keys then go to it (`{"key", "bytes",
-  "widget"}`), its escape and close keys end it (`released`);
-  `--paste T:TEXT`: `{"widget", "paste"}`; under a grab, key by key,
-  the rest to the program; else to the program, bracketed. `--resize T:CxR`: the host
-  resized, as a tape's resize: the screen first, then `size`.
+  (`ptyrc-rules`, `nozzle`): `hover`, `bomb` `[x, y, ms]` or `[x, y,
+  ms, dx, dy]`; no permission; a press on it without `clicks-grab`:
+  `lacks`.
+- `--focus T:TAG`: its widget that asks is focused; keys then go to it
+  (`{"key", "bytes", "widget"}`), its escape and close keys end it
+  (`released`). `--paste T:TEXT`: `{"widget", "paste"}`; under a grab,
+  key by key, the rest to the program; else to the program,
+  bracketed. `--resize T:CxR`: the host resized, as a tape's resize:
+  the screen first, then `size`.
 
 ## OS profile
 
@@ -156,7 +191,10 @@ the profile from host code; `tests/abi.rs`, `tests/hostile/`,
 A core module, little-endian, `wasm32`. No WASI, no start function
 expected (one runs under the bound of `init`). Every import is a
 function of the module `ptyrc` listed below; any other import: the
-module does not start (`bad-import`).
+module does not start (`bad-import`). A module imports what it uses:
+an import added to the list (`sprite`) leaves a module built before
+it as it was; a module that imports it does not start on a runner
+that lacks it.
 
 All integers are `i32` unless said. A text is `(ptr, len)`: UTF-8
 bytes in the guest's memory, no terminator. JSON is a text.
@@ -187,6 +225,7 @@ bytes in the guest's memory, no terminator. JSON is a text.
 | `canvas` | `(w, h) -> id` | a buffer of `w * h` cells; 0: refused |
 | `cells` | `(id) -> ptr` | its cells; 0: no such canvas |
 | `present` | `(id, place_ptr, place_len) -> status` | show the canvas; 0, or 1: refused (the reason is logged) |
+| `sprite` | `(id) -> i64` | the id of the canvas's sprite (that of `mouse`, `hover`); -1: not presented, or no such canvas |
 | `release` | `(id)` | forget the canvas, remove its picture; the host calls `free` on its cells |
 | `period` | `(ms)` | the tick wanted; under 33: 33; 0: none (the default). A period counts from its call |
 | `log` | `(ptr, len)` | a line of the app's log |
@@ -243,6 +282,8 @@ bytes in the guest's memory, no terminator. JSON is a text.
   `rows` when a cell changed (the rows changed, trailing holes left
   out), the place when it changed; neither: no request.
 - A canvas is one sprite of the app's connection: it dies with it.
+  Its id, for `mouse` and `hover`: `sprite`; a sprite removed by the
+  driver and put again by `present` has a new one.
 
 ### Limits
 
@@ -260,7 +301,11 @@ bytes in the guest's memory, no terminator. JSON is a text.
 | stack | 1 MiB | `stack` |
 
 Time is bounded by epoch interruption (a thread, 10 ms): wall time,
-the host's included. A limit met is logged once (`limit: NAME`):
+the host's included. Headless, lateness is session time, which a call
+does not take: no `late`, no pause, whatever the load
+(`Runner::untimed`); the wall time of a call, and a call over the
+bound, are `--timing`'s. The bounds that end the app (`time`) stay
+wall time. A limit met is logged once (`limit: NAME`):
 `memory`, `late`, `paused`, `call`, `canvas`, `log`.
 
 How an app ends (`Error::name`): `bad-module`, `bad-import`,
@@ -299,12 +344,14 @@ print!("{report}");
   driver would (`Headless::next_wake`), between the times asked: the
   screen at `T` does not depend on the other times of `at`. A step
   follows `init`. Topic `idle` as the driver's `watch_idle`; a screen
-  nothing was written on (`Empty`) is idle from the start. Lateness is wall time: a guest near 50 ms a
-  tick may differ.
+  nothing was written on (`Empty`) is idle from the start. Never
+  `late` nor paused (Limits).
 - The screen: `Options::under`: `Empty`; `Text` (written from the top
-  left, `\n` a line, escapes read); `Tape` (`Tape::parse`, the format
-  of `plan/design.md`, Tapes: output and resizes, in session time,
-  `t / 1000` ms; its size is the screen's).
+  left, `\n` a line, escapes read); `Screens` (texts as `Text`, each
+  from its time on: the screen cleared, the text written, the topics
+  told as the driver tells them); `Tape` (`Tape::parse`, the format of
+  `plan/design.md`, Tapes: output and resizes, in session time, `t /
+  1000` ms; its size is the screen's).
 - Drawn by the scene and the widgets of `ptyrc-core`, as the driver
   draws: canvases, text sprites (`rows`, `cells`), `frames`, anchors,
   layers (behind the text by default), `ttl_ms`, `motion`, the
@@ -313,8 +360,9 @@ print!("{report}");
   driver lays them out, `plan/design.md`, Layout: on cells still for
   1 s, none before; off the cursor's row and a row each side; a cell
   from the edges of the view; a larger variant taken after 2 s of
-  looks; focused: laid out again, over the text if no room holds it). An unknown effect: the hint
-  lists the known. Not: `draw.ext`, the pop-up, other clients.
+  looks; focused: laid out again, over the text if no room holds
+  it). An unknown effect: the hint lists the known. Not: `draw.ext`,
+  the pop-up, other clients.
 - `random`: xorshift64 from the seed mixed (splitmix64): each seed its
   own.
 - `Report`: the screens at each time as text (one string a row,
@@ -328,8 +376,21 @@ print!("{report}");
   smallest variant, the screen's size). `Report::to_json`,
   `Report::text(styles)`; without styles, a note when a screen holds
   `inverse`, `hidden` or `underline` cells. `Report::timing`: the wall
-  time of the ticks (`Timing`: equal to any other, so that two runs
-  compare equal), `Report::timing_line`.
+  time of the ticks and events, the calls over `tick-ms`
+  (`Timing::slow`; `Timing`: equal to any other, so that two runs
+  compare equal), `Report::timing_line`, `Report::slow_lines`.
+- `live::run`: a session (`Live::new(Client, log)`, `.seeded(N)`), real
+  time times `PTYRC_CLOCK_RATE`. Ticks are due as headless
+  (`ticks::Ticks`): a period asked, changed or not, counts from its
+  call; none asked, each tick one period after the last was due; a
+  tick missed is not made up for.
+- `Runner<H: Host>`: `load`, `init`, `tick`, `event`, `stop`; `Host` is
+  the outside (`call`, `size`, `log`, `random`).
+- `engine.rs` alone names wasmtime. One engine a process, its epoch
+  advanced by one thread; a module of 256 KiB and more is compiled
+  once a process (the last four are kept).
+
+### Session
 
 `hello`. The guest gets none: no export, no event. Live, the runner
 reads the driver's `hello` at connect (cut below `text`: `protocol`,
@@ -343,19 +404,10 @@ The event `size`, `{"size": [columns, rows]}`, to a guest subscribed
 (`call("subscribe", {"topics": ["size"]})`). Live: from the driver at
 each resize of the host, the runner's bound updated before the guest
 sees it; with `snapshot: true`, the size now, after the answer.
-Headless: at each resize of the tape, the screen resized first;
+Headless: at each resize of the tape or `--resize`, the screen
+resized first;
 `--event T:size:JSON` delivers the data alone, the screen unchanged;
 `snapshot` is ignored.
-- `live::run`: a session (`Live::new(Client, log)`, `.seeded(N)`), real
-  time times `PTYRC_CLOCK_RATE`. Ticks are due as headless
-  (`ticks::Ticks`): a period asked, changed or not, counts from its
-  call; none asked, each tick one period after the last was due; a
-  tick missed is not made up for.
-- `Runner<H: Host>`: `load`, `init`, `tick`, `event`, `stop`; `Host` is
-  the outside (`call`, `size`, `log`, `random`).
-- `engine.rs` alone names wasmtime. One engine a process, its epoch
-  advanced by one thread; a module of 256 KiB and more is compiled
-  once a process (the last four are kept).
 
 ## Speed
 
@@ -416,9 +468,11 @@ allocator).
 
 - Paused: nothing resumes it but `Runner::resume`; the manager is not
   told.
-- The compiled interpreter is not kept on disk (1 s a start, 20 s in
-  a debug build): `Module::deserialize` is `unsafe`, and `unsafe` is
-  kept to `ptyrc-server`.
+- The compiled interpreter is not kept on disk: each start compiles
+  it (2026-11-20, 16 cores, load 60: 0.4 s of wall time, 3.3 s of
+  processor time, in a release build; 1.1 s, 12 s in a debug one).
+  `Module::deserialize` is `unsafe`: allowed in `ptyrc-box`, one
+  module, for this cache (owner), once measured worth it.
 - `wasmi` where wasmtime does not build.
 - The OS profile: macOS; W^X after the drop (live, no `PROT_EXEC`
   once compiled); the driver setting `PTYRC_PROFILE=full`.

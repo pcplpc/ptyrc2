@@ -43,6 +43,8 @@ Exact and minimal. Plain, sober, precise; no filler.
 - Small commits, terse messages (`ptyrc-vt: DECSTBM`). No co-authorship
   trailers, no session links.
 - Several agents share this tree. Commit only your own paths:
-  `git add <your dir> && git commit -m "..." -- <your dir>`. Never
-  `git add -A`, never commit `Cargo.lock`, `uv.lock` or the root files,
-  never rewrite history. Retry if the index is locked.
+  `git add <your paths>`, then `git diff --cached --name-only` shows
+  yours alone, then `git commit -m "..."`. Never `git commit -- <path>`,
+  never `git add -A`, never `git stash`, never commit `Cargo.lock`,
+  `uv.lock` or the root files, never rewrite history. Retry if the
+  index is locked.

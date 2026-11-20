@@ -79,10 +79,14 @@ pub enum Dev {
         /// that is not the default, and the legend
         #[arg(long)]
         styles: bool,
-        /// A last line: the ticks run, the mean and the max wall time of
-        /// one, host calls in it (what limit-time bounds). Not in the
-        /// report by default: it is not the same twice. --json: always,
-        /// `ticks`, `tick_ms`
+        /// The wall time of the calls, host calls in them: a line for
+        /// each tick or event over tick-ms (50 ms), `slow at T ms: tick,
+        /// X ms`, `slow at T ms: event TOPIC, X ms`; a last line, the
+        /// ticks run, the mean and the max of one, the events and their
+        /// max. A slow call: status 1. Not in the report by default: it
+        /// is not the same twice. --json: always, `ticks`, `tick_ms`,
+        /// `events`, `event_ms`, `slow`. Run alone, on a quiet machine,
+        /// with the release runner
         #[arg(long)]
         timing: bool,
         /// The storage at the end into DIR, as --storage reads it (a file
@@ -99,6 +103,8 @@ pub enum Dev {
         /// `ptyrc dev test .` (white space, `#` comments, run in the
         /// tree), its report against tests/CASE.txt; those NAMEd alone.
         /// A line a case, a diff for a failure; status 1 when one fails.
+        /// A value of an option refused (status 2, `ptyrc: --NAME: WHY`
+        /// on stderr): its report is that line.
         /// The cases run at once, a Rust app built once before. The
         /// canonical runner: the harness and a tree's test.sh call it
         #[arg(long, value_name = "NAME", num_args = 0.., conflicts_with = "unit")]
@@ -133,6 +139,8 @@ pub enum Dev {
     },
     /// Run the app in a live session, as the user's own client; start it
     /// again when a file of DIR changes. The log on stderr; Ctrl-C ends
+    /// it, the app stopped first. The frame told at `init`: --frame,
+    /// else `[app] frame`, else `active`, resolved by the session
     Run {
         /// The app's directory [default: .]
         dir: Option<PathBuf>,

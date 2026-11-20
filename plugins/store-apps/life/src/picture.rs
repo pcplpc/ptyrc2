@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The world as Braille, a glyph for 2 by 4 cells, one colour a glyph.
 
-use crate::canvas::{Braille, from_grid};
 use crate::world::World;
+use ptyrc_app::canvas::{Braille, from_grid};
 
 /// The colour of a glyph by the age of its youngest cell, in generations.
 pub const AGES: [u8; 8] = [231, 228, 156, 114, 79, 73, 67, 61];

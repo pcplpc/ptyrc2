@@ -8,7 +8,7 @@
 
 use super::Driver;
 use crate::apps::App;
-use crate::engine::{Ctx, Effects, Engine, Reply, Token};
+use crate::engine::{ConnId, Ctx, Effects, Engine, Reply, Token};
 use crate::grants::{Degree, Surface};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -144,18 +144,32 @@ impl Driver {
         }
     }
 
+    /// The frame of `app`'s surface when `move_surface` moves it: a
+    /// surface on a frame, or a blind app (all it names on frame 0).
+    pub(super) fn surface_frame(&self, app: u64) -> Option<u32> {
+        let entry = self.apps.as_ref()?.get(app)?;
+        match surface(entry) {
+            Some(Surface::Frame(frame) | Surface::Screen(frame)) => Some(frame),
+            Some(Surface::Widget) => None,
+            // Its frame so far: the one all it names is put on.
+            None if blind(entry) => Some(0),
+            None => None,
+        }
+    }
+
+    /// The event `move` to `conn`: the frame `to`; 0 below `layout`, the
+    /// one frame such an app knows (as `frame.get`, `draw.list`).
+    pub(super) fn send_move(&mut self, conn: ConnId, to: u32) {
+        let blind = self.own(conn).is_some_and(|o| o.degree < Degree::Layout);
+        let frame = if blind { 0 } else { to };
+        self.send_event(conn, "move", json!({"frame": frame}));
+    }
+
     /// `app.move` by the user: as `give_frame`, its sprites going along
     /// as to an heir. True: it has a surface, moved.
     pub(super) fn move_surface(&mut self, app: u64, to: u32, engine: &mut dyn Engine) -> bool {
-        let Some(entry) = self.apps.as_ref().and_then(|apps| apps.get(app)) else {
+        let Some(from) = self.surface_frame(app) else {
             return false;
-        };
-        let from = match surface(entry) {
-            Some(Surface::Frame(frame) | Surface::Screen(frame)) => frame,
-            Some(Surface::Widget) => return false,
-            // Its frame so far: the one all it names is put on.
-            None if blind(entry) => 0,
-            None => return false,
         };
         self.give_frame(app, from);
         self.rehome(app, from, to, engine);
@@ -213,7 +227,7 @@ impl Driver {
             let topics = self.conns.get(&conn).map(|c| c.topics.clone());
             let topics = topics.unwrap_or_default();
             if topics.contains("move") {
-                self.send_event(conn, "move", json!({"frame": to}));
+                self.send_move(conn, to);
             }
             if topics.contains("size") {
                 self.send_event(conn, "size", size.clone());

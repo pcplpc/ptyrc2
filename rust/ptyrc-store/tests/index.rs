@@ -23,6 +23,7 @@ fn colours() {
     assert_eq!(names, PERMISSIONS);
     assert_eq!(colour("text"), Colour::Red);
     assert_eq!(colour("front"), Colour::Amber);
+    assert_eq!(colour("keys-arrows"), Colour::Amber);
     assert_eq!(colour("shape"), Colour::Plain);
     assert_eq!(colour("no-such"), Colour::Red);
 }

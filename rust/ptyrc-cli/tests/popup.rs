@@ -189,7 +189,8 @@ fn asked_on_the_host_answered_by_it_alone_and_kept() {
     );
     let shown = host_text(&mut client);
     assert!(
-        shown.contains("[x] take the arrow and function keys"),
+        // Amber: unticked.
+        shown.contains("[ ] take the arrow and function keys"),
         "{shown}"
     );
     assert!(!shown.contains("see where the text is"), "{shown}");

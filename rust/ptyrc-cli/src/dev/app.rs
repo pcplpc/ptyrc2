@@ -619,6 +619,20 @@ fn start(program: &Path, socket: &Path, guest: &[OsString], args: &Value) -> Res
         .map_err(|e| Fail::from(format!("{}: {}", program.display(), io_text(&e))))
 }
 
+/// The frame a start draws on, as the driver resolves it for
+/// `app.start`: `--frame`, else `[app] frame`, else `active`.
+fn frame_at_start(socket: &Path, m: &Manifest, launch: &options::Launch) -> Result<u64, Fail> {
+    let name = (launch.launcher.frame.clone())
+        .or_else(|| m.app.frame.clone())
+        .unwrap_or_else(|| "active".into());
+    let frame = name
+        .parse::<u64>()
+        .map_or_else(|_| json!(name), |id| json!(id));
+    let mut client = ptyrc_proto::Client::connect_as(socket, None)?;
+    let got = client.call("frame.get", json!({ "frame": frame }))?;
+    (got["frame"]["id"].as_u64()).ok_or_else(|| Fail::from(format!("frame.get {name}: no id")))
+}
+
 /// SIGTERM to the runner: the guest's `stop` (500 ms), then the end;
 /// killed past a second.
 fn stop(child: &mut Child) {
@@ -662,6 +676,7 @@ pub fn run(common: &Common, dir: &Path, given: &[String]) -> Result<ExitCode, Fa
             // The author's own run: all it declares, its limits too.
             let mut told = self::given(&m);
             told["granted"] = json!(declared(&m));
+            told["frame"] = json!(frame_at_start(&socket, &m, &launch)?);
             let mut guest = guest(dir, &m)?;
             guest.splice(0..0, ["--manifest".into(), told.to_string().into()]);
             if let Some(seed) = launch.launcher.seed {

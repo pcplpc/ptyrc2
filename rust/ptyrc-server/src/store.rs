@@ -157,19 +157,34 @@ fn given(manifest: &manifest::Manifest) -> Value {
 }
 
 /// The runner's command line: `base` with `--manifest`, `granted` the
-/// permissions held. The limits not granted stay at the default.
-pub(crate) fn command_line(base: &[String], given: &Value, granted: &[&str]) -> Vec<String> {
+/// permissions held, `frame` the app's frame (`None`: as `given` has
+/// it). The limits not granted stay at the default; the runner tells
+/// the frame as `0` without `layout`.
+pub(crate) fn command_line(
+    base: &[String],
+    given: &Value,
+    granted: &[&str],
+    frame: Option<u32>,
+) -> Vec<String> {
     let mut given = given.clone();
     given["granted"] = json!(granted);
+    if let Some(frame) = frame {
+        given["frame"] = json!(frame);
+    }
     let mut argv = base.to_vec();
     argv.insert(1, "--manifest".into());
     argv.insert(2, given.to_string());
     argv
 }
 
-/// `argv` of a store app started before, its grants `granted`: the
-/// `--manifest` given anew. `None`: not a command line of `command_line`.
-pub(crate) fn regranted(argv: &[String], granted: &[&str]) -> Option<Vec<String>> {
+/// `argv` of a store app started before, its grants `granted`, its
+/// frame `frame` (`None`: the one told before): the `--manifest` given
+/// anew. `None`: not a command line of `command_line`.
+pub(crate) fn regranted(
+    argv: &[String],
+    granted: &[&str],
+    frame: Option<u32>,
+) -> Option<Vec<String>> {
     if argv.get(1).map(String::as_str) != Some("--manifest") {
         return None;
     }
@@ -178,7 +193,7 @@ pub(crate) fn regranted(argv: &[String], granted: &[&str]) -> Option<Vec<String>
         .chain(argv.iter().skip(3))
         .cloned()
         .collect();
-    Some(command_line(&base, &given, granted))
+    Some(command_line(&base, &given, granted, frame))
 }
 
 /// The app in `tree`, as installed; `seed` the runner's `--seed`.
@@ -260,9 +275,10 @@ pub(crate) fn find(
 }
 
 impl Found {
-    /// The runner's command line, `granted` the permissions held.
-    pub fn argv(&self, granted: &[&str]) -> Vec<String> {
-        command_line(&self.base, &self.given, granted)
+    /// The runner's command line, `granted` the permissions held,
+    /// `frame` the one its surface is on.
+    pub fn argv(&self, granted: &[&str], frame: u32) -> Vec<String> {
+        command_line(&self.base, &self.given, granted, Some(frame))
     }
 
     /// The commit started once: told to the lock, the tree before it
@@ -407,14 +423,18 @@ mod tests {
     fn the_command_line_granted_anew() {
         let base: Vec<String> = ["box", "--script", "app.js", "{}"].map(String::from).into();
         let given = json!({"id": "a", "limits": {"memory-mib": 128}});
-        let argv = command_line(&base, &given, &["shape", "limit-memory"]);
+        let argv = command_line(&base, &given, &["shape", "limit-memory"], Some(2));
         assert_eq!(argv[1], "--manifest");
         assert_eq!(&argv[3..], &base[1..]);
         let told: Value = serde_json::from_str(&argv[2]).unwrap();
         assert_eq!(told["granted"], json!(["shape", "limit-memory"]));
         assert_eq!(told["limits"], json!({"memory-mib": 128}));
-        let again = regranted(&argv, &["shape"]).unwrap();
-        assert_eq!(again, command_line(&base, &given, &["shape"]));
-        assert_eq!(regranted(&base, &[]), None);
+        assert_eq!(told["frame"], json!(2));
+        // The frame kept, or the one its surface moved to.
+        let again = regranted(&argv, &["shape"], None).unwrap();
+        assert_eq!(again, command_line(&base, &given, &["shape"], Some(2)));
+        let moved = regranted(&argv, &["shape"], Some(5)).unwrap();
+        assert_eq!(moved, command_line(&base, &given, &["shape"], Some(5)));
+        assert_eq!(regranted(&base, &[], None), None);
     }
 }

@@ -1180,7 +1180,8 @@ exited child, 128 + signal when killed. `result`: its last
 seconds in the present state. `sprites`, `widgets`: those its
 connections own. `frames`: the ids of the frames those are on, in
 order, as they are when the info is made (a change of them alone is
-no event). `moves`: a connection of it is subscribed to `move`. `me`:
+no event). `moves`: a connection of it is subscribed to `move`, or it
+has a surface on a frame (moved by the driver, Move). `me`:
 the entry of the connection that asks; false for one that is no app.
 
 An exited child stays in the table (`exited`) until restarted or
@@ -1258,9 +1259,13 @@ Store apps. `app.start {store}` starts an installed app
   declared is the default profile. A permission of the manifest the
   driver does not know is not held, and said in the log.
 - `--manifest` (`store::command_line`), as `ptyrc dev test` gives it:
-  `{id, version, permissions, limits, granted}`, `granted` the names
-  held, resolved before the spawn. The runner applies a limit whose
-  permission is granted, up to its ceiling; a no keeps the default.
+  `{id, version, permissions, limits, granted, frame}`, `granted` the
+  names held, resolved before the spawn; `frame` the id of the frame
+  resolved for its surface (that of a restart: the one given, else its
+  surface's now). The runner applies a limit whose permission is
+  granted, up to its ceiling; a no keeps the default. It tells the
+  guest `frame` at `init` (`ptyrc:manifest`): as given with `layout`,
+  else 0, as `frame.get` tells it; headless, 0.
 - Headless (no screen to ask): what has no answer is granted as
   declared; the answer bears `"warnings": [LINE]`, naming each
   permission so granted, and the line goes to the child's log. `ptyrc
@@ -1269,8 +1274,8 @@ Store apps. `app.start {store}` starts an installed app
   `[app] id`.
 - `app.restart` of a store app takes no `argv`, `name` nor `declares`
   (`not-usable`): it is started again from the same tree, its grants
-  resolved again from the file (`store::regranted`: `granted` of
-  `--manifest` anew), the headless rule and its warning as at a start.
+  resolved again from the file (`store::regranted`: `granted` and
+  `frame` of `--manifest` anew), the headless rule and its warning as at a start.
 - `app.list`: its own entry alone (Permissions, Its own).
 - The first start of a commit is told to the lock
   (`install::started`): the tree before it is pruned.
@@ -1301,9 +1306,10 @@ through `Engine::hide_owner(conn, hidden)`.
 ### Move
 
 An app that can change frame while it runs subscribes to the topic
-`move`: that is its word for it (`moves`). `app.move` sends each such
-connection the event `move`: `{"frame": id}`; the app moves what it
-drew. An app with a surface is moved by the driver besides, as to an
+`move`: that is its word for it. An app with a surface on a frame
+needs none: the driver moves it (`moves`). `app.move` sends each such
+connection the event `move`: `{"frame": id}` (0 below `layout`, its
+one frame, as `frame.get` tells it); the app moves what it drew. An app with a surface is moved by the driver besides, as to an
 heir (`driver/heir.rs`): its surface is the frame, its sprites there
 or on `NOWHERE` and its widgets there go along
 (`Widgets::move_owner`, through `Engine::move_widgets`), then `move`
@@ -1892,8 +1898,8 @@ the pop-up, `app.start {store}`.
   - Three colours, one table (`ptyrc_store::manifest::COLOURS`). Plain
     (`clock`, `storage`, `limit-*` among them): ticked. Red (`text`,
     `keys-grab`, `keys-read`, `clicks`, `clicks-grab`, `files-write`)
-    and amber (`front`, `screen-wide`, bright yellow): unticked, ticked
-    by hand. `limit-*`: the figures (`use up to 128 MiB of memory`).
+    and amber (`front`, `screen-wide`, `keys-arrows`, bright yellow):
+    unticked, ticked by hand. `limit-*`: the figures (`use up to 128 MiB of memory`).
   - Keys: `↑↓` or `jk`, `home`, `end`; space ticks; unticking a degree
     unticks those above it, ticking one ticks those below. enter: the
     answers written (`remember`; a yes and a no each), then the start

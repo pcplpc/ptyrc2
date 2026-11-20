@@ -1,0 +1,2 @@
+# test_bad_zone: an unknown zone refused at the start (init: exit 2).
+--size 20x7 --for 1s --tz Nowhere/Atlantis

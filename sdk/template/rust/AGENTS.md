@@ -14,6 +14,7 @@ clock is asked.
 | `src/lib.rs` | the app, and its modules under `src/` |
 | `vendor/ptyrc-app/` | the guest crate, ptyrc's copy; `README.md` there is the API, whole |
 | `Cargo.toml` | for cargo only (`cargo test`, an editor); the store does not read it |
+| `Cargo.lock` | written by `cargo test`; commit it |
 | `test.sh` | every case, then the unit tests; status 1 when one fails |
 | `tests/CASE.args`, `tests/CASE.txt` | a case: the words after `ptyrc dev test .`, and its report |
 | `LICENSE.txt` | GPL-3.0-or-later; the only licence accepted |
@@ -34,8 +35,12 @@ ptyrc_app::app!(MyApp);
 - `Canvas::new(w, h)`: cells; `set`, `text`, `fill`, `clear`;
   `present(&json!({"anchor": {"at": [x, y], "space": "view"}}))` shows
   it, again after a change. `ch: None` is a hole. Negative `at`: the
-  right or bottom edge of the canvas from the right or bottom, `-1` the
-  last cell.
+  canvas's right or bottom edge from the view's, `-1` on the last
+  column or row. `canvas::Half` has no transparent pixel: empty the
+  cells to leave holes (README, Drawing).
+- The pointer on a canvas behind the text (the default): `hover` needs
+  `pointer`, `mouse` needs `clicks`; on a widget, or a canvas in front,
+  neither. Tell it from another by `canvas.sprite()`.
 - A widget (a small window the driver places, in the size that fits):
   `ptyrc_app::deck`: `Deck<S>`, `deck.add(Spec::new(tag, [("big", 17,
   3), ("line", 5, 1)], |state, w, h, widget| content).key(|state, name,
@@ -58,8 +63,13 @@ ptyrc_app::app!(MyApp);
   name})`, `v["k"][0].as_u64()` (`Null` where nothing is, never a
   panic), `v == "x"`, `v.to_string()`, `json::parse(text)`. A number is
   an `f64`.
-- The size: `ptyrc_app::size()`, then `subscribe(&["size"])` and
-  `event("size", {"size": [c, r]})`.
+- The size: `ptyrc_app::size() -> Result<(u32, u32), Error>`, then
+  `subscribe(&["size"])` and `event("size", {"size": [c, r]})`.
+  `subscribe` adds to the topics held (a `Sight`, a `Deck` add theirs);
+  hand each event to them, then use it.
+- The frame told at `init`, `manifest().and_then(|m| m.frame)`: a real id
+  live with `layout` held, else 0; headless always 0 (`PROTOCOL.md`,
+  Manifest).
 
 ## Rules
 
@@ -94,7 +104,7 @@ ptyrc_app::app!(MyApp);
 rustup target add wasm32-unknown-unknown    once
 ptyrc dev check            what the store checks, and its build
 cargo test                 the unit tests of src/, natively (`dev test --unit` is for scripts)
-./test.sh                  each case (dev test builds), then cargo test
+./test.sh                  dev test . --cases (each case; it builds), then cargo test
 ./test.sh --update         rewrites each tests/CASE.txt: after a change meant to change it
 ptyrc dev test . --size 80x24 --for 3s --at 0,1s,3s [--screen F | --tape F] [--seed N] [--NAME VALUE]
 ptyrc dev test . --deny shape --key 500:up --event 1s:TOPIC:JSON    a no, a key, an event
@@ -104,7 +114,8 @@ ptyrc dev run [--NAME VALUE]   in a live session (ptyrc run -- $SHELL), rebuilt 
 A case: `tests/NAME.args`, words split on white space, `#` to the end
 of a line a comment, no quoting (JSON without spaces); a new one:
 write the `.args`, then `./test.sh --update`. A report that differs
-is left in `tests/NAME.got`.
+is printed as a diff (`-` expected, `+` got); `ptyrc dev test . --cases
+NAME` runs one.
 
 `ptyrc dev test` prints the screen at each time (`--- T ms`), then
 `refused at T ms: METHOD (CODE)`, `lowered at T ms: METHOD, to the

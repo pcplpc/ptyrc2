@@ -171,6 +171,7 @@ Host-driven: no thread, no blocking, time an argument (as the core).
 |---|---|
 | `call(method, params) -> result` | a protocol request, JSON, answered before it returns; beyond the grants: a lowered answer, or `denied` (Permissions) |
 | `canvas(w, h) -> id`, `cells(id) -> ptr`, `present(id, place)` | a cell buffer in guest memory; the runner sends what changed |
+| `sprite(id) -> i64` | the id of a presented canvas's sprite (that of `mouse`, `hover`); -1: none |
 | `period(ms)` | the tick wanted; 0: events only |
 | `log(text)` | to the app's log |
 | `random(ptr, len)` | |
@@ -215,7 +216,12 @@ which.
 [as built] As the table, and: a `tick` or `event` past 2 s ends the
 app; `stop` 500 ms; the stack 1 MiB (the owner's); a text read by the
 host 4 MiB. Paused: nothing resumes it, the manager is not told (not
-done). `[limits]` (`memory-mib`, `tick-ms`, `init-ms`,
+done). Headless (`ptyrc dev test`): `late` and the pause counted in
+session time, which a call does not take: never met, a case does not
+depend on the load; the 50 ms bound checked apart, `dev test
+--timing` (the wall time of each tick and event; one over `tick-ms`
+named, status 1). The end past 2 s stays wall
+time. `[limits]` (`memory-mib`, `tick-ms`, `init-ms`,
 `calls-per-second`, `canvas-screens`, `log-mib`) asked as
 `limit-memory`, `limit-time`, up to a ceiling a key. The driver: 256
 sprites, 16 widgets, 32 subscriptions; past one, `not-usable`.
@@ -340,7 +346,8 @@ ptyrc dev test [DIR] [--tape F] [--size CxR] [--for T] [--at T,...]
 ptyrc dev run [DIR] [--NAME VALUE...]
                                 in a live session; started again when
                                 a file changes; SIGTERM, SIGINT: the
-                                app stopped (`stop`), then the end
+                                app stopped (`stop`), then the end;
+                                told the frame the driver would give
 ptyrc dev entry [DIR]           the file to add to the registry
 ```
 
@@ -512,7 +519,7 @@ shown, unticked, ticked by hand.
 | `front-widget` | a widget in front, with the driver's border and the app's name | plain | behind |
 | `front` | bare sprites in front; a tint or an opacity over the text | amber | behind |
 | `screen-wide` | `surface = "screen"`: anywhere, not its frame alone | amber | its frame |
-| `keys-arrows` | a grab of named keys that are not text | plain, the keys shown | `denied` |
+| `keys-arrows` | a grab of named keys that are not text | amber, the keys shown | `denied` |
 | `keys-grab` | a grab of other named keys; a modal | red | `denied` |
 | `keys-read` | every key (`input`) | red | no event |
 | `pointer` | movements anywhere (`hover`, `move`) | plain | no event |
@@ -531,8 +538,8 @@ shown, unticked, ticked by hand.
   permission that opens it; one not listed is closed to store apps.
 
 [as built] The names and colours of the table
-(`ptyrc_store::manifest::COLOURS`), but `keys-arrows`: plain, as the
-table, against amber in Colours. `limit-*` is `limit-memory`,
+(`ptyrc_store::manifest::COLOURS`); `keys-arrows` amber, as Colours,
+asked with the option that grabs (`needs`). `limit-*` is `limit-memory`,
 `limit-time`; `keys-arrows` covers the arrows, home, end, page up and
 down, insert, delete, f1 to f12 (decision 6). `files` plain,
 `files-write` red. Every method and topic is listed
@@ -734,7 +741,7 @@ own found.
 | | |
 |---|---|
 | keys of its own focused widget | the user focused it: nothing asked |
-| a grab of named keys that are not text (arrows, function keys) | plain, the keys shown |
+| a grab of named keys that are not text (arrows, function keys) | amber, the keys shown |
 | a grab of other named keys | red |
 | a modal | as a grab of everything, while shown |
 | every key read (`input`) | red |
@@ -862,7 +869,7 @@ summary = "Sand that piles on your text."
 license = "GPL-3.0-or-later"       # no other is accepted
 api = 1                            # ABI version
 script = "app.js"                  # or: rust = "src/lib.rs"
-rustc = "1.85"                     # Rust only: the oldest that builds
+rustc = "1.88"                     # Rust only: the oldest that builds (ours: 1.88)
 assets = "assets/"                 # read-only, nothing asked
 surface = "widget"                 # widget | frame | screen
 frame = "largest"                  # active (default) | largest | quietest | idle | raw

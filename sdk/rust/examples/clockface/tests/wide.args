@@ -1,0 +1,2 @@
+# the wide screen: block digits
+--size 40x8 --for 3s --at 0,2s,3s

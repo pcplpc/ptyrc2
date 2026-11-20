@@ -77,7 +77,7 @@ pub const COLOURS: &[(&str, Colour)] = &[
     ("files-write", Colour::Red),
     ("front", Colour::Amber),
     ("front-widget", Colour::Plain),
-    ("keys-arrows", Colour::Plain),
+    ("keys-arrows", Colour::Amber),
     ("keys-grab", Colour::Red),
     ("keys-read", Colour::Red),
     ("layout", Colour::Plain),
@@ -500,7 +500,7 @@ impl Cx<'_> {
                 ));
             }
         };
-        let rustc = self.string(t, "app", "rustc", "\"1.85\"")?;
+        let rustc = self.string(t, "app", "rustc", "\"1.88\"")?;
         if let Some(r) = &rustc {
             if matches!(entry, Entry::Script(_)) {
                 return Err(self.err(
@@ -518,7 +518,7 @@ impl Cx<'_> {
                 return Err(self.err(
                     self.span(t, "rustc"),
                     format!("[app] rustc: {r:?}: not a version"),
-                    "rustc = \"1.85\"",
+                    "rustc = \"1.88\"",
                 ));
             }
         }

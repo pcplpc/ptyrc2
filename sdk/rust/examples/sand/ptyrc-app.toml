@@ -6,7 +6,7 @@ summary = "A thin stream of sand piles on your text."
 license = "GPL-3.0-or-later"
 api = 1
 rust = "src/lib.rs"
-rustc = "1.85"
+rustc = "1.88"
 surface = "frame"
 
 # The effect `sand` of the driver looks at the text and answers nothing;

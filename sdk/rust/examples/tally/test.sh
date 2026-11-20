@@ -1,18 +1,14 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
-# At 0 and 1 s; then storage and the clock denied. Against expected.txt,
-# the same as the script twin's.
-# After a change meant to change it: ./test.sh --update
+# The cases (tests/CASE.args, each report against tests/CASE.txt), then
+# the unit tests (cargo test). Exits 1 when one fails.
+# After a change meant to change a report: ./test.sh --update
 set -eu
 cd "$(dirname "$0")"
-run() {
-  "${PTYRC:-ptyrc}" dev test . --size 50x2 --for 1s --at 0,1s
-  "${PTYRC:-ptyrc}" dev test . --size 50x2 --for 1s --at 1s --deny storage,clock
-}
-if [ "${1:-}" = --update ]; then
-  run > expected.txt
-else
-  run > actual.txt
-  diff -u expected.txt actual.txt
-  rm actual.txt
-fi
+ptyrc=${PTYRC:-ptyrc}
+bless=
+[ "${1:-}" = --update ] && bless=--bless
+failed=0
+"$ptyrc" dev test . --cases $bless || failed=1
+cargo test -q >&2 || failed=1
+exit $failed

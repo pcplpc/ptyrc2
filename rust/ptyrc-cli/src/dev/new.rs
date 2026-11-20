@@ -65,11 +65,6 @@ const SCRIPT: &[File] = &[
         include_str!("../../../../sdk/template/script/AGENTS.md"),
         false,
     ),
-    (
-        ".gitignore",
-        include_str!("../../../../sdk/template/script/gitignore"),
-        false,
-    ),
 ];
 
 const RUST: &[File] = &[
@@ -109,8 +104,18 @@ const RUST: &[File] = &[
         false,
     ),
     (
+        "vendor/ptyrc-app/src/canvas.rs",
+        include_str!("../../../../sdk/rust/ptyrc-app/src/canvas.rs"),
+        false,
+    ),
+    (
         "vendor/ptyrc-app/src/deck.rs",
         include_str!("../../../../sdk/rust/ptyrc-app/src/deck.rs"),
+        false,
+    ),
+    (
+        "vendor/ptyrc-app/src/dice.rs",
+        include_str!("../../../../sdk/rust/ptyrc-app/src/dice.rs"),
         false,
     ),
     (
@@ -126,6 +131,11 @@ const RUST: &[File] = &[
     (
         "vendor/ptyrc-app/src/json.rs",
         include_str!("../../../../sdk/rust/ptyrc-app/src/json.rs"),
+        false,
+    ),
+    (
+        "vendor/ptyrc-app/src/sight.rs",
+        include_str!("../../../../sdk/rust/ptyrc-app/src/sight.rs"),
         false,
     ),
     (

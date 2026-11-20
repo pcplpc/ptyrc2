@@ -6,7 +6,12 @@ summary = "TODO: what the app does, in one line."
 license = "GPL-3.0-or-later"
 api = 1
 script = "app.js"
-surface = "screen"  # TODO: the least that holds what it draws: "widget", "frame", "screen"
+# surface: where it draws, the least that holds it.
+#   "widget": widgets alone (a deck); a canvas or sprite is shown nowhere.
+#   "frame":  sprites and widgets clipped to the pane it starts on; follows it.
+#   "screen": anywhere, with `screen-wide` declared (amber, asked at the
+#             start); a no: as "frame".
+surface = "frame"
 
 [options]
 label = { type = "string", default = "t", doc = "shown before the time" }

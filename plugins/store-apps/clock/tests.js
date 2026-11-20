@@ -181,8 +181,7 @@ export function test_options() {
 
 export function test_bad_zone() {
   // test_bad_zone: an unknown zone refused at the start, a line for the
-  // log (init: status 2). A case cannot carry it: `dev test --cases`
-  // fails a run whose app exits with a status not 0.
+  // log (init: status 2). The case `tests/zone` runs it.
   const zone = (name) => {
     if (name !== "Asia/Tokyo") throw Object.assign(new Error("no such zone"), { code: "bad-params" });
     return { zone: name, offsets: [{ at: 0, offsetS: 32400, abbr: "JST", next: null }] };

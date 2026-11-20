@@ -4,8 +4,9 @@
 //!
 //! Two sizes: block digits (17x3, a Canvas) where there is room, a line
 //! (5x1) where not; the driver picks. The widget asks for the keyboard,
-//! quietly: focused (ctrl+t twice), `space` pauses, `r` resets. Time is
-//! session time, the `now` of `tick`.
+//! quietly: focused (ctrl+t twice), `space` pauses, `r` resets. A left
+//! click on it pauses too, a right click resets. Time is session time,
+//! the `now` of `tick`.
 
 mod face;
 
@@ -57,7 +58,12 @@ impl App for Clockface {
             let paused = s.since.is_none();
             face(s.elapsed(widget.now), w, h, paused, &mut s.canvas)
         })
-        .key(|s, name, widget| s.key(name, widget.now));
+        .key(|s, name, widget| s.key(name, widget.now))
+        .click(|s, _x, _y, button, widget| match button {
+            "left" => s.key("space", widget.now),
+            "right" => s.key("r", widget.now),
+            _ => false,
+        });
         if let Err(e) = deck.add(spec, &mut watch) {
             log(&format!("clockface: {e}"));
         }

@@ -2,7 +2,7 @@
 // The module "ptyrc/sight": the shape of the view of a frame, kept by
 // the topics (`_cli.Sight`). `ptyrc.d.ts` is its contract.
 
-import { call as hostCall, PtyrcError } from "ptyrc";
+import { call as hostCall, manifest, PtyrcError } from "ptyrc";
 
 // Topics a sight takes whole.
 const OWN = ["frames", "text", "cursor"];
@@ -21,7 +21,8 @@ export class Sight {
   #stale = true;
   #at = null; // the last cursor told
   constructor(options = {}) {
-    const { frame = "raw", words = [], text = false, cursor = false, call = hostCall } = options;
+    // The app's frame told at `init`, unless named.
+    const { frame = manifest()?.frame ?? "raw", words = [], text = false, cursor = false, call = hostCall } = options;
     if (typeof call !== "function") throw new TypeError("new Sight({call}): call(method, params) is a function");
     this.#call = call;
     this.frame = frame;

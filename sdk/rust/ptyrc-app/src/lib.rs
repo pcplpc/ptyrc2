@@ -12,7 +12,9 @@
 //! ptyrc_app::app!(Hello);
 //! ```
 
+pub mod canvas;
 pub mod deck;
+pub mod dice;
 #[cfg(target_arch = "wasm32")]
 mod ffi;
 #[cfg(not(target_arch = "wasm32"))]
@@ -20,6 +22,7 @@ mod ffi;
 mod ffi;
 mod host;
 pub mod json;
+pub mod sight;
 
 use std::fmt;
 use std::sync::OnceLock;
@@ -144,6 +147,9 @@ pub struct Manifest {
     pub granted: Vec<String>,
     /// `[limits]` granted: `(key, value)`.
     pub limits: Vec<(String, u64)>,
+    /// The app's frame at the start (`move` names the next); 0 without
+    /// `layout`; `None`: not told.
+    pub frame: Option<u64>,
 }
 
 impl Manifest {
@@ -177,6 +183,7 @@ impl Manifest {
                 .flatten())
             .filter_map(|(k, v)| Some((k.clone(), v.as_u64()?)))
             .collect(),
+            frame: m.get("frame").and_then(Value::as_u64),
         })
     }
 
@@ -288,7 +295,8 @@ pub fn exit(code: i32) -> ! {
     ffi::exit(code)
 }
 
-/// `subscribe` to `topics`; their events reach [`App::event`].
+/// `subscribe` to `topics`, added to those held (none is removed);
+/// their events reach [`App::event`].
 pub fn subscribe(topics: &[&str]) -> Result<(), Error> {
     call("subscribe", crate::json!({ "topics": topics })).map(drop)
 }
@@ -669,6 +677,13 @@ impl Canvas {
         };
         ffi::present(self.id, &place)
     }
+
+    /// The id of its sprite once presented: the `sprite` of `mouse` and
+    /// `hover` on it. `None`: not presented, or refused; natively,
+    /// always. Put again by the driver (removed meanwhile): a new id.
+    pub fn sprite(&self) -> Option<u64> {
+        ffi::sprite(self.id)
+    }
 }
 
 impl Drop for Canvas {
@@ -682,21 +697,33 @@ mod tests {
     use super::*;
     use crate::json;
 
+    /// Natively no host puts a sprite.
+    #[test]
+    fn no_sprite_natively() {
+        let mut c = Canvas::new(2, 1).unwrap();
+        assert_eq!(c.sprite(), None);
+        assert!(c.present(&Value::Null));
+        assert_eq!(c.sprite(), None);
+    }
+
     #[test]
     fn the_manifest_told_at_init() {
         let args = json!({"rate": 3, "ptyrc:manifest": {
             "id": "snake", "version": "0.1.0",
             "permissions": [{"name": "shape"}, {"name": "words", "words": ["food"]}],
             "granted": ["shape", "limit-time"],
-            "limits": {"tick-ms": 100},
+            "limits": {"tick-ms": 100}, "frame": 3,
         }});
         let m = Manifest::of(&args).unwrap();
+        assert_eq!(m.frame, Some(3));
         assert_eq!((m.id.as_str(), m.version.as_str()), ("snake", "0.1.0"));
         assert_eq!(m.permissions, ["shape", "words"]);
         assert_eq!(m.words, ["food"]);
         assert!(m.holds("shape") && m.holds("limit-time") && !m.holds("words"));
         assert_eq!(m.limits, [("tick-ms".to_string(), 100)]);
         assert_eq!(Manifest::of(&json!({"rate": 3})), None);
+        let bare = json!({"ptyrc:manifest": {"id": "a"}});
+        assert_eq!(Manifest::of(&bare).unwrap().frame, None);
         assert_eq!(manifest(), None);
     }
 }

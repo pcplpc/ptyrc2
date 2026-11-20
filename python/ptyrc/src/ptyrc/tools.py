@@ -457,8 +457,8 @@ class Tools:
         self.call("app.forget", app=app)
 
     def app_move(self, app: int, frame: int | str) -> int:
-        """Tell an app that moves by itself (`moves`: subscribed to
-        `move`) to go to `frame`; the id of the frame."""
+        """Move an app that `moves` (subscribed to `move`, or a surface
+        on a frame) to `frame`; the id of the frame."""
         return self.call("app.move", app=app, frame=frame)["frame"]
 
     def shown(

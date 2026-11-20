@@ -1,0 +1,2 @@
+# the effect sand of the driver, which the test host has too
+--size 40x8 --for 6s --at 1s,3s,6s --rate 120

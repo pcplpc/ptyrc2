@@ -204,20 +204,114 @@ fn escapes_in_text() {
     assert!(!all.chars().any(|c| c.is_control() && c != '\n'));
 }
 
-/// Three late in a row: paused, no tick after.
+/// A host of no session, for the runner alone.
+struct Bare;
+
+impl ptyrc_box::Host for Bare {
+    fn call(
+        &mut self,
+        m: &str,
+        _: serde_json::Value,
+    ) -> Result<serde_json::Value, ptyrc_box::CallError> {
+        Err(ptyrc_box::CallError::new("not-usable", m))
+    }
+    fn size(&self) -> (u32, u32) {
+        (80, 24)
+    }
+    fn log(&mut self, _: &str) {}
+    fn random(&mut self, buf: &mut [u8]) {
+        buf.fill(0);
+    }
+}
+
+fn spin_limits() -> Limits {
+    Limits {
+        late: Duration::from_millis(5),
+        ..Limits::default()
+    }
+}
+
+/// Live: three late in a row, paused; no tick entered after.
 #[test]
 fn late_ticks_pause() {
+    let wasm = guest(include_str!("late.wat"));
+    let mut runner = ptyrc_box::Runner::load(&wasm, Bare, spin_limits()).unwrap();
+    runner.init(&serde_json::json!({}), 0).unwrap();
+    for t in 1..=5 {
+        runner.tick(t * 100).unwrap();
+    }
+    assert!(runner.paused());
+    assert_eq!(runner.timing().ticks, 3);
+    assert_eq!(runner.met(), ["late", "paused"]);
+}
+
+/// Headless: lateness in session time, which a call does not take: the
+/// same ticks spinning past the bound are neither late nor paused.
+#[test]
+fn headless_is_never_late() {
     let options = Options {
-        limits: Limits {
-            late: Duration::from_millis(5),
-            ..Limits::default()
-        },
+        limits: spin_limits(),
+        duration_ms: 500,
         ..Options::default()
     };
     let report = run(&guest(include_str!("late.wat")), &options).unwrap();
     assert_eq!(report.end, None);
-    assert_eq!(report.ticks, 3);
-    assert!(met(&report, "late") && met(&report, "paused"));
+    assert_eq!(report.ticks, 5);
+    assert!(report.met.is_empty(), "{:?}", report.met);
+}
+
+/// Headless: each call over `tick-ms` kept with its session time, for
+/// `--timing`; out of the text report.
+#[test]
+fn headless_names_the_slow_calls() {
+    let spin = "(func (export \"event\") (param i32 i32 i32 i32) (local $i i32)
+      (loop $l
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br_if $l (i32.lt_u (local.get $i) (i32.const 30000000)))))";
+    let wat =
+        include_str!("late.wat").replace("(func (export \"event\") (param i32 i32 i32 i32))", spin);
+    let options = Options {
+        limits: spin_limits(),
+        duration_ms: 300,
+        events: vec![(150, "go".into(), serde_json::json!({}))],
+        ..Options::default()
+    };
+    let report = run(&guest(&wat), &options).unwrap();
+    let slow: Vec<(u64, Option<&str>)> = (report.timing.slow.iter())
+        .map(|c| (c.now_ms, c.topic.as_deref()))
+        .collect();
+    assert_eq!(
+        slow,
+        [(100, None), (150, Some("go")), (200, None), (300, None)]
+    );
+    assert!(
+        report
+            .timing
+            .slow
+            .iter()
+            .all(|c| c.took > Duration::from_millis(5))
+    );
+    let lines = report.slow_lines();
+    assert!(
+        lines[1].starts_with("slow at 150 ms: event go, "),
+        "{lines:?}"
+    );
+    assert!(lines[0].starts_with("slow at 100 ms: tick, "), "{lines:?}");
+    assert!(report.timing_line().contains("; events: 1, max "));
+    assert!(!report.to_string().contains("slow"));
+    let j = report.to_json();
+    assert_eq!(j["slow"][1]["call"], "event");
+    assert_eq!(j["slow"][1]["topic"], "go");
+    assert_eq!(j["slow"][0]["t"], 100);
+    assert!(j["slow"][0]["ms"].as_f64().unwrap() > 5.0);
+    assert_eq!(j["events"], 1);
+    // Under the bound: none.
+    let options = Options {
+        duration_ms: 300,
+        ..Options::default()
+    };
+    let quick = run(&guest(include_str!("late.wat")), &options).unwrap();
+    assert!(quick.timing.slow.is_empty() || quick.timing.max > Duration::from_millis(50));
 }
 
 /// `present` on canvases that are not; `release` twice; `cells` of

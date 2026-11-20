@@ -20,6 +20,7 @@ IMPORT(call) int64_t h_call(const char *, size_t, const char *, size_t);
 IMPORT(canvas) int32_t h_canvas(int32_t, int32_t);
 IMPORT(cells) uint8_t *h_cells(int32_t);
 IMPORT(present) int32_t h_present(int32_t, const char *, size_t);
+IMPORT(sprite) int64_t h_sprite(int32_t);
 IMPORT(release) void h_release(int32_t);
 IMPORT(period) void h_period(int32_t);
 IMPORT(log) void h_log(const char *, size_t);
@@ -302,6 +303,12 @@ NATIVE_FN(present) {
     JS_FreeCString(ctx, s);
     return JS_NewBool(ctx, shown);
 }
+// sprite(id) -> the id of its sprite, or null
+NATIVE_FN(sprite) {
+    Cv *cv = cv_of(ctx, argc, argv);
+    int64_t id = cv ? h_sprite(cv->id) : -1;
+    return id < 0 ? JS_NULL : JS_NewInt64(ctx, id);
+}
 NATIVE_FN(release) {
     Cv *cv = cv_of(ctx, argc, argv);
     if (cv) h_release(cv->id), *cv = CVS[--NCV];
@@ -354,7 +361,7 @@ static const JSCFunctionListEntry NATIVES[] = {
     JS_CFUNC_DEF("random", 1, n_random),   JS_CFUNC_DEF("mathRandom", 0, n_math_random),
     JS_CFUNC_DEF("exit", 1, n_exit),       JS_CFUNC_DEF("manifest", 0, n_manifest),
     JS_CFUNC_DEF("hooks", 1, n_hooks),     JS_CFUNC_DEF("cells", 1, n_cells),
-    JS_CFUNC_DEF("bytes", 1, n_bytes),
+    JS_CFUNC_DEF("bytes", 1, n_bytes),     JS_CFUNC_DEF("sprite", 1, n_sprite),
 };
 #define NNATIVES (int)(sizeof NATIVES / sizeof *NATIVES)
 static int natives_init(JSContext *ctx, JSModuleDef *m) { return JS_SetModuleExportList(ctx, m, NATIVES, NNATIVES); }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The boundary off `wasm32` (`cargo test`): no host. A canvas is cells
-//! in memory, `present` shows nothing; `call` is answered by what
+//! in memory, `present` shows nothing, `sprite` is none; `call` is answered by what
 //! `native::serve` set, else `native`; `log` goes to stderr; `random`
 //! is a fixed sequence a thread; `exit` panics. Same items as `ffi.rs`.
 
@@ -55,6 +55,10 @@ pub(crate) fn release(_id: u32) {}
 
 pub(crate) fn present(_id: u32, _place: &[u8]) -> bool {
     true
+}
+
+pub(crate) fn sprite(_id: u32) -> Option<u64> {
+    None
 }
 
 pub(crate) fn period(_ms: u32) {}

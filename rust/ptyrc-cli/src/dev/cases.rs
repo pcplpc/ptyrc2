@@ -98,8 +98,14 @@ pub fn run(program: &Path, dir: &Path, args: &Path, bless: bool) -> Outcome {
         Ok(o) => o,
         Err(e) => return Outcome::Failed(None, format!("{}: {e}\n", program.display())),
     };
-    let got = String::from_utf8_lossy(&out.stdout).into_owned();
-    if !out.status.success() && !out.status.code().is_some_and(|n| says_status(&got, n)) {
+    let mut got = String::from_utf8_lossy(&out.stdout).into_owned();
+    if let Some(line) = refusal(
+        out.status.code(),
+        &got,
+        &String::from_utf8_lossy(&out.stderr),
+    ) {
+        got = line;
+    } else if !out.status.success() && !out.status.code().is_some_and(|n| says_status(&got, n)) {
         let said = format!("{got}{}", String::from_utf8_lossy(&out.stderr));
         return Outcome::Failed(out.status.code(), said);
     }
@@ -123,6 +129,16 @@ pub fn run(program: &Path, dir: &Path, args: &Path, bless: bool) -> Outcome {
 fn says_status(report: &str, n: i32) -> bool {
     let (exit, result) = (format!("ended: exit: {n}"), format!(" (status {n})"));
     (report.lines()).any(|l| l == exit || (l.starts_with("result: ") && l.ends_with(&result)))
+}
+
+/// A value of an option the launcher refused (status 2, nothing on
+/// stdout, its stderr `ptyrc: --NAME: WHY`; not an option unknown):
+/// its report is that line. A bound of the manifest is a case.
+fn refusal(status: Option<i32>, stdout: &str, stderr: &str) -> Option<String> {
+    let line = stderr.lines().next()?;
+    let why = line.strip_prefix("ptyrc: --")?;
+    let refused = why.contains(": ") && !why.ends_with(": no such option");
+    (status == Some(2) && stdout.is_empty() && refused).then(|| format!("{line}\n"))
 }
 
 /// The lines of `want` and `got` that differ, each hunk with two
@@ -231,6 +247,20 @@ mod tests {
         assert!(!says_status("ended: exit: 2\n", 3));
         assert!(says_status("result: \"no\" (status 1)\n", 1));
         assert!(!says_status("x (status 1)\n", 1));
+    }
+
+    #[test]
+    fn a_refusal_of_the_launcher() {
+        let said = "ptyrc: --rate: -1: at least 0\n  [options]: ...\n";
+        let line = Some("ptyrc: --rate: -1: at least 0\n".to_string());
+        assert_eq!(refusal(Some(2), "", said), line);
+        assert_eq!(refusal(Some(1), "", said), None);
+        assert_eq!(refusal(Some(2), "--- 0 ms\n", said), None);
+        assert_eq!(refusal(Some(2), "", "error: no cargo\n"), None);
+        assert_eq!(
+            refusal(Some(2), "", "ptyrc: --sise: no such option\n"),
+            None
+        );
     }
 
     #[test]

@@ -4,10 +4,10 @@
 //! manifest names them. `plan/store-model.md`, "A no lowers, it does not
 //! break"; `plan/design.md`, "The cut answers".
 
-use ptyrc_rules::grants::{self as rules, Permission, Verdict, Why};
+use ptyrc_rules::grants::{self as rules, Permission, Verdict};
 use std::collections::BTreeSet;
 
-pub use ptyrc_rules::grants::{Degree, Gate};
+pub use ptyrc_rules::grants::{Degree, Gate, Why};
 
 /// The permissions held: those declared, less those denied, on the
 /// ladder (`rules::ladder`). A name that is no permission is ignored.
@@ -84,11 +84,14 @@ pub fn is_method(method: &str) -> bool {
     methods().any(|m| m == method)
 }
 
-/// What opens `method` with these params: the driver's gate. A method
-/// it does not list (`asset.*`, the runner's; one unknown, refused
-/// later) is open.
-pub fn gate(method: &str, params: &serde_json::Value) -> Gate {
-    rules::gate(method, params).unwrap_or(Gate::Open)
+/// What opens `method` with these params: the driver's gate; `asset.*`,
+/// the runner's, open. `None`: not listed, denied as the driver denies
+/// it.
+pub fn gate(method: &str, params: &serde_json::Value) -> Option<Gate> {
+    match method.starts_with("asset.") {
+        true => Some(Gate::Open),
+        false => rules::gate(method, params),
+    }
 }
 
 /// What opens a topic of `subscribe`.
@@ -98,29 +101,29 @@ pub fn topic_gate(topic: &str) -> Gate {
 }
 
 /// What `gate` gives for `grants`: `Ok(None)` allowed, `Ok(Some(d))`
-/// answered at the degree `d`, `Err(Some(p))` denied for lack of `p`,
-/// `Err(None)` closed.
-pub fn judge(grants: &Grants, gate: Gate) -> Result<Option<Degree>, Option<&'static str>> {
-    match rules::judge(&grants.rules(), Some(gate)) {
+/// answered at the degree `d`, `Err(why)` denied.
+pub fn judge(grants: &Grants, gate: Option<Gate>) -> Result<Option<Degree>, Why> {
+    match rules::judge(&grants.rules(), gate) {
         Verdict::Allow => Ok(None),
         Verdict::Lower(d) => Ok(Some(d)),
-        Verdict::Denied(Why::Lacks(p)) => Err(Some(p.name())),
-        Verdict::Denied(_) => Err(None),
+        Verdict::Denied(why) => Err(why),
     }
 }
 
-/// The hint of `denied`: the permission, and the line of the manifest
-/// that would ask for it when it is not declared.
-pub fn denied_hint(grants: &Grants, lacks: Option<&str>) -> String {
-    match lacks {
-        None => "closed to apps, whatever they hold: the user's hand only".into(),
-        Some(p) if grants.declares(p) => {
-            format!("the app does not hold `{p}`: declared, and denied")
+/// The hint of `denied`: as the driver's; for a permission lacking, the
+/// line of the manifest that would ask for it when it is not declared.
+pub fn denied_hint(grants: &Grants, why: Why) -> String {
+    match why {
+        Why::Lacks(p) if grants.declares(p.name()) => {
+            format!("the app does not hold `{}`: declared, and denied", p.name())
         }
-        Some(p) => format!(
-            "the app does not hold `{p}`; the manifest would ask for it: {}",
-            manifest_line(p, &[])
+        Why::Lacks(p) => format!(
+            "the app does not hold `{}`; the manifest would ask for it: {}",
+            p.name(),
+            manifest_line(p.name(), &[])
         ),
+        Why::Unlisted => "not open to apps".into(),
+        Why::Never | Why::Gone => "closed to apps, whatever they hold: the user's hand only".into(),
     }
 }
 
@@ -170,6 +173,7 @@ mod tests {
 
     #[test]
     fn gates() {
+        let gate = |m: &str, p: &serde_json::Value| super::gate(m, p).unwrap();
         let shape = json!({"words": ["fish"]});
         assert_eq!(gate("screen.shape", &shape), Gate::Read(Degree::Words));
         assert_eq!(gate("screen.shape", &json!({})), Gate::Read(Degree::Shape));
@@ -205,19 +209,29 @@ mod tests {
             Gate::Lowered(Permission::ProbeGit)
         );
         assert_eq!(gate("asset.read", &json!({})), Gate::Open);
+        assert_eq!(gate("asset.anything", &json!({})), Gate::Open);
+        assert_eq!(super::gate("no.such", &json!({})), None);
         assert_eq!(topic_gate("input"), Gate::Needs(Permission::KeysRead));
         assert_eq!(topic_gate("size"), Gate::Open);
         let none = g(&[], &[]);
         assert_eq!(
-            judge(&none, Gate::Read(Degree::Text)),
+            judge(&none, Some(Gate::Read(Degree::Text))),
             Ok(Some(Degree::None))
         );
         assert_eq!(
-            judge(&none, Gate::Needs(Permission::KeysArrows)),
-            Err(Some("keys-arrows"))
+            judge(&none, Some(Gate::Needs(Permission::KeysArrows))),
+            Err(Why::Lacks(Permission::KeysArrows))
         );
-        assert!(denied_hint(&none, Some("keys-arrows")).contains("[permissions] keys-arrows"));
+        let arrows = Why::Lacks(Permission::KeysArrows);
+        assert!(denied_hint(&none, arrows).contains("[permissions] keys-arrows"));
         let denied = g(&["keys-arrows"], &["keys-arrows"]);
-        assert!(denied_hint(&denied, Some("keys-arrows")).contains("denied"));
+        assert!(denied_hint(&denied, arrows).contains("denied"));
+        // Not listed: denied as the driver denies it, whatever is held.
+        let all = g(&["text", "keys-grab", "storage"], &[]);
+        assert_eq!(
+            judge(&all, super::gate("no.such", &json!({}))),
+            Err(Why::Unlisted)
+        );
+        assert_eq!(denied_hint(&all, Why::Unlisted), "not open to apps");
     }
 }

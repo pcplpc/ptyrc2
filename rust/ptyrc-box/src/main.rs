@@ -25,9 +25,11 @@
 //! `--storage-out FILE`: the storage at the end, one JSON object (key:
 //! value), the file opened before the profile, written after the run.
 //! `--assets DIR`, live too: `asset.*`, answered by the runner.
-//! `--styles`: under each screen, its styles. `--timing`: a last line,
-//! the ticks and the wall time of one (`Report::timing_line`); kept out
-//! of the report by default, as it is not the same twice.
+//! `--styles`: under each screen, its styles. `--timing`: a line for each
+//! `tick` or `event` over `tick-ms` (`Report::slow_lines`), then a last
+//! line, the ticks and the wall time of one (`Report::timing_line`);
+//! kept out of the report by default, as it is not the same twice. A
+//! call over `tick-ms`: status 1 (an app's own status kept).
 //!
 //! `--unit FILE --script APP.js`: the unit tests of a script app:
 //! FILE, a script of the tree of `APP.js` by relative path, its exports
@@ -37,7 +39,8 @@
 //! passed, 1 else (`script::unit`).
 //!
 //! `--manifest JSON`: the manifest as its reader (the driver, `ptyrc dev
-//! test`) read it: handed to `init` under `ptyrc:manifest`; its
+//! test`) read it, and the app's frame (`frame`, the driver's; headless:
+//! raw): handed to `init` under `ptyrc:manifest`; its
 //! `[limits]` applied as far as `granted` (headless: the grants) holds
 //! `limit-memory`, `limit-time` (`manifest.rs`).
 //!
@@ -514,14 +517,21 @@ fn confine(cli: &Cli, told: bool) -> Result<(), String> {
 }
 
 /// The argument of `init` with `ptyrc:manifest`, and the limits
-/// granted; without `--manifest`, as given and the defaults.
+/// granted; without `--manifest`, as given and the defaults. Headless
+/// and unit runs: the frame is the one frame, raw.
 fn given(cli: &Cli, args: serde_json::Value, granted: &[String]) -> (serde_json::Value, Limits) {
     match &cli.manifest {
         None => (args, Limits::default()),
-        Some(m) => (
-            manifest::with_member(args, m.member(granted)),
-            m.limits(granted),
-        ),
+        Some(m) => {
+            let mut m = m.clone();
+            if cli.headless || cli.unit.is_some() {
+                m.frame = Some(u64::from(ptyrc_core::RAW));
+            }
+            (
+                manifest::with_member(args, m.member(granted)),
+                m.limits(granted),
+            )
+        }
     }
 }
 
@@ -621,10 +631,17 @@ fn headless_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
     } else {
         print!("{}", report.text(cli.styles));
         if cli.timing {
+            for line in report.slow_lines() {
+                println!("{line}");
+            }
             println!("{}", report.timing_line());
         }
     }
-    let status = report.result.as_ref().map_or(0, |r| r.1);
+    let mut status = report.result.as_ref().map_or(0, |r| r.1);
+    // `--timing`: a call over `tick-ms` fails the run.
+    if cli.timing && status == 0 && !report.timing.slow.is_empty() {
+        status = 1;
+    }
     match report.end {
         None | Some(Error::Exit(0)) => ExitCode::from(status),
         Some(Error::Exit(code)) => ExitCode::from(code.clamp(1, 255) as u8),

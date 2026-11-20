@@ -64,7 +64,7 @@ pub(crate) fn told(permission: Permission, declared: &Declared) -> (String, Colo
         FrontWidget => ("show a box in front of the text, bearing its name", Plain),
         Front => ("draw over the text, without a border", Amber),
         ScreenWide => ("draw anywhere on the screen, not on its frame alone", Amber),
-        KeysArrows => ("take the arrow and function keys", Plain),
+        KeysArrows => ("take the arrow and function keys", Amber),
         KeysGrab => ("take other keys, or all of them while it shows a box", Red),
         KeysRead => ("read every key you type", Red),
         Pointer => ("follow the mouse pointer anywhere", Plain),
@@ -415,12 +415,13 @@ mod tests {
                 (Shape, true),
                 (Text, false),
                 (Front, false),
-                (KeysArrows, true)
+                (KeysArrows, false)
             ]
         );
         let none = Declared::default();
         assert_eq!(told(Text, &none).1, Colour::Red);
         assert_eq!(told(Front, &none).1, Colour::Amber);
+        assert_eq!(told(KeysArrows, &none).1, Colour::Amber);
         assert_eq!(told(ScreenWide, &none).1, Colour::Amber);
         // Decision 17: asked, plain.
         assert_eq!(told(Clock, &none).1, Colour::Plain);
@@ -521,7 +522,7 @@ mod tests {
                 (Words, false),
                 (Text, false),
                 (Front, true),
-                (KeysArrows, true)
+                (KeysArrows, false)
             ]
         );
     }

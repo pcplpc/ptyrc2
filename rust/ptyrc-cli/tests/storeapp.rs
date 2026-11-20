@@ -612,8 +612,9 @@ fn a_store_app_follows_its_pane() {
         "its sprite moved",
     );
     let log = log_of(&mut client, id);
+    // Below `layout`, its one frame: 0.
     wait_slow(
-        || log_of(&mut client, id).contains(&format!("move={{\"frame\":{wide}}}")),
+        || log_of(&mut client, id).contains("move={\"frame\":0}"),
         "told",
     );
     let log = log_of(&mut client, id) + &log;
@@ -1006,6 +1007,118 @@ fn the_launchers_prefer_border_back() {
     assert_eq!(widgets["widgets"][0]["border"], json!("heavy"), "{widgets}");
 }
 
+/// Its frame told at `init`; a `Sight` of it; what it reads logged.
+const FRAMED: &str = r#"
+import { log, manifest, period } from "ptyrc";
+import { Sight } from "ptyrc/sight";
+let sight;
+export function init(args) {
+  log("frame=" + JSON.stringify(manifest().frame));
+  sight = new Sight();
+  log("drawn");
+  period(100);
+}
+export function tick(now) {
+  if (sight.look() && sight.changed) log("seen=" + JSON.stringify([sight.frame, sight.rows[0].trim()]));
+}
+export function event(topic, data) {
+  if (!sight.event(topic, data)) log(topic + "=" + JSON.stringify(data));
+}
+"#;
+
+/// The frame told at the start, and by `move`: the frame the user gave
+/// from `layout` up, 0 below it (no degree); the `Sight` follows.
+#[test]
+fn a_store_app_is_told_its_frame() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let sb = Sandbox::new("framed");
+    let shape = "shape = \"the shape\"";
+    let layout = format!("{shape}\nlayout = \"the panes\"");
+    let seer = install(&sb, "seer", wide_manifest("seer", "frame", &layout), FRAMED);
+    install(&sb, "blind", wide_manifest("blind", "frame", ""), FRAMED);
+    // Granted beforehand, as the guide says.
+    let config = sb.config().join("ptyrc");
+    std::fs::create_dir_all(&config).unwrap();
+    let allowed = format!("[app.\"{seer}\"]\nallow = [\"shape\", \"layout\"]\n");
+    std::fs::write(config.join("permissions.toml"), allowed).unwrap();
+    let mut driver = sb.ptyrc();
+    driver
+        .env("PTYRC_BOX", runner())
+        .env("PTYRC_JS", &js)
+        .args(["run", "--name", "s", "--headless", "--size", "60x16"])
+        .args(["--", "sh", "-c", MERGE])
+        .stdin(std::process::Stdio::null());
+    let _driver = common::Proc(driver.spawn().unwrap());
+    let socket = sb.socket("s");
+    wait_for(
+        || std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "socket",
+    );
+    let mut client = sb.client("s");
+    client.call("session.info", json!({})).unwrap();
+    let pane = |client: &mut Client, x: u64| {
+        let frames = client.call("frame.list", json!({})).unwrap();
+        (frames["frames"].as_array().unwrap().iter())
+            .find(|f| f["kind"] == "pane" && f["rect"][0] == x && f["state"] == "stable")
+            .map(|f| f["id"].as_u64().unwrap())
+    };
+    let (mut left, mut right) = (0, 0);
+    wait_for(
+        || {
+            let found = (pane(&mut client, 0), pane(&mut client, 40));
+            found
+                .0
+                .zip(found.1)
+                .map(|(l, r)| (left, right) = (l, r))
+                .is_some()
+        },
+        "the panes",
+    );
+    let start = |client: &mut Client, name: &str| {
+        let started = client
+            .call("app.start", json!({"store": name, "frame": left}))
+            .unwrap();
+        started["app"]["id"].as_u64().unwrap()
+    };
+    let (a, b) = (start(&mut client, "seer"), start(&mut client, "blind"));
+    for id in [a, b] {
+        wait_slow(|| log_of(&mut client, id).contains("drawn"), "drawn");
+    }
+    let log = log_of(&mut client, a);
+    assert!(log.contains(&format!("frame={left}\n")), "{log}");
+    wait_slow(
+        || log_of(&mut client, a).contains(&format!("seen=[{left},\"####\"]")),
+        "its pane seen",
+    );
+    let log = log_of(&mut client, b);
+    assert!(log.contains("frame=0\n"), "{log}");
+
+    for id in [a, b] {
+        client
+            .call("app.move", json!({"app": id, "frame": right}))
+            .unwrap();
+    }
+    wait_slow(
+        || log_of(&mut client, a).contains(&format!("move={{\"frame\":{right}}}")),
+        "told",
+    );
+    wait_slow(
+        || log_of(&mut client, a).contains(&format!("seen=[{right},\"#####\"]")),
+        "the pane it was moved to seen",
+    );
+    wait_slow(
+        || log_of(&mut client, b).contains("move={\"frame\":0}"),
+        "told 0",
+    );
+    let log = log_of(&mut client, b);
+    assert!(!log.contains(&format!("\"frame\":{right}")), "{log}");
+    assert!(!log.contains(&format!("seen=[{right},")), "{log}");
+}
+
 /// One sprite, one widget; it asks to move itself and another.
 const MOVED: &str = r#"
 import { call, log, period } from "ptyrc";
@@ -1030,13 +1143,28 @@ export function event(topic, data) { log(topic + "=" + JSON.stringify(data)); }
 
 #[test]
 fn a_store_app_is_where_the_user_moves_it() {
+    moved("moved", MOVED);
+}
+
+/// Its surface moved by the driver: no subscription to `move` wanted.
+#[test]
+fn a_store_app_not_subscribed_to_move_is_moved() {
+    moved(
+        "unmoved",
+        &MOVED.replace("[\"move\", \"widgets\"]", "[\"widgets\"]"),
+    );
+}
+
+/// `MOVED`, or it not subscribed to `move`, moved by the user.
+fn moved(name: &str, script: &str) {
+    let subscribed = script.contains("\"move\"");
     let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
     if !js.is_file() {
         eprintln!("SKIPPED: no interpreter module");
         return;
     }
-    let sb = Sandbox::new("moved");
-    install(&sb, "moved", wide_manifest("moved", "frame", ""), MOVED);
+    let sb = Sandbox::new(name);
+    install(&sb, name, wide_manifest(name, "frame", ""), script);
     let mut driver = sb.ptyrc();
     driver
         .env("PTYRC_BOX", runner())
@@ -1071,10 +1199,13 @@ fn a_store_app_is_where_the_user_moves_it() {
         "the panes",
     );
     let started = client
-        .call("app.start", json!({"store": "moved", "frame": left}))
+        .call("app.start", json!({"store": name, "frame": left}))
         .unwrap();
     let id = started["app"]["id"].as_u64().unwrap();
     wait_slow(|| log_of(&mut client, id).contains("drawn"), "drawn");
+    let listed = client.call("app.list", json!({})).unwrap();
+    let info = (listed["apps"].as_array().unwrap().iter()).find(|a| a["id"] == id);
+    assert_eq!(info.unwrap()["moves"], json!(true), "{listed}");
     let log = log_of(&mut client, id);
     // Neither itself nor another: closed to apps.
     assert_eq!(log.matches("app.move: denied").count(), 2, "{log}");
@@ -1098,10 +1229,13 @@ fn a_store_app_is_where_the_user_moves_it() {
     assert_eq!(moved["frame"], right);
     assert_eq!(frame_of_its_sprite(&mut client), Some(json!(right)));
     assert_eq!(frame_of_its_widget(&mut client), json!(right));
-    wait_slow(
-        || log_of(&mut client, id).contains(&format!("move={{\"frame\":{right}}}")),
-        "told",
-    );
+    if subscribed {
+        // Below `layout`, its one frame: 0.
+        wait_slow(
+            || log_of(&mut client, id).contains("move={\"frame\":0}"),
+            "told",
+        );
+    }
     let told = format!("\"frame\":{right}");
     wait_slow(
         || (log_of(&mut client, id).lines()).any(|l| l.contains("widgets=") && l.contains(&told)),

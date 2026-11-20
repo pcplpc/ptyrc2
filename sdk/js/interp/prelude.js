@@ -167,6 +167,9 @@ export class Canvas {
   present(place) {
     return n.present(this.#id, place === undefined ? "" : JSON.stringify(place));
   }
+  sprite() {
+    return n.sprite(this.#id);
+  }
   release() {
     n.release(this.#id);
     this.#id = 0;

@@ -30,7 +30,7 @@ its own widget, or its own sprite in front of the text.
 | `front-widget` | a widget in front | behind | plain |
 | `front` | sprites in front (`layer` > 0, `"front"`, `"hud"`); widgets too | behind | amber |
 | `screen-wide` | `surface = "screen"`: anywhere | clipped to its frame | amber |
-| `keys-arrows` | `input.grab` of keys that are not text: arrows, `home`, `end`, `pageup`, `pagedown`, `insert`, `delete`, `f1`..`f12` | `denied` | plain |
+| `keys-arrows` | `input.grab` of keys that are not text: arrows, `home`, `end`, `pageup`, `pagedown`, `insert`, `delete`, `f1`..`f12` | `denied` | amber |
 | `keys-grab` | any other `input.grab`; `widget.show {modal: true}` | `denied` | red |
 | `keys-read` | topic `input`: every key | subscribed, no event | red |
 | `pointer` | topic `hover` elsewhere than its own things: moves anywhere | no event there | plain |
@@ -76,7 +76,7 @@ Cut answers:
 |---|---|---|---|
 | `auth` | `token` | done by the host; never call it | — |
 | `batch` | `calls`: `[{method, params}]` | `{"results":[{"result"} or {"error"}]}`, one repaint | each call its own |
-| `subscribe` | `topics`: `[name]`, `snapshot` (bool: the state now, as events) | `{}`; an unknown topic: `bad-params` | each topic its own |
+| `subscribe` | `topics`: `[name]`, `snapshot` (bool: the state now, as events) | `{}`; adds to the topics held, never removes one; an unknown topic: `bad-params`, none added | each topic its own |
 | `session.info` | | `{"protocol","server","size":[c,r],"headless",...}` | `text` for the rest |
 | `screen.text` | `frame`, `rect` | `{"lines":[str],"size":[c,r],"rect":[x,y,w,h]}`, one string a row, trailing spaces cut | `text` |
 | `screen.cells` | `frame`, `rect` | `{"rows":[[run]],"size","rect"}`; a run `{"t":text, style...}` | `text` |
@@ -129,7 +129,9 @@ Sprite (`draw.put`; a `Canvas` makes one):
 "frames": [{"rows", "ms"}], "loop", "layer", "alpha": 0..1, "z",
 "ttl_ms", "persist", "motion": {"vx","vy","ax","ay","bounce"},
 "effect": {"name", "params"}, "size": [w, h]}`. `anchor`: `{"at": [x,
-y], "space": "view" | "frame"}`, `{"text": "word", "side": "right" |
+y], "space": "view" | "frame"}` (`view`: a negative `x` puts the
+sprite's right edge `-x - 1` columns from the view's last, `y`
+likewise from the bottom), `{"text": "word", "side": "right" |
 "left" | "above" | "below" | "over"}`, `{"auto": {"prefer":
 "top-right"}}`, `{"cursor": {"dx": 1, "dy": 0}}`. `layer`: absent or
 negative, behind the text; in front only with `front` (else behind).
@@ -169,7 +171,7 @@ Host functions (`clock.*`, `storage.*`, `app.result`, `file.*`,
 | `size` | `{"size":[c,r]}` | — |
 | `draw` | `{"removed":[id],"frame","rows":[from,to]\|null}`: its sprites removed by the driver | — |
 | `widgets` | widget info, when it changes | — |
-| `move` | `{"frame":id}`: the user moved the app, or its frame left the screen and a pane took its place (its sprites moved along; `size` follows) | — |
+| `move` | `{"frame":id}`: the user moved the app, or its frame left the screen and a pane took its place (its sprites moved along; `size` follows); 0 below `layout` | — |
 | `exit` | `{"status"}`: the program ended | — |
 | `frames` | frame infos | `layout` |
 | `screen` | `{"rows":[y]}`: screen rows changed | `shape` |
@@ -191,7 +193,12 @@ Host functions (`clock.*`, `storage.*`, `app.result`, `file.*`,
   `wheel-down`, `wheel-left`, `wheel-right`, `none`. The release and
   the drags of a press go to the sprite pressed, `at` null when off it.
   A deck turns them into `click(x, y, button, widget)` and `hover(x,
-  y, widget)` on the inner box (`ptyrc.d.ts`).
+  y, widget)` on the inner box (`ptyrc.d.ts`). Its own sprite behind
+  the text (a canvas without `layer`) is not its own thing here:
+  `hover` on it needs `pointer`, `mouse` needs `clicks`. `sprite` of a canvas:
+  `canvas.sprite()` (Rust: `Canvas::sprite`), `null` before its first
+  `present`; a new id when the driver removed it and `present` put it
+  again.
 - `screen.*` answers the wrapped program's cells. With `text`,
   `screen.text`, `screen.cells {sprites: true}` compose its own
   sprites alone over them: an app never reads another's.
@@ -247,10 +254,15 @@ calls a second), `headless`.
   --storage-out tests/stored` once, the directory kept in the tree;
   the case `--storage tests/stored`. Not one case writing what another
   reads: the cases run at once.
-- `--timing`: a last line, the ticks run and the wall time of one,
-  mean and max, host calls in it (what the 50 ms bound measures). Not
-  in the report otherwise, which a case compares whole; `--json` has
-  `ticks` and `tick_ms` always.
+- `--timing`: the wall time of the calls, host calls in them (what the
+  50 ms bound of `tick-ms` measures: a test run is never `late` nor
+  paused, whatever the load). A line for each `tick` or `event` over
+  the bound, `slow at T ms: tick, X ms` or `slow at T ms: event TOPIC,
+  X ms`, and status 1; a last line, the ticks run, the mean and the
+  max of one, the events and their max. Not in the report otherwise,
+  which a case compares whole; `--json` has `ticks`, `tick_ms`,
+  `events`, `event_ms`, `slow` always. Run it alone, on a quiet
+  machine, with the release runner.
 - The permissions are those the manifest declares for the run (a
   permission tied to an option by `needs`, or `files`, `files-write`
   to a file option: only when that option asks it; `[limits]`:
@@ -315,8 +327,8 @@ version = "0.1.0"
 summary = "One line, 200 at most."
 license = "GPL-3.0-or-later"
 api = 1
-script = "app.js"          # or rust = "src/lib.rs", rustc = "1.85"
-surface = "screen"         # "widget" (default), "frame", "screen": where it is clipped
+script = "app.js"          # or rust = "src/lib.rs", rustc = "1.88"
+surface = "frame"          # "widget" (default), "frame", "screen": below
 # frame = "largest"       # without --frame: active (default), largest, quietest, idle, raw
 # assets = "assets/"; tape = "demo.tape"
 # wait = true            # `ptyrc app ID` waits for its result (app.result)
@@ -375,13 +387,24 @@ memory-mib = 128
   `--no-wait`, `--seed N` (its `random` drawn from `N`, as under `dev test --seed
   N`; absent, from `/dev/urandom`: an app keeps no seed option of its
   own).
+- `surface`, where its sprites and widgets are clipped, never refused
+  (nothing in the answers tells it): `widget`, its widgets alone, a
+  bare sprite (a canvas) put but never shown; `frame`, the view of the
+  frame it starts on, which it follows (`move`); `screen`, anywhere,
+  with `screen-wide` declared and held (amber), else as `frame`.
+  Headless, one pane: the three draw alike but `widget`.
 - `--help` is made from the manifest; `ptyrc dev check` checks it.
   A `summary`, a reason or a `doc` that starts with `TODO`: a note of
   `dev check`, refused by the install.
 
 At `init`, `args["ptyrc:manifest"]`: `{"id", "version", "permissions":
-[{"name", "words"?}], "granted": [name], "limits": {KEY: N}}`, the
-limits granted alone (Rust: `manifest()`).
+[{"name", "words"?}], "granted": [name], "limits": {KEY: N}, "frame"}`,
+the limits granted alone; `frame`: the id of the frame its surface is
+on at the start (that of `--frame`, else `[app] frame`, else `active`;
+`move` names the next). Live: that id with `layout` held; without it
+0, and the `frame` of every request is ignored (the surface's).
+Headless: 0, the one frame, raw; a live id is seen only under `ptyrc
+dev run`. A `Sight` reads it by default (Rust: `manifest()`).
 
 ## Limits
 

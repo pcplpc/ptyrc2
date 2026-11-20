@@ -463,7 +463,7 @@ fn rust_app_that_does_not_build() {
     let r = Root::new("rust");
     let m = manifest("crab", "0.1.0").replace(
         "script = \"app.js\"",
-        "rust = \"src/lib.rs\"\nrustc = \"1.85\"",
+        "rust = \"src/lib.rs\"\nrustc = \"1.88\"",
     );
     let (remote, _) = r.bare(
         "remote.git",

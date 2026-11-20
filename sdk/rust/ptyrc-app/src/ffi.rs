@@ -15,6 +15,7 @@ mod sys {
         pub fn canvas(w: u32, h: u32) -> u32;
         pub fn cells(id: u32) -> u32;
         pub fn present(id: u32, place: u32, place_len: u32) -> u32;
+        pub fn sprite(id: u32) -> i64;
         pub fn release(id: u32);
         pub fn period(ms: u32);
         pub fn log(text: u32, len: u32);
@@ -93,6 +94,11 @@ pub(crate) fn present(id: u32, place: &[u8]) -> bool {
     let (p, pl) = addr(place);
     // SAFETY: the text is live for the call.
     unsafe { sys::present(id, p, pl) == 0 }
+}
+
+pub(crate) fn sprite(id: u32) -> Option<u64> {
+    // SAFETY: an integer only.
+    u64::try_from(unsafe { sys::sprite(id) }).ok()
 }
 
 pub(crate) fn period(ms: u32) {

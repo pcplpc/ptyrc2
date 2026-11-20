@@ -247,3 +247,44 @@ Supersedes `--spawn --rate` above.
   declares in the catalog what it reads of the screen.
 - `Sight` reads the shape by default; an app that needs the text asks
   for it.
+
+## Before the migration (2026-11-20, evening)
+
+Answers to the questions of
+`plan/handsoff/20261120T174339Z-next-steps.md`.
+
+- `fishes --tank`: its own app, `tank`; the reef in `_shared`.
+- `marks`: its frame alone. No `surface = "screen"`, no `screen-wide`.
+- `timer -b`: `surface = "frame"`.
+- `keys-arrows`: amber, in the code as in the plan. An app asks it
+  with the option that grabs (`needs`: `snake --grab`, `bricks
+  --grab`); the default start asks nothing more.
+- Test hooks: `--speed`, `--at` dropped and kept as the audit lists
+  (`migration-plan.md`, (c)).
+- `ask --json`: dropped. `ptyrc --json app ask` prints the value as
+  JSON; without it a string as it is, a list a line each.
+- The box denies a method the driver's table does not list, as live;
+  `asset.*` opened by name.
+- `app.move` of an app with a surface: no subscription to `move`
+  wanted.
+- `mix` rounds half up; a carried case that differs by a step is
+  blessed again.
+- Cases: headless counts its limits without the wall clock; `late` and
+  `paused` cannot come from load. The time bound: `dev test --timing`.
+- `rustc`: 1.88 for every Rust store app; the template follows.
+- A store app is told its frame at start: a field of `init`.
+- A live test grants beforehand by writing `permissions.toml` in its
+  own config directory: the recipe in the guide. No flag, no tool
+  that answers for the user.
+- Confirmed as built: `[app] frame`; an option without a default;
+  `--seed` the launcher's; canvases, colours and `Sight` in the SDK,
+  family code copied from `_shared/` and checked; the end of `init`
+  told by a log line, 60 s at most; a period counts from its call; the
+  deck's `click` on press and wheel; `dev test --timing`; a one-value
+  flag given twice refused.
+- Not asked: the probe pool of 4, the 64 jobs an app. As built.
+- Agents in the shared tree: `git add PATHS`, then `git diff --cached
+  --name-only` shows one's own alone, then plain `git commit -m`.
+  Never `git commit -- PATHS`. Two agents at once.
+- Finished worktrees: removed when the branch is merged and the tree
+  clean; the others listed, kept.

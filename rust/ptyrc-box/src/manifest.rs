@@ -9,7 +9,7 @@ use serde_json::{Map, Value, json};
 use std::time::Duration;
 
 /// Member of the `init` JSON: `{id, version, permissions, granted,
-/// limits}`. Wins over a member of the arguments with its name.
+/// limits, frame?}`. Wins over a member of the arguments with its name.
 pub const MEMBER: &str = "ptyrc:manifest";
 
 /// `[limits]` keys: `(name, default, ceiling, permission)`. The ceiling
@@ -40,11 +40,14 @@ pub struct Given {
     pub granted: Option<Vec<String>>,
     /// `[limits]` as declared: `(key, value)`.
     pub limits: Vec<(String, u64)>,
+    /// The app's frame at the start, as the driver resolved it; `None`:
+    /// not told.
+    pub frame: Option<u64>,
 }
 
 impl Given {
     /// `{"id","version","permissions":[{"name","words"?}],"granted"?,
-    /// "limits":{KEY: N}}`.
+    /// "limits":{KEY: N},"frame"?}`.
     pub fn parse(text: &str) -> Result<Given, String> {
         let v: Value = serde_json::from_str(text).map_err(|e| format!("--manifest: {e}"))?;
         let s = |k: &str| v[k].as_str().map(str::to_owned).unwrap_or_default();
@@ -69,12 +72,17 @@ impl Given {
                 .ok_or_else(|| format!("--manifest: limits: {k}: a number"))?;
             limits.push((k.clone(), n));
         }
+        let frame = match v.get("frame") {
+            None | Some(Value::Null) => None,
+            Some(f) => Some(f.as_u64().ok_or("--manifest: frame: a frame id")?),
+        };
         Ok(Given {
             id: s("id"),
             version: s("version"),
             permissions,
             granted: v.get("granted").map(strings),
             limits,
+            frame,
         })
     }
 
@@ -104,7 +112,8 @@ impl Given {
         l
     }
 
-    /// The member of `init`: what the app may know of itself.
+    /// The member of `init`: what the app may know of itself. `frame`:
+    /// 0 without `layout`, as `frame.get` and `draw.list` tell it.
     pub fn member(&self, granted: &[String]) -> Value {
         let permissions: Vec<Value> = (self.permissions.iter())
             .map(|(name, words)| match words.is_empty() {
@@ -119,13 +128,18 @@ impl Given {
                 (k.clone(), json!((*v).min(c)))
             })
             .collect();
-        json!({
+        let mut member = json!({
             "id": self.id,
             "version": self.version,
             "permissions": permissions,
             "granted": granted,
             "limits": limits,
-        })
+        });
+        if let Some(frame) = self.frame {
+            let layout = granted.iter().any(|g| g == "layout");
+            member["frame"] = json!(if layout { frame } else { 0 });
+        }
+        member
     }
 }
 
@@ -162,5 +176,17 @@ mod tests {
         assert_eq!(m["permissions"][0]["words"], json!(["fish"]));
         assert_eq!(m["limits"], json!({"tick-ms": 100}));
         assert!(Given::parse(r#"{"limits":{"disk-mib":1}}"#).is_err());
+        assert_eq!(m.get("frame"), None);
+    }
+
+    /// The frame told whole with `layout`; else 0, the one frame.
+    #[test]
+    fn the_frame_at_the_start() {
+        let g = Given::parse(r#"{"id":"a","version":"1","frame":3}"#).unwrap();
+        assert_eq!(g.frame, Some(3));
+        assert_eq!(g.member(&["layout".into()])["frame"], json!(3));
+        assert_eq!(g.member(&["shape".into()])["frame"], json!(0));
+        assert!(Given::parse(r#"{"frame":"active"}"#).is_err());
+        assert_eq!(Given::parse(r#"{"frame":null}"#).unwrap().frame, None);
     }
 }

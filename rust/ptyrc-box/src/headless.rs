@@ -6,7 +6,7 @@
 use crate::assets::Assets;
 use crate::core::{CallError, Host, Limits};
 use crate::error::Error;
-use crate::grants::{self, Degree, Gate, Grants};
+use crate::grants::{self, Degree, Gate, Grants, Why};
 use crate::hostfn::{self, HostFns, Named};
 use crate::nozzle::{self, Nozzles};
 use crate::runner::Runner;
@@ -1121,15 +1121,15 @@ impl Headless {
                 let mut silent = Vec::new();
                 if let Some(g) = self.grants.clone() {
                     for t in &topics {
-                        match grants::judge(&g, grants::topic_gate(t)) {
+                        match grants::judge(&g, Some(grants::topic_gate(t))) {
                             Ok(None) => {}
-                            Err(None) => {
+                            Ok(Some(_)) | Err(Why::Lacks(_)) => silent.push(*t),
+                            Err(why) => {
                                 return Err(CallError {
-                                    hint: Some(grants::denied_hint(&g, None)),
+                                    hint: Some(grants::denied_hint(&g, why)),
                                     ..CallError::new("denied", format!("{t}: denied"))
                                 });
                             }
-                            Ok(Some(_)) | Err(Some(_)) => silent.push(*t),
                         }
                     }
                 }
@@ -1502,12 +1502,12 @@ impl Headless {
             }
         }
         let params = &placed;
-        if let Err(lacks) = grants::judge(&g, grants::gate(method, params)) {
-            if let Some(p) = lacks {
-                self.lack_as(p, &[], true);
+        if let Err(why) = grants::judge(&g, grants::gate(method, params)) {
+            if let Why::Lacks(p) = why {
+                self.lack_as(p.name(), &[], true);
             }
             let e = CallError {
-                hint: Some(grants::denied_hint(&g, lacks)),
+                hint: Some(grants::denied_hint(&g, why)),
                 ..CallError::new("denied", format!("{method}: denied"))
             };
             return (Err(e), None);
@@ -1516,7 +1516,7 @@ impl Headless {
         // is lowered whole.
         if hostfn::is_host(method) {
             let low = match grants::gate(method, params) {
-                Gate::Lowered(p) if !g.holds(p.name()) => Some(p.name()),
+                Some(Gate::Lowered(p)) if !g.holds(p.name()) => Some(p.name()),
                 _ => None,
             };
             let writable = g.holds("files-write");
@@ -1546,7 +1546,7 @@ impl Headless {
         let answer = match planned {
             // Fail closed: lowered by the table, not planned.
             Plan::Pass if lowered => Err(CallError {
-                hint: Some(grants::denied_hint(&g, None)),
+                hint: Some(grants::denied_hint(&g, Why::Never)),
                 ..CallError::new("denied", format!("{method}: denied"))
             }),
             // Where an anchor landed, at the degree that finds it.
@@ -2302,7 +2302,9 @@ impl Report {
     /// `storage_written` (the keys set or removed), `storage_held`,
     /// `files` (written: `option`, `name`,
     /// `size`, `text` or `base64`); `ticks`, `tick_ms` (`mean`, `max`
-    /// of the wall time of a tick, null without one: [`Report::timing_line`]).
+    /// of the wall time of a tick, null without one: [`Report::timing_line`]),
+    /// `events`, `event_ms` (`max`), `slow` (`t`, `call`: `tick` or
+    /// `event`, `topic` of an event, `ms`: [`Report::slow_lines`]).
     pub fn to_json(&self) -> Value {
         let screens: Vec<Value> = self
             .screens
@@ -2352,6 +2354,14 @@ impl Report {
                 v
             })
             .collect();
+        let slow: Vec<Value> = (self.timing.slow.iter())
+            .map(|c| match &c.topic {
+                None => json!({"t": c.now_ms, "call": "tick", "ms": ms(c.took)}),
+                Some(topic) => {
+                    json!({"t": c.now_ms, "call": "event", "topic": topic, "ms": ms(c.took)})
+                }
+            })
+            .collect();
         json!({
             "screens": screens,
             "refused": refused,
@@ -2370,6 +2380,9 @@ impl Report {
             "ticks": self.ticks,
             "tick_ms": self.timing.mean().map(|mean| json!({
                 "mean": ms(mean), "max": ms(self.timing.max)})),
+            "events": self.timing.events,
+            "event_ms": (self.timing.events > 0).then(|| json!({"max": ms(self.timing.event_max)})),
+            "slow": slow,
         })
     }
 }
@@ -2513,7 +2526,7 @@ impl Report {
     /// of one, host calls in it (what `limit-time` bounds). Not in the
     /// text report, which two runs compare.
     pub fn timing_line(&self) -> String {
-        match self.timing.mean() {
+        let mut line = match self.timing.mean() {
             None => format!("ticks: {}", self.ticks),
             Some(mean) => format!(
                 "ticks: {}; a tick, wall time: mean {:.3} ms, max {:.3} ms",
@@ -2521,7 +2534,29 @@ impl Report {
                 ms(mean),
                 ms(self.timing.max)
             ),
+        };
+        if self.timing.events > 0 {
+            line += &format!(
+                "; events: {}, max {:.3} ms",
+                self.timing.events,
+                ms(self.timing.event_max)
+            );
         }
+        line
+    }
+
+    /// `--timing`: a line for each call over `tick-ms`, in order:
+    /// `slow at T ms: tick, X ms`, `slow at T ms: event TOPIC, X ms`.
+    pub fn slow_lines(&self) -> Vec<String> {
+        (self.timing.slow.iter())
+            .map(|c| {
+                let call = match &c.topic {
+                    None => "tick".to_string(),
+                    Some(t) => format!("event {t}"),
+                };
+                format!("slow at {} ms: {call}, {:.3} ms", c.now_ms, ms(c.took))
+            })
+            .collect()
     }
 }
 
@@ -2712,6 +2747,7 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
     }
     host.take_events();
     let mut runner = Runner::load(wasm, host, options.limits.clone())?;
+    runner.untimed();
     let end = options.duration_ms;
     let mut at: Vec<u64> = options.at.iter().copied().filter(|t| *t <= end).collect();
     if at.is_empty() {
@@ -2834,7 +2870,7 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
         }
     }
     let met = runner.met().iter().map(|m| m.to_string()).collect();
-    let timing = runner.timing();
+    let timing = runner.timing().clone();
     let storage_held = (options.grants.as_ref()).is_none_or(|g| g.holds("storage"));
     let host = runner.host_mut();
     if let Some(t) = host.nowhere {
@@ -2942,12 +2978,19 @@ mod tests {
             .unwrap_err();
         assert_eq!(e.code, "headless");
         assert!(e.hint.unwrap().contains("ptyrc dev run"));
-        let e = h.call("screen.txt", json!({})).unwrap_err();
+        // The whole session: unknown, the nearest named.
+        let mut whole = Headless::new((4, 1), 1);
+        let e = whole.call("screen.txt", json!({})).unwrap_err();
         assert_eq!(e.code, "unknown-method");
         assert_eq!(e.message, "unknown method: screen.txt");
         assert!(e.hint.unwrap().starts_with("did you mean screen.text? "));
-        let e = h.call("unsubscribe", json!({})).unwrap_err();
-        assert_eq!(e.code, "unknown-method");
+        // Held as a store app: not in the driver's table, denied as live.
+        for m in ["screen.txt", "unsubscribe"] {
+            let e = h.call(m, json!({})).unwrap_err();
+            assert_eq!(e.code, "denied");
+            assert_eq!(e.message, format!("{m}: denied"));
+            assert_eq!(e.hint.as_deref(), Some("not open to apps"));
+        }
         let e = h
             .call("subscribe", json!({"topics": ["sizes"]}))
             .unwrap_err();

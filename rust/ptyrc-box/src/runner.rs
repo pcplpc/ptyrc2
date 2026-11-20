@@ -10,13 +10,28 @@ use std::time::{Duration, Instant};
 /// What `stop` is given (plan, Guest ABI).
 pub const STOP: Duration = Duration::from_millis(500);
 
-/// The wall time of the `tick` calls entered, host calls in it.
-/// Equal to any other: wall time is not what two runs compare.
-#[derive(Clone, Copy, Debug, Default)]
+/// The wall time of the `tick` and `event` calls entered, host calls
+/// in it. Equal to any other: wall time is not what two runs compare.
+#[derive(Clone, Debug, Default)]
 pub struct Timing {
     pub ticks: u64,
     pub total: Duration,
     pub max: Duration,
+    pub events: u64,
+    pub event_max: Duration,
+    /// The calls over `Limits::late` (`tick-ms`), in order; kept only
+    /// `untimed` (headless), where nothing else tells them.
+    pub slow: Vec<Slow>,
+}
+
+/// A `tick` or an `event` over `Limits::late`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Slow {
+    /// Session time of the call.
+    pub now_ms: u64,
+    /// `None`: a tick; else the topic of the event.
+    pub topic: Option<String>,
+    pub took: Duration,
 }
 
 impl PartialEq for Timing {
@@ -39,6 +54,8 @@ pub struct Runner<H: Host> {
     guest: Guest<H>,
     late: u32,
     paused: bool,
+    /// Lateness counted (`untimed`: not).
+    timed: bool,
     ended: Option<Error>,
     timing: Timing,
 }
@@ -50,6 +67,7 @@ impl<H: Host> Runner<H> {
             guest: Guest::load(wasm, Core::new(host, limits))?,
             late: 0,
             paused: false,
+            timed: true,
             ended: None,
             timing: Timing::default(),
         })
@@ -76,6 +94,14 @@ impl<H: Host> Runner<H> {
     /// Three late calls in a row: no `tick`, no `event` until `resume`.
     pub fn paused(&self) -> bool {
         self.paused
+    }
+
+    /// Lateness in session time, which does not pass during a call:
+    /// no call is late, the app is never paused (headless: a run does
+    /// not depend on the machine's load). The bounds that end the app
+    /// stay wall time.
+    pub fn untimed(&mut self) {
+        self.timed = false;
     }
 
     pub fn resume(&mut self) {
@@ -116,20 +142,42 @@ impl<H: Host> Runner<H> {
             t.ticks += 1;
             t.total += took;
             t.max = t.max.max(took);
+            self.slow(now_ms, None, took);
         }
         done
     }
 
-    /// The `tick` calls entered so far, timed.
-    pub fn timing(&self) -> Timing {
-        self.timing
+    /// The `tick` and `event` calls entered so far, timed.
+    pub fn timing(&self) -> &Timing {
+        &self.timing
     }
 
     /// Not delivered while paused.
     pub fn event(&mut self, topic: &str, data: &Value, now_ms: u64) -> Result<(), Error> {
         let bound = self.guest.core().limits.hard;
         let data = serde_json::to_vec(data).unwrap_or_default();
-        self.enter(now_ms, true, |g| g.event(topic.as_bytes(), &data, bound))
+        let entered = !self.paused && self.ended.is_none();
+        let start = Instant::now();
+        let done = self.enter(now_ms, true, |g| g.event(topic.as_bytes(), &data, bound));
+        if entered {
+            let took = start.elapsed();
+            let t = &mut self.timing;
+            t.events += 1;
+            t.event_max = t.event_max.max(took);
+            self.slow(now_ms, Some(topic), took);
+        }
+        done
+    }
+
+    /// A call over `Limits::late`, kept when `untimed`.
+    fn slow(&mut self, now_ms: u64, topic: Option<&str>, took: Duration) {
+        if !self.timed && took > self.guest.core().limits.late {
+            self.timing.slow.push(Slow {
+                now_ms,
+                topic: topic.map(str::to_string),
+                took,
+            });
+        }
     }
 
     /// The optional `stop`, 500 ms. The guest is not entered after it.
@@ -158,7 +206,7 @@ impl<H: Host> Runner<H> {
             self.ended = Some(e.clone());
             return Err(e);
         }
-        if timed {
+        if timed && self.timed {
             let core = self.guest.core_mut();
             if start.elapsed() > core.limits.late {
                 self.late += 1;

@@ -19,8 +19,8 @@ the second; code shared with other apps as modules of the tree).
 ```
 NAME/
   ptyrc-app.toml   [app] id = "NAME"; random = [...]
-  LICENSE          a copy of the repository's LICENSE.txt
-  app.js           or Cargo.toml, src/lib.rs (rustc only, no crate)
+  LICENSE.txt      a copy of the repository's, as `ptyrc dev new` writes it
+  app.js           or Cargo.toml, Cargo.lock, src/lib.rs (A Rust app)
   tests.js         unit tests: exports test_*
   x.js, x.tests.js a module and its tests; tests.js re-exports them
   tests/CASE.args  the words after `ptyrc dev test NAME/`
@@ -28,7 +28,7 @@ NAME/
   tests/*.screen   files the cases name (--screen tests/x.screen)
 ```
 
-- `LICENSE`: the store wants the GPL text in each tree; git stores the
+- `LICENSE.txt`: the store wants the GPL text in each tree; git stores the
   copies as one blob. The harness checks each is the repository's.
 - A module: code another app wants too (the twin's `_x`, or a part of
   another app it imports) is a file of its own, importing the SDK's
@@ -37,18 +37,24 @@ NAME/
   any author would want is the SDK's (`"ptyrc/canvas"`: the twin's
   `_canvas`; `"ptyrc/sight"`: `_cli.Sight`).
 
-## Shared code: `_shared/js/`
+## Shared code: `_shared/js/`, `_shared/rust/`
 
 Code of a family of our apps (`_arcade`, `_reef`, `_sky`, `_strip`,
 the fonts of `clock` and `timer`) has one source, `_shared/js/x.js`,
 copied into each tree that uses it, anywhere in it (`NAME/x.js`,
 `NAME/lib/x.js`): each tree stays whole, the store and the runner
 know nothing of it. A file of a tree named as one of `_shared/js/` is
-its copy: the harness checks it byte for byte, as it does `LICENSE`;
+its copy: the harness checks it byte for byte, as it does `LICENSE.txt`;
 `PTYRC_SYNC=1` writes each copy from the source. Its tests,
 `_shared/js/x.tests.js`, are not copied: the harness runs them once.
 `_shared` is not an app: no manifest, a name the store refuses.
 Tenants: `digits.js` (`clock`; `timer` next).
+
+`_shared/rust/x.rs` likewise, copied as `NAME/src/x.rs` and declared
+`mod x;` there; its unit tests are inside (`#[cfg(test)]`), run once
+by the harness, natively, with `ptyrc-app`. Not `lib.rs`, `main.rs`.
+No tenant yet; the first: the grid of `stars` (`Grid`, `noise`,
+`runs`, `phase_of`), for `pond` and `shore`.
 - A Rust app: `app.wasm` is built from the tree on demand in a
   checkout (`<cache>/ptyrc/shipped/NAME/`, at `ptyrc app`); a release
   installs the trees in `<data>/ptyrc/shipped/` with `app.wasm` beside
@@ -76,7 +82,9 @@ harness below runs it, a tree's `test.sh` calls it.
 A second run from the first one's storage: `ptyrc dev test .
 --storage-out tests/stored` once, the directory kept in the tree; the
 case `--storage tests/stored`. Not a case writing what another reads.
-`--timing` (not in a case): the ticks and the wall time of one.
+`--timing` (not in a case): the wall time of the ticks and events; one
+over `tick-ms` named (`slow at T ms: ...`), status 1. Run it alone, on
+a quiet machine, with the release runner (below, Cost).
 
 The scene steps on its own clock, as the driver's: the screen at `T`
 is the same whatever other times `--at` asks.
@@ -84,7 +92,9 @@ is the same whatever other times `--at` asks.
 A run that ends with a status other than 0 fails its case, unless the
 report says that status (`ended: exit: N`, `result: VALUE (status
 N)`) and so `CASE.txt` holds the line: an option refused in `init`
-(`exit(2)`) is a case.
+(`exit(2)`) is a case (`clock/tests/zone`). A value the manifest
+refuses (`choices`, `min`) stops `dev test` before the app, status 2:
+the report is its line, `ptyrc: --NAME: WHY` (`life/tests/kind`).
 
 The wall clock: `--clock ISO` (default `2000-01-01T00:00:00Z`),
 `--zone NAME` the machine's (default `UTC`), `--deny clock` the time
@@ -107,7 +117,7 @@ effect that follows the pointer asks the driver (`"pointer": true`,
 cargo test -p ptyrc-cli --test store_apps           # every tree
 PTYRC_STORE_APP=NAME cargo test -p ptyrc-cli --test store_apps
 PTYRC_BLESS=1 ...                                   # --cases --bless
-PTYRC_SYNC=1 ...                                    # copies of _shared/js written
+PTYRC_SYNC=1 ...                                    # copies of _shared written
 ```
 
 A start of the runner compiles the interpreter: some 7 s of processor
@@ -117,13 +127,14 @@ time in a debug build, 2 s in a release one. The cases run on
 176 s of processor time, against 4 s, 49 s); `PTYRC_BOX` names
 another (`ptyrc dev test` takes it, as the driver).
 
-Per tree: `ptyrc dev check`; the id its directory; `LICENSE`; the
-copies of `_shared/js/`; each
+Per tree: `ptyrc dev check`; the id its directory; `LICENSE.txt`; the
+copies of `_shared/`; each
 draw of `random` read by the options; each case against its `.txt`
 (`dev test --cases`); `dev test --unit` when `tests.js` exists; a Rust
 app's `cargo test`.
 Needs `sdk/js/interp/build.sh` (else the scripts are skipped, or fail
-with `PTYRC_REQUIRE_JS=1`). Bless only after reading the diff.
+with `PTYRC_REQUIRE_JS=1`) and `rustc` with its wasm target (else the
+Rust apps are skipped, or fail with `PTYRC_REQUIRE_RUSTC=1`). Bless only after reading the diff.
 
 ## Moving an app
 
@@ -190,6 +201,70 @@ with `PTYRC_REQUIRE_JS=1`). Bless only after reading the diff.
 
    Compare the shot with the case of the same size; then stop the
    driver (`kill` its pid).
+
+   With a host terminal (`ptyrc run` on a pty, no `--headless`) the
+   pop-up asks the permissions declared, and `ptyrc app` waits on it.
+   Answer beforehand, in the driver's own config directory, before
+   `ptyrc run`:
+
+   ```
+   mkdir -p -m 700 $D/config/ptyrc
+   (umask 077; printf '[app."ptyrc/NAME"]\nallow = ["shape", "pointer"]\n' \
+     > $D/config/ptyrc/permissions.toml)
+   ```
+
+   A table per app, `[app."ORIGIN"]` (`ptyrc/NAME` shipped, the origin
+   of a store app); `allow`, `deny`: arrays of permission names on one
+   line (`rust/ptyrc-server/src/permissions.rs`). Never the user's own
+   file. `--headless` asks nothing: what is declared is granted, less
+   what the file denies. Tested 2026-11-20, `ptyrc/life` on a pty:
+   with the file `ptyrc app` returns, granted `shape`, `pointer`;
+   without, it waits on the pop-up.
+
+## A Rust app
+
+The model: `life`. Beside the lines above:
+
+- `Cargo.toml`: `[workspace]` (the tree is no member of the
+  repository's), `crate-type = ["cdylib"]`, `ptyrc-app = { path =
+  "../../../sdk/rust/ptyrc-app" }`: for `cargo test` alone; the store
+  builds `src/lib.rs` by `rustc` with its own copy. The tree's
+  `Cargo.lock` committed.
+- `[app] rustc = "1.88"`: the floor of every Rust store app.
+- The SDK's modules, not the twin's: `ptyrc_app::canvas` (`Braille`,
+  `Half`, `mix`, `xterm`: `_canvas`), `ptyrc_app::sight` (`Sight`:
+  `_cli.Sight`), `ptyrc_app::dice` (`Dice`, `Host`, `Seeded`);
+  `ptyrc_app::deck` for widgets, `.click` on a press and a wheel turn
+  (`sdk/rust/ptyrc-app/README.md`, Drawing, Deck). Family code:
+  `_shared/rust/` (above).
+- Draws: the pure code takes `&mut impl Dice`; `init` seeds a `Seeded`
+  from `Host` (the launcher's `--seed`), a unit test from a number.
+- Time: steps counted from `now_ms` (`life`: generation `now_ms *
+  speed / 1000`), never one a tick: the world does not hang on when
+  the ticks fall.
+- Cost: a tick measured on 200x60 with the release runner (`cargo
+  build --release -p ptyrc-box`; `ptyrc dev test . --size 200x60 --for
+  10s --timing`), against the 50 ms bound of `tick-ms`. `life`: 1.1 ms,
+  3.6 ms with `-a`.
+
+## Decided (`plan/interview.md`, 2026-11-20)
+
+- `keys-arrows` is amber: asked by the option that grabs (`needs =
+  ["keys-arrows"]`: `snake --grab`, `bricks --grab`), never by the
+  default start.
+- No `seed` option: `--seed` is the launcher's.
+- `ask`: no `--json`; `ptyrc --json app ask` prints the value as JSON.
+- `fishes --tank` is an app of its own, `tank`; the reef in `_shared`.
+- `marks` draws on its frame alone: `surface = "frame"`.
+  `timer -b`: `surface = "frame"`.
+- Test hooks dropped and kept as `migration-plan.md` (c) lists:
+  dropped `--speed`, `--at` of fire, globe, timer; `--speed` of
+  gallery, pace; `--colour` of gallery, `--file` of minimap, `--seed`
+  of pace, `--json` of ask, `--save` of pace. Kept, the app's:
+  `--speed` of snake, bricks, life, train, window; `--at` of flock,
+  shore, train, window (after `--` under `dev test`).
+- `mix` rounds half up (the twin: half to even): a carried case that
+  differs from the twin by one colour step is blessed.
 
 The native twin wins `ptyrc app NAME` while it exists (a note names
 both); the store one is `ptyrc app ptyrc/NAME`.

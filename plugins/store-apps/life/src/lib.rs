@@ -11,7 +11,7 @@
 //! - A still world (`Watch`) is made again: a soup, or with `--guests`
 //!   a pattern dropped (`guests`), which also come at `--rate` a second,
 //!   of `--kinds`.
-//! - The text, read as a shape (`sight`, `shape`): nothing is drawn on
+//! - The text, read as a shape (`ptyrc_app::sight`, `shape`): nothing is drawn on
 //!   the cell on each side of a glyph; `--walls`: no cell lives there.
 //! - `--cursor`: the pointer over the canvas (`hover`, `pointer`) kills
 //!   the cells within `REACH` of it.
@@ -22,20 +22,17 @@
 //! The world, the drops and the sparks draw from `random`: `--seed N`
 //! of the launcher gives the same run.
 
-pub mod canvas;
-pub mod dice;
 pub mod guests;
 pub mod patterns;
 pub mod picture;
-pub mod sight;
 pub mod world;
 
-use dice::{Dice, Host, Seeded};
 use guests::{Guests, Landing};
 use patterns::Kind;
 use picture::{AGES, Picture, TRAIL, picture};
+use ptyrc_app::dice::{Dice, Host, Seeded};
+use ptyrc_app::sight::{self, Sight};
 use ptyrc_app::{App, Canvas, Color, Value, call, exit, json, log, period, subscribe};
-use sight::{Look, Sight};
 use world::{Mask, Watch, World, blasts, wall};
 
 /// Cells around the pointer that die.
@@ -305,7 +302,7 @@ impl App for Life {
         let ages = if o.colour { AGES.len() } else { 1 };
         let gone = if o.trail { TRAIL.len() } else { 1 };
         Life {
-            sight: Sight::new(Look::Shape, false),
+            sight: Sight::new(sight::Options::default()),
             world: World::new(0, 0, ages, gone),
             watch: Watch::default(),
             clear: None,

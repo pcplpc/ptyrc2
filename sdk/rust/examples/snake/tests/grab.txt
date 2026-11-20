@@ -1,0 +1,11 @@
+--- 1000 ms
+    @ooo                    ←↑↓→ ctrl+t
+
+
+
+
+
+
+
+      ●
+ended: exit: 0

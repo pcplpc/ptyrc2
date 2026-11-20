@@ -224,6 +224,46 @@ fn random_and_release() {
     assert!(letters.len() > 3);
 }
 
+/// `sprite`: -1 before the first `present`, then the id of its sprite,
+/// written as a digit after `0`: the screen reads `/1`.
+#[test]
+fn sprite_of_a_presented_canvas() {
+    let wasm = guest(&format!(
+        r#"
+  (global $id (mut i32) (i32.const 0))
+  (func $digit (param $at i32)
+    (i32.store (i32.add (call $cells (global.get $id)) (local.get $at))
+      (i32.add (i32.const 0x30) (i32.wrap_i64 (call $sprite (global.get $id))))))
+  (func (export "init") (param i32 i32)
+    (global.set $id (call $canvas (i32.const 2) (i32.const 1)))
+    (call $digit (i32.const 0))
+    (drop (call $present (global.get $id) (i32.const 0) (i32.const 0)))
+    (call $digit (i32.const 16))
+    (drop (call $present (global.get $id) (i32.const 0) (i32.const 0))))
+  {TICK} {EVENT}
+"#
+    ));
+    let report = run(&wasm, &Options::default()).unwrap();
+    assert_eq!(report.screens[0].1[0], "/1");
+}
+
+/// A module of ABI 1 built before `sprite`: its imports are a part of
+/// the list, it loads.
+#[test]
+fn an_app_built_before_sprite_loads() {
+    let wasm = common::bare(&format!(
+        r#"
+  (import "ptyrc" "canvas" (func $canvas (param i32 i32) (result i32)))
+  (import "ptyrc" "present" (func $present (param i32 i32 i32) (result i32)))
+  (memory (export "memory") 1)
+  (func (export "alloc") (param i32) (result i32) (i32.const 1024))
+  (func (export "free") (param i32 i32))
+  {INIT} {TICK} {EVENT}
+"#
+    ));
+    assert!(run(&wasm, &Options::default()).is_ok());
+}
+
 #[test]
 fn missing_exports() {
     let no_tick = guest(&format!("{INIT} {EVENT}"));

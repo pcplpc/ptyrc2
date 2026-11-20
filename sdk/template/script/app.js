@@ -7,6 +7,7 @@ const WIDTH = 16;
 let canvas;
 let label = "t";
 
+// An act refused in init (`denied`) ends the app unless caught: AGENTS.md, Errors.
 export function init(args) {
   label = String(args.label ?? "t");
   canvas = new Canvas(WIDTH, 1);

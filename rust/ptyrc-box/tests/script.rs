@@ -176,6 +176,29 @@ fn manifest_is_the_runners() {
     assert!(logged(&r, "manifest null"), "{r}");
 }
 
+/// The frame told at `init` (`manifest().frame`): a `Sight` reads it
+/// unless named; told none, `raw`.
+#[test]
+fn a_sight_reads_the_frame_told() {
+    let Some(wasm) = interpreter() else { return };
+    let files = [(
+        "app.js",
+        "import { log, manifest } from 'ptyrc';
+         import { Sight } from 'ptyrc/sight';
+         export function init() {
+           log('frame', manifest()?.frame, new Sight().frame, new Sight({ frame: 'raw' }).frame);
+         }",
+    )];
+    let given =
+        ptyrc_box::manifest::Given::parse(r#"{"id": "a", "version": "1", "frame": 3}"#).unwrap();
+    let mut o = options(&files, json!({}));
+    o.args = ptyrc_box::manifest::with_member(o.args, given.member(&["layout".to_owned()]));
+    let r = run(wasm, &o).unwrap();
+    assert!(logged(&r, "frame 3 3 raw"), "{r}");
+    let r = run(wasm, &options(&files, json!({}))).unwrap();
+    assert!(logged(&r, "frame undefined raw raw"), "{r}");
+}
+
 #[test]
 fn time_is_session_time_and_random_is_the_hosts() {
     let Some(a) = app(

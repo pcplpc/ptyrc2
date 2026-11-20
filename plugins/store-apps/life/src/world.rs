@@ -9,8 +9,8 @@
 //!
 //! A [`Mask`] is a plane: the cells where something is allowed.
 
-use crate::dice::Dice;
 use crate::patterns::Art;
+use ptyrc_app::dice::Dice;
 use std::collections::VecDeque;
 
 /// A population that repeats at this distance is still.
@@ -466,8 +466,8 @@ pub fn blasts(world: &World) -> Vec<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dice::Seeded;
     use crate::patterns::{Kind, LIBRARY, decode, heading, named, turn};
+    use ptyrc_app::dice::Seeded;
     use std::collections::{BTreeMap, BTreeSet};
 
     type Cells = BTreeSet<(usize, usize)>;

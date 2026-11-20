@@ -2190,8 +2190,14 @@ impl Driver {
         let apps = self.apps.as_ref()?;
         let owned = |conn| engine.owned(conn);
         let mut info = apps.info(id, self.now(), me, &owned)?;
-        info["moves"] = json!(!self.movers(id).is_empty());
+        info["moves"] = json!(self.moves(id));
         Some(info)
+    }
+
+    /// `app.move` moves it live: a connection subscribed to `move`, or
+    /// a surface on a frame, moved by the driver.
+    fn moves(&self, id: u64) -> bool {
+        !self.movers(id).is_empty() || self.surface_frame(id).is_some()
     }
 
     /// The connections of an app subscribed to `move`.
@@ -2215,7 +2221,8 @@ impl Driver {
         )
     }
 
-    /// `app.move`: tell an app that moves by itself to go to a frame.
+    /// `app.move`: an app with a surface on a frame moved there; one
+    /// that moves by itself told.
     fn app_move(
         &mut self,
         conn: ConnId,
@@ -2232,7 +2239,7 @@ impl Driver {
         let why = match app.state {
             State::Exited => Some("has exited"),
             State::Paused => Some("is paused"),
-            State::Running if movers.is_empty() => Some("does not move by itself"),
+            State::Running if !self.moves(id) => Some("does not move by itself"),
             State::Running => None,
         };
         if let Some(why) = why {
@@ -2247,7 +2254,7 @@ impl Driver {
         // its sprites along, told; another is told.
         if !self.move_surface(id, frame, engine) {
             for mover in movers {
-                self.send_event(mover, "move", json!({"frame": frame}));
+                self.send_move(mover, frame);
             }
         }
         Ok(json!({"app": self.app_info(id, Some(conn), engine), "frame": frame}))
@@ -2466,7 +2473,7 @@ impl Driver {
             // The grants first: the runner is told them, and the limits.
             let (resolved, notes) =
                 Self::resolved(Some(identity.key()), &found.declared, headless, given);
-            let argv = found.argv(&held_names(&resolved.grants));
+            let argv = found.argv(&held_names(&resolved.grants), frame);
             let id = apps
                 .start_as(argv, Some(found.name.clone()), Some(identity), false, now)
                 .map_err(|e| match e {
@@ -2522,6 +2529,9 @@ impl Driver {
                 Some(frame) => Some(self.frame_id(conn, frame.clone(), engine)?),
                 None => None,
             };
+            // A store app restarted is told the frame given, else that of
+            // its surface now (moved, or an heir's).
+            let told = frame.or_else(|| self.surface_frame(id));
             let apps = self.apps.as_mut().expect("checked above");
             if apps.get(id).is_none() {
                 return Err(refused(apps, id, Refused::Unknown));
@@ -2552,7 +2562,7 @@ impl Driver {
                     let declared = apps.get(id).and_then(|a| a.declares.clone());
                     warnings.extend(Self::grant(apps, id, declared, headless, None));
                     let app = apps.get(id).expect("checked above");
-                    let argv = crate::store::regranted(&app.argv, &held_names(&app.grants));
+                    let argv = crate::store::regranted(&app.argv, &held_names(&app.grants), told);
                     apps.restart(id, argv, None, now).map(|()| None)
                 }
                 "restart" => {

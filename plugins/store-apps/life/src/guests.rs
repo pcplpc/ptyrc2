@@ -10,9 +10,9 @@
 //! replaces the cells of a place that has few; so does a small one when
 //! no hole is left.
 
-use crate::dice::Dice;
 use crate::patterns::{Art, Kind, LIBRARY, Pattern, heading, turn};
 use crate::world::{BLOCK, World, room};
+use ptyrc_app::dice::Dice;
 use std::collections::VecDeque;
 
 /// Patterns a second dropped in an empty world.
@@ -359,8 +359,8 @@ impl<D: Dice> Guests<D> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dice::Seeded;
     use crate::patterns::named;
+    use ptyrc_app::dice::Seeded;
     use std::collections::BTreeSet;
 
     fn block() -> Art {

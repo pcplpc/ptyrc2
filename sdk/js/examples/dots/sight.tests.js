@@ -106,6 +106,17 @@ export function test_sight_out_of_sight() {
   assertEqual([sight.frame, h.calls.at(-1)], [2, ["screen.shape", { frame: 2 }]]);
 }
 
+export function test_sight_moved_below_layout() {
+  // Told 0 at `init` and by `move`: the raw frame read again.
+  const h = host();
+  const sight = new Sight({ call: h.call, frame: 0 });
+  assert(sight.look());
+  const n = h.reads();
+  assertEqual(sight.event("move", { frame: 0 }), false);
+  assert(sight.look() && sight.frame === 0);
+  assertEqual([h.reads(), h.calls.at(-1)], [n + 1, ["screen.shape", { frame: 0 }]]);
+}
+
 export function test_spare() {
   const dots = new Braille(5, 3);
   dots.bits.fill(255);

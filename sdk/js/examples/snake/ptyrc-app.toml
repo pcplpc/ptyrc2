@@ -14,4 +14,4 @@ keys-arrows = "with grab: the arrows steer it, until ctrl+t"
 
 [options]
 speed = { type = "int", default = 12, doc = "moves a second, 1 to 30" }
-grab = { type = "bool", default = false, doc = "the arrows steer it, at half the speed; ctrl+t ends" }
+grab = { type = "bool", default = false, needs = ["keys-arrows"], doc = "the arrows steer it, at half the speed; ctrl+t ends" }

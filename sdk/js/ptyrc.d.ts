@@ -51,6 +51,7 @@ declare module "ptyrc" {
    * A request of the ptyrc protocol, answered before it returns:
    * `call("subscribe", { topics: ["size"] })`. The methods, topics and
    * the permission each needs: `PROTOCOL.md`. At most 1000 a second.
+   * `subscribe` adds to the topics held; none is ever removed.
    * @throws PtyrcError when the request is refused.
    */
   export function call(method: string, params?: object): any;
@@ -102,9 +103,10 @@ declare module "ptyrc" {
   /** Where and how a canvas shows: the members of a sprite. */
   export interface Place {
     /**
-     * `{ at: [x, y], space: "view" }`: fixed on the surface, negative
-     * from the right and the bottom; `space: "frame"`: moves with the
-     * scroll. `{ auto: { prefer: "top-right" } }`: a quiet corner.
+     * `{ at: [x, y], space: "view" }`: fixed in the view; a negative
+     * `x` puts the canvas's right edge `-x - 1` columns from the last
+     * (`-1`: on it), `y` likewise from the bottom; `space: "frame"`:
+     * moves with the scroll. `{ auto: { prefer: "top-right" } }`: a quiet corner.
      * `{ cursor: { dx: 1, dy: 0 } }`: follows the cursor.
      * `{ text: "word", side: "right" }`: next to a match.
      * Default: `{ at: [0, 0], space: "view" }`.
@@ -156,6 +158,14 @@ declare module "ptyrc" {
      * Only what changed is sent. `false`: refused (the log says why).
      */
     present(place?: Place): boolean;
+    /**
+     * The id of its sprite once presented: the `sprite` of `mouse` and
+     * `hover` on it. A new one when the driver removed it and `present`
+     * put it again. `null`: not presented, or refused. Behind the text
+     * (the default), `hover` on it needs `pointer`, `mouse` `clicks`;
+     * in front, neither.
+     */
+    sprite(): number | null;
     /** Removes the picture and gives the cells back. */
     release(): void;
   }
@@ -181,6 +191,12 @@ declare module "ptyrc" {
     granted: string[];
     /** `[limits]` granted, each up to its ceiling: `{"tick-ms": 80}`. */
     limits: { [key: string]: number };
+    /**
+     * The id of the frame its surface is on at the start, as `move`
+     * names the next. Live: that id with `layout` held, else 0;
+     * headless: 0. Absent: not told.
+     */
+    frame?: number;
   }
 
   /**
@@ -534,8 +550,8 @@ declare module "ptyrc/deck" {
  *   deck.add("plot", [[20, 5]], () => dots.rows());
  *   dots.draw(canvas, 0, 0, { fg: 6 });       // or on a Canvas
  *
- * Cost (`sdk/js/README.md`, Speed): `set` about 0.45 µs; at 200x60,
- * 96000 dots set one by one take about 45 ms, near the 50 ms of a tick.
+ * Cost, a release runner: `set` about 0.45 µs; at 200x60, 96000 dots
+ * set one by one take about 45 ms, near the 50 ms of a tick.
  * `rows` and `draw` of 200x60: about 2 ms. A picture that sets every
  * dot of the frame each tick: write `bits`, or go to Rust.
  */
@@ -582,7 +598,9 @@ declare module "ptyrc/canvas" {
   /**
    * `width` by `2 * height` pixels in `width` by `height` cells: a cell
    * is `▀`, the top pixel its foreground, the bottom its background.
-   * Glyphs go over the pixels.
+   * Glyphs go over the pixels. No pixel is transparent: every cell
+   * drawn has a `bg`. To leave holes, empty cells after `draw`:
+   * `canvas.set(cx, cy, "")` where both pixels are the background.
    */
   export class Half {
     /** Every pixel `color` (black). @throws RangeError unless two integers, 1 at least. */
@@ -653,7 +671,11 @@ declare module "ptyrc/canvas" {
  */
 declare module "ptyrc/sight" {
   export interface SightOptions {
-    /** The frame read: an id or a name (`"raw"`). A `move` event changes it. */
+    /**
+     * The frame read: an id or a name; by default the app's frame told
+     * at `init` (`manifest().frame`), else `"raw"`. A `move` event
+     * changes it.
+     */
     frame?: number | string;
     /** Words shown as on screen in the shape (`screen.shape {words}`). */
     words?: string[];

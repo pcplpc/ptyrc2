@@ -1,0 +1,1 @@
+ptyrc: --kinds: ",": one of ship, seed, oscillator, puffer, gun, still, filler, all
