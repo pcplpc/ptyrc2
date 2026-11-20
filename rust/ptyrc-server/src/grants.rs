@@ -205,6 +205,9 @@ pub(crate) enum Gate {
     Read(Degree),
     /// An act with no lesser form; a topic: no event without it.
     Needs(Permission),
+    /// Answered without it, in a lesser form (`"degree": "none"`);
+    /// never `denied`.
+    Lowered(Permission),
     /// Closed to apps whatever they hold: the user's and the driver's.
     Never,
 }
@@ -231,7 +234,7 @@ pub(crate) enum Why {
 }
 
 use Degree::{Layout, Shape, Text};
-use Gate::{Needs, Never, Open, Read};
+use Gate::{Lowered, Needs, Never, Open, Read};
 
 /// Every method of the protocol. One not listed is closed to apps.
 /// `gate` refines some by their params.
@@ -294,6 +297,13 @@ pub(crate) const METHODS: &[(&str, Gate)] = &[
     ("app.forget", Never),
     ("app.move", Never),
     ("app.permissions", Never),
+    ("app.result", Open),
+    ("clock.now", Lowered(Permission::Clock)),
+    ("clock.zone", Lowered(Permission::Clock)),
+    ("storage.get", Needs(Permission::Storage)),
+    ("storage.set", Needs(Permission::Storage)),
+    ("storage.remove", Needs(Permission::Storage)),
+    ("storage.list", Needs(Permission::Storage)),
     ("debug.overlay", Never),
     ("debug.dump", Never),
 ];
@@ -378,6 +388,8 @@ fn judge(grants: &Grants, gate: Option<Gate>) -> Verdict {
         Some(Read(_)) => Verdict::Lower(grants.degree()),
         Some(Needs(permission)) if grants.holds(permission) => Verdict::Allow,
         Some(Needs(permission)) => Verdict::Denied(Why::Lacks(permission)),
+        Some(Lowered(permission)) if grants.holds(permission) => Verdict::Allow,
+        Some(Lowered(_)) => Verdict::Lower(Degree::None),
         Some(Never) => Verdict::Denied(Why::Never),
     }
 }
@@ -531,6 +543,33 @@ mod tests {
             ask(&arrows, "widget.show", json!({"modal": false})),
             Verdict::Allow
         );
+    }
+
+    #[test]
+    fn the_host_functions() {
+        let none = Grants::of([]);
+        let lowered = Verdict::Lower(Degree::None);
+        assert_eq!(ask(&none, "clock.now", json!({})), lowered);
+        assert_eq!(
+            ask(&Grants::of([Permission::Text]), "clock.zone", json!({})),
+            lowered
+        );
+        let clock = Grants::of([Permission::Clock]);
+        assert_eq!(ask(&clock, "clock.now", json!({})), Verdict::Allow);
+        for m in [
+            "storage.get",
+            "storage.set",
+            "storage.remove",
+            "storage.list",
+        ] {
+            let lacks = Verdict::Denied(Why::Lacks(Permission::Storage));
+            assert_eq!(ask(&clock, m, json!({})), lacks);
+            assert_eq!(
+                ask(&Grants::of([Permission::Storage]), m, json!({})),
+                Verdict::Allow
+            );
+        }
+        assert_eq!(ask(&none, "app.result", json!({})), Verdict::Allow);
     }
 
     #[test]

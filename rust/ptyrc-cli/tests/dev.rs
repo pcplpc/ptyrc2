@@ -291,8 +291,14 @@ fn examples() {
             ],
         ));
         assert!(out.starts_with("--- 1000 ms\n"), "{}: {out}", dir.display());
+        if dir.join("tests.js").is_file() {
+            let unit = ok(&ptyrc(&dir, &["dev", "test", "--unit"]));
+            assert!(unit.trim_end().ends_with(" passed, 0 failed"), "{unit}");
+        }
+        // A method headless does not serve yet is the bench's gap.
+        let refused = (out.lines()).any(|l| l.contains("refused") && !l.ends_with("(headless)"));
         assert!(
-            !out.contains("refused") && !out.contains("ended"),
+            !refused && !out.contains("ended"),
             "{}: {out}",
             dir.display()
         );

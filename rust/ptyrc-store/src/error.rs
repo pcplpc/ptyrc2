@@ -18,8 +18,11 @@ pub enum ErrorKind {
     Install,
     /// A registry pointer file, `store.toml`, the choice of a version.
     Registry,
-    /// Planned, not built: Rust apps.
+    /// Planned, not built.
     Unsupported,
+    /// The build of a Rust app: the toolchain, the rule, the sources,
+    /// `rustc`, the module.
+    Build,
     /// The file system.
     Io,
 }

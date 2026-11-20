@@ -65,6 +65,11 @@ pub enum Dev {
         /// that is not the default, and the legend
         #[arg(long)]
         styles: bool,
+        /// The unit tests of a script: the exports `test_*` of FILE, a
+        /// script of the app [default: tests.js]; no screen, no session.
+        /// Status 1 when one fails
+        #[arg(long, value_name = "FILE", num_args = 0..=1, default_missing_value = "tests.js")]
+        unit: Option<String>,
         /// An option of the manifest's [options]; again for each
         #[arg(long = "arg", value_name = "NAME=VALUE")]
         args: Vec<String>,
@@ -136,9 +141,15 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
             mut deny,
             events,
             keys,
+            unit,
             options,
         } => {
             let (dir, options) = split_dir(dir, options);
+            if let Some(file) = unit {
+                let dir = here(dir);
+                is_dir(&dir)?;
+                return app::unit(&dir, &file);
+            }
             // Flags of `dev test` after the first option of the app,
             // before a `--`: ours.
             let mut flags: Vec<OsString> = Vec::new();

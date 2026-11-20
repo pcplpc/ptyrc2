@@ -9,5 +9,3 @@ publish = false
 
 [workspace]
 
-[dependencies]
-serde_json = "1"

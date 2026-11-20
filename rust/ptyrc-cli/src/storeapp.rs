@@ -8,6 +8,7 @@ use crate::{Common, Fail};
 use ptyrc_store::manifest::{self, Manifest, OptionValue};
 use ptyrc_store::{Dirs, Installed, install};
 use serde_json::{Map, Value, json};
+use std::io::IsTerminal;
 use std::process::ExitCode;
 
 const MANIFEST: &str = "ptyrc-app.toml";
@@ -90,6 +91,10 @@ fn usage(app: &StoreApp) -> String {
     {
         text.push_str("  --no-NAME            a yes-or-no option, off\n");
     }
+    text.push_str(&format!(
+        "\n  --wait, --no-wait    wait for its end, print its result [default: {}]\n",
+        if m.app.wait { "--wait" } else { "--no-wait" }
+    ));
     text
 }
 
@@ -168,17 +173,82 @@ pub fn start_params(app: &StoreApp, words: &[String]) -> Result<Option<Value>, F
     Ok(parse_options(app, words)?.map(|args| json!({"store": app.installed.origin, "args": args})))
 }
 
-/// `ptyrc app ID|ORIGIN [OPTION...]`: the driver starts it; the pop-up
-/// first, when it asks for something not answered yet.
+/// `ptyrc app ID|ORIGIN [--wait|--no-wait] [OPTION...]`: the driver
+/// starts it; the pop-up first, when it asks for something not answered
+/// yet. Waiting (`[app] wait = true`: by default): until it exits, its
+/// result printed, the command's status that of the result.
 pub fn run(common: &Common, app: &StoreApp, words: &[String]) -> Result<ExitCode, Fail> {
-    let Some(params) = start_params(app, words)? else {
+    let mut wait = app.manifest.app.wait;
+    let mut rest = Vec::with_capacity(words.len());
+    for word in words {
+        match word.as_str() {
+            "--wait" => wait = true,
+            "--no-wait" => wait = false,
+            _ => rest.push(word.clone()),
+        }
+    }
+    let Some(params) = start_params(app, &rest)? else {
         print!("{}", usage(app));
         return Ok(ExitCode::SUCCESS);
     };
     let mut client = crate::connect(common)?;
     let info = crate::manage::start_with(&mut client, params)?;
-    crate::manage::report(common, &[info]);
-    Ok(ExitCode::SUCCESS)
+    if !wait {
+        crate::manage::report(common, &[info]);
+        return Ok(ExitCode::SUCCESS);
+    }
+    let id = info["id"].as_u64().unwrap_or(0);
+    let mut last = info;
+    while last["state"] != "exited" {
+        std::thread::sleep(crate::manage::LOOK_EVERY);
+        match crate::manage::find(&crate::manage::list(&mut client)?, id) {
+            Some(now) => last = now.clone(),
+            // Forgotten: no result.
+            None => return Ok(ExitCode::from(1)),
+        }
+    }
+    let result = &last["result"];
+    if !result.is_null() {
+        let tty = std::io::stdout().is_terminal();
+        print!("{}", shown_result(&result["value"], common.json, tty));
+    }
+    // No result: 1; else the runner's own failure wins.
+    let status = match (result["status"].as_u64(), last["status"].as_u64()) {
+        (None, _) => 1,
+        (Some(_), Some(failed)) if failed != 0 => failed,
+        (Some(status), _) => status,
+    };
+    Ok(ExitCode::from(status.min(255) as u8))
+}
+
+/// A result as printed: a string as it is, a list a line each, else
+/// JSON; `json`: always JSON. Control characters escaped; to a terminal
+/// (`tty`), glyphs only.
+fn shown_result(value: &Value, json: bool, tty: bool) -> String {
+    let line = |v: &Value| match v {
+        Value::String(s) if !json => s.clone(),
+        v => v.to_string(),
+    };
+    let lines: Vec<String> = match value {
+        Value::Array(items) if !json => items.iter().map(line).collect(),
+        v => vec![line(v)],
+    };
+    let mut out = String::new();
+    for l in lines {
+        let escaped: String = l
+            .chars()
+            .map(|c| match c {
+                c if c.is_control() => c.escape_unicode().to_string(),
+                c => c.to_string(),
+            })
+            .collect();
+        match tty {
+            true => out.push_str(&ptyrc_vt::glyphs_only(&escaped)),
+            false => out.push_str(&escaped),
+        }
+        out.push('\n');
+    }
+    out
 }
 
 /// The installed apps as entries of the menu of `ptyrc manage`, beside
@@ -274,6 +344,23 @@ mod tests {
         assert!(parsed("fish").is_err());
         let help = usage(&app);
         assert!(help.contains("--rate N") && help.contains("example.org/a/sand"));
+    }
+
+    #[test]
+    fn a_result_as_printed() {
+        let show = |v: Value| shown_result(&v, false, false);
+        assert_eq!(show(json!("done")), "done\n");
+        assert_eq!(show(json!(["a", 2, {"b": 1}])), "a\n2\n{\"b\":1}\n");
+        assert_eq!(show(json!({"n": 1})), "{\"n\":1}\n");
+        assert_eq!(shown_result(&json!(["a"]), true, false), "[\"a\"]\n");
+        // An escape sequence never reaches the terminal raw.
+        let evil = show(json!("\u{1b}]52;c;aGk=\u{7}x\ny"));
+        assert!(
+            !evil.contains('\u{1b}') && !evil.contains('\u{7}'),
+            "{evil:?}"
+        );
+        assert_eq!(evil, "\\u{1b}]52;c;aGk=\\u{7}x\\u{a}y\n");
+        assert_eq!(shown_result(&json!("\u{202e}abc"), false, true), "abc\n");
     }
 
     #[test]

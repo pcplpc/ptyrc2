@@ -1,6 +1,6 @@
 [package]
 name = "ptyrc-store"
-description = "ptyrc: store apps: manifest, fetch, check, install, registry"
+description = "ptyrc: store apps: manifest, fetch, check, build, install, registry"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,3 +10,6 @@ rustix = { version = "1", features = ["process"] }
 serde.workspace = true
 serde_json.workspace = true
 toml = { version = "1", default-features = false, features = ["std", "parse", "serde", "display"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4.7"

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Store apps: manifest, origin, fetch, tree check, install, registry,
 //! its index, page and review.
-//! See `plan/store-model.md`. No engine, no build; the network only
-//! through `git`.
+//! See `plan/store-model.md`. No engine; the build of a Rust app by
+//! `rustc` alone; the network only through `git`.
 
+pub mod build;
 pub mod error;
 pub mod git;
 pub mod index;

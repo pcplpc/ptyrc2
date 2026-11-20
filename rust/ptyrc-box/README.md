@@ -4,8 +4,8 @@ The runner of store apps: one WebAssembly guest, its limits, its
 canvases. `plan/store-model.md` is the plan; this file is the ABI.
 
 ```
-ptyrc-box [--no-profile] [--script] MODULE [ARGS]
-ptyrc-box --headless [--no-profile] [--script] MODULE [ARGS] [--size CxR] [--for T]
+ptyrc-box [--no-profile] [--manifest JSON] [--script] MODULE [ARGS]
+ptyrc-box --headless [--no-profile] [--manifest JSON] [--script] MODULE [ARGS] [--size CxR] [--for T]
           [--at T,...] [--seed N] [--tape FILE | --screen FILE] [--json]
           [--grant NAME,...] [--deny NAME,...] [--words WORD,...]
           [--event T:TOPIC:JSON]... [--key T:KEY]...
@@ -16,6 +16,11 @@ session of `PTYRC_SOCKET`, presenting `PTYRC_TOKEN`. `ARGS`: the JSON
 given to `init`, default `{}`. The log is stderr. SIGTERM: `stop`, then
 the end. Status: that of `exit`; 0 after SIGTERM; 70 a guest ended by
 the runner; 2 usage; 5 the connection, or the OS profile refused.
+
+`--manifest JSON`: the manifest as its reader (the driver, `ptyrc dev
+test`) read it: handed to `init` under `ptyrc:manifest`; its
+`[limits]` applied as far as `granted` (headless: the grants) holds
+`limit-memory`, `limit-time`.
 
 `--headless`: no session; `headless::run` (Library). The report on
 stdout (`--json`: one JSON value), the log on stderr. `T`: ms, or
@@ -124,8 +129,8 @@ bytes in the guest's memory, no terminator. JSON is a text.
   `headless` (a run without a session answers only `headless::SERVED`:
   `draw.put`, `update`, `remove`, `clear`, `widget.declare`, `show`,
   `set`, `hide`, `subscribe`, `session.info`, `screen.text`, `shape`,
-  `find`, `wait`, `cursor`, `frame.list`, `get`, `at`, `idle`,
-  `input.grab`, `input.release`).
+  `cells`, `find`, `wait`, `cursor`, `frame.list`, `get`, `at`,
+  `idle`, `text`, `heat`, `input.grab`, `input.release`).
 - Methods and topics: `plan/design.md`, Protocol.
 
 `canvas`, `cells`

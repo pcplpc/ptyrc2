@@ -9,11 +9,11 @@ use crate::grants::{self, Degree, Gate, Grants};
 use crate::runner::Runner;
 use ptyrc_core::frames::{FrameConfig, FrameEvent, Frames, ScreenInput};
 use ptyrc_core::plugin::DrawExt;
-use ptyrc_core::scene::{Scene, SpritePatch, SpriteSpec};
+use ptyrc_core::scene::{ColorSpec, Scene, SpritePatch, SpriteSpec};
 use ptyrc_core::shape::{Words, shape};
 use ptyrc_core::widgets::{Declare, Set, Show, WidgetConfig, Widgets};
 use ptyrc_core::{FrameId, FrameSel, RAW, Surfaces, TextMatch, TextQuery};
-use ptyrc_vt::{Attrs, Color, Grid, Style, Vt};
+use ptyrc_vt::{Attrs, Cell, Color, Grid, Rect, Style, Vt, char_width};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -38,6 +38,7 @@ pub const SERVED: &[&str] = &[
     "session.info",
     "screen.text",
     "screen.shape",
+    "screen.cells",
     "screen.find",
     "screen.wait",
     "screen.cursor",
@@ -45,6 +46,8 @@ pub const SERVED: &[&str] = &[
     "frame.get",
     "frame.at",
     "frame.idle",
+    "frame.text",
+    "frame.heat",
 ];
 
 /// A request the guest made, at session time `t` (ms). `content` and
@@ -746,6 +749,54 @@ impl Headless {
                     "rect": [0, 0, cols, rows],
                 }))
             }
+            "screen.cells" => {
+                let rect = self.view_rect(&params)?;
+                let sprites = params.get("sprites") == Some(&Value::Bool(true));
+                let composed;
+                let grid = match sprites {
+                    true => {
+                        composed = self.scene.compose(self.vt.grid(), &self.frames);
+                        &composed
+                    }
+                    false => self.vt.grid(),
+                };
+                let rows: Vec<Value> = (rect.y..rect.bottom())
+                    .map(|row| {
+                        let cells: Vec<&Cell> =
+                            (rect.x..rect.right()).map(|c| grid.cell(c, row)).collect();
+                        row_runs(&cells)
+                    })
+                    .collect();
+                Ok(json!({"rows": rows, "size": [rect.w, rect.h],
+                          "rect": [rect.x, rect.y, rect.w, rect.h]}))
+            }
+            "frame.text" => {
+                let id = self.frame_of(&params)?;
+                let info = (self.frames.list().into_iter().find(|f| f.id == id))
+                    .ok_or_else(|| CallError::new("no-frame", format!("no frame {id}")))?;
+                // As the driver: without a range, the island of the view,
+                // at most `MAX` rows around it.
+                const MAX: i64 = 100_000;
+                let row = |k: &str| params.get(k).and_then(Value::as_i64);
+                let (lo, hi) = (info.extent[0], info.extent[1]);
+                let y0 =
+                    row("y0").unwrap_or_else(|| lo.max(info.origin[1].saturating_sub(MAX / 2)));
+                let y1 = row("y1").unwrap_or_else(|| (hi + 1).min(y0.saturating_add(MAX)));
+                let y1 = y1.max(y0);
+                if y1.saturating_sub(y0) > MAX {
+                    return Err(CallError::new(
+                        "bad-params",
+                        format!("rows {y0}..{y1}: more than {MAX}; give a narrower y0 and y1"),
+                    ));
+                }
+                Ok(json!({"lines": self.frames.text(id, y0, y1), "y0": y0}))
+            }
+            "frame.heat" => {
+                let id = self.frame_of(&params)?;
+                let heat = (self.frames.heat_at(id, now))
+                    .ok_or_else(|| CallError::new("no-frame", format!("no frame {id}")))?;
+                Ok(json!({"rows": heat.digits(), "classes": heat.classes()}))
+            }
             "screen.find" => {
                 let id = self.frame_of(&params)?;
                 let query: TextQuery = serde_json::from_value(params.clone()).map_err(bad)?;
@@ -876,6 +927,23 @@ impl Headless {
             .ok_or_else(|| CallError::new("no-frame", format!("no frame {sel:?}")))
     }
 
+    /// The cells a view reads, as the driver: the frame's rect on the
+    /// screen, `rect` within it.
+    fn view_rect(&self, params: &Value) -> Result<Rect, CallError> {
+        let id = self.frame_of(params)?;
+        let info = (self.frames.info(id))
+            .ok_or_else(|| CallError::new("no-frame", format!("no frame {id}")))?;
+        let view = info.rect.intersect(&self.vt.grid().rect());
+        let rect = params.get("rect").filter(|r| !r.is_null());
+        Ok(match rect {
+            None => view,
+            Some(r) => {
+                let [x, y, w, h]: [u16; 4] = serde_json::from_value(r.clone()).map_err(bad)?;
+                Rect::new(view.x.saturating_add(x), view.y.saturating_add(y), w, h).intersect(&view)
+            }
+        })
+    }
+
     /// The screen under the app, the app's sprites and widgets over
     /// it, as text: one string a row, trailing spaces cut.
     pub fn screen(&self) -> Vec<String> {
@@ -919,6 +987,7 @@ impl Headless {
         }
         let shape = degree >= Degree::Shape;
         let (cols, rows) = (self.vt.cols(), self.vt.rows());
+        let rows_n = rows;
         let lines = |h: &Headless, words: &[String]| -> Result<Vec<String>, CallError> {
             let words =
                 Words::new(words).map_err(|e| CallError::new("bad-params", e.to_string()))?;
@@ -939,6 +1008,67 @@ impl Headless {
                     self.lack("shape", &[]);
                 }
                 lines(self, g.held_words()).map(cut)
+            }
+            "screen.cells" => {
+                self.lack("text", &[]);
+                if !shape {
+                    self.lack("shape", &[]);
+                }
+                lines(self, g.held_words()).map(|lines| {
+                    let rows: Vec<Value> = (lines.into_iter())
+                        .map(|l| match l.is_empty() {
+                            true => json!([]),
+                            false => json!([{"t": l}]),
+                        })
+                        .collect();
+                    json!({"rows": rows, "size": [cols, rows_n], "rect": [0, 0, cols, rows_n],
+                           "degree": degree.name()})
+                })
+            }
+            "frame.text" => {
+                self.lack("text", &[]);
+                if !shape {
+                    self.lack("shape", &[]);
+                    return (
+                        Ok(mark(json!({"lines": [], "y0": 0}), degree)),
+                        Some(degree),
+                    );
+                }
+                let mut p = json!({});
+                for k in ["frame", "y0", "y1"] {
+                    if let Some(v) = params.get(k).filter(|v| !v.is_null())
+                        && (k != "frame" || degree >= Degree::Layout)
+                    {
+                        p[k] = v.clone();
+                    }
+                }
+                let words = g.held_words().to_vec();
+                self.answer(method, &p).map(|v| {
+                    let lines: Vec<String> = (v["lines"].as_array().into_iter().flatten())
+                        .filter_map(Value::as_str)
+                        .map(|l| text_mask(l, &words))
+                        .collect();
+                    mark(json!({"lines": lines, "y0": v["y0"]}), degree)
+                })
+            }
+            "frame.heat" if !shape => {
+                self.lack("shape", &[]);
+                let mut p = json!({});
+                if let Some(f) = params.get("frame").filter(|_| degree >= Degree::Layout) {
+                    p["frame"] = f.clone();
+                }
+                self.answer(method, &p).map(|v| {
+                    let fill = |member: &str, with: &str| -> Vec<String> {
+                        (v[member].as_array().into_iter().flatten())
+                            .filter_map(Value::as_str)
+                            .map(|row| with.repeat(row.chars().count()))
+                            .collect()
+                    };
+                    mark(
+                        json!({"rows": fill("rows", "9"), "classes": fill("classes", ".")}),
+                        degree,
+                    )
+                })
             }
             "screen.shape" => {
                 let asked = params.get("words").and_then(Value::as_array);
@@ -1063,6 +1193,90 @@ impl Headless {
         };
         (answer, Some(degree))
     }
+}
+
+/// The shape of a line of text, the words held shown
+/// (`ptyrc-server`, `lower::mask`).
+fn text_mask(line: &str, words: &[String]) -> String {
+    let ink = |c: char, out: &mut String| match (c.is_whitespace(), char_width(c)) {
+        (true, _) => out.push(' '),
+        (false, 2) => out.push_str("##"),
+        (false, 0) => {}
+        (false, _) => out.push('#'),
+    };
+    let held = |w: &str| {
+        let w = w.to_lowercase();
+        words.iter().any(|h| h.to_lowercase() == w)
+    };
+    let chars: Vec<char> = line.chars().collect();
+    let mut out = String::with_capacity(line.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i].is_alphanumeric() {
+            let end = (i..chars.len())
+                .find(|&j| !chars[j].is_alphanumeric())
+                .unwrap_or(chars.len());
+            let word: String = chars[i..end].iter().collect();
+            let narrow = chars[i..end].iter().all(|&c| char_width(c) == 1);
+            match narrow && held(&word) {
+                true => out.push_str(&word),
+                false => chars[i..end].iter().for_each(|&c| ink(c, &mut out)),
+            }
+            i = end;
+        } else {
+            ink(chars[i], &mut out);
+            i += 1;
+        }
+    }
+    out.truncate(out.trim_end_matches(' ').len());
+    out
+}
+
+/// A row as runs of equal style (`ptyrc-server`, `rpc::row_runs`).
+fn row_runs(cells: &[&Cell]) -> Value {
+    let mut runs: Vec<Value> = Vec::new();
+    let mut text = String::new();
+    let mut style: Option<Style> = None;
+    let mut flush = |text: &mut String, style: &Style| {
+        let mut run = serde_json::Map::new();
+        run.insert("t".into(), Value::String(std::mem::take(text)));
+        let colour = |c: Color| serde_json::to_value(ColorSpec(c)).unwrap_or(Value::Null);
+        if style.fg != Color::Default {
+            run.insert("fg".into(), colour(style.fg));
+        }
+        if style.bg != Color::Default {
+            run.insert("bg".into(), colour(style.bg));
+        }
+        for (bit, name) in [
+            (Attrs::BOLD, "bold"),
+            (Attrs::DIM, "dim"),
+            (Attrs::ITALIC, "italic"),
+            (Attrs::UNDERLINE, "underline"),
+            (Attrs::INVERSE, "inverse"),
+            (Attrs::STRIKE, "strike"),
+            (Attrs::BLINK, "blink"),
+        ] {
+            if style.attrs.contains(bit) {
+                run.insert(name.into(), Value::Bool(true));
+            }
+        }
+        runs.push(Value::Object(run));
+    };
+    for cell in cells.iter().filter(|c| c.width != 0) {
+        match style {
+            Some(s) if s == cell.style => {}
+            Some(s) => {
+                flush(&mut text, &s);
+                style = Some(cell.style);
+            }
+            None => style = Some(cell.style),
+        }
+        text.push_str(&cell.text);
+    }
+    if let Some(s) = style {
+        flush(&mut text, &s);
+    }
+    Value::Array(runs)
 }
 
 /// `v` marked with the degree it was cut to.
@@ -1765,10 +1979,63 @@ mod tests {
         h
     }
 
+    /// `screen.cells`, `frame.text`, `frame.heat`: whole with `text`,
+    /// cut below it as the driver cuts them (`lower.rs`).
+    #[test]
+    fn cells_text_and_heat_lowered() {
+        let mut h = host(&["text"], &[]);
+        h.feed(b"\x1b[1;31mred\x1b[0m");
+        let c = h.call("screen.cells", json!({})).unwrap();
+        assert_eq!(
+            c["rows"][1],
+            json!([{"t": "world", }, {"t": "red", "fg": "red", "bold": true}, {"t": "            "}])
+        );
+        let c = h
+            .call("screen.cells", json!({"rect": [6, 0, 4, 1]}))
+            .unwrap();
+        assert_eq!(
+            (&c["rows"], &c["rect"]),
+            (&json!([[{"t": "fish"}]]), &json!([6, 0, 4, 1]))
+        );
+        let t = h.call("frame.text", json!({})).unwrap();
+        assert_eq!(
+            (&t["lines"][0], &t["y0"]),
+            (&json!("hello fish"), &json!(0))
+        );
+        let heat = h.call("frame.heat", json!({})).unwrap();
+        assert_eq!(heat["rows"].as_array().unwrap().len(), 3);
+        assert!(heat.get("degree").is_none());
+        // `shape` and the word `fish`.
+        let mut h = host(&["shape", "words"], &[]);
+        let c = h.call("screen.cells", json!({})).unwrap();
+        assert_eq!(
+            c["rows"],
+            json!([[{"t": "##### fish"}], [{"t": "#####"}], []])
+        );
+        assert_eq!(c["degree"], "words");
+        let t = h.call("frame.text", json!({})).unwrap();
+        assert_eq!(t["lines"][0], "##### fish");
+        assert_eq!(t["degree"], "words");
+        // Below `shape`: blank, cold, nothing remembered.
+        let mut h = host(&["shape"], &["shape"]);
+        let c = h.call("screen.cells", json!({})).unwrap();
+        assert_eq!(c["rows"], json!([[], [], []]));
+        let t = h.call("frame.text", json!({})).unwrap();
+        assert_eq!(t, json!({"lines": [], "y0": 0, "degree": "none"}));
+        let heat = h.call("frame.heat", json!({})).unwrap();
+        let nines = heat["rows"].as_array().unwrap();
+        assert!(
+            nines
+                .iter()
+                .all(|r| r.as_str().unwrap().chars().all(|c| c == '9'))
+        );
+        assert_eq!(heat["degree"], "none");
+    }
+
     #[test]
     fn known_unknown_and_served() {
         let mut h = host(&["text"], &[]);
-        let e = h.call("screen.cells", json!({})).unwrap_err();
+        let e = h.call("draw.list", json!({})).unwrap_err();
         assert_eq!(e.code, "headless");
         assert!(e.hint.unwrap().contains("ptyrc dev run"));
         let e = h.call("screen.txt", json!({})).unwrap_err();

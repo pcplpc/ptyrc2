@@ -142,6 +142,11 @@ def test_reader() -> None:
 def test_reader_rubbed_out() -> None:
     assert Screen().type("helo\b\bllo wrold\b\b\b\borld\n").words == ["hello", "world"]
     assert Screen().type("abc\b\b\b\n").words == []
+    # Seen late: `widgt`, then `widget` at the next look.
+    screen = Screen().type("widgt")
+    screen.text = "$ widget"
+    screen.look(4)
+    assert screen.type(" ").words == ["widget"]
 
 
 def test_reader_not_typed() -> None:

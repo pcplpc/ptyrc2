@@ -190,6 +190,13 @@ class Reader:
         same = row == self.row
         if same and left == self.left:
             return []
+        if same and keyed:
+            # Rubbed out and typed again between two looks: the cells
+            # left of the change stay, the rest is rubbed out.
+            keep = len(os.path.commonprefix([self.left, left]))
+            if keep < len(self.left) and keep < len(left):
+                self.typed = min(self.typed, len(_tail(self.left[:keep])))
+                self.left = self.left[:keep]
         if same and keyed and left.startswith(self.left):
             more = left[len(self.left) :]
             if len(more) > keyed:

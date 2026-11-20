@@ -52,6 +52,7 @@ fn minimal_and_rust() {
     .unwrap();
     assert_eq!(m.app.entry, Entry::Rust("src/lib.rs".into()));
     assert_eq!(m.app.surface, Surface::Widget);
+    assert!(!m.app.wait);
     assert!(m.permissions.is_empty());
 }
 
@@ -93,6 +94,9 @@ fn bad_app() {
         "surface",
     );
     bad("surface = \"frame\"", "rustc = \"1.85\"", 10, "rustc");
+    bad("surface = \"frame\"", "wait = \"yes\"", 10, "wait");
+    let waits = GOOD.replacen("surface = \"frame\"", "wait = true", 1);
+    assert!(manifest::parse(&waits).unwrap().app.wait);
     bad("tape = \"demo.tape\"", "colour = \"red\"", 11, "unknown");
     bad("[limits]", "[extra]", 17, "unknown");
     bad(

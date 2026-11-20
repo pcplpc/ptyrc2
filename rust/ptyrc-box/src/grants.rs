@@ -110,6 +110,8 @@ pub enum Gate {
     Read(Degree),
     /// An act with no lesser form; a topic: no event without it.
     Needs(&'static str),
+    /// Answered without it, in a lesser form (`"degree": "none"`).
+    Lowered(&'static str),
     /// Closed to apps whatever they hold.
     Never,
 }
@@ -175,6 +177,13 @@ pub const METHODS: &[&str] = &[
     "app.forget",
     "app.move",
     "app.permissions",
+    "app.result",
+    "clock.now",
+    "clock.zone",
+    "storage.get",
+    "storage.set",
+    "storage.remove",
+    "storage.list",
     "debug.overlay",
     "debug.dump",
 ];
@@ -241,6 +250,8 @@ pub fn gate(method: &str, params: &serde_json::Value) -> Gate {
         "widget.show" if params.get("modal") == Some(&serde_json::Value::Bool(true)) => {
             Gate::Needs("keys-grab")
         }
+        "clock.now" | "clock.zone" => Gate::Lowered("clock"),
+        _ if method.starts_with("storage.") => Gate::Needs("storage"),
         _ => Gate::Open,
     }
 }
@@ -268,6 +279,8 @@ pub fn judge(grants: &Grants, gate: Gate) -> Result<Option<Degree>, Option<&'sta
         Gate::Read(_) => Ok(Some(grants.degree())),
         Gate::Needs(p) if grants.holds(p) => Ok(None),
         Gate::Needs(p) => Err(Some(p)),
+        Gate::Lowered(p) if grants.holds(p) => Ok(None),
+        Gate::Lowered(_) => Ok(Some(Degree::None)),
         Gate::Never => Err(None),
     }
 }
@@ -339,6 +352,9 @@ mod tests {
         assert_eq!(gate("input.send", &json!({})), Gate::Never);
         assert_eq!(gate("tape.seek", &json!({})), Gate::Never);
         assert_eq!(gate("draw.put", &json!({})), Gate::Open);
+        assert_eq!(gate("clock.zone", &json!({})), Gate::Lowered("clock"));
+        assert_eq!(gate("storage.set", &json!({})), Gate::Needs("storage"));
+        assert_eq!(gate("app.result", &json!({})), Gate::Open);
         assert_eq!(topic_gate("input"), Gate::Needs("keys-read"));
         assert_eq!(topic_gate("size"), Gate::Open);
         let none = g(&[], &[]);

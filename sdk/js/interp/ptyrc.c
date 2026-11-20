@@ -29,14 +29,21 @@ IMPORT(exit) _Noreturn void h_exit(int32_t);
 static const char PRELUDE[] = {
 #embed "prelude.js"
     , 0};
+static const char DECK[] = {
+#embed "deck.js"
+    , 0};
 
 // Members of the `init` JSON, taken out before the script's `init`.
 #define SOURCES_KEY "ptyrc:sources"
 #define MAIN_KEY "ptyrc:main"
 #define MANIFEST_KEY "ptyrc:manifest"
+// Unit tests: the exports `test_*` of the main file, one an `event`.
+#define UNIT_KEY "ptyrc:unit"
+#define UNIT_TOPIC "ptyrc:unit"
 // The API, and the natives under it: reachable until SEALED.
 #define API "ptyrc"
 #define NATIVE "ptyrc:native"
+#define DECK_API "ptyrc/deck"
 
 static JSRuntime *RT;
 static JSContext *CTX;
@@ -48,6 +55,9 @@ static JSValue DESCRIBE = JS_UNDEFINED;  // prelude's: error -> text
 static int SEALED;
 static JSValue F_TICK = JS_UNDEFINED, F_EVENT = JS_UNDEFINED, F_STOP = JS_UNDEFINED;
 static char *LAST;  // the last refusal logged
+static int UNIT;    // unit mode
+static JSValue TESTS = JS_UNDEFINED;  // [name, function] of `test_*`
+static uint32_t NTESTS, NEXT, FAILED;
 
 static void log_str(const char *s) { h_log(s, strlen(s)); }
 
@@ -236,6 +246,28 @@ NATIVE_FN(text) {
     JS_FreeCString(ctx, s);
     return JS_NewInt32(ctx, x);
 }
+// cells(string) -> columns
+NATIVE_FN(cells) {
+    size_t len;
+    const char *s = JS_ToCStringLen(ctx, &len, A(argc, argv, 0));
+    if (!s) return JS_EXCEPTION;
+    int64_t n = 0;
+    for (const unsigned char *p = (const unsigned char *)s, *e = p + len; p < e;) {
+        uint32_t c = *p++;
+        int more = c >= 0xf0 ? 3 : c >= 0xe0 ? 2 : c >= 0xc0 ? 1 : 0;
+        c &= 0x7f >> more;
+        while (more-- && p < e) c = c << 6 | (*p++ & 63);
+        n += width_of(c);
+    }
+    JS_FreeCString(ctx, s);
+    return JS_NewInt64(ctx, n);
+}
+// bytes(id) -> Uint8Array: a copy of the cells
+NATIVE_FN(bytes) {
+    Cv *cv = cv_of(ctx, argc, argv);
+    if (!cv) return JS_NewUint8ArrayCopy(ctx, NULL, 0);
+    return JS_NewUint8ArrayCopy(ctx, cv->ptr, (size_t)cv->w * cv->h * 16);
+}
 NATIVE_FN(clear) {
     Cv *cv = cv_of(ctx, argc, argv);
     if (cv) memset(cv->ptr, 0, (size_t)cv->w * cv->h * 16);
@@ -303,7 +335,8 @@ static const JSCFunctionListEntry NATIVES[] = {
     JS_CFUNC_DEF("period", 1, n_period),   JS_CFUNC_DEF("log", 1, n_log),
     JS_CFUNC_DEF("random", 1, n_random),   JS_CFUNC_DEF("mathRandom", 0, n_math_random),
     JS_CFUNC_DEF("exit", 1, n_exit),       JS_CFUNC_DEF("manifest", 0, n_manifest),
-    JS_CFUNC_DEF("hooks", 1, n_hooks),
+    JS_CFUNC_DEF("hooks", 1, n_hooks),     JS_CFUNC_DEF("cells", 1, n_cells),
+    JS_CFUNC_DEF("bytes", 1, n_bytes),
 };
 #define NNATIVES (int)(sizeof NATIVES / sizeof *NATIVES)
 static int natives_init(JSContext *ctx, JSModuleDef *m) { return JS_SetModuleExportList(ctx, m, NATIVES, NNATIVES); }
@@ -356,9 +389,10 @@ static char *normal(JSContext *ctx, const char *dir, size_t dirlen, const char *
 }
 
 static char *normalize(JSContext *ctx, const char *base, const char *spec, void *opaque) {
-    if (!strcmp(spec, API) || (!strcmp(spec, NATIVE) && !SEALED)) return js_strdup(ctx, spec);
+    if (!strcmp(spec, API) || !strcmp(spec, DECK_API) || (!strcmp(spec, NATIVE) && !SEALED))
+        return js_strdup(ctx, spec);
     if (strncmp(spec, "./", 2) && strncmp(spec, "../", 3)) {
-        return throw_fmt(ctx, "import \"%s\": no such module\n  hint: \"ptyrc\", or a file of the app by relative path: \"./%s\"",
+        return throw_fmt(ctx, "import \"%s\": no such module\n  hint: \"ptyrc\", \"ptyrc/deck\", or a file of the app by relative path: \"./%s\"",
                          spec, spec + strspn(spec, "/"));
     }
     const char *slash = strrchr(base, '/');
@@ -368,9 +402,10 @@ static char *normalize(JSContext *ctx, const char *base, const char *spec, void 
         return throw_fmt(ctx, "import \"%s\" from %s: outside the app\n  hint: imports stay inside the tree of the app",
                          spec, base);
     }
-    if (!strcmp(name, NATIVE)) {  // a file of that name: none is
+    if (!strcmp(name, NATIVE) || !strcmp(name, DECK_API)) {  // a file of that name: none is
+        throw_fmt(ctx, "`%s`: no such file in the app", name);
         js_free(ctx, name);
-        return throw_fmt(ctx, "`%s`: no such file in the app", NATIVE);
+        return NULL;
     }
     return name;
 }
@@ -390,6 +425,7 @@ static JSModuleDef *load(JSContext *ctx, const char *name, void *opaque) {
         return m;
     }
     if (!strcmp(name, API)) return compile(ctx, name, PRELUDE, sizeof PRELUDE - 1);
+    if (!strcmp(name, DECK_API)) return compile(ctx, name, DECK, sizeof DECK - 1);
     JSValue text = JS_GetPropertyStr(ctx, SOURCES, name);
     if (!JS_IsString(text)) {
         JS_FreeValue(ctx, text);
@@ -546,6 +582,76 @@ static JSValue export_fn(JSValue ns, const char *main, const char *name) {
     die("%s: the export `%s` is not a function\n  hint: export function %s(...) { }", main, name, name);
 }
 
+// ---- unit tests ----
+
+// The exports `test_*` of `ns`, in the order of their names, into
+// TESTS; their names on one line of the log, for the runner.
+static void unit_init(JSValue ns, const char *main) {
+    JSPropertyEnum *tab;
+    uint32_t n;
+    if (JS_GetOwnPropertyNames(CTX, &tab, &n, ns, JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) < 0) report(0);
+    TESTS = JS_NewArray(CTX);
+    size_t size = 32, at = 0;
+    char *line = malloc(size);
+    if (!line) die("interpreter: no memory");
+    at = (size_t)snprintf(line, size, "ptyrc:tests");
+    for (uint32_t i = 0; i < n; i++) {
+        const char *name = JS_AtomToCString(CTX, tab[i].atom);
+        if (name && !strncmp(name, "test_", 5)) {
+            JSValue f = JS_GetProperty(CTX, ns, tab[i].atom);
+            if (JS_IsFunction(CTX, f)) {
+                JS_SetPropertyUint32(CTX, TESTS, NTESTS++, f);
+                size_t len = strlen(name);
+                if (at + len + 2 > size && !(line = realloc(line, size = 2 * (at + len + 2)))) die("interpreter: no memory");
+                line[at++] = ' ';
+                memcpy(line + at, name, len + 1), at += len;
+            } else {
+                JS_FreeValue(CTX, f);
+            }
+        }
+        JS_FreeCString(CTX, name);
+    }
+    JS_FreePropertyEnum(CTX, tab, n);
+    if (!NTESTS) die("%s: no export test_*\n  hint: export function test_sum() { assertEqual(1 + 1, 2); }", main);
+    log_str(line);
+    free(line);
+}
+
+// The next test: `ok NAME`, or `FAIL NAME` and its error; after the
+// last, the count, and the end: status 1 when one failed.
+static void unit_next(void) {
+    if (NEXT >= NTESTS) {
+        char line[96];
+        snprintf(line, sizeof line, "%u passed, %u failed", NTESTS - FAILED, FAILED);
+        log_str(line);
+        h_exit(FAILED ? 1 : 0);
+    }
+    JSValue f = JS_GetPropertyUint32(CTX, TESTS, NEXT++);
+    JSValue nv = JS_GetPropertyStr(CTX, f, "name");
+    const char *name = JS_ToCString(CTX, nv);
+    char head[160];
+    if (run(f, 0, NULL) == 0) {
+        snprintf(head, sizeof head, "ok   %s", name ? name : "?");
+        log_str(head);
+    } else {
+        FAILED++;
+        snprintf(head, sizeof head, "FAIL %s", name ? name : "?");
+        log_str(head);
+        JSValue e = JS_GetException(CTX);
+        JSValue text = JS_IsFunction(CTX, DESCRIBE) ? JS_Call(CTX, DESCRIBE, JS_UNDEFINED, 1, &e) : JS_UNDEFINED;
+        if (JS_IsException(text)) JS_FreeValue(CTX, JS_GetException(CTX)), text = JS_UNDEFINED;
+        const char *t = JS_ToCString(CTX, JS_IsString(text) ? text : e);
+        if (!t) JS_FreeValue(CTX, JS_GetException(CTX));
+        log_str(t ? t : "an error, and no memory left to tell it");
+        JS_FreeCString(CTX, t);
+        JS_FreeValue(CTX, text);
+        JS_FreeValue(CTX, e);
+    }
+    JS_FreeCString(CTX, name);
+    JS_FreeValue(CTX, nv);
+    JS_FreeValue(CTX, f);
+}
+
 extern void __wasm_call_ctors(void);
 
 __attribute__((export_name("init"))) void g_init(const char *ptr, size_t len) {
@@ -569,6 +675,9 @@ __attribute__((export_name("init"))) void g_init(const char *ptr, size_t len) {
     if (!JS_IsUndefined(m)) MANIFEST = JS_JSONStringify(CTX, m, JS_UNDEFINED, JS_UNDEFINED);
     if (JS_IsException(MANIFEST)) report(0);
     JS_FreeValue(CTX, m);
+    JSValue unit = take(args, UNIT_KEY);
+    UNIT = JS_ToBool(CTX, unit) > 0;
+    JS_FreeValue(CTX, unit);
 
     // The API first, while the natives are reachable; then never again.
     if (settle(load(CTX, API, NULL)) < 0) report(0);
@@ -580,6 +689,13 @@ __attribute__((export_name("init"))) void g_init(const char *ptr, size_t len) {
     JSModuleDef *entry = load(CTX, main, NULL);
     if (settle(entry) < 0) report(0);
     JSValue ns = JS_GetModuleNamespace(CTX, entry);
+    if (UNIT) {
+        unit_init(ns, main);
+        JS_FreeValue(CTX, ns);
+        JS_FreeValue(CTX, args);
+        JS_FreeValue(CTX, mainv);
+        return;
+    }
     JSValue init = export_fn(ns, main, "init");
     F_TICK = export_fn(ns, main, "tick");
     F_EVENT = export_fn(ns, main, "event");
@@ -602,6 +718,10 @@ __attribute__((export_name("tick"))) void g_tick(int64_t now) {
 }
 
 __attribute__((export_name("event"))) void g_event(const char *tp, size_t tl, const char *dp, size_t dl) {
+    if (UNIT) {
+        if (tl == sizeof UNIT_TOPIC - 1 && !memcmp(tp, UNIT_TOPIC, tl)) unit_next();
+        return;
+    }
     if (JS_IsUndefined(F_EVENT)) return;
     JSValue a[2] = {JS_NewStringLen(CTX, tp, tl), dl ? parse(dp, dl, "event") : JS_NULL};
     if (JS_IsException(a[1])) JS_FreeValue(CTX, JS_GetException(CTX)), a[1] = JS_NULL;

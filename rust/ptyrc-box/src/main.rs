@@ -14,6 +14,12 @@
 //! `--screen [T:]FILE`, again for each: the screen from T on.
 //! `--styles`: under each screen, its styles.
 //!
+//! `--unit FILE --script APP.js`: the unit tests of a script app:
+//! FILE, a script of the tree of `APP.js` by relative path, its exports
+//! `test_*` run in order, each under the limits of an `event`; no
+//! session, `call` refused. The report on stdout; status 0 when all
+//! passed, 1 else (`script::unit`).
+//!
 //! `--manifest JSON`: the manifest as its reader (the driver, `ptyrc dev
 //! test`) read it: handed to `init` under `ptyrc:manifest`; its
 //! `[limits]` applied as far as `granted` (headless: the grants) holds
@@ -43,6 +49,7 @@ const USAGE: &str = "usage: ptyrc-box [--no-profile] [--manifest JSON] [--script
                  [--tape FILE | --screen [T:]FILE...] [--json] [--styles]
                  [--grant NAME,...] [--deny NAME,...] [--words WORD,...]
                  [--event T:TOPIC:JSON]... [--key T:KEY]...
+       ptyrc-box --unit FILE [--no-profile] [--manifest JSON] --script APP.js [ARGS]
 T: milliseconds, or with a unit: 500ms, 2s";
 
 /// The permissions of the plan (`ptyrc-store`, `PERMISSIONS`).
@@ -96,6 +103,7 @@ struct Cli {
     headless: bool,
     no_profile: bool,
     script: bool,
+    unit: Option<String>,
     module: Option<OsString>,
     args: Option<OsString>,
     size: Option<(u32, u32)>,
@@ -144,6 +152,7 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
         match text.as_str() {
             "--headless" => cli.headless = true,
             "--script" => cli.script = true,
+            "--unit" => cli.unit = Some(string(value("--unit")?)),
             "--profile" => cli.no_profile = false,
             "--no-profile" => cli.no_profile = true,
             "--size" => {
@@ -247,6 +256,9 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
     if cli.module.is_none() {
         return Err(String::new());
     }
+    if cli.unit.is_some() && (cli.headless || !cli.script) {
+        return Err("--unit: with --script, without --headless".into());
+    }
     Ok(cli)
 }
 
@@ -268,8 +280,13 @@ fn load(cli: &Cli, args: serde_json::Value) -> Result<(Vec<u8>, serde_json::Valu
         dir
     };
     let sources = script::sources(dir)?;
+    // Unit tests: FILE of the tree in place of the entry.
+    let main = match &cli.unit {
+        Some(file) => file.trim_start_matches("./"),
+        None => main,
+    };
     if !sources.contains_key(main) {
-        return Err(format!("{}: no such script", app.display()));
+        return Err(format!("{}: no such script", dir.join(main).display()));
     }
     Ok((
         script::interpreter()?,
@@ -380,6 +397,19 @@ fn headless_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
     }
 }
 
+fn unit_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
+    if let Err(e) = confine(cli, false) {
+        return fail(5, e);
+    }
+    let all: Vec<String> = ALL.iter().map(|s| s.to_string()).collect();
+    let (args, limits) = given(cli, args, &all);
+    let (lines, status) = script::unit(wasm, &args, limits);
+    for line in lines {
+        println!("{line}");
+    }
+    ExitCode::from(status)
+}
+
 fn main() -> ExitCode {
     let cli = match parse(std::env::args_os().skip(1)) {
         Ok(c) => c,
@@ -401,6 +431,9 @@ fn main() -> ExitCode {
     };
     if cli.headless {
         return headless_run(&cli, &wasm, args);
+    }
+    if cli.unit.is_some() {
+        return unit_run(&cli, &wasm, args);
     }
     let Some(socket) = std::env::var_os(session::ENV_SOCKET).map(PathBuf::from) else {
         return fail(2, format!("{} is not set", session::ENV_SOCKET));

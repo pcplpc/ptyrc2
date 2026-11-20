@@ -1,0 +1,10 @@
+[package]
+name = "ptyrc-probe"
+description = "ptyrc: what the driver reads of the machine for store apps: git, system"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rustix = { version = "1", features = ["fs", "param", "process"] }
+serde_json.workspace = true

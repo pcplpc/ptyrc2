@@ -120,3 +120,118 @@ pub fn interpreter() -> Result<Vec<u8>, String> {
     let path = interpreter_path()?;
     std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))
 }
+
+/// Member of the `init` JSON: unit mode, the `test_*` exports of the
+/// main file run one an `event` of topic `UNIT`, not `init`.
+pub const UNIT: &str = "ptyrc:unit";
+/// The interpreter's line that names the tests, consumed here.
+const TESTS_LINE: &str = "ptyrc:tests";
+
+/// A host for unit tests: no session; the log kept.
+struct Bench {
+    log: Vec<String>,
+    random: u64,
+}
+
+impl crate::Host for Bench {
+    fn call(&mut self, method: &str, _: Value) -> Result<Value, crate::CallError> {
+        let mut e =
+            crate::CallError::new("not-usable", format!("{method}: no session in a unit test"));
+        e.hint = Some("test the logic; ptyrc dev test for the screen".into());
+        Err(e)
+    }
+    fn size(&self) -> (u32, u32) {
+        (80, 24)
+    }
+    fn log(&mut self, text: &str) {
+        self.log.extend(text.lines().map(str::to_owned));
+    }
+    fn random(&mut self, buf: &mut [u8]) {
+        // splitmix64, seed 1: the same run every time.
+        for chunk in buf.chunks_mut(8) {
+            self.random = self.random.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut z = self.random;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            let z = (z ^ (z >> 31)).to_le_bytes();
+            chunk.copy_from_slice(&z[..chunk.len()]);
+        }
+    }
+}
+
+/// Unit tests of a script: `init` (`args` with `UNIT`) loads the main
+/// file and names its `test_*` exports; each runs in its own `event`,
+/// under the limits of an event. The lines of the report, and the
+/// status: 0 all passed, 1 one failed or the run ended.
+pub fn unit(wasm: &[u8], args: &Value, limits: crate::Limits) -> (Vec<String>, u8) {
+    let mut args = args.clone();
+    if let Value::Object(o) = &mut args {
+        o.insert(UNIT.to_owned(), Value::Bool(true));
+    }
+    let bench = Bench {
+        log: Vec::new(),
+        random: 1,
+    };
+    let mut runner = match crate::Runner::load(wasm, bench, limits) {
+        Ok(r) => r,
+        Err(e) => return (vec![format!("ended: {e}")], 1),
+    };
+    let mut names: Vec<String> = Vec::new();
+    let mut out = Vec::new();
+    let mut take = |runner: &mut crate::Runner<Bench>, out: &mut Vec<String>| {
+        for line in std::mem::take(&mut runner.host_mut().log) {
+            match line.strip_prefix(TESTS_LINE) {
+                Some(rest) if names.is_empty() => {
+                    names = rest.split_whitespace().map(str::to_owned).collect()
+                }
+                _ => out.push(line),
+            }
+        }
+        names.len()
+    };
+    let done = runner.init(&args, 0);
+    let count = take(&mut runner, &mut out);
+    if let Err(e) = done {
+        let status = end_status(&e, &mut out);
+        return (out, status);
+    }
+    for i in 0..=count {
+        runner.resume();
+        let mark = out.len();
+        let done = runner.event(UNIT, &Value::Null, 0);
+        take(&mut runner, &mut out);
+        if let Err(e) = done {
+            if !matches!(e, crate::Error::Exit(_)) {
+                let name = names.get(i).map_or("?", String::as_str);
+                out.insert(mark, format!("FAIL {name}"));
+                let passed = out.iter().filter(|l| l.starts_with("ok   ")).count();
+                out.push(format!(
+                    "{passed} passed, {} failed, the rest not run",
+                    i + 1 - passed
+                ));
+            }
+            let status = end_status(&e, &mut out);
+            return (out, status);
+        }
+    }
+    out.push("ended: the tests did not end".into());
+    (out, 1)
+}
+
+fn end_status(e: &crate::Error, out: &mut Vec<String>) -> u8 {
+    // The runner's `exit: N`: the status tells it.
+    if matches!(e, crate::Error::Exit(_)) && out.last() == Some(&e.to_string()) {
+        out.pop();
+    }
+    match e {
+        crate::Error::Exit(0) => 0,
+        crate::Error::Exit(_) => 1,
+        e => {
+            // The runner logged it; said once.
+            if !out.iter().any(|l| l.contains(&e.to_string())) {
+                out.push(format!("ended: {e}"));
+            }
+            1
+        }
+    }
+}

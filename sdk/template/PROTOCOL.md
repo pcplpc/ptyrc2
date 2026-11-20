@@ -38,7 +38,9 @@ its own widget, or its own sprite in front of the text.
 | `clicks-grab` | a click it is told elsewhere taken from the program | the program has it too | red |
 | `limit-memory` | `[limits]` `memory-mib`, `canvas-screens`, `log-mib` | the default | plain |
 | `limit-time` | `[limits]` `tick-ms`, `init-ms`, `calls-per-second` | the default | plain |
-| `clock`, `storage`, `files`, `files-write`, `probe-git`, `probe-system` | nothing yet: accepted, unused | | `files-write` red; the rest plain |
+| `clock` | `clock.now`, `clock.zone`: the wall clock, zones | session time as the epoch, UTC, `"degree": "none"` | plain |
+| `storage` | `storage.*`: 64 named values, 1 MiB, its own | `denied` | plain |
+| `files`, `files-write`, `probe-git`, `probe-system` | nothing yet: accepted, unused | | `files-write` red; the rest plain |
 
 - A reading not held is answered in the same form, cut to the degree
   held, with `"degree": "none" | "layout" | "shape" | "words"` in the
@@ -103,6 +105,13 @@ Cut answers:
 | `widget.list` | | `{"widgets":[info]}`: its own | — |
 | `widget.borders` | | `{"borders":[name]}` | — |
 | `app.list` | | its own entry | — |
+| `app.result` | `value` (any JSON, 64 KiB), `status` (0..255, default 0) | `{}`; the last holds; told in `app.list` as `"result": {"value","status"}`; `ptyrc app ID --wait` prints it and exits with the status | — |
+| `clock.now` | | `{"unix_ms","zone","offset_s","abbr","next"}`: the machine's zone; `next`: when the offset changes, ms, or null | `clock` |
+| `clock.zone` | `zone` (an IANA name, or `"local"`), `at`: 1..64 instants, ms (absent: now) | `{"zone","offsets":[{"at","offset_s","abbr","next"}]}`; an unknown zone: `bad-params` | `clock` |
+| `storage.get` | `key` | `{"value": str \| null}` | `storage` |
+| `storage.set` | `key`, `value` (a string, 256 KiB) | `{"used","quota"}`; past 64 keys or 1 MiB: `not-usable`, nothing written; 16 a second | `storage` |
+| `storage.remove` | `key` | `{}` | `storage` |
+| `storage.list` | | `{"keys":[{"key","size"}],"used","quota"}` | `storage` |
 
 Sprite (`draw.put`; a `Canvas` makes one):
 `{"frame", "anchor", "content": {"rows": [str], "style": {...}},
@@ -115,6 +124,16 @@ y], "space": "view" | "frame"}`, `{"text": "word", "side": "right" |
 negative, behind the text; in front only with `front` (else behind).
 Effects: `draw.exts`. Limits of the driver: 256 sprites, 16 widgets,
 32 subscriptions; past one, `not-usable`.
+
+Host functions (`clock.*`, `storage.*`, `app.result`):
+
+- A `key`: 1 to 64 bytes of `[A-Za-z0-9._-]`, not starting with `.`;
+  else `bad-params`. The values are the app's origin's: kept by an
+  update, removed by `ptyrc store rm --purge`.
+- `clock.*` held and `storage.*` read the disk: not in a `batch`
+  (`bad-request`).
+- A tick on the second: `period(1000 - unix_ms % 1000)` once, then
+  `period(1000)`. At `next`, ask `clock.now` again.
 
 ## Topics
 
@@ -148,7 +167,7 @@ Effects: `draw.exts`. Limits of the driver: 256 sprites, 16 widgets,
 `denied` (not held, or closed), `bad-params`, `bad-request`,
 `unknown-method`, `no-frame`, `no-sprite` (also another app's),
 `not-usable` (a limit of the driver, a grab held elsewhere), `timeout`,
-`gone`, `cancelled`, `internal`; of the host: `limit` (more than the
+`gone`, `cancelled`, `no-file`, `internal`; of the host: `limit` (more than the
 calls a second), `headless`.
 
 ## Headless (`ptyrc dev test`)
@@ -156,9 +175,10 @@ calls a second), `headless`.
 - Answers `draw.put`, `draw.update`, `draw.remove`, `draw.clear`,
   `widget.declare`, `widget.show`, `widget.set`, `widget.hide`,
   `subscribe`, `input.grab`, `input.release`, `session.info`,
-  `screen.text`, `screen.shape`, `screen.find`, `screen.wait`,
-  `screen.cursor`, `frame.list`, `frame.get`, `frame.at`,
-  `frame.idle`, cut as the driver cuts them. `screen.wait` is answered
+  `screen.text`, `screen.shape`, `screen.cells`, `screen.find`,
+  `screen.wait`, `screen.cursor`, `frame.list`, `frame.get`,
+  `frame.at`, `frame.idle`, `frame.text`, `frame.heat`, cut as the
+  driver cuts them. `screen.wait` is answered
   at once: no session time passes in a call; not true now,
   `{"matched": false}`. Another method of the table above: `headless`
   (the hint says so; a session answers it, `ptyrc dev run`). A name
@@ -195,10 +215,11 @@ api = 1
 script = "app.js"          # or rust = "src/lib.rs", rustc = "1.85"
 surface = "screen"         # "widget" (default), "frame", "screen": where it is clipped
 # assets = "assets/"; tape = "demo.tape"
+# wait = true            # `ptyrc app ID` waits for its result (app.result)
 
 [options]                  # each: --NAME VALUE, --NAME, --no-NAME; init(args).NAME
 size = { type = "int", default = 20, doc = "one line" }   # int, float, bool, string
-# reserved: alpha, back, frame, front, help, prefer
+# reserved: alpha, back, frame, front, help, no-wait, prefer, wait
 
 [permissions]              # NAME = "why, one line, 200 at most"
 shape = "to stand on the text"

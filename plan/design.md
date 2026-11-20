@@ -1138,13 +1138,15 @@ A connection belongs to the child whose process group holds its peer
 App info: `{"id","kind":"child"|"client","name","argv":[...],"pid",
 "state":"running"|"paused"|"exited","status":code|null,"runs":n,
 "since":seconds,"conns":[id,...],"sprites":n,"widgets":n,"frames":[id,
-...],"moves":bool,"log":path|null,"foreground":bool,"me":bool}`. `id`: from 1; that of a
+...],"moves":bool,"log":path|null,"foreground":bool,"result":{"value",
+"status"}|null,"me":bool}`. `id`: from 1; that of a
 child is never used twice in a session, that of a client is free again
 when it leaves and no entry came after it (a verb that comes and goes
 costs none). `name`: given at `app.start`; else the file name of
 `argv[0]`. `argv`: as started; of
 a client, `/proc/<pid>/cmdline` (empty when unreadable). `status`: of an
-exited child, 128 + signal when killed. `runs`: starts so far. `since`:
+exited child, 128 + signal when killed. `result`: its last
+`app.result` of the present run (Host functions). `runs`: starts so far. `since`:
 seconds in the present state. `sprites`, `widgets`: those its
 connections own. `frames`: the ids of the frames those are on, in
 order, as they are when the info is made (a change of them alone is
@@ -1842,7 +1844,7 @@ the pop-up, `app.start {store}`.
 
   | opened by | methods | topics |
   |---|---|---|
-  | the default profile | `auth`, `batch`, `subscribe`, `input.release`, `draw.*`, `widget.declare`, `.show`, `.set`, `.hide`, `.ask`, `.release`, `.list`, `.borders`, `app.list` | `draw`, `size`, `widgets`, `move`, `exit`; `mouse`, `hover`, told by event (The pointer) |
+  | the default profile | `auth`, `batch`, `subscribe`, `input.release`, `draw.*`, `widget.declare`, `.show`, `.set`, `.hide`, `.ask`, `.release`, `.list`, `.borders`, `app.list`, `app.result` | `draw`, `size`, `widgets`, `move`, `exit`; `mouse`, `hover`, told by event (The pointer) |
   | `layout` | `frame.list`, `frame.get`, `frame.at` | `frames` |
   | `shape` | `screen.shape`, `screen.cursor`, `screen.wait` without `pattern`, `frame.heat`, `frame.idle` | `screen`, `cursor`, `text`, `idle`, `colors` |
   | `words` | `screen.shape` with `words` | |
@@ -1850,13 +1852,17 @@ the pop-up, `app.start {store}`.
   | `keys-arrows` | `input.grab` of named keys that are not text: the arrows, `home`, `end`, `pageup`, `pagedown`, `insert`, `delete`, `f1`..`f12` | |
   | `keys-grab` | any other `input.grab`; `widget.show` with `modal` | |
   | `keys-read` | | `input` |
+  | `clock` (lowered) | `clock.now`, `clock.zone` | |
+  | `storage` | `storage.get`, `.set`, `.remove`, `.list` | |
   | never | `session.resize`, `.colors`, `.handoff`, `input.send`, `input.click`, `tape.*`, `layer.*`, `widget.focus`, `widget.blur`, the other `app.*`, `debug.*` | `apps` |
 
 - A degree not held: lowered to the degree held (`Verdict::Lower`);
   see The cut answers. A topic not held, a degree or a permission:
   subscribed, no event comes. A closed topic: `denied`.
 - An act not held, a closed method: `denied`, the hint naming the
-  permission (`grants::denied`).
+  permission (`grants::denied`). A method `Gate::Lowered` (`clock.*`)
+  is answered without it, in a lesser form marked `"degree": "none"`;
+  never `denied`.
 - A bound connection whose app left the table: `denied`, every request.
 - The names (`grants::Permission`): `layout`, `shape`, `words`, `text`,
   `front-widget`, `front`, `screen-wide`, `keys-arrows`, `keys-grab`,
@@ -1974,7 +1980,8 @@ server -> {"event":"frames","data":{...}}          after subscribe
 
 Error codes: `bad-request`, `unknown-method`, `bad-params`, `no-frame`,
 `no-sprite`, `not-usable`, `timeout`, `gone`, `denied`, `cancelled`
-(the user said no), `internal`.
+(the user said no), `no-file` (no such file handle, asset or child),
+`internal`.
 
 An error may carry `"hint"`: what to try, in one line. The valid values
 (frames, sprites, key names, colours, anchors, topics, extensions,
@@ -2031,10 +2038,61 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `widget.list` | | `{"widgets":[info,...]}`, every connection's |
 | `widget.borders` | | `{"borders":[name,...]}` |
 | `app.list`, `app.start`, `app.stop`, `app.pause`, `app.resume`, `app.restart`, `app.forget`, `app.move`, `app.permissions` | | see Apps and the manager, Methods; Permissions |
+| `clock.now`, `clock.zone`, `storage.get`, `.set`, `.remove`, `.list`, `app.result` | | see Host functions |
 | `batch` | `calls`: `[{"method","params"}]` | `{"results":[{"result"} or {"error"},...]}`, applied in one repaint |
 | `subscribe` | `topics`: `screen`, `cursor`, `frames`, `text`, `idle`, `draw`, `input`, `mouse`, `hover`, `size`, `colors`, `widgets`, `apps`, `move`, `exit`; `snapshot` | `{}`; with `snapshot`, then the state now as events, to this client: `idle` per frame on screen, `cursor`, `frames`, `size`, `widgets` per widget, `apps` per app |
 | `debug.overlay` | `what`: `frames`, `heat`, `off` | `{}` |
 | `debug.dump` | | app grid, host grid, sprites, frames |
+
+Host functions (`driver/hostfn.rs`; the contract:
+`temp/20112026-01-store/design/host-functions.md`):
+
+| method | params | result |
+|---|---|---|
+| `clock.now` | | `{"unix_ms","zone","offset_s","abbr","next"}`: the machine's zone; `next`: when the offset or the abbreviation changes, ms, or null |
+| `clock.zone` | `zone`: an IANA name, or `"local"`; `at`: 1..64 instants, ms (absent: now) | `{"zone","offsets":[{"at","offset_s","abbr","next"}]}` |
+| `storage.get` | `key` | `{"value":str\|null}` |
+| `storage.set` | `key`, `value`: a string, 256 KiB | `{"used","quota"}` |
+| `storage.remove` | `key` | `{}` |
+| `storage.list` | | `{"keys":[{"key","size"}],"used","quota"}` |
+| `app.result` | `value`: any JSON, 64 KiB serialised; `status`: 0..255, default 0 | `{}` |
+
+- What reads a disk runs on one worker thread (`hostio.rs`), in
+  order; the request is pending and completed from the loop, woken by
+  a socket pair. 64 waiting, then `not-usable` (`host busy`). Pending:
+  not in a `batch` (`bad-request`). A new kind of request is a job, a
+  function of the worker's state; the plumbing does not change.
+- `clock.*`: the wall clock of the server (`PTYRC_CLOCK_RATE` does not
+  scale it). Zones: the system database (`$TZDIR`, else
+  `/usr/share/zoneinfo`), read by `zone.rs` (TZif v2+, the POSIX
+  footer past the last transition; no crate). `local`: `$TZ` of the
+  driver (a name, an absolute path, a POSIX rule), else
+  `/etc/localtime`, else UTC; named as in the database, else `local`.
+  A zone name: components of `[A-Za-z0-9._+-]`, 1 to 64 bytes, none
+  starting with `.`, 3 at most; the file found, links followed, must
+  lie in the database. Else, and a zone not known: `bad-params`. No
+  database: `UTC` and `local` (UTC) alone, the rest `not-usable`. Not
+  held: `unix_ms` the session time of the app (0 at the start of its
+  run), zone `UTC`, offset 0, `"degree": "none"`.
+- `storage.*`: of the identity (`Identity::key`), in
+  `<state>/ptyrc/storage/<key percent-encoded as Origin::dir_name>/`
+  (`native%2FNAME` for a native app), 0700, a file 0600 a key. A key:
+  1 to 64 bytes of `[A-Za-z0-9._-]`, not starting with `.`; else
+  `bad-params`. 64 keys, 1 MiB in all, 256 KiB a value: past one,
+  `not-usable`, nothing written. A write: a temp file (`.KEY.new`), a
+  rename. The directory opened `O_NOFOLLOW | O_DIRECTORY`, each value
+  `openat` with `O_NOFOLLOW`: a link is not followed (read: `null`;
+  written over: replaced). `storage.set`: 16 a second an app, then
+  `not-usable`. A connection with no app: `not-usable`. Kept by an
+  update; removed by `ptyrc store rm --purge`.
+- `app.result`: kept with the app's entry, the last of the run; told
+  in its info (`result`) and so in the `apps` event at its exit. A
+  connection with no app: `not-usable`. `ptyrc app ID --wait` (the
+  default with `[app] wait = true`; `--no-wait`): waits for the end,
+  prints the value (a string as it is, a list a line each, else JSON;
+  `--json`: JSON), control characters escaped as `\u{..}`, to a
+  terminal glyphs only; exits with its status, the runner's own
+  failure first; no result: 1, nothing printed.
 
 Frame info: `{"id","kind":"raw"|"pane"|"chrome","state":"candidate"|
 "stable"|"inactive","usable","rect":[x,y,w,h],"origin":[x,y],

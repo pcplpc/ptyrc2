@@ -243,6 +243,29 @@ pub fn test(o: TestOpts) -> Result<ExitCode, Fail> {
     Ok(status_of(status))
 }
 
+/// `dev test --unit FILE`: the unit tests of a script app, under the
+/// limits its manifest declares.
+pub fn unit(dir: &Path, file: &str) -> Result<ExitCode, Fail> {
+    let m = manifest_of(dir)?;
+    let Entry::Script(main) = &m.app.entry else {
+        return Err(Fail::usage(
+            "--unit: the unit tests of a script app",
+            "a Rust app: cargo test",
+        ));
+    };
+    let program = runner()?;
+    let status = Command::new(&program)
+        .args(["--unit", file])
+        .arg("--manifest")
+        .arg(given(&m).to_string())
+        .arg("--script")
+        .arg(dir.join(main))
+        .stdin(Stdio::null())
+        .status()
+        .map_err(|e| Fail::from(format!("{}: {}", program.display(), io_text(&e))))?;
+    Ok(status_of(status))
+}
+
 /// Files of the tree by path: `(mtime, size)`. Skipped: `.git`, a cache
 /// directory (`CACHEDIR.TAG`, as `target/`), `node_modules`.
 fn snapshot(dir: &Path, out: &mut BTreeMap<PathBuf, (SystemTime, u64)>, depth: usize) {

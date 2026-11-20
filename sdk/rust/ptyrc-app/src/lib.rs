@@ -13,12 +13,13 @@
 //! ```
 
 mod ffi;
+pub mod json;
 
 use std::fmt;
 use std::sync::OnceLock;
 
 pub use ffi::{alloc, free};
-pub use serde_json::{self as json, Value, json};
+pub use json::{Map, Value};
 
 /// An app. One value of it lives from `init` to the end.
 pub trait App: Sized + 'static {
@@ -66,7 +67,7 @@ pub mod __rt {
     pub use ffi::Slot;
 
     fn json(ptr: u32, len: u32) -> Value {
-        serde_json::from_slice(&ffi::arg(ptr, len)).unwrap_or(Value::Null)
+        super::json::parse_bytes(&ffi::arg(ptr, len)).unwrap_or(Value::Null)
     }
 
     pub fn init<A: App>(slot: &Slot<A>, ptr: u32, len: u32) {
@@ -198,10 +199,10 @@ impl std::error::Error for Error {}
 pub fn call(method: &str, params: Value) -> Result<Value, Error> {
     let params = match params {
         Value::Null => Vec::new(),
-        p => serde_json::to_vec(&p).unwrap_or_default(),
+        p => p.to_string().into_bytes(),
     };
     let bytes = ffi::call(method, &params).ok_or_else(|| Error::new("alloc", "no memory"))?;
-    let mut answer: Value = serde_json::from_slice(&bytes)
+    let mut answer = json::parse_bytes(&bytes)
         .map_err(|e| Error::new("bad-answer", format!("{method}: {e}")))?;
     if let Some(result) = answer.get_mut("result") {
         return Ok(result.take());
@@ -249,7 +250,7 @@ pub fn exit(code: i32) -> ! {
 
 /// `subscribe` to `topics`; their events reach [`App::event`].
 pub fn subscribe(topics: &[&str]) -> Result<(), Error> {
-    call("subscribe", json!({ "topics": topics })).map(drop)
+    call("subscribe", crate::json!({ "topics": topics })).map(drop)
 }
 
 /// The screen, `(columns, rows)` (`session.info`). Event `size` tells a
@@ -275,7 +276,7 @@ pub fn put(sprite: Value) -> Result<u64, Error> {
 /// A text sprite: `rows` at `(x, y)` of the raw frame, one `style`
 /// (`fg`, `bg`, `bold`, ...; a space is a hole); its id.
 pub fn text(x: i32, y: i32, rows: &[&str], style: Value) -> Result<u64, Error> {
-    put(json!({
+    put(crate::json!({
         "anchor": {"at": [x, y]},
         "content": {"rows": rows, "style": style},
     }))
@@ -283,7 +284,7 @@ pub fn text(x: i32, y: i32, rows: &[&str], style: Value) -> Result<u64, Error> {
 
 /// `draw.remove` of a sprite of this app.
 pub fn remove(id: u64) -> Result<(), Error> {
-    call("draw.remove", json!({ "id": id })).map(drop)
+    call("draw.remove", crate::json!({ "id": id })).map(drop)
 }
 
 /// A colour of a cell.
@@ -461,7 +462,7 @@ impl Canvas {
     pub fn present(&mut self, place: &Value) -> bool {
         let place = match place {
             Value::Null => Vec::new(),
-            p => serde_json::to_vec(p).unwrap_or_default(),
+            p => p.to_string().into_bytes(),
         };
         ffi::present(self.id, &place)
     }
@@ -476,6 +477,7 @@ impl Drop for Canvas {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::json;
 
     #[test]
     fn the_manifest_told_at_init() {

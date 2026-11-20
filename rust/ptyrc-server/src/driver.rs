@@ -42,6 +42,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 mod asks;
+mod hostfn;
 mod own;
 
 /// Upper bounds of a burst (design: "Coalescing").
@@ -294,6 +295,10 @@ struct Driver {
     drawn: HashMap<ConnId, HashSet<u64>>,
     /// The answers of the pop-up for the start it lets go on.
     given: Option<Entry>,
+    /// The worker of the host functions; None: it did not start.
+    hostio: Option<crate::hostio::Hostio>,
+    /// `storage.set` of each app in the present second: since, count.
+    writes: HashMap<u64, (Instant, u32)>,
 }
 
 /// Real time, milliseconds since the epoch.
@@ -534,6 +539,8 @@ impl Driver {
             topics: HashSet::new(),
             pending: HashMap::new(),
             cuts: HashMap::new(),
+            hostio: crate::hostio::Hostio::spawn(crate::hostio::State::from_env()).ok(),
+            writes: HashMap::new(),
             after: Vec::new(),
             next_conn: 1,
             next_token: 1,
@@ -604,6 +611,8 @@ impl Driver {
             topics: HashSet::new(),
             pending: HashMap::new(),
             cuts: HashMap::new(),
+            hostio: crate::hostio::Hostio::spawn(crate::hostio::State::from_env()).ok(),
+            writes: HashMap::new(),
             next_conn: 1,
             next_token: 1,
             repaint: false,
@@ -852,6 +861,9 @@ impl Driver {
             if ready.listener {
                 self.accept(engine);
             }
+            if ready.hostio {
+                self.host_done();
+            }
             for id in ready.conns_in {
                 self.pump_conn(id, engine);
             }
@@ -873,6 +885,7 @@ impl Driver {
             Stdin,
             Signal,
             Listener,
+            Hostio,
             Conn(ConnId),
         }
         let stdin = rustix::stdio::stdin();
@@ -894,6 +907,10 @@ impl Driver {
         fds.push(PollFd::new(&self.signals.wake, PollFlags::IN));
         srcs.push(Src::Listener);
         fds.push(PollFd::new(&self.listener, PollFlags::IN));
+        if let Some(hostio) = &self.hostio {
+            srcs.push(Src::Hostio);
+            fds.push(PollFd::new(hostio.fd(), PollFlags::IN));
+        }
         for (id, conn) in &self.conns {
             let mut flags = PollFlags::IN;
             if conn.wants_write() {
@@ -927,6 +944,7 @@ impl Driver {
                 Src::Stdin => ready.stdin = readable,
                 Src::Signal => ready.signal = readable,
                 Src::Listener => ready.listener = readable,
+                Src::Hostio => ready.hostio = readable,
                 Src::Conn(id) => {
                     if readable {
                         ready.conns_in.push(*id);
@@ -1666,6 +1684,10 @@ impl Driver {
         // by one. A connection without a token is the user's.
         if let Verdict::Denied(why) = self.verdict(conn, method, &params) {
             return Some(Err(grants::denied(method, why)));
+        }
+        // Clock, storage, result: answered by the driver, nothing cut.
+        if hostfn::is_host(method) {
+            return self.host_call(conn, method, params, in_batch);
         }
         // An app that does not hold the whole session sees its own.
         let own = self.own(conn);
@@ -2946,6 +2968,7 @@ struct Ready {
     stdin: bool,
     signal: bool,
     listener: bool,
+    hostio: bool,
     conns_in: Vec<ConnId>,
     conns_out: Vec<ConnId>,
 }

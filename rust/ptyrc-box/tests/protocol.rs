@@ -64,9 +64,36 @@ fn every_method_open_to_apps_and_none_closed() {
     for (name, gate) in &rows {
         // The gate of this crate, as the driver's, without params.
         let ours = grants::gate(name, &json!({}));
+        // `Needs(Permission::KeysGrab)`: `keys-grab`.
+        let permission = || {
+            let variant = gate
+                .split("Permission::")
+                .nth(1)
+                .unwrap()
+                .trim_end_matches(')');
+            let mut name = String::new();
+            for c in variant.chars() {
+                if c.is_uppercase() && !name.is_empty() {
+                    name.push('-');
+                }
+                name.push(c.to_ascii_lowercase());
+            }
+            name
+        };
         let theirs = match kind(gate) {
             "Never" => Gate::Never,
             "Open" => Gate::Open,
+            // Refined by params (`input.grab`, `widget.show`): those of
+            // this crate.
+            "Needs" | "Lowered" if !matches!(ours, Gate::Needs(_) | Gate::Lowered(_)) => {
+                panic!("{name}: {gate}, here {ours:?}")
+            }
+            "Needs" if !matches!(ours, Gate::Needs(p) if p == permission()) => {
+                panic!("{name}: {gate}, here {ours:?}")
+            }
+            "Lowered" if ours != Gate::Lowered(permission().leak()) => {
+                panic!("{name}: {gate}, here {ours:?}")
+            }
             _ => ours,
         };
         assert_eq!(ours, theirs, "{name}: {gate}");

@@ -4,7 +4,8 @@
 import * as n from "ptyrc:native";
 
 // The host's random under `Math.random`; no clock but `Date` (session
-// time).
+// time). Base64 is the engine's: `Uint8Array.fromBase64`, `toBase64`,
+// `atob`, `btoa`.
 Object.defineProperty(Math, "random", { value: n.mathRandom, writable: true, configurable: true });
 delete globalThis.performance;
 
@@ -77,6 +78,35 @@ function scalar(ch) {
   throw new TypeError("a glyph is a string of one character, or its scalar value");
 }
 
+export function cells(text) {
+  return n.cells(String(text));
+}
+
+// A cell's colour (4 bytes at `i`) as a run's member; undefined: absent.
+function colorOf(b, i) {
+  if (b[i] === 1) return "default";
+  if (b[i] === 2) return b[i + 1];
+  if (b[i] === 3) return "#" + ((b[i + 1] << 16) | (b[i + 2] << 8) | b[i + 3]).toString(16).padStart(6, "0");
+  return undefined;
+}
+
+function styleKey(b, p) {
+  let k = "";
+  for (let i = p + 4; i < p + 14; i++) k += String.fromCharCode(b[i]);
+  return k;
+}
+
+function runOf(b, p) {
+  const run = { t: "" };
+  const fg = colorOf(b, p + 4);
+  const bg = colorOf(b, p + 8);
+  if (fg !== undefined) run.fg = fg;
+  if (bg !== undefined) run.bg = bg;
+  const a = b[p + 12] | (b[p + 13] << 8);
+  for (const name in ATTRS) if (a & ATTRS[name]) run[name] = true;
+  return run;
+}
+
 export class Canvas {
   #id;
   constructor(width, height) {
@@ -108,6 +138,31 @@ export class Canvas {
   clear() {
     n.clear(this.#id);
     return this;
+  }
+  runs() {
+    const b = n.bytes(this.#id);
+    const w = this.width;
+    const rows = [];
+    for (let y = 0; y < this.height; y++) {
+      const row = [];
+      let run = null;
+      let key = -1;
+      for (let x = 0; x < w; x++) {
+        const p = (y * w + x) * 16;
+        const s = (b[p] | (b[p + 1] << 8) | (b[p + 2] << 16) | (b[p + 3] << 24)) >>> 0;
+        const ch = s > 0 && s <= 0x10ffff ? String.fromCodePoint(s) : " ";
+        const k = s > 0 ? styleKey(b, p) : "";
+        if (run === null || k !== key) {
+          run = s > 0 ? runOf(b, p) : { t: "" };
+          row.push(run);
+          key = k;
+        }
+        run.t += ch;
+        if (s > 0 && n.cells(ch) === 2) x++;
+      }
+      rows.push(row);
+    }
+    return rows;
   }
   present(place) {
     return n.present(this.#id, place === undefined ? "" : JSON.stringify(place));
@@ -152,6 +207,116 @@ export function manifest() {
   return text === null ? null : JSON.parse(text);
 }
 
+// ---- text and bytes: UTF-8 only ----
+
+class TextEncoder {
+  get encoding() {
+    return "utf-8";
+  }
+  encode(text = "") {
+    const s = String(text);
+    const out = [];
+    for (let i = 0; i < s.length; i++) {
+      let c = s.charCodeAt(i);
+      if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
+        const d = s.charCodeAt(i + 1);
+        if (d >= 0xdc00 && d <= 0xdfff) (c = 0x10000 + ((c - 0xd800) << 10) + (d - 0xdc00)), i++;
+      }
+      if (c >= 0xd800 && c <= 0xdfff) c = 0xfffd;
+      if (c < 0x80) out.push(c);
+      else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+      else if (c < 0x10000) out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+      else out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    }
+    return new Uint8Array(out);
+  }
+}
+
+class TextDecoder {
+  constructor(label = "utf-8") {
+    if (!/^utf-?8$/i.test(String(label))) throw new RangeError(`TextDecoder: ${label}: UTF-8 only`);
+  }
+  get encoding() {
+    return "utf-8";
+  }
+  decode(input) {
+    if (input === undefined) return "";
+    const b = input instanceof Uint8Array ? input : ArrayBuffer.isView(input) ? new Uint8Array(input.buffer, input.byteOffset, input.byteLength) : new Uint8Array(input);
+    let s = "";
+    let i = b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf ? 3 : 0;
+    while (i < b.length) {
+      const x = b[i];
+      const n = x < 0x80 ? 0 : x >= 0xc2 && x < 0xe0 ? 1 : x >= 0xe0 && x < 0xf0 ? 2 : x >= 0xf0 && x < 0xf5 ? 3 : -1;
+      let c = n === 0 ? x : n === 1 ? x & 31 : n === 2 ? x & 15 : x & 7;
+      let k = 1;
+      for (; n > 0 && k <= n; k++) {
+        const y = b[i + k];
+        if (y === undefined || (y & 0xc0) !== 0x80) break;
+        c = (c << 6) | (y & 63);
+      }
+      const whole = n >= 0 && k === n + 1;
+      const shortest = n < 2 || (n === 2 ? c >= 0x800 && (c < 0xd800 || c > 0xdfff) : c >= 0x10000 && c <= 0x10ffff);
+      if (whole && shortest) {
+        s += String.fromCodePoint(c);
+        i += n + 1;
+      } else {
+        // The lead byte and the continuation bytes before the fault.
+        s += "�";
+        i += n < 0 || whole ? 1 : k;
+      }
+    }
+    return s;
+  }
+}
+
+globalThis.TextEncoder = TextEncoder;
+globalThis.TextDecoder = TextDecoder;
+
+// ---- unit tests ----
+
+export class AssertionError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "AssertionError";
+  }
+}
+
+export function assert(value, message) {
+  if (!value) throw new AssertionError(message ?? `${show(value)} is not true`);
+}
+
+function same(a, b) {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false;
+  if (ArrayBuffer.isView(a)) return a.length === b.length && Array.prototype.every.call(a, (v, i) => Object.is(v, b[i]));
+  if (a instanceof Map || a instanceof Set) return a.size === b.size && same([...a], [...b]);
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  return ka.length === kb.length && ka.every((k) => Object.hasOwn(b, k) && same(a[k], b[k]));
+}
+
+function shown(v) {
+  if (ArrayBuffer.isView(v)) return `${v.constructor.name} [${Array.prototype.join.call(v, ", ")}]`;
+  if (v instanceof Map || v instanceof Set) return `${v.constructor.name} ${show([...v])}`;
+  return v === undefined ? "undefined" : typeof v === "number" || typeof v === "bigint" ? String(v) : typeof v === "string" ? JSON.stringify(v) : show(v);
+}
+
+export function assertEqual(actual, expected, message) {
+  if (!same(actual, expected))
+    throw new AssertionError(`${message ? message + ": " : ""}${shown(actual)}, expected ${shown(expected)}`);
+}
+
+export function assertThrows(f, kind, message) {
+  try {
+    f();
+  } catch (e) {
+    if (kind === undefined || e instanceof kind) return e;
+    throw new AssertionError(`${message ? message + ": " : ""}threw ${show(e)}, expected a ${kind.name}`);
+  }
+  throw new AssertionError(`${message ? message + ": " : ""}nothing thrown`);
+}
+
 // An uncaught error as lines of the log, for the interpreter:
 // `file:line:column: what`, the frames of the app, the cure when known.
 
@@ -178,7 +343,7 @@ function describe(e) {
   const frames = [];
   for (const line of String(e.stack ?? "").split("\n")) {
     const at = /^\s*at (?:.* \()?(.+?):(\d+):(\d+)\)?$/.exec(line);
-    if (at && at[1] !== "ptyrc" && at[1] !== "native" && !at[1].startsWith("<")) frames.push({ line: line.trimEnd(), where: `${at[1]}:${at[2]}:${at[3]}` });
+    if (at && at[1] !== "ptyrc" && at[1] !== "ptyrc/deck" && at[1] !== "native" && !at[1].startsWith("<")) frames.push({ line: line.trimEnd(), where: `${at[1]}:${at[2]}:${at[3]}` });
   }
   // A file that does not parse: its place, the message.
   const parsing = e.name === "SyntaxError" && frames.length && !frames.some((f) => f.line.includes(" ("));

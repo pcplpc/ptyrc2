@@ -11,7 +11,7 @@ use ptyrc_core::widgets::WidgetId;
 use ptyrc_proto::{ErrorCode, RpcError, suggest};
 
 /// Every method of the protocol, for the nearest-name hint.
-pub(crate) const METHODS: [&str; 60] = [
+pub(crate) const METHODS: [&str; 67] = [
     "auth",
     "session.info",
     "session.resize",
@@ -68,6 +68,13 @@ pub(crate) const METHODS: [&str; 60] = [
     "app.forget",
     "app.move",
     "app.permissions",
+    "app.result",
+    "clock.now",
+    "clock.zone",
+    "storage.get",
+    "storage.set",
+    "storage.remove",
+    "storage.list",
     "batch",
     "subscribe",
     "debug.overlay",

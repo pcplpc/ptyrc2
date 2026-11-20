@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 pub const START_WAIT: Duration = Duration::from_millis(400);
 /// How long a stop or a restart may take.
 const END_WAIT: Duration = Duration::from_secs(5);
-const LOOK_EVERY: Duration = Duration::from_millis(25);
+pub const LOOK_EVERY: Duration = Duration::from_millis(25);
 /// How long `ptyrc-app --declares` may take.
 const DECLARES_WAIT: Duration = Duration::from_secs(2);
 
@@ -255,7 +255,7 @@ pub fn list(client: &mut Client) -> Result<Vec<Value>, Fail> {
     }
 }
 
-fn find(apps: &[Value], id: u64) -> Option<&Value> {
+pub fn find(apps: &[Value], id: u64) -> Option<&Value> {
     apps.iter().find(|a| a["id"] == id)
 }
 

@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "clockface"
+version = "0.1.0"
+summary = "A stopwatch in a widget: block digits where there is room, a line where not."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+
+[options]
+every = { type = "bool", default = false, doc = "draw every size each second, in one batch" }

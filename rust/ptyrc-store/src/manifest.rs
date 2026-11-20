@@ -123,7 +123,9 @@ pub fn limit_permission(name: &str) -> &'static str {
 }
 
 /// Option names reserved to ptyrc's launcher (principle 4).
-pub const RESERVED_OPTIONS: &[&str] = &["alpha", "back", "frame", "front", "help", "prefer"];
+pub const RESERVED_OPTIONS: &[&str] = &[
+    "alpha", "back", "frame", "front", "help", "no-wait", "prefer", "wait",
+];
 
 /// Bounds on `words`: count, and characters per word.
 pub const MAX_WORDS: usize = 32;
@@ -154,6 +156,8 @@ pub struct App {
     pub assets: Option<String>,
     pub surface: Surface,
     pub tape: Option<String>,
+    /// `ptyrc app ID` waits for its result by default (`--wait`).
+    pub wait: bool,
 }
 
 /// The program: a script, or the root of a Rust crate.
@@ -233,7 +237,7 @@ impl OptionValue {
 
 const APP_KEYS: &[&str] = &[
     "api", "assets", "id", "license", "rust", "rustc", "script", "summary", "surface", "tape",
-    "version",
+    "version", "wait",
 ];
 const SECTIONS: &[&str] = &["app", "limits", "options", "permissions"];
 
@@ -529,6 +533,19 @@ impl Cx<'_> {
                 ));
             }
         };
+        let wait = match field(t, "wait") {
+            None => false,
+            Some((_, v)) => match v.get_ref() {
+                DeValue::Boolean(b) => *b,
+                _ => {
+                    return Err(self.err(
+                        v.span(),
+                        "[app] wait: not true or false".to_string(),
+                        "wait = true",
+                    ));
+                }
+            },
+        };
         Ok(App {
             id,
             version,
@@ -540,6 +557,7 @@ impl Cx<'_> {
             assets,
             surface,
             tape,
+            wait,
         })
     }
 

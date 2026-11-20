@@ -100,6 +100,10 @@ pub(crate) struct App {
     pub surface: Option<Surface>,
     /// What it declared at its start (`app.start {declares}`).
     pub declares: Option<Declared>,
+    /// When its present run began: 0 of its session time.
+    pub started: Duration,
+    /// Its last `app.result` of the present run: the value, the status.
+    pub result: Option<(Value, u8)>,
     /// Of the present run of a child.
     token: Option<String>,
     child: Option<Child>,
@@ -162,6 +166,7 @@ impl App {
             "declares": self.declares.is_some(),
             "store": self.store(),
             "foreground": self.enrolled.is_some(),
+            "result": self.result.as_ref().map(|(value, status)| json!({"value": value, "status": status})),
         })
     }
 }
@@ -286,6 +291,8 @@ impl Apps {
             grants: Grants::whole(),
             surface: None,
             declares: None,
+            started: now,
+            result: None,
             token: Some(token),
             child: Some(child),
             kill_at: None,
@@ -349,6 +356,8 @@ impl Apps {
                     grants: Grants::whole(),
                     surface: None,
                     declares: None,
+                    started: now,
+                    result: None,
                     token: None,
                     child: None,
                     kill_at: None,
@@ -426,6 +435,8 @@ impl Apps {
             grants: Grants::whole(),
             surface: None,
             declares: None,
+            started: now,
+            result: None,
             token: Some(token),
             child: None,
             kill_at: None,
@@ -481,6 +492,13 @@ impl Apps {
     }
 
     /// Of a store app: where it draws.
+    /// The result of `id` (`app.result`): the last one holds.
+    pub fn set_result(&mut self, id: u64, value: Value, status: u8) {
+        if let Some(app) = self.entries.get_mut(&id) {
+            app.result = Some((value, status));
+        }
+    }
+
     pub fn set_surface(&mut self, id: u64, surface: Surface) {
         if let Some(app) = self.entries.get_mut(&id) {
             app.surface = Some(surface);
@@ -620,6 +638,8 @@ impl Apps {
                 app.status = None;
                 app.runs += 1;
                 app.since = now;
+                app.started = now;
+                app.result = None;
                 app.conns.clear();
                 Ok(())
             }

@@ -42,6 +42,8 @@ pub enum ErrorCode {
     Denied,
     /// The user said no: `esc` on the driver's pop-up.
     Cancelled,
+    /// No such file handle, asset or child.
+    NoFile,
     Internal,
 }
 
@@ -58,6 +60,7 @@ impl ErrorCode {
             ErrorCode::Gone => "gone",
             ErrorCode::Denied => "denied",
             ErrorCode::Cancelled => "cancelled",
+            ErrorCode::NoFile => "no-file",
             ErrorCode::Internal => "internal",
         }
     }
@@ -203,6 +206,7 @@ mod tests {
             ErrorCode::Gone,
             ErrorCode::Denied,
             ErrorCode::Cancelled,
+            ErrorCode::NoFile,
             ErrorCode::Internal,
         ] {
             assert_eq!(serde_json::to_value(code).unwrap(), json!(code.as_str()));

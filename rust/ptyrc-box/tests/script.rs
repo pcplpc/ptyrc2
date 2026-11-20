@@ -596,3 +596,123 @@ fn speed() {
         );
     }
 }
+
+/// `script::unit` on `files`, the first the file of the tests.
+fn unit(files: &[(&str, &str)], limits: Limits) -> Option<(Vec<String>, u8)> {
+    let wasm = interpreter()?;
+    let o = options(files, json!({}));
+    Some(script::unit(wasm, &o.args, limits))
+}
+
+#[test]
+fn unit_tests_each_export_in_order_the_place_of_a_failure() {
+    let tests = r#"
+        import { assert, assertEqual, assertThrows } from "ptyrc";
+        import { add } from "./lib.js";
+        export function test_b_fails() { assertEqual(add(1, 2), 4, "sum"); }
+        export function test_a_adds() { assertEqual(add(1, 2), 3); assert(true); }
+        export function test_c_throws() { assertThrows(() => null.x, TypeError); }
+        export async function test_d_async() { assertEqual(await Promise.resolve([1, {a: 2}]), [1, {a: 2}]); }
+        export function helper() { throw new Error("not a test"); }
+        export const test_e = 3;
+    "#;
+    let lib = "export function add(a, b) { return a + b; }";
+    let Some((lines, status)) = unit(&[("tests.js", tests), ("lib.js", lib)], Limits::default())
+    else {
+        return;
+    };
+    assert_eq!(status, 1, "{lines:#?}");
+    assert_eq!(
+        lines,
+        [
+            "ok   test_a_adds",
+            "FAIL test_b_fails",
+            "tests.js:4:54: AssertionError: sum: 3, expected 4",
+            "    at test_b_fails (tests.js:4:54)",
+            "ok   test_c_throws",
+            "ok   test_d_async",
+            "3 passed, 1 failed",
+        ]
+    );
+    let Some((lines, status)) = unit(
+        &[("tests.js", "export function test_x() {}")],
+        Limits::default(),
+    ) else {
+        return;
+    };
+    assert_eq!(
+        (lines, status),
+        (vec!["ok   test_x".into(), "1 passed, 0 failed".into()], 0)
+    );
+}
+
+#[test]
+fn unit_tests_under_the_limits_of_an_event() {
+    let limits = Limits {
+        hard: Duration::from_millis(300),
+        ..Limits::default()
+    };
+    let tests = "export function test_a() {}\nexport function test_b() { for (;;) {} }\nexport function test_c() {}";
+    let Some((lines, status)) = unit(&[("tests.js", tests)], limits.clone()) else {
+        return;
+    };
+    assert_eq!(status, 1);
+    assert_eq!(lines[..2], ["ok   test_a", "FAIL test_b"], "{lines:#?}");
+    assert!(lines[2].starts_with("time:"), "{lines:#?}");
+    assert_eq!(lines[3], "1 passed, 1 failed, the rest not run");
+    // No test; a test file that does not load.
+    for (text, said) in [
+        ("export function check() {}", "no export test_*"),
+        ("export function test_a() {", "tests.js:1:27: "),
+    ] {
+        let (lines, status) = unit(&[("tests.js", text)], limits.clone()).unwrap();
+        assert_eq!(status, 1);
+        assert!(lines.iter().any(|l| l.contains(said)), "{lines:#?}");
+    }
+    // A request: no session.
+    let text =
+        r#"import { call } from "ptyrc"; export function test_a() { call("session.info"); }"#;
+    let (lines, _) = unit(&[("tests.js", text)], limits).unwrap();
+    assert!(
+        lines[1].contains("PtyrcError: session.info: no session"),
+        "{lines:#?}"
+    );
+}
+
+#[test]
+fn text_bytes_and_base64() {
+    let tests = r##"
+        import { assertEqual, cells, Canvas } from "ptyrc";
+        const enc = new TextEncoder(), dec = new TextDecoder();
+        export function test_utf8() {
+          const b = enc.encode("aé€😀");
+          assertEqual(b, new Uint8Array([97, 0xc3, 0xa9, 0xe2, 0x82, 0xac, 0xf0, 0x9f, 0x98, 0x80]));
+          assertEqual(dec.decode(b), "aé€😀");
+          assertEqual(enc.encode("\ud800"), new Uint8Array([0xef, 0xbf, 0xbd]));
+          assertEqual(dec.decode(new Uint8Array([0xff, 0x41, 0xe2, 0x82, 0xc0, 0xed, 0xa0, 0x80])),
+                      "�A�����");
+        }
+        export function test_base64() {
+          const b = Uint8Array.fromBase64("G1sxOzJB");
+          assertEqual(dec.decode(b), "\x1b[1;2A");
+          assertEqual(b.toBase64(), "G1sxOzJB");
+          assertEqual(btoa("hi"), "aGk=");
+          assertEqual(atob("aGk="), "hi");
+        }
+        export function test_cells_and_runs() {
+          assertEqual(cells("a日́"), 3);
+          const c = new Canvas(5, 2);
+          c.text(0, 0, "ab", { fg: 9, bold: true });
+          c.set(3, 0, "日", { bg: "#102030" });
+          c.set(0, 1, "x", { fg: "default" });
+          assertEqual(c.runs(), [
+            [{ t: "ab", fg: 9, bold: true }, { t: " " }, { t: "日", bg: "#102030" }],
+            [{ t: "x", fg: "default" }, { t: "    " }],
+          ]);
+        }
+    "##;
+    let Some((lines, status)) = unit(&[("tests.js", tests)], Limits::default()) else {
+        return;
+    };
+    assert_eq!(status, 0, "{lines:#?}");
+}

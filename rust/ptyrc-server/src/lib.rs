@@ -19,6 +19,7 @@ mod hands;
 mod hints;
 pub mod host;
 pub mod hostcolors;
+mod hostio;
 mod hotkey;
 pub mod keys;
 mod lower;
@@ -34,8 +35,10 @@ pub mod screen;
 #[cfg(test)]
 mod screen_tests;
 pub mod start;
+mod storage;
 mod store;
 pub mod veil;
+mod zone;
 
 pub use driver::{Config, Exit, replay, run};
 pub use engine::{ConnId, Ctx, Engine, Owned, PassThrough, Reply, SessionInfo, Token};
