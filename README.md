@@ -38,6 +38,22 @@ manage the running driver from the inside:
 You can also use `ptyrc python` to [pilot](doc/interact.gif) your terminal by
 hand.
 
+## Store apps
+
+Apps can also come from a git repository, as scripts run in a sandbox
+(WebAssembly, no file, no network), each asking for its permissions:
+
+```sh
+ptyrc store add ORIGIN  # install; see also: rm, update, ls, show, search
+ptyrc app ID            # start it, a pop-up asks for what it declares
+```
+
+Write your own with `ptyrc dev new NAME`, then `ptyrc dev test` and
+`ptyrc dev run`.
+
+**The store is not yet safe for strangers' apps:** install only what you
+have read or trust.
+
 ## Install from source
 
 It's not published

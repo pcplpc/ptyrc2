@@ -16,6 +16,11 @@ FAILED=0
 
 rm -rf "$WORK"; mkdir -p "$WORK/run"
 export XDG_RUNTIME_DIR=$WORK/run
+# Apps started here are answered yes in a private permissions.toml: no
+# pop-up waits for the keyboard. What an app does not declare stays unheld.
+export XDG_CONFIG_HOME=$WORK/config
+mkdir -p -m 700 "$XDG_CONFIG_HOME/ptyrc"
+(umask 077; printf '[app."native/%s"]\nallow = ["layout", "shape", "words", "text", "front-widget", "front", "screen-wide", "keys-arrows", "keys-grab", "keys-read", "pointer", "clicks", "clicks-grab", "clock", "storage", "files", "files-write", "probe-git", "probe-system", "limit-memory", "limit-time"]\n' clock fishes >"$XDG_CONFIG_HOME/ptyrc/permissions.toml")
 unset TMUX TMUX_PANE PTYRC_SESSION PTYRC_SOCKET
 HOST=(false)
 IN=(false)
@@ -126,7 +131,14 @@ s_apps() {
     check "apps: still one client" is "$(clients)" 1
     p tmux detach
     until_is tmux running
-    left() { pgrep -f "ptyrc-app (clock|fishes)" | wc -l; }
+    # Ours alone: an app of another driver on this machine is not counted.
+    left() {
+        local pid n=0
+        for pid in $(pgrep -f "ptyrc-app (clock|fishes)"); do
+            tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null | grep -qx "PTYRC_SOCKET=$WORK/run/.*" && n=$((n + 1))
+        done
+        echo "$n"
+    }
     until_is 0 left
     check "apps: the apps end with the driver" is "$(left)" 0
     local out status

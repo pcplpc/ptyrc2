@@ -298,12 +298,15 @@ pub struct Headless {
     pub log: Vec<String>,
     /// `text`: per frame, its rect, origin and the text of its rows at
     /// the last look.
-    shown: BTreeMap<FrameId, ([u16; 4], [i64; 2], Vec<String>)>,
+    shown: BTreeMap<FrameId, Shown>,
     /// `screen`: the rows at the last look.
     rows: Option<Vec<String>>,
     /// Session time of the last change of the screen, ms.
     changed: u64,
 }
+
+/// A frame at the last look: rect, origin, the text of its rows.
+type Shown = ([u16; 4], [i64; 2], Vec<String>);
 
 fn bad(e: serde_json::Error) -> CallError {
     CallError::new("bad-params", e.to_string())
@@ -1803,6 +1806,17 @@ mod tests {
             hint.starts_with("effects: ") && hint.contains("sand"),
             "{hint}"
         );
+    }
+
+    /// As the driver: every row of the rect, an empty one `""`.
+    #[test]
+    fn the_shape_keeps_every_row() {
+        let mut h = host(&["shape"], &[]);
+        let s = h.call("screen.shape", json!({})).unwrap();
+        assert_eq!(s["lines"], json!(["##### ####", "#####", ""]));
+        h.feed(b"\x1b[2J");
+        let s = h.call("screen.shape", json!({})).unwrap();
+        assert_eq!(s["lines"], json!(["", "", ""]));
     }
 
     #[test]

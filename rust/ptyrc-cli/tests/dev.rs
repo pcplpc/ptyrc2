@@ -14,7 +14,7 @@ use std::process::{Command, Output, Stdio};
 use std::sync::Once;
 use std::time::{Duration, Instant};
 
-const JS: &str = "../../sdk/js/interp/target/wasm32-unknown-unknown/release/ptyrc_js.wasm";
+const JS: &str = "../../sdk/js/interp/target/ptyrc-js.wasm";
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -41,7 +41,7 @@ fn skipped(what: &str) {
 fn has_js() -> bool {
     let ok = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS).is_file();
     if !ok {
-        skipped("no interpreter; cargo build --release --manifest-path sdk/js/interp/Cargo.toml");
+        skipped("no interpreter; sdk/js/interp/build.sh");
     }
     ok
 }
@@ -478,4 +478,19 @@ fn grants_keys_events() {
     assert!(out.contains("refused: keys-arrows, not declared"), "{out}");
     let said = ok(&ptyrc(&app, &["dev", "check"]));
     assert!(said.contains("asks no permission"), "{said}");
+}
+
+/// `dev check`: a limit past the runner's ceiling, named.
+#[test]
+fn check_names_the_ceiling() {
+    let js = "export function init(args) {}\n";
+    let dir = script_app("ceiling", "[limits]\nmemory-mib = 4096\n", js);
+    let out = ptyrc(&dir, &["dev", "check"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{err}");
+    assert!(
+        err.contains("memory-mib: 4096 above the ceiling 512"),
+        "{err}"
+    );
+    assert!(err.contains("memory-mib = 512 at most"), "{err}");
 }

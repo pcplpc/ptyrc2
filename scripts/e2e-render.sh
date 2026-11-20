@@ -516,9 +516,12 @@ for y, line in enumerate(sys.stdin.read().split("\n")[:22]):
 }
 
 # waste LOG COLS ROWS: what the driver wrote to the host, replayed on a
-# model of it, per synchronized update. `written`: cells written;
-# `wasted`: those written more than once, or with what they held;
-# `outside`: cells written out of an update after the first one.
+# model of it, per synchronized update. A cell is written by a glyph, or
+# by an erase (EL, ED, ECH) that blanks it; a blank glyph or an erase on
+# a blank cell writes nothing. `written`: the writes; `wasted`, per
+# cell, its writes beyond the one that changed it (all of them when it
+# ends as it began): never negative; `worst`: the most in one update;
+# `outside`: writes out of an update after the first one.
 waste() {
     python3 - "$@" <<'PY'
 import re, sys
@@ -536,6 +539,14 @@ seen_update = False
 begin = 0
 def blank():
     return [(" ", "")] * cols
+def erase(cx, cy):
+    if grid[cy][cx] == (" ", ""):
+        return
+    grid[cy][cx] = (" ", "")
+    if inside:
+        wrote[cy][cx] += 1
+    elif seen_update:
+        stats["outside"] += 1
 for m in tok.finditer(data):
     params, final, ctl, ch = m.group(1), m.group(2), m.group(3), m.group(4)
     if final:
@@ -546,13 +557,15 @@ for m in tok.finditer(data):
             wrote = [[0] * cols for _ in range(rows)]
         elif final == "l" and params == "?2026":
             inside = False
-            changed = sum(a != b for ra, rb in zip(start, grid) for a, b in zip(ra, rb))
             written = sum(map(sum, wrote))
+            wasted = sum(max(w - (a != b), 0)
+                         for rw, ra, rb in zip(wrote, start, grid)
+                         for w, a, b in zip(rw, ra, rb))
             stats["updates"] += 1
             stats["bytes"] += m.end() - begin
             stats["written"] += written
-            stats["wasted"] += written - changed
-            stats["worst"] = max(stats["worst"], written - changed)
+            stats["wasted"] += wasted
+            stats["worst"] = max(stats["worst"], wasted)
         elif final == "H":
             y = min(max(n[0], 1), rows) - 1
             x = min(max(n[1] if len(n) > 1 else 1, 1), cols) - 1
@@ -572,9 +585,14 @@ for m in tok.finditer(data):
                 pen = ""
         elif final == "K":
             for cx in range(x, cols):
-                grid[y][cx] = (" ", "")
+                erase(cx, y)
+        elif final == "X":
+            for cx in range(x, min(x + max(n[0], 1), cols)):
+                erase(cx, y)
         elif final == "J":
-            grid = [blank() for _ in range(rows)]
+            for cy in range(rows):
+                for cx in range(cols):
+                    erase(cx, cy)
         continue
     if ctl == "\r":
         x = 0

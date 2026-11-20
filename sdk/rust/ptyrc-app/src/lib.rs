@@ -15,6 +15,7 @@
 mod ffi;
 
 use std::fmt;
+use std::sync::OnceLock;
 
 pub use ffi::{alloc, free};
 pub use serde_json::{self as json, Value, json};
@@ -70,7 +71,9 @@ pub mod __rt {
 
     pub fn init<A: App>(slot: &Slot<A>, ptr: u32, len: u32) {
         std::panic::set_hook(Box::new(|info| ffi::log(&format!("panic: {info}"))));
-        let app = A::init(json(ptr, len));
+        let args = json(ptr, len);
+        let _ = super::MANIFEST.set(super::Manifest::of(&args));
+        let app = A::init(args);
         *slot.cell().borrow_mut() = Some(app);
     }
 
@@ -92,6 +95,71 @@ pub mod __rt {
     pub fn stop<A: App>(slot: &Slot<A>) {
         with(slot, |a| a.stop())
     }
+}
+
+/// What the app is told of itself at `init`: `args["ptyrc:manifest"]`,
+/// set by the runner from the manifest and the grants (`PROTOCOL.md`,
+/// Manifest).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Manifest {
+    pub id: String,
+    pub version: String,
+    /// `[permissions]`, by name.
+    pub permissions: Vec<String>,
+    /// The words of `words`, as declared.
+    pub words: Vec<String>,
+    /// The permissions held, the limits' among them.
+    pub granted: Vec<String>,
+    /// `[limits]` granted: `(key, value)`.
+    pub limits: Vec<(String, u64)>,
+}
+
+impl Manifest {
+    /// Of the argument of `init`; `None`: no member `ptyrc:manifest`.
+    pub fn of(args: &Value) -> Option<Manifest> {
+        let m = args.get("ptyrc:manifest")?.as_object()?;
+        let text = |k: &str| {
+            m.get(k)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        };
+        let strings = |v: Option<&Value>| -> Vec<String> {
+            let all = v.and_then(Value::as_array).into_iter().flatten();
+            all.filter_map(|s| s.as_str().map(str::to_string)).collect()
+        };
+        let permissions = m.get("permissions").and_then(Value::as_array);
+        let permissions = permissions.into_iter().flatten();
+        Some(Manifest {
+            id: text("id"),
+            version: text("version"),
+            permissions: (permissions.clone())
+                .filter_map(|p| p.get("name")?.as_str().map(str::to_string))
+                .collect(),
+            words: permissions.flat_map(|p| strings(p.get("words"))).collect(),
+            granted: strings(m.get("granted")),
+            limits: (m
+                .get("limits")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flatten())
+            .filter_map(|(k, v)| Some((k.clone(), v.as_u64()?)))
+            .collect(),
+        })
+    }
+
+    /// `name` is held.
+    pub fn holds(&self, name: &str) -> bool {
+        self.granted.iter().any(|g| g == name)
+    }
+}
+
+static MANIFEST: OnceLock<Option<Manifest>> = OnceLock::new();
+
+/// The manifest told at `init`; `None` before `init`, or when the
+/// runner was given none (`ptyrc-box` without `--manifest`).
+pub fn manifest() -> Option<&'static Manifest> {
+    MANIFEST.get().and_then(Option::as_ref)
 }
 
 /// The error of a request: the protocol's `code`, `message`, `hint`.
@@ -402,5 +470,28 @@ impl Canvas {
 impl Drop for Canvas {
     fn drop(&mut self) {
         ffi::release(self.id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_manifest_told_at_init() {
+        let args = json!({"rate": 3, "ptyrc:manifest": {
+            "id": "snake", "version": "0.1.0",
+            "permissions": [{"name": "shape"}, {"name": "words", "words": ["food"]}],
+            "granted": ["shape", "limit-time"],
+            "limits": {"tick-ms": 100},
+        }});
+        let m = Manifest::of(&args).unwrap();
+        assert_eq!((m.id.as_str(), m.version.as_str()), ("snake", "0.1.0"));
+        assert_eq!(m.permissions, ["shape", "words"]);
+        assert_eq!(m.words, ["food"]);
+        assert!(m.holds("shape") && m.holds("limit-time") && !m.holds("words"));
+        assert_eq!(m.limits, [("tick-ms".to_string(), 100)]);
+        assert_eq!(Manifest::of(&json!({"rate": 3})), None);
+        assert_eq!(manifest(), None);
     }
 }

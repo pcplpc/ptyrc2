@@ -920,7 +920,11 @@ fn colours_are_the_popups() {
         assert_eq!(format!("{ours:?}"), colour, "{name}");
         seen += 1;
     }
-    assert!(seen >= ptyrc_store::manifest::PERMISSIONS.len(), "{seen}");
+    let names = ptyrc_store::manifest::PERMISSIONS.iter();
+    assert!(
+        seen >= names.filter(|p| !p.starts_with("limit-")).count(),
+        "{seen}"
+    );
 }
 
 /// The registry's scripts in a repository of their own: the example

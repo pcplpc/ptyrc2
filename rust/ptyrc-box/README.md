@@ -238,12 +238,21 @@ print!("{report}");
   injected and reached nobody (`dropped`), `notes` (a screen file that
   wraps or scrolls). `Report::to_json`, `Report::text(styles)`.
 
-The size. `session.info` answers `{"protocol": 1, "server",
-"size": [columns, rows], "headless": true}` (headless: `"server":
-"ptyrc-box"`), as the driver answers at the degree `none`. A change:
-the event `size`, `{"size": [columns, rows]}`, to an app subscribed
-(`call("subscribe", {"topics": ["size"]})`); headless, at each resize
-of the tape.
+`hello`. The guest gets none: no export, no event. Live, the runner
+reads the driver's `hello` at connect (cut below `text`: `protocol`,
+`server`, `size`, `headless`) and keeps its `size` (80x24 when absent)
+as the screen of the canvas bound. Headless, there is no connection;
+`session.info` answers `{"protocol": 1, "server": "ptyrc-box", "size":
+[columns, rows], "headless": true}`, as the driver at the degree
+`none`. A guest asks `session.info` for the size at `init`.
+
+The event `size`, `{"size": [columns, rows]}`, to a guest subscribed
+(`call("subscribe", {"topics": ["size"]})`). Live: from the driver at
+each resize of the host, the runner's bound updated before the guest
+sees it; with `snapshot: true`, the size now, after the answer.
+Headless: at each resize of the tape, the screen resized first;
+`--event T:size:JSON` delivers the data alone, the screen unchanged;
+`snapshot` is ignored.
 - `live::run`: a session (`Live::new(Client, log)`), real time times
   `PTYRC_CLOCK_RATE`.
 - `Runner<H: Host>`: `load`, `init`, `tick`, `event`, `stop`; `Host` is
@@ -286,6 +295,11 @@ screen (0.009 ms against 0.6 ms). What is left with a colour a cell
 is the repair: some 200 KB of SGR a frame, written and fed to the
 model of the host (1.3 ms of the 1.8).
 
+2026-11-20, a whole CSI parsed in one pass and the colours of an SGR
+written from a table (`ptyrc-vt`), the two drivers in turn (load 2):
+a colour a cell, 2.89 to 3.00 ms against 3.33 to 3.44 ms; one colour
+unchanged.
+
 ## Tests
 
 - `tests/abi.rs`: the ABI against small guests.
@@ -293,8 +307,7 @@ model of the host (1.3 ms of the 1.8).
 - `tests/live.rs`: above.
 - `tests/profile.rs`: the OS profile.
 - `tests/script.rs`: script apps and hostile scripts. They need the
-  interpreter: `cargo build --release --manifest-path
-  sdk/js/interp/Cargo.toml`. Without it they pass, testing nothing,
+  interpreter: `sdk/js/interp/build.sh`. Without it they pass, testing nothing,
   and a line `script tests SKIPPED` is printed past the capture;
   `PTYRC_REQUIRE_JS=1`: they fail.
 

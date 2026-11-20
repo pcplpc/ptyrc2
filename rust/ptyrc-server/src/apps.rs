@@ -221,7 +221,10 @@ impl Apps {
     fn spawn(&self, id: u64, argv: &[String], log: &Path) -> Result<(Child, String), String> {
         let token = new_token()?;
         let (program, args) = argv.split_first().ok_or("argv: empty")?;
-        let stderr = match start::private_file(log, false) {
+        // Emptied, then appended to: a line of the driver (`note`) is
+        // not written over by the child's.
+        let file = start::private_file(log, false).and_then(|_| start::private_file(log, true));
+        let stderr = match file {
             Ok(file) => Stdio::from(file),
             Err(_) => Stdio::null(),
         };

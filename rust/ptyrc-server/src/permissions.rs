@@ -28,11 +28,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const FILE: &str = "permissions.toml";
 
 /// What an app declares at its start (`app.start {declares}`): each
-/// permission with its reason, and the words of `words`.
+/// permission with its reason, the words of `words`, and of a store
+/// app `[limits]`: `(key, value)`, each asked as `limit-memory` or
+/// `limit-time`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Declared {
     pub permissions: BTreeMap<Permission, String>,
     pub words: Vec<String>,
+    pub limits: Vec<(String, u64)>,
 }
 
 impl Declared {
@@ -350,6 +353,7 @@ mod tests {
                 .map(|p| (*p, "why".to_string()))
                 .collect(),
             words: vec!["fish".into()],
+            limits: Vec::new(),
         }
     }
 

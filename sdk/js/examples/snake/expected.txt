@@ -48,4 +48,4 @@ ended: exit: 0
   ●   o
    @ooo
 refused at 0 ms: input.grab (denied)
-denied: keys-arrows, declared and answered no
+refused: keys-arrows, declared and answered no

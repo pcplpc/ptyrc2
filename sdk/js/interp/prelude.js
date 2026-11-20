@@ -3,6 +3,11 @@
 
 import * as n from "ptyrc:native";
 
+// The host's random under `Math.random`; no clock but `Date` (session
+// time).
+Object.defineProperty(Math, "random", { value: n.mathRandom, writable: true, configurable: true });
+delete globalThis.performance;
+
 const BELOW = 0;
 const DEFAULT = 0x01000000;
 const ATTRS = { bold: 1, dim: 2, italic: 4, underline: 8, inverse: 16, strike: 32, blink: 64 };
@@ -141,3 +146,51 @@ export function random(length) {
 export function exit(code = 0) {
   n.exit(code | 0);
 }
+
+export function manifest() {
+  const text = n.manifest();
+  return text === null ? null : JSON.parse(text);
+}
+
+// An uncaught error as lines of the log, for the interpreter:
+// `file:line:column: what`, the frames of the app, the cure when known.
+
+const FRAMES = 6;
+const NO_TIMER = "no timer: ask a period (period(50)) and count in tick(now)";
+const NO_NETWORK = "no network: a store app has none";
+const NO_PAGE = 'no page: draw on a Canvas from "ptyrc"';
+const CURES = {
+  setTimeout: NO_TIMER,
+  setInterval: NO_TIMER,
+  requestAnimationFrame: "no timer: ask a period (period(33)) and draw in tick(now)",
+  fetch: NO_NETWORK,
+  XMLHttpRequest: NO_NETWORK,
+  WebSocket: NO_NETWORK,
+  require: 'ES modules only: import { x } from "./file.js"',
+  process: "no process: arguments come in init(args)",
+  console: 'no console: import { log } from "ptyrc"',
+  document: NO_PAGE,
+  window: NO_PAGE,
+};
+
+function describe(e) {
+  if (!(e instanceof Error)) return `uncaught: ${show(e)}`;
+  const frames = [];
+  for (const line of String(e.stack ?? "").split("\n")) {
+    const at = /^\s*at (?:.* \()?(.+?):(\d+):(\d+)\)?$/.exec(line);
+    if (at && at[1] !== "ptyrc" && at[1] !== "native" && !at[1].startsWith("<")) frames.push({ line: line.trimEnd(), where: `${at[1]}:${at[2]}:${at[3]}` });
+  }
+  // A file that does not parse: its place, the message.
+  const parsing = e.name === "SyntaxError" && frames.length && !frames.some((f) => f.line.includes(" ("));
+  let out = parsing ? e.message : `${e.name}: ${e.message}`;
+  if (frames.length) out = `${frames[0].where}: ${out}`;
+  for (const f of frames.slice(0, FRAMES)) if (f.line.includes(" (")) out += `\n${f.line}`;
+  if (!out.includes("\n  hint: ")) {
+    const missing = / ?(\w+) is not defined$/.exec(e.message);
+    const hint = typeof e.hint === "string" ? e.hint : missing && Object.hasOwn(CURES, missing[1]) ? CURES[missing[1]] : null;
+    if (hint) out += `\n  hint: ${hint}`;
+  }
+  return out;
+}
+
+n.hooks(describe);

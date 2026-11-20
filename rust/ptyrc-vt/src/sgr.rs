@@ -199,26 +199,82 @@ pub(crate) fn write_sgr_from(out: &mut Vec<u8>, from: &Style, to: &Style) {
         write_sgr(out, to);
         return;
     }
-    out.extend_from_slice(b"\x1b[");
-    let start = out.len();
+    let mut seq = Seq {
+        bytes: [0; 48],
+        len: 0,
+    };
+    seq.put(b"\x1b[");
     for (base, old, new) in [(30, from.fg, to.fg), (40, from.bg, to.bg)] {
         if old == new {
             continue;
         }
-        if new == Color::Default {
-            out.push(b';');
-            push_num(out, base + 9);
-        } else {
-            color(out, base, new);
+        if seq.len > 2 {
+            seq.put(b";");
+        }
+        match new {
+            Color::Default => seq.num(base + 9),
+            Color::Indexed(n) if n < 8 => seq.num(base + n),
+            Color::Indexed(n) if n < 16 => seq.num(base + 60 + (n - 8)),
+            Color::Indexed(n) => {
+                seq.num(base + 8);
+                seq.put(b";5;");
+                seq.num(n);
+            }
+            Color::Rgb(r, g, b) => {
+                seq.num(base + 8);
+                seq.put(b";2;");
+                seq.num(r);
+                seq.put(b";");
+                seq.num(g);
+                seq.put(b";");
+                seq.num(b);
+            }
         }
     }
-    if out.len() == start {
-        out.push(b'm');
-    } else {
-        // The separator before the first parameter.
-        out[start..].rotate_left(1);
-        out.pop();
-        out.push(b'm');
+    seq.put(b"m");
+    // A copy of fixed size, cut after: no call to copy a few bytes.
+    let at = out.len();
+    out.extend_from_slice(&seq.bytes);
+    out.truncate(at + seq.len);
+}
+
+/// A colour change built on the stack, appended at once: at most
+/// `ESC [`, two colours of 16 bytes, `;`, `m`; the rest is room for the
+/// copies of `num`.
+struct Seq {
+    bytes: [u8; 48],
+    len: usize,
+}
+
+/// `n` in decimal: up to three digits, then their count.
+static DECIMAL: [[u8; 4]; 256] = {
+    let mut out = [[0u8; 4]; 256];
+    let mut n = 0;
+    while n < 256 {
+        let (h, t, o) = ((n / 100) as u8, (n / 10 % 10) as u8, (n % 10) as u8);
+        out[n] = if n >= 100 {
+            [b'0' + h, b'0' + t, b'0' + o, 3]
+        } else if n >= 10 {
+            [b'0' + t, b'0' + o, 0, 2]
+        } else {
+            [b'0' + o, 0, 0, 1]
+        };
+        n += 1;
+    }
+    out
+};
+
+impl Seq {
+    fn put(&mut self, s: &[u8]) {
+        self.bytes[self.len..self.len + s.len()].copy_from_slice(s);
+        self.len += s.len();
+    }
+
+    /// `n` in decimal: four bytes copied, the digits kept.
+    fn num(&mut self, n: u8) {
+        let d = &DECIMAL[n as usize];
+        self.bytes[self.len..self.len + 4].copy_from_slice(d);
+        self.len += d[3] as usize;
     }
 }
 
@@ -269,4 +325,77 @@ pub fn write_sgr(out: &mut Vec<u8>, style: &Style) {
         }
     }
     out.push(b'm');
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn colours() -> Vec<Color> {
+        let mut all = vec![Color::Default];
+        all.extend((0..=255).map(Color::Indexed));
+        for v in [0, 1, 9, 10, 99, 100, 199, 255] {
+            all.push(Color::Rgb(v, 255 - v, v / 2));
+        }
+        all
+    }
+
+    /// The colours-only form, as `format!` spells it.
+    fn reference(from: &Style, to: &Style) -> String {
+        let mut params = Vec::new();
+        for (base, old, new) in [(30u16, from.fg, to.fg), (40, from.bg, to.bg)] {
+            if old == new {
+                continue;
+            }
+            params.push(match new {
+                Color::Default => format!("{}", base + 9),
+                Color::Indexed(n) if n < 8 => format!("{}", base + n as u16),
+                Color::Indexed(n) if n < 16 => format!("{}", base + 60 + (n - 8) as u16),
+                Color::Indexed(n) => format!("{};5;{n}", base + 8),
+                Color::Rgb(r, g, b) => format!("{};2;{r};{g};{b}", base + 8),
+            });
+        }
+        format!("\x1b[{}m", params.join(";"))
+    }
+
+    /// A change of colours: the bytes of `reference`, and read back,
+    /// the rendition wanted.
+    #[test]
+    fn colours_written_and_read_back() {
+        let all = colours();
+        let style = |fg, bg| Style {
+            fg,
+            bg,
+            attrs: Attrs(Attrs::BOLD),
+            ..Style::default()
+        };
+        for &a in &all {
+            for &b in &all {
+                for (old, new) in [
+                    (style(a, Color::Default), style(b, Color::Indexed(4))),
+                    (style(Color::Indexed(1), a), style(Color::Indexed(1), b)),
+                    (style(a, b), style(b, a)),
+                ] {
+                    if old == new {
+                        continue;
+                    }
+                    let mut out = Vec::new();
+                    write_sgr_from(&mut out, &old, &new);
+                    assert_eq!(String::from_utf8_lossy(&out), reference(&old, &new));
+                    let mut p = Params {
+                        vals: [0; 32],
+                        len: 0,
+                        sub: 0,
+                    };
+                    for v in out[2..out.len() - 1].split(|&c| c == b';') {
+                        p.vals[p.len] = std::str::from_utf8(v).unwrap().parse().unwrap();
+                        p.len += 1;
+                    }
+                    let mut pen = old;
+                    apply(&mut pen, &p);
+                    assert_eq!(pen, new);
+                }
+            }
+        }
+    }
 }

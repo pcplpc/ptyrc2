@@ -37,7 +37,9 @@ pub struct Manage {
 
 #[derive(Subcommand)]
 enum Verb {
-    /// List the apps: id, kind, state, since when, pid, name, arguments
+    /// List the apps: id, kind, state, since when, pid, name, arguments.
+    /// To a terminal, names and arguments as glyphs only; to a pipe, as
+    /// they are
     Ls,
     /// Start an app under the driver: `start bricks -a`
     Start {
@@ -78,7 +80,9 @@ enum Verb {
     },
     /// List the frames on screen and the apps on each
     Frames,
-    /// Print what an app wrote on stderr
+    /// Print what an app wrote on stderr. To a terminal, as glyphs only:
+    /// a control character a space, a hidden one dropped, the line ends
+    /// kept; to a pipe, as written, as `cat` would
     Log {
         /// An id or a name
         app: String,
@@ -259,7 +263,7 @@ fn find(apps: &[Value], id: u64) -> Option<&Value> {
 pub fn last_log_line(info: &Value) -> Option<String> {
     let text = std::fs::read_to_string(info["log"].as_str()?).ok()?;
     let line = text.lines().rev().find(|l| !l.trim().is_empty())?;
-    Some(line.trim().to_string())
+    Some(ptyrc_vt::glyphs_only(line).trim().to_string())
 }
 
 fn ended_badly(info: &Value) -> bool {
@@ -290,6 +294,10 @@ pub fn start(client: &mut Client, argv: &[String], name: &str) -> Result<Value, 
 /// `start`, with the params of `app.start` made.
 pub fn start_with(client: &mut Client, params: Value) -> Result<Value, Fail> {
     let started = client.call("app.start", params)?;
+    // A store app granted without asking (no screen): each named.
+    for w in started["warnings"].as_array().into_iter().flatten() {
+        eprintln!("ptyrc: warning: {}", w.as_str().unwrap_or_default());
+    }
     let id = started["app"]["id"].as_u64().unwrap_or(0);
     let deadline = Instant::now() + START_WAIT;
     let mut info = started["app"].clone();
@@ -408,6 +416,7 @@ pub fn ls(common: &Common) -> Result<ExitCode, Fail> {
         eprintln!("ptyrc: no app\n  start one: ptyrc manage start APP");
         return Ok(ExitCode::SUCCESS);
     }
+    let tty = std::io::stdout().is_terminal();
     let rows: Vec<[String; 7]> = apps
         .iter()
         .map(|a| {
@@ -417,8 +426,8 @@ pub fn ls(common: &Common) -> Result<ExitCode, Fail> {
                 state(a),
                 since(a),
                 a["pid"].to_string(),
-                label(a),
-                options(a).join(" "),
+                shown(&label(a), tty),
+                shown(&options(a).join(" "), tty),
             ]
         })
         .collect();
@@ -778,14 +787,39 @@ fn log(common: &Common, word: &str) -> Result<ExitCode, Fail> {
     if common.json {
         print_json(&json!({"app": app["id"], "log": path, "text": text}), false);
     } else {
-        print!("{text}");
+        print!("{}", shown(&text, std::io::stdout().is_terminal()));
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// What an app wrote, as printed: to a terminal (`tty`), each line as
+/// glyphs only (`ptyrc_vt::glyphs_only`), its end kept; else as is.
+fn shown(text: &str, tty: bool) -> String {
+    if !tty {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        let (body, end) = match line.strip_suffix('\n') {
+            Some(body) => (body, "\n"),
+            None => (line, ""),
+        };
+        out.push_str(&ptyrc_vt::glyphs_only(body));
+        out.push_str(end);
+    }
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_log_reaches_a_terminal_as_glyphs() {
+        let log = "ok \x1b]0;owned\x07\x1b[2J\u{202e}gnp.exe\r\nnext\n";
+        assert_eq!(shown(log, true), "ok  ]0;owned  [2Jgnp.exe \nnext\n");
+        assert_eq!(shown(log, false), log);
+    }
 
     #[test]
     fn a_native_app_hides_a_store_one() {

@@ -152,3 +152,61 @@ fn throughput() {
         2000,
     );
 }
+
+/// Cost of one call, in microseconds: the least of `rounds` calls, the
+/// measure least disturbed by other load.
+fn best(name: &str, rounds: usize, mut f: impl FnMut()) {
+    let mut least = f64::MAX;
+    for _ in 0..rounds {
+        let start = Instant::now();
+        f();
+        least = least.min(start.elapsed().as_secs_f64());
+    }
+    println!("{name}: {:.1} us", least * 1e6);
+}
+
+/// A 200x60 frame, every cell its own colour: `ptyrc-box`'s live test.
+fn rainbow(k: u32) -> ptyrc_vt::Grid {
+    use ptyrc_vt::{Cell, Color, Grid, Style};
+    let mut grid = Grid::new(200, 60);
+    let c = char::from(b'A' + (k % 26) as u8);
+    for row in 0..60u16 {
+        for col in 0..200u16 {
+            let v = u32::from(row) * 200 + u32::from(col) + k;
+            let style = Style {
+                fg: Color::Rgb((v >> 16) as u8, (v >> 8) as u8, v as u8),
+                ..Style::default()
+            };
+            grid.put(col, row, Cell::glyph(c, 1, style));
+        }
+    }
+    grid
+}
+
+/// The repair of a colour a cell, and the same bytes parsed whole by a
+/// copy of the host. `cargo test --release -p ptyrc-vt --test throughput
+/// repaint -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn repaint() {
+    let frames = [rainbow(0), rainbow(1)];
+    let mut host = Vt::new(200, 60);
+    let (mut k, mut sent) = (0, 0);
+    best("repair a colour a cell 200x60", 400, || {
+        k += 1;
+        let mut out = Vec::new();
+        ptyrc_vt::repair(&mut host, &frames[k % 2], &mut out);
+        sent = out.len();
+    });
+    println!("  {sent} B sent");
+    let before = host.clone();
+    let mut out = Vec::new();
+    ptyrc_vt::repair(&mut host, &frames[(k + 1) % 2], &mut out);
+    let mut fed = before.clone();
+    best("clone_from 200x60", 100, || fed.clone_from(&before));
+    best("clone_from, feed the repair 200x60", 100, || {
+        fed.clone_from(&before);
+        fed.feed(&out);
+    });
+    assert_eq!(fed.grid(), host.grid());
+}

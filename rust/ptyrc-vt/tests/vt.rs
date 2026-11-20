@@ -14,6 +14,44 @@ fn pos(vt: &Vt) -> (u16, u16) {
     (c.col, c.row)
 }
 
+/// A whole CSI of parameters takes a shorter way than one fed in pieces:
+/// both end alike, odd sequences too.
+#[test]
+fn csi_whole_or_in_pieces() {
+    let mut many = String::from("\x1b[");
+    for i in 0..40 {
+        many += &format!("{};", 30 + i % 8);
+    }
+    many += "1m";
+    let cases = [
+        "\x1b[31;48;2;1;2;3mA",
+        "\x1b[38:2::4:5:6;4:3mB",
+        "\x1b[99999999;5HC",
+        "\x1b[;;7;mD",
+        "\x1b[:1mE",
+        "\x1b[3;4r\x1b[2;5HF",
+        "\x1b[?25l\x1b[?1049hG",
+        "\x1b[1 qH",
+        "\x1b[2$pI",
+        "\x1b[5\x08CJ",
+        "\x1b[3\x1b[32mK",
+        "\x1b[12bL",
+        many.as_str(),
+        "\x1b[38;5;300;1;2;22;23;24;27;9m\x1b[3XM",
+    ];
+    for case in cases {
+        let text = format!("ab\x1b[2;3H{case}\u{301}\x1b[2b");
+        let whole = vt(12, 6, &text);
+        let mut pieces = Vt::new(12, 6);
+        for b in text.as_bytes() {
+            pieces.feed(std::slice::from_ref(b));
+        }
+        assert_eq!(whole.grid(), pieces.grid(), "{case:?}");
+        assert!(whole.same_state(&pieces), "{case:?}");
+        assert_eq!(whole.in_ground(), pieces.in_ground(), "{case:?}");
+    }
+}
+
 #[test]
 fn print_and_wrap() {
     let v = vt(5, 3, "abcdefg");

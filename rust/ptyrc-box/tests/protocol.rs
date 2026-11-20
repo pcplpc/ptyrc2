@@ -107,7 +107,7 @@ fn every_topic_and_permission() {
     };
     let permissions = section(&doc, "Permissions");
     let names = list("PERMISSIONS");
-    assert_eq!(names.len(), 19, "{names:?}");
+    assert_eq!(names.len(), 21, "{names:?}");
     for p in names {
         assert!(
             named(permissions, &p),
@@ -118,4 +118,33 @@ fn every_topic_and_permission() {
     for l in list("LIMITS") {
         assert!(named(limits, &l), "{l}: not in PROTOCOL.md, Limits");
     }
+}
+
+/// `manifest::CEILINGS` of this crate against `LIMITS` and
+/// `limit_permission` of `ptyrc-store`: one row each, the same figures.
+#[test]
+fn the_ceilings_are_the_manifests() {
+    let manifest = read("rust/ptyrc-store/src/manifest.rs");
+    let start = manifest.find("pub const LIMITS: &[").unwrap();
+    let body = &manifest[start..];
+    let body = &body[body.find("= &[").unwrap()..body.find("];").unwrap()];
+    let rows: Vec<(String, u64, u64)> = (body.lines())
+        .filter_map(|l| {
+            let l = l.trim().strip_prefix("(\"")?.strip_suffix("),")?;
+            let (name, rest) = l.split_once("\", ")?;
+            let (d, c) = rest.split_once(", ")?;
+            let n = |s: &str| s.replace('_', "").parse::<u64>().unwrap();
+            Some((name.to_owned(), n(d), n(c)))
+        })
+        .collect();
+    let ours: Vec<(String, u64, u64)> = (ptyrc_box::manifest::CEILINGS.iter())
+        .map(|(name, d, c, _)| (name.to_string(), *d, *c))
+        .collect();
+    assert_eq!(rows, ours);
+    for (name, _, _, permission) in ptyrc_box::manifest::CEILINGS {
+        let memory = ["memory-mib", "canvas-screens", "log-mib"].contains(name);
+        let theirs = if memory { "limit-memory" } else { "limit-time" };
+        assert_eq!(*permission, theirs, "{name}");
+    }
+    assert!(manifest.contains(r#""memory-mib" | "canvas-screens" | "log-mib" => "limit-memory""#));
 }

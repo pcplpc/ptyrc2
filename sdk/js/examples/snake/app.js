@@ -23,8 +23,8 @@ const HINT = style({ fg: 8 });
 const PLACE = { anchor: { at: [0, 0], space: "view" } };
 const ARROWS = { right: [1, 0], left: [-1, 0], down: [0, 1], up: [0, -1] };
 const STEPS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-// Cells of the field a step: Boa takes about 3 µs a cell, and a whole
-// field of 200x60 would be over the 50 ms of a tick.
+// Cells of the field a step: a bound, so that a field of 200x60
+// stays well under the 50 ms of a tick.
 const BUDGET = 2000;
 
 let w = 0;
@@ -36,7 +36,6 @@ let body = []; // cell indices, the head first
 let occ; // body segments per cell
 let grow = 0;
 let apple = -1;
-// Plain arrays: faster than typed ones in Boa.
 let dist = []; // steps to the apple, -1: none
 let queue = [];
 let qh = 0;

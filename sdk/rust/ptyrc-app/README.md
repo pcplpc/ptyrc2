@@ -98,6 +98,7 @@ session (`PTYRC_SOCKET`); headless, through the library (Test).
 | `log(text)` | a line of the app's log; 1 MiB in all |
 | `random(&mut [u8])`, `random_u32()`, `random_below(n)` | from the host; `random_below`: `0..n` |
 | `exit(code) -> !` | the end |
+| `manifest() -> Option<&Manifest>` | what the app is told of itself at `init` (`PROTOCOL.md`, Manifest): `id`, `version`, `permissions`, `words`, `granted`, `limits` (those granted); `holds(name)`. `None` before `init`, or run without a manifest |
 | `subscribe(&[topics])` | `size`, `draw`, `mouse`, `hover`, ... (`subscribe` of the Protocol) |
 | `size() -> (columns, rows)` | `session.info`; event `size` `{"size": [c, r]}` |
 | `put(sprite) -> id` | `draw.put` of a sprite as JSON (`PROTOCOL.md`, Methods) |

@@ -176,6 +176,23 @@ fn bad_limits_options() {
         "above the default",
     );
     bad("memory-mib = 128", "disk-mib = 128", 18, "unknown");
+    // Past the runner's ceiling: named.
+    bad(
+        "memory-mib = 128",
+        "memory-mib = 4096",
+        18,
+        "above the ceiling 512",
+    );
+    assert!(manifest::parse(&GOOD.replace("memory-mib = 128", "memory-mib = 512")).is_ok());
+    // A limit is asked through [limits], never [permissions].
+    bad(
+        "shape = \"the cats",
+        "limit-memory = \"more\"\nshape = \"the cats",
+        14,
+        "not a permission",
+    );
+    assert_eq!(manifest::limit_permission("log-mib"), "limit-memory");
+    assert_eq!(manifest::limit_permission("tick-ms"), "limit-time");
     bad(
         "rate = { type = \"int\", default = 20",
         "rate = { type = \"int\", default = \"20\"",

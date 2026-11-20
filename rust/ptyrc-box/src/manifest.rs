@@ -13,7 +13,8 @@ use std::time::Duration;
 pub const MEMBER: &str = "ptyrc:manifest";
 
 /// `[limits]` keys: `(name, default, ceiling, permission)`. The ceiling
-/// holds whatever the manifest says (`ptyrc-store`, `LIMITS`).
+/// holds whatever the manifest says; `ptyrc-store` (`LIMITS`) refuses a
+/// manifest past it. Pinned by `tests/protocol.rs`.
 pub const CEILINGS: &[(&str, u64, u64, &str)] = &[
     ("calls-per-second", 1000, 10_000, "limit-time"),
     ("canvas-screens", 4, 16, "limit-memory"),

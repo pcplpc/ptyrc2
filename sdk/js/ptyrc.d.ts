@@ -155,6 +155,24 @@ declare module "ptyrc" {
   /** Random bytes from the host: 65536 at most. */
   export function random(length: number): Uint8Array;
 
+  /** What the app may know of its manifest, as the runner holds it. */
+  export interface Manifest {
+    id: string;
+    version: string;
+    /** As declared; `words`: those of the permission `words`. */
+    permissions: { name: string; words?: string[] }[];
+    /** The permissions held now. */
+    granted: string[];
+    /** `[limits]` granted, each up to its ceiling: `{"tick-ms": 80}`. */
+    limits: { [key: string]: number };
+  }
+
+  /**
+   * The manifest of the app (a copy); `null` in a run given none
+   * (`ptyrc-box` without `--manifest`).
+   */
+  export function manifest(): Manifest | null;
+
   /** Ends the app. Does not return. */
   export function exit(code?: number): never;
 }

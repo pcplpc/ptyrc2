@@ -21,3 +21,8 @@ regex = "1"
 [profile.release]
 opt-level = 3
 lto = "thin"
+
+# The script interpreter is compiled by cranelift at each start of a
+# script app: 20 s in a debug build without this.
+[profile.dev.package.cranelift-codegen]
+opt-level = 3

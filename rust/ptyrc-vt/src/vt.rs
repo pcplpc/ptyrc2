@@ -123,6 +123,19 @@ const LINKS_MAX: usize = 1 << 16;
 const EVENTS_MAX: usize = 1024;
 const CELL_TEXT_MAX: usize = 32;
 
+/// Length of the CSI at the start of `bytes` when it is whole and made of
+/// parameters only: `ESC [`, digits, `;` and `:`, a final byte.
+fn csi_len(bytes: &[u8]) -> Option<usize> {
+    if bytes.get(1) != Some(&b'[') {
+        return None;
+    }
+    let body = bytes[2..]
+        .iter()
+        .position(|b| !matches!(b, b'0'..=b'9' | b';' | b':'))?;
+    let end = 2 + body;
+    (0x40..=0x7e).contains(&bytes[end]).then_some(end + 1)
+}
+
 #[derive(Clone, Debug, Default)]
 struct Parser {
     state: State,
@@ -164,6 +177,23 @@ impl Parser {
         }
         self.cur = 0;
         self.has_cur = false;
+    }
+
+    /// A digit, `;` or `:` of a CSI.
+    fn param_byte(&mut self, b: u8) {
+        if b.is_ascii_digit() {
+            if self.ninter > 0 {
+                self.ignore = true;
+            }
+            self.cur = self
+                .cur
+                .saturating_mul(10)
+                .saturating_add((b - b'0') as u16);
+        } else {
+            self.push_param();
+            self.next_sub = b == b':';
+        }
+        self.has_cur = true;
     }
 
     fn collect(&mut self, b: u8) {
@@ -418,6 +448,30 @@ impl Vt {
 
     // Byte stream.
 
+    /// The final byte of a CSI: dispatch.
+    fn csi_end(&mut self, fin: u8) {
+        if self.p.has_cur {
+            self.p.push_param();
+        }
+        self.p.state = State::Ground;
+        if fin == b'm' && self.p.private == 0 && self.p.ninter == 0 && !self.p.ignore {
+            // SGR, the most frequent: the arm of `csi` taken at once.
+            let params = Params {
+                vals: self.p.vals,
+                len: self.p.len,
+                sub: self.p.sub,
+            };
+            sgr::apply(&mut self.pen, &params);
+        } else if !self.p.ignore {
+            let params = Params {
+                vals: self.p.vals,
+                len: self.p.len,
+                sub: self.p.sub,
+            };
+            self.csi(&params, fin);
+        }
+    }
+
     pub fn feed(&mut self, bytes: &[u8]) {
         let mut i = 0;
         let n = bytes.len();
@@ -433,6 +487,19 @@ impl Vt {
                         self.print_ascii(&bytes[i..j]);
                         i = j;
                     } else if b < 0x20 || b == 0x7f {
+                        if b == 0x1b
+                            && let Some(len) = csi_len(&bytes[i..])
+                        {
+                            // A whole CSI of parameters only, in the
+                            // buffer: the steps of the states below.
+                            self.p.start_seq();
+                            for &c in &bytes[i + 2..i + len - 1] {
+                                self.p.param_byte(c);
+                            }
+                            self.csi_end(bytes[i + len - 1]);
+                            i += len;
+                            continue;
+                        }
                         i += 1;
                         if b == 0x1b {
                             self.p.state = State::Esc;
@@ -529,22 +596,7 @@ impl Vt {
                 State::Csi => {
                     i += 1;
                     match b {
-                        b'0'..=b'9' => {
-                            if self.p.ninter > 0 {
-                                self.p.ignore = true;
-                            }
-                            self.p.cur = self
-                                .p
-                                .cur
-                                .saturating_mul(10)
-                                .saturating_add((b - b'0') as u16);
-                            self.p.has_cur = true;
-                        }
-                        b';' | b':' => {
-                            self.p.push_param();
-                            self.p.next_sub = b == b':';
-                            self.p.has_cur = true;
-                        }
+                        b'0'..=b'9' | b';' | b':' => self.p.param_byte(b),
                         0x3c..=0x3f => {
                             if self.p.len == 0 && !self.p.has_cur && self.p.private == 0 {
                                 self.p.private = b;
@@ -553,20 +605,7 @@ impl Vt {
                             }
                         }
                         0x20..=0x2f => self.p.collect(b),
-                        0x40..=0x7e => {
-                            if self.p.has_cur {
-                                self.p.push_param();
-                            }
-                            self.p.state = State::Ground;
-                            if !self.p.ignore {
-                                let params = Params {
-                                    vals: self.p.vals,
-                                    len: self.p.len,
-                                    sub: self.p.sub,
-                                };
-                                self.csi(&params, b);
-                            }
-                        }
+                        0x40..=0x7e => self.csi_end(b),
                         0x18 | 0x1a => self.p.state = State::Ground,
                         0x1b => {
                             self.p.state = State::Esc;

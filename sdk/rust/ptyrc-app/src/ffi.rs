@@ -30,7 +30,8 @@ fn layout(len: u32) -> Option<Layout> {
 }
 
 /// `len` bytes for the host; 0: none left. `len` 0: a non-null address.
-#[unsafe(no_mangle)]
+// Exported to the host alone: natively (`cargo test`) not the libc's.
+#[cfg_attr(target_arch = "wasm32", unsafe(no_mangle))]
 pub extern "C" fn alloc(len: u32) -> u32 {
     match layout(len) {
         Some(_) if len == 0 => ALIGN as u32,
@@ -41,7 +42,8 @@ pub extern "C" fn alloc(len: u32) -> u32 {
 }
 
 /// What `alloc` gave, with its `len`.
-#[unsafe(no_mangle)]
+// Exported to the host alone: natively (`cargo test`) not the libc's.
+#[cfg_attr(target_arch = "wasm32", unsafe(no_mangle))]
 pub extern "C" fn free(ptr: u32, len: u32) {
     if let Some(l) = layout(len).filter(|_| ptr != 0 && len != 0) {
         // SAFETY: the host gives back what `alloc` gave, with its length.

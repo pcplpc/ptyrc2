@@ -267,13 +267,11 @@ impl Driver {
     /// gone on without being shown.
     pub(super) fn show_ask(&mut self, engine: &mut dyn Engine) {
         while let Some(first) = self.asks.front()
-            && let Then::Call { params, .. } = &first.then
+            && let Then::Call { .. } = &first.then
         {
-            let declared = (params.get("declares"))
-                .and_then(|d| Declared::from_wire(d).ok())
-                .unwrap_or_default();
+            // What the screen asks: of a store app, its manifest's.
             let (entry, _) = file_entry(&first.ask.key);
-            if !permissions::resolve(&declared, entry.as_ref(), false)
+            if !permissions::resolve(&first.ask.declared, entry.as_ref(), false)
                 .missing
                 .is_empty()
             {

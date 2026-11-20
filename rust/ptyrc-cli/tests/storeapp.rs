@@ -14,7 +14,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 const GPL: &str = "                    GNU GENERAL PUBLIC LICENSE\n                       Version 3, 29 June 2007\n";
-const JS: &str = "../../sdk/js/interp/target/wasm32-unknown-unknown/release/ptyrc_js.wasm";
+const JS: &str = "../../sdk/js/interp/target/ptyrc-js.wasm";
 const CONFETTI: &str = "../../sdk/js/examples/confetti";
 /// The first start compiles the interpreter: slow in a debug build.
 const SLOW: Duration = Duration::from_secs(180);
@@ -138,7 +138,7 @@ fn a_store_app_from_a_repository_to_the_screen() {
     if !js.is_file() {
         eprintln!(
             "SKIPPED: no interpreter module; build it: \
-             cargo build --release --manifest-path sdk/js/interp/Cargo.toml"
+             sdk/js/interp/build.sh"
         );
         return;
     }
@@ -670,4 +670,186 @@ fn a_look_alike_of_the_pop_up() {
         &mut || host_text(&mut client).contains(" local:"),
         "told",
     );
+}
+
+/// Holds `shape` and asks two limits; stays.
+const LIMITED: &str = r#"[app]
+id = "limited"
+version = "0.1.0"
+summary = "Asks for more."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+
+[permissions]
+shape = "to see"
+
+[limits]
+memory-mib = 128
+tick-ms = 100
+"#;
+
+const STAYS: &str = r#"
+import { log, period } from "ptyrc";
+export function init(args) { log("up"); period(0); }
+export function tick(now) {}
+export function event(topic, data) {}
+"#;
+
+/// `--manifest` of the runner's command line of `app`: `granted`, and
+/// the limits.
+fn told(app: &Value) -> Value {
+    let argv = app["argv"].as_array().unwrap();
+    assert_eq!(argv[1], "--manifest", "{app}");
+    serde_json::from_str(argv[2].as_str().unwrap()).unwrap()
+}
+
+#[test]
+fn limits_granted_told_to_the_runner_and_anew_at_a_restart() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let sb = Sandbox::new("limits");
+    let origin = install(&sb, "limited", LIMITED.to_string(), STAYS);
+    let mut driver = sb.ptyrc();
+    driver
+        .env("PTYRC_BOX", runner())
+        .env("PTYRC_JS", &js)
+        .args(["run", "--name", "s", "--headless", "--", "cat"])
+        .stdin(std::process::Stdio::null());
+    let _driver = common::Proc(driver.spawn().unwrap());
+    let socket = sb.socket("s");
+    wait_for(
+        || std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "socket",
+    );
+    let mut client = sb.client("s");
+
+    // Headless: granted as declared, each named in a warning.
+    let started = client
+        .call("app.start", json!({"store": "limited"}))
+        .unwrap();
+    let warned = "no screen to ask: granted as declared: shape, limit-memory, limit-time";
+    assert_eq!(started["warnings"], json!([warned]), "{started}");
+    let app = &started["app"];
+    let id = app["id"].as_u64().unwrap();
+    let given = told(app);
+    assert_eq!(
+        given["granted"],
+        json!(["shape", "limit-memory", "limit-time"])
+    );
+    assert_eq!(given["limits"], json!({"memory-mib": 128, "tick-ms": 100}));
+    assert_eq!(given["id"], "limited");
+    wait_slow(|| log_of(&mut client, id).contains("up"), "started");
+    assert!(log_of(&mut client, id).contains(warned));
+
+    // A no to a limit, then a restart: the runner is told anew.
+    let config = sb.config().join("ptyrc");
+    std::fs::create_dir_all(&config).unwrap();
+    let answers = format!(
+        "[app.\"{origin}\"]\nallow = [\"shape\", \"limit-time\"]\ndeny = [\"limit-memory\"]\n"
+    );
+    std::fs::write(config.join("permissions.toml"), answers).unwrap();
+    let restarted = client.call("app.restart", json!({"app": id})).unwrap();
+    assert!(restarted.get("warnings").is_none(), "{restarted}");
+    assert_eq!(
+        told(&restarted["app"])["granted"],
+        json!(["shape", "limit-time"])
+    );
+    let runs = |client: &mut Client| {
+        let apps = client.call("app.list", json!({})).unwrap();
+        let app = (apps["apps"].as_array().unwrap().iter()).find(|a| a["id"] == id);
+        app.map(|a| {
+            (
+                a["runs"].as_u64().unwrap_or(0),
+                a["pid"].as_u64().unwrap_or(0),
+            )
+        })
+    };
+    wait_slow(
+        || runs(&mut client).is_some_and(|(r, _)| r == 2),
+        "run again",
+    );
+    let pid = runs(&mut client).unwrap().1;
+    let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap();
+    let cmdline = String::from_utf8_lossy(&cmdline);
+    assert!(
+        cmdline.contains(r#""granted":["shape","limit-time"]"#),
+        "{cmdline}"
+    );
+
+    // `ptyrc app`: the warning on its stderr.
+    std::fs::remove_file(config.join("permissions.toml")).unwrap();
+    let run = sb.run(&["-s", "s", "app", "limited"]);
+    let err = String::from_utf8_lossy(&run.stderr).into_owned();
+    assert!(run.status.success(), "{err}");
+    assert!(err.contains(&format!("ptyrc: warning: {warned}")), "{err}");
+}
+
+#[test]
+fn the_pop_up_of_a_store_app_shows_its_limits() {
+    let sb = Sandbox::new("limitsasked");
+    install(&sb, "limited", LIMITED.to_string(), STAYS);
+    let env = |name: &str, path: &Path| format!("{name}={}", path.display());
+    let box_ = env("PTYRC_BOX", &runner());
+    let data = env("XDG_DATA_HOME", &sb.dir.join("data"));
+    let state = env("XDG_STATE_HOME", &sb.dir.join("state"));
+    let cache = env("XDG_CACHE_HOME", &sb.dir.join("cache"));
+    let argv = [
+        "env",
+        &box_,
+        &data,
+        &state,
+        &cache,
+        BIN,
+        "run",
+        "--no-hotkey",
+        "--name",
+        "t",
+        "cat",
+    ];
+    let (mut host, _pty) = common::HostPty::spawn(&sb, &argv);
+    let host_text = |client: &mut Client| {
+        let dump = client.call("debug.dump", json!({})).unwrap();
+        let lines = dump["host"].as_array().unwrap().iter();
+        lines
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let until = |host: &mut common::HostPty, ready: &mut dyn FnMut() -> bool, what: &str| {
+        wait_slow(
+            || {
+                host.pump();
+                ready()
+            },
+            what,
+        )
+    };
+    until(&mut host, &mut || sb.socket("t").exists(), "the session");
+    let mut asker = sb.client("t");
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(code(asker.call("app.start", json!({"store": "limited"}))));
+    });
+    let mut client = sb.client("t");
+    until(
+        &mut host,
+        &mut || host_text(&mut client).contains("This app asks to:"),
+        "the pop-up",
+    );
+    let shown = host_text(&mut client);
+    assert!(shown.contains("[x] see where the text is"), "{shown}");
+    assert!(shown.contains("[x] use up to 128 MiB of memory"), "{shown}");
+    assert!(shown.contains("[x] use up to 100 ms a tick"), "{shown}");
+    host.type_in(b"\x1b");
+    until(
+        &mut host,
+        &mut || !host_text(&mut client).contains("asks to"),
+        "closed",
+    );
+    let answer = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(answer, "cancelled");
 }

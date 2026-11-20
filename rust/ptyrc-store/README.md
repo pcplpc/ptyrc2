@@ -19,8 +19,10 @@ hint }`: `message` says what was refused (manifest errors as
 - `Permission { name, why, words }`; names from `manifest::PERMISSIONS`;
   `words = { list = [...], why = "..." }`: 1 to 32 words, 3 to 32
   letters or digits, distinct ignoring case.
-- `Limit { name, value }`: keys and defaults in `manifest::LIMITS`; a
-  value must exceed its default.
+- `Limit { name, value }`: keys, defaults and ceilings in
+  `manifest::LIMITS`; a value exceeds its default, not its ceiling (the
+  runner's). Granted by `limit-memory` or `limit-time`
+  (`limit_permission`), never declared in `[permissions]`.
 - `AppOption { name, default: OptionValue, doc }`; the type is the
   default's. Names in `RESERVED_OPTIONS` are ptyrc's.
 

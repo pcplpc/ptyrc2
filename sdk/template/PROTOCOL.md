@@ -9,13 +9,17 @@ Checked against the driver by `rust/ptyrc-box/tests/protocol.rs`.
 
 ## Permissions
 
-Declared in `[permissions]`, granted by the user at the start, one yes
-or no each. Not declared: never held. A degree (`layout` < `shape` <
-`words` < `text`) is held only with every declared degree below it.
+Declared in `[permissions]` (the limits: in `[limits]`, Limits),
+granted by the user at the start, one yes or no each. Not declared:
+never held. A degree (`layout` < `shape` < `words` < `text`) is held
+only with every declared degree below it. No screen to ask (a headless
+session): what has no answer is granted as declared, each so granted
+named in a warning on the stderr of who started it.
 
 Held without asking (the default profile): drawing on its own layer,
-behind the text; its own sprites and widgets; the size; `tick`; the
-keys of its focused widget; the pointer on its own things.
+behind the text, on its surface; its own sprites and widgets; the size;
+`tick`; the keys of its focused widget; the pointer and the clicks on
+its own widget, or its own sprite in front of the text.
 
 | name | opens | a no gives | colour |
 |---|---|---|---|
@@ -25,14 +29,16 @@ keys of its focused widget; the pointer on its own things.
 | `text` | every cell: `screen.text`, `screen.cells`, `screen.find`, `screen.wait {pattern}`, `frame.text`, all of `session.info` | `words`, else `shape`, else blank | red |
 | `front-widget` | a widget in front | behind | plain |
 | `front` | sprites in front (`layer` > 0, `"front"`, `"hud"`); widgets too | behind | amber |
-| `screen-wide` | `surface = "screen"` | not enforced yet | amber |
+| `screen-wide` | `surface = "screen"`: anywhere | clipped to its frame | amber |
 | `keys-arrows` | `input.grab` of keys that are not text: arrows, `home`, `end`, `pageup`, `pagedown`, `insert`, `delete`, `f1`..`f12` | `denied` | plain |
 | `keys-grab` | any other `input.grab`; `widget.show {modal: true}` | `denied` | red |
 | `keys-read` | topic `input`: every key | subscribed, no event | red |
-| `pointer` | topic `hover`: moves anywhere | subscribed, no event | plain |
-| `clicks` | topic `mouse`: clicks on sprites | subscribed, no event | red |
-| `clicks-grab` | nothing yet | | red |
-| `clock`, `storage`, `files`, `files-write`, `probe-git`, `probe-system` | nothing yet: accepted, unused | | `files-write` red |
+| `pointer` | topic `hover` elsewhere than its own things: moves anywhere | no event there | plain |
+| `clicks` | topic `mouse` elsewhere than its own things: clicks anywhere | no event there | red |
+| `clicks-grab` | a click it is told elsewhere taken from the program | the program has it too | red |
+| `limit-memory` | `[limits]` `memory-mib`, `canvas-screens`, `log-mib` | the default | plain |
+| `limit-time` | `[limits]` `tick-ms`, `init-ms`, `calls-per-second` | the default | plain |
+| `clock`, `storage`, `files`, `files-write`, `probe-git`, `probe-system` | nothing yet: accepted, unused | | `files-write` red; the rest plain |
 
 - A reading not held is answered in the same form, cut to the degree
   held, with `"degree": "none" | "layout" | "shape" | "words"` in the
@@ -128,8 +134,8 @@ Effects: `draw.exts`. Limits of the driver: 256 sprites, 16 widgets,
 | `idle` | `{"frame","idle","score","free"}`, when `idle` changes | `shape` |
 | `colors` | host colours | `shape` |
 | `input` | `{"key","bytes","grabbed":true}` (a grab), `{"key","bytes","widget"}` (a focused widget), `{"released":"escape"}`; every key | `keys-read` for every key; a grab's and a focused widget's come unsubscribed |
-| `mouse` | `{"sprite","button","action","mods","at","x","y","frame","pos"}` | `clicks` |
-| `hover` | `{"sprite","at","x","y","frame","pos","mods"}` | `pointer` |
+| `mouse` | `{"sprite","button","action","mods","at","x","y","frame","pos"}` | — on its own widget or sprite in front; elsewhere `clicks` |
+| `hover` | `{"sprite","at","x","y","frame","pos","mods"}`; `sprite` null: left | — on its own widget or sprite in front; elsewhere `pointer` |
 
 - `screen.*` answers the wrapped program's cells, never the composed
   picture: an app never reads its own sprites, nor another's.
@@ -187,7 +193,7 @@ summary = "One line, 200 at most."
 license = "GPL-3.0-or-later"
 api = 1
 script = "app.js"          # or rust = "src/lib.rs", rustc = "1.85"
-surface = "screen"         # "widget" (default), "frame", "screen"; not enforced yet
+surface = "screen"         # "widget" (default), "frame", "screen": where it is clipped
 # assets = "assets/"; tape = "demo.tape"
 
 [options]                  # each: --NAME VALUE, --NAME, --no-NAME; init(args).NAME
@@ -198,21 +204,30 @@ size = { type = "int", default = 20, doc = "one line" }   # int, float, bool, st
 shape = "to stand on the text"
 words = { list = ["food", "fish"], why = "to find them" }  # 1..32 words, 3..32 letters or digits
 
-[limits]                   # only above the default; accepted, not applied yet
+[limits]                   # above the default, up to the ceiling (Limits)
 memory-mib = 128
 ```
 
+At `init`, `args["ptyrc:manifest"]`: `{"id", "version", "permissions":
+[{"name", "words"?}], "granted": [name], "limits": {KEY: N}}`, the
+limits granted alone (Rust: `manifest()`).
+
 ## Limits
 
-| | default | `[limits]` key |
-|---|---|---|
-| `tick`, `event`: late | 50 ms; three late in a row: paused | `tick-ms` |
-| `tick`, `event`, `stop`: ended | 2 s (`stop`: 500 ms) | |
-| `init` | 2 s | `init-ms` |
-| memory | 64 MiB | `memory-mib` |
-| `call` | 1000 a second, then `limit` | `calls-per-second` |
-| canvases, all | four screens of cells | `canvas-screens` |
-| log | 1 MiB | `log-mib` |
+More than a default is declared in `[limits]`, a key each, and asked
+as its permission: the pop-up shows the figure ("use up to 128 MiB of
+memory"). Granted: applied; a no: the default. A value past the
+ceiling: an error at `ptyrc dev check` and at install, naming it.
+
+| | default | `[limits]` key | ceiling | permission |
+|---|---|---|---|---|
+| `tick`, `event`: late | 50 ms; three late in a row: paused | `tick-ms` | 200 | `limit-time` |
+| `tick`, `event`, `stop`: ended | 2 s (`stop`: 500 ms) | | | |
+| `init` | 2 s | `init-ms` | 10000 | `limit-time` |
+| memory | 64 MiB | `memory-mib` | 512 | `limit-memory` |
+| `call` | 1000 a second, then `limit` | `calls-per-second` | 10000 | `limit-time` |
+| canvases, all | four screens of cells | `canvas-screens` | 16 | `limit-memory` |
+| log | 1 MiB | `log-mib` | 16 | `limit-memory` |
 | `period` | 33 ms at least | |
 | a JSON argument or answer | 4 MiB | |
 | scripts, all | 1 MiB | |

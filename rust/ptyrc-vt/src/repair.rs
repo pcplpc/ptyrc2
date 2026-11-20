@@ -58,6 +58,11 @@ fn write_link(out: &mut Vec<u8>, vt: &Vt, id: u32) {
     }
 }
 
+/// `*cell == Cell::default()`, the cheap fields first.
+fn is_default(cell: &Cell) -> bool {
+    cell.style == Style::default() && cell.width == 1 && cell.text == " "
+}
+
 struct Painter<'a> {
     host: &'a Vt,
     buf: Vec<u8>,
@@ -115,7 +120,7 @@ impl Painter<'_> {
         self.pen != Style::default()
             && self.pen.bg == Color::Default
             && !self.pen.attrs.contains(Attrs::INVERSE)
-            && *cell == Cell::default()
+            && is_default(cell)
     }
 
     /// Erase `n` cells from `(col, row)`, or to the end of the row; the
@@ -137,7 +142,10 @@ impl Painter<'_> {
     fn cell(&mut self, col: u16, row: u16, cell: &Cell) {
         self.goto(col, row);
         self.style(cell.style);
-        self.buf.extend_from_slice(glyph(cell).as_bytes());
+        match glyph(cell).as_bytes() {
+            &[b] => self.buf.push(b),
+            text => self.buf.extend_from_slice(text),
+        }
         let next = col + cell.width.max(1) as u16;
         // Past the last column the cursor stays there, wrap pending or not.
         self.at = if next < self.host.cols() {
@@ -168,9 +176,11 @@ pub fn repair(host: &mut Vt, desired: &Grid, out: &mut Vec<u8>) {
     let (top, _) = host.margins();
     let last_pos = host.last_pos;
 
+    // Written in place at the end of `out`.
+    let before = out.len();
     let mut p = Painter {
         host,
-        buf: Vec::with_capacity(256),
+        buf: std::mem::take(out),
         at: None,
         pen: entry_pen,
     };
@@ -211,7 +221,7 @@ pub fn repair(host: &mut Vt, desired: &Grid, out: &mut Vec<u8>) {
                     // or to the end of the row.
                     let run = want[col as usize..]
                         .iter()
-                        .take_while(|c| **c == Cell::default())
+                        .take_while(|c| is_default(c))
                         .count();
                     let to_end = col as usize + run == cols as usize;
                     let n = (0..run)
@@ -293,9 +303,8 @@ pub fn repair(host: &mut Vt, desired: &Grid, out: &mut Vec<u8>) {
         p.buf.extend_from_slice(b"\x1b[?2026l");
     }
 
-    let buf = p.buf;
-    host.feed(&buf);
-    out.extend_from_slice(&buf);
+    *out = p.buf;
+    host.feed(&out[before..]);
 }
 
 /// Rows of `grid` as text with SGR sequences, each ending in a reset.

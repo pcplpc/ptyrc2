@@ -5,41 +5,56 @@
 
 use crate::grants::Permission;
 use crate::permissions::{Declared, Entry};
+use ptyrc_store::manifest::{self, Colour};
 use ptyrc_vt::{Attrs, Cell, Color, Grid, Style, char_width, str_width};
 
 /// The least screen the box is drawn on; a smaller one is refused at
 /// the request.
 pub(crate) const MIN_SIZE: (u16, u16) = (24, 8);
 
-/// How a permission is shown. Amber is ticked by hand, as red, until
-/// the colours are decided (`plan/store-model.md`, Colours).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Colour {
-    Plain,
-    Amber,
-    Red,
+/// How a permission is shown (`plan/store-model.md`, Colours): plain,
+/// ticked when shown; amber and red, ticked by hand.
+fn ticked(colour: Colour) -> bool {
+    colour == Colour::Plain
 }
 
-impl Colour {
-    /// Ticked when shown.
-    fn ticked(self) -> bool {
-        self == Colour::Plain
-    }
-
-    fn fg(self) -> Color {
-        match self {
-            Colour::Plain => Color::Default,
-            Colour::Amber => Color::Indexed(11),
-            Colour::Red => Color::Indexed(9),
-        }
+fn fg(colour: Colour) -> Color {
+    match colour {
+        Colour::Plain => Color::Default,
+        Colour::Amber => Color::Indexed(11),
+        Colour::Red => Color::Indexed(9),
     }
 }
 
-/// A permission in plain words, and its colour. `words`: the declared
-/// words, for `words`.
-pub(crate) fn told(permission: Permission, words: &[String]) -> (String, Colour) {
+/// `limit-*` in plain words: the figures of `[limits]` it grants.
+fn limits(permission: Permission, declared: &Declared) -> String {
+    let figures: Vec<String> = (declared.limits.iter())
+        .filter(|(k, _)| manifest::limit_permission(k) == permission.name())
+        .map(|(key, n)| match key.as_str() {
+            "memory-mib" => format!("up to {n} MiB of memory"),
+            "canvas-screens" => format!("canvases of up to {n} screens"),
+            "log-mib" => format!("a log of up to {n} MiB"),
+            "tick-ms" => format!("up to {n} ms a tick"),
+            "init-ms" => format!("up to {n} ms to start"),
+            "calls-per-second" => format!("up to {n} requests a second"),
+            _ => format!("{key} = {n}"),
+        })
+        .collect();
+    match (figures.is_empty(), permission) {
+        (false, _) => format!("use {}", figures.join(", ")),
+        (true, Permission::LimitMemory) => "use more memory than the default".into(),
+        (true, _) => "use more time than the default".into(),
+    }
+}
+
+/// A permission in plain words, and its colour: the table of
+/// `ptyrc_store::manifest::COLOURS`, held to it by
+/// `ptyrc-cli/tests/store.rs`. The declared words of `words`, the
+/// figures of `limit-*`.
+pub(crate) fn told(permission: Permission, declared: &Declared) -> (String, Colour) {
     use Colour::*;
     use Permission::*;
+    let words = &declared.words;
     let (text, colour) = match permission {
         Layout => ("see how the screen is split, not what it shows", Plain),
         Shape => ("see where the text is, not what it says", Plain),
@@ -61,8 +76,7 @@ pub(crate) fn told(permission: Permission, words: &[String]) -> (String, Colour)
         FilesWrite => ("write a file you name", Red),
         ProbeGit => ("read the state of git repositories", Plain),
         ProbeSystem => ("read the state of the machine", Plain),
-        LimitMemory => ("use more memory than the default", Plain),
-        LimitTime => ("use more time than the default", Plain),
+        LimitMemory | LimitTime => return (limits(permission, declared), Plain),
     };
     (text.to_string(), colour)
 }
@@ -115,7 +129,7 @@ impl Ask {
         let rows = shown
             .iter()
             .map(|&p| {
-                let plain = told(p, &declared.words).1.ticked();
+                let plain = ticked(told(p, declared).1);
                 let ticked = match (entry.allow.contains(&p), entry.deny.contains(&p)) {
                     (true, _) if review => true,
                     (_, true) if review => false,
@@ -210,9 +224,9 @@ impl Ask {
     fn list(&self, inner: usize) -> Vec<(usize, Vec<(String, Style)>)> {
         let mut lines = Vec::new();
         for (i, &(p, ticked)) in self.rows.iter().enumerate() {
-            let (text, colour) = told(p, &self.declared.words);
+            let (text, colour) = told(p, &self.declared);
             let mut style = Style {
-                fg: colour.fg(),
+                fg: fg(colour),
                 ..Style::default()
             };
             if i == self.sel {
@@ -371,6 +385,7 @@ mod tests {
                 .map(|p| (*p, format!("why {}", p.name())))
                 .collect(),
             words: vec!["food".into(), "fish".into(), "toy".into()],
+            limits: Vec::new(),
         }
     }
 
@@ -402,8 +417,51 @@ mod tests {
                 (KeysArrows, true)
             ]
         );
-        assert_eq!(told(Text, &[]).1, Colour::Red);
-        assert_eq!(told(Front, &[]).1, Colour::Amber);
+        let none = Declared::default();
+        assert_eq!(told(Text, &none).1, Colour::Red);
+        assert_eq!(told(Front, &none).1, Colour::Amber);
+        assert_eq!(told(ScreenWide, &none).1, Colour::Amber);
+        // Decision 17: asked, plain.
+        assert_eq!(told(Clock, &none).1, Colour::Plain);
+        assert_eq!(told(Storage, &none).1, Colour::Plain);
+    }
+
+    #[test]
+    fn the_permissions_and_colours_are_those_of_the_manifest() {
+        let mut ours: Vec<&str> = Permission::ALL.iter().map(|p| p.name()).collect();
+        ours.sort();
+        assert_eq!(ours, manifest::PERMISSIONS);
+        for &p in Permission::ALL {
+            let told = told(p, &Declared::default()).1;
+            assert_eq!(told, manifest::colour(p.name()), "{}", p.name());
+        }
+    }
+
+    #[test]
+    fn a_limit_with_its_figure() {
+        let mut d = declared(&[Shape, LimitMemory, LimitTime]);
+        d.limits = vec![
+            ("memory-mib".into(), 128),
+            ("log-mib".into(), 2),
+            ("tick-ms".into(), 100),
+        ];
+        let memory = told(LimitMemory, &d);
+        assert_eq!(
+            memory.0,
+            "use up to 128 MiB of memory, a log of up to 2 MiB"
+        );
+        assert_eq!(memory.1, Colour::Plain);
+        assert_eq!(told(LimitTime, &d).0, "use up to 100 ms a tick");
+        let a = Ask::new(
+            "cat",
+            "x/y/z",
+            "untested",
+            &d,
+            Entry::default(),
+            &[LimitMemory],
+            false,
+        );
+        assert_eq!(a.rows(), [(LimitMemory, true)]);
     }
 
     #[test]

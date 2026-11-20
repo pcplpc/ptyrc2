@@ -18,7 +18,8 @@ pub const API: i64 = 1;
 /// Bound on the manifest, bytes.
 pub const MAX_MANIFEST: usize = 64 << 10;
 
-/// Permission names accepted in `[permissions]` ("The list").
+/// Permission names ("The list"). `limit-*` are asked through
+/// `[limits]`, never in `[permissions]`.
 pub const PERMISSIONS: &[&str] = &[
     "clicks",
     "clicks-grab",
@@ -31,6 +32,8 @@ pub const PERMISSIONS: &[&str] = &[
     "keys-grab",
     "keys-read",
     "layout",
+    "limit-memory",
+    "limit-time",
     "pointer",
     "probe-git",
     "probe-system",
@@ -78,6 +81,8 @@ pub const COLOURS: &[(&str, Colour)] = &[
     ("keys-grab", Colour::Red),
     ("keys-read", Colour::Red),
     ("layout", Colour::Plain),
+    ("limit-memory", Colour::Plain),
+    ("limit-time", Colour::Plain),
     ("pointer", Colour::Plain),
     ("probe-git", Colour::Plain),
     ("probe-system", Colour::Plain),
@@ -96,15 +101,26 @@ pub fn colour(name: &str) -> Colour {
         .map_or(Colour::Red, |(_, c)| *c)
 }
 
-/// `[limits]` keys and their defaults; a value must exceed its default.
-pub const LIMITS: &[(&str, u64)] = &[
-    ("calls-per-second", 1000),
-    ("canvas-screens", 4),
-    ("init-ms", 2000),
-    ("log-mib", 1),
-    ("memory-mib", 64),
-    ("tick-ms", 50),
+/// `[limits]` keys: `(name, default, ceiling)`. A value exceeds the
+/// default and does not exceed the ceiling, the runner's
+/// (`ptyrc-box`, `manifest::CEILINGS`; pinned by a test there).
+pub const LIMITS: &[(&str, u64, u64)] = &[
+    ("calls-per-second", 1000, 10_000),
+    ("canvas-screens", 4, 16),
+    ("init-ms", 2000, 10_000),
+    ("log-mib", 1, 16),
+    ("memory-mib", 64, 512),
+    ("tick-ms", 50, 200),
 ];
+
+/// The permission that grants a `[limits]` key: `limit-memory` for
+/// `memory-mib`, `canvas-screens`, `log-mib`; else `limit-time`.
+pub fn limit_permission(name: &str) -> &'static str {
+    match name {
+        "memory-mib" | "canvas-screens" | "log-mib" => "limit-memory",
+        _ => "limit-time",
+    }
+}
 
 /// Option names reserved to ptyrc's launcher (principle 4).
 pub const RESERVED_OPTIONS: &[&str] = &["alpha", "back", "frame", "front", "help", "prefer"];
@@ -543,7 +559,7 @@ impl Cx<'_> {
         let mut out = Vec::new();
         for (k, v) in t.iter() {
             let name = k.get_ref().as_ref();
-            if !PERMISSIONS.contains(&name) {
+            if !PERMISSIONS.contains(&name) || name.starts_with("limit-") {
                 let hint = if name.starts_with("limit-") {
                     "a limit goes in [limits], as memory-mib = 128".to_string()
                 } else {
@@ -672,22 +688,29 @@ impl Cx<'_> {
     }
 
     fn limits(&self, t: &DeTable<'_>) -> Result<Vec<Limit>> {
-        let names: Vec<&str> = LIMITS.iter().map(|(n, _)| *n).collect();
+        let names: Vec<&str> = LIMITS.iter().map(|(n, _, _)| *n).collect();
         self.unknown(t, "limits", &names)?;
         let mut out = Vec::new();
         for (k, v) in t.iter() {
             let name = k.get_ref().as_ref();
-            let default = LIMITS
+            let (default, ceiling) = LIMITS
                 .iter()
-                .find(|(n, _)| *n == name)
-                .map(|(_, d)| *d)
-                .unwrap_or(0);
+                .find(|(n, _, _)| *n == name)
+                .map(|(_, d, c)| (*d, *c))
+                .unwrap_or((0, 0));
             let value = match v.get_ref() {
                 DeValue::Integer(i) => u64::from_str_radix(i.as_str(), i.radix()).ok(),
                 _ => None,
             };
             match value {
-                Some(x) if x > default && x <= 1 << 32 => out.push(Limit {
+                Some(x) if x > ceiling => {
+                    return Err(self.err(
+                        v.span(),
+                        format!("[limits] {name}: {x} above the ceiling {ceiling}"),
+                        format!("the runner allows no more: {name} = {ceiling} at most"),
+                    ));
+                }
+                Some(x) if x > default => out.push(Limit {
                     name: name.to_string(),
                     value: x,
                 }),

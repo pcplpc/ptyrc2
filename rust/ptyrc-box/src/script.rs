@@ -89,7 +89,7 @@ pub fn init_args(main: &str, sources: &BTreeMap<String, String>, args: Value) ->
 }
 
 /// Built in the source tree, from `target/<profile>/`.
-const BUILT: &str = "../../sdk/js/interp/target/wasm32-unknown-unknown/release/ptyrc_js.wasm";
+const BUILT: &str = "../../sdk/js/interp/target/ptyrc-js.wasm";
 
 /// Where the interpreter is: `PTYRC_JS`; else `ptyrc-js.wasm` beside
 /// the program; else `../share/ptyrc/ptyrc-js.wasm` from there; else,
@@ -108,8 +108,8 @@ pub fn interpreter_path() -> Result<PathBuf, String> {
     ];
     tried.iter().find(|p| p.is_file()).cloned().ok_or_else(|| {
         format!(
-            "the script interpreter is not installed ({}); build it: cargo build --release \
-             --manifest-path sdk/js/interp/Cargo.toml (sdk/js/README.md), or set {ENV_JS}",
+            "the script interpreter is not installed ({}); build it: sdk/js/interp/build.sh \
+             (sdk/js/README.md), or set {ENV_JS}",
             tried[0].display()
         )
     })

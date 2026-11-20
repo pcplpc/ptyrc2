@@ -297,6 +297,29 @@ struct Driver {
 }
 
 /// Real time, milliseconds since the epoch.
+/// The names of the permissions held, for the runner's `--manifest`.
+fn held_names(grants: &Grants) -> Vec<&'static str> {
+    let all = grants::Permission::ALL.iter();
+    all.filter(|p| grants.holds(**p))
+        .map(|p| p.name())
+        .collect()
+}
+
+/// Granted without an answer (no screen to ask: the headless rule,
+/// decision 18): the warning naming each. `None`: nothing so granted.
+fn unasked(resolved: &permissions::Resolved, headless: bool) -> Option<String> {
+    let names: Vec<&str> = (resolved.missing.iter())
+        .filter(|p| headless && resolved.grants.holds(**p))
+        .map(|p| p.name())
+        .collect();
+    (!names.is_empty()).then(|| {
+        format!(
+            "no screen to ask: granted as declared: {}",
+            names.join(", ")
+        )
+    })
+}
+
 fn unix_ms() -> Option<u64> {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
     u64::try_from(now.as_millis()).ok()
@@ -2212,6 +2235,9 @@ impl Driver {
         // A screen that cannot be shown: the rule of a headless session.
         let headless = !self.can_ask();
         let given = self.given.take();
+        // Told to the client and in the app's log (a store app granted
+        // without asking).
+        let mut warnings: Vec<String> = Vec::new();
         let apps = self.apps.as_mut().expect("checked above");
         let refused = |apps: &Apps, id: u64, e: Refused| match e {
             Refused::Unknown => Self::no_app(apps, id),
@@ -2255,24 +2281,26 @@ impl Driver {
             let frame = member("frame").cloned().unwrap_or(json!("active"));
             let frame = self.frame_id(conn, frame, engine)?;
             let apps = self.apps.as_mut().expect("checked above");
-            let identity = Some(Identity::Store(found.origin.clone()));
+            let identity = Identity::Store(found.origin.clone());
+            // The grants first: the runner is told them, and the limits.
+            let (resolved, notes) =
+                Self::resolved(Some(identity.key()), &found.declared, headless, given);
+            let argv = found.argv(&held_names(&resolved.grants));
             let id = apps
-                .start_as(
-                    found.argv.clone(),
-                    Some(found.name.clone()),
-                    identity,
-                    false,
-                    now,
-                )
+                .start_as(argv, Some(found.name.clone()), Some(identity), false, now)
                 .map_err(|e| match e {
                     Refused::Spawn(message) => RpcError::new(ErrorCode::NotUsable, message),
                     e => refused(apps, 0, e),
                 })?;
+            for note in &notes {
+                apps.note(id, note);
+            }
             for name in &found.unknown {
                 apps.note(id, &format!("permission `{name}`: not known, not held"));
             }
             apps.set_surface(id, Surface::of(found.surface, frame));
-            Self::grant(apps, id, Some(found.declared.clone()), headless, given);
+            warnings.extend(unasked(&resolved, headless));
+            apps.grant(id, Some((found.declared.clone(), resolved.grants)));
             found.started();
             id
         } else if method == "app.start" {
@@ -2317,6 +2345,14 @@ impl Driver {
                 "stop" => apps.stop(id, now).map(|()| None),
                 "pause" => apps.pause(id, now).map(|was| was.then_some(true)),
                 "resume" => apps.resume(id, now).map(|was| was.then_some(false)),
+                "restart" if of_store => {
+                    // The answers of now, the runner told them anew.
+                    let declared = apps.get(id).and_then(|a| a.declares.clone());
+                    warnings.extend(Self::grant(apps, id, declared, headless, None));
+                    let app = apps.get(id).expect("checked above");
+                    let argv = crate::store::regranted(&app.argv, &held_names(&app.grants));
+                    apps.restart(id, argv, None, now).map(|()| None)
+                }
                 "restart" => {
                     // New words, or a new declaration: what it holds anew.
                     let anew = argv.is_some() || declares.is_some();
@@ -2345,7 +2381,16 @@ impl Driver {
             }
             id
         };
-        Ok(json!({"app": self.app_info(id, Some(conn), engine)}))
+        let mut reply = json!({"app": self.app_info(id, Some(conn), engine)});
+        if !warnings.is_empty() {
+            for w in &warnings {
+                if let Some(apps) = &self.apps {
+                    apps.note(id, &format!("warning: {w}"));
+                }
+            }
+            reply["warnings"] = json!(warnings);
+        }
+        Ok(reply)
     }
 
     /// What the child `id` holds from what it declares: the answers of
@@ -2353,31 +2398,47 @@ impl Driver {
     /// (`permissions::resolve`). Nothing declared: the whole session.
     /// What the file holds that is not understood is told in the
     /// child's log.
+    /// The warning of a store app granted without asking: none
+    /// otherwise.
     fn grant(
         apps: &mut Apps,
         id: u64,
         declares: Option<Declared>,
         headless: bool,
         given: Option<Entry>,
-    ) {
+    ) -> Option<String> {
         let Some(declared) = declares else {
-            return apps.grant(id, None);
+            apps.grant(id, None);
+            return None;
         };
-        let key = apps
-            .get(id)
-            .and_then(|a| a.identity.as_ref())
-            .map(|i| i.key());
-        let (answers, warnings) = permissions::dir()
+        let identity = apps.get(id).and_then(|a| a.identity.clone());
+        let key = identity.as_ref().map(|i| i.key());
+        let (resolved, notes) = Self::resolved(key, &declared, headless, given);
+        for note in &notes {
+            apps.note(id, note);
+        }
+        let store = matches!(identity, Some(Identity::Store(_)));
+        let warning = unasked(&resolved, headless).filter(|_| store);
+        apps.grant(id, Some((declared, resolved.grants)));
+        warning
+    }
+
+    /// `permissions::resolve` of `declared`, from the answers of the
+    /// pop-up when `given`, else of the file under `key`; the lines of
+    /// the file not understood.
+    fn resolved(
+        key: Option<String>,
+        declared: &Declared,
+        headless: bool,
+        given: Option<Entry>,
+    ) -> (permissions::Resolved, Vec<String>) {
+        let (answers, notes) = permissions::dir()
             .map(|dir| permissions::load(&dir))
             .unwrap_or_default();
-        for warning in &warnings {
-            apps.note(id, warning);
-        }
         let entry = given
             .as_ref()
             .or(key.and_then(|key| answers.apps.get(&key)));
-        let grants = permissions::resolve(&declared, entry, headless).grants;
-        apps.grant(id, Some((declared, grants)));
+        (permissions::resolve(declared, entry, headless), notes)
     }
 
     /// An app was paused or resumed: hide or show what its connections

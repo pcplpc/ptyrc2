@@ -17,6 +17,11 @@ FAILED=0
 
 rm -rf "$WORK"; mkdir -p "$WORK/run"
 export XDG_RUNTIME_DIR=$WORK/run PATH=$ROOT/.venv/bin:$PATH
+# Apps started here are answered yes in a private permissions.toml: no
+# pop-up waits for the keyboard. What an app does not declare stays unheld.
+export XDG_CONFIG_HOME=$WORK/config
+mkdir -p -m 700 "$XDG_CONFIG_HOME/ptyrc"
+(umask 077; printf '[app."native/%s"]\nallow = ["layout", "shape", "words", "text", "front-widget", "front", "screen-wide", "keys-arrows", "keys-grab", "keys-read", "pointer", "clicks", "clicks-grab", "clock", "storage", "files", "files-write", "probe-git", "probe-system", "limit-memory", "limit-time"]\n' clock manage >"$XDG_CONFIG_HOME/ptyrc/permissions.toml")
 unset TMUX TMUX_PANE PTYRC_SESSION PTYRC_SOCKET PTYRC_HOTKEY
 command -v ptyrc-app >/dev/null || { echo "no ptyrc-app: uv sync"; exit 2; }
 HOST=(tmux -L "ptyrc-e2e-mhost-$$" -f /dev/null)

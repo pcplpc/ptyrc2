@@ -1187,18 +1187,30 @@ Store apps. `app.start {store}` starts an installed app
   filled in; the whole given to `init`.
 - `frame`: the frame it is clipped to (Permissions, A store app);
   resolved as any frame name, `no-frame` as any; absent: `active`.
-- The child is the runner: `ptyrc-box --script TREE/SCRIPT ARGS`
-  (`$PTYRC_BOX`, else beside `ptyrc`, else of `PATH`), with its token.
-  Its identity is the origin (`permissions.toml`: `[app."ORIGIN"]`);
-  what it declares is `[permissions]` of the manifest, asked by the
-  same pop-up, which bears its tier and commit. It never holds the
-  whole session: nothing declared is the default profile. A permission
-  of the manifest the driver does not know is not held, and said in
-  the log.
+- The child is the runner: `ptyrc-box --manifest JSON --script
+  TREE/SCRIPT ARGS` (`$PTYRC_BOX`, else beside `ptyrc`, else of
+  `PATH`), with its token. Its identity is the origin
+  (`permissions.toml`: `[app."ORIGIN"]`); what it declares is
+  `[permissions]` of the manifest, and `[limits]` as `limit-memory`
+  (`memory-mib`, `canvas-screens`, `log-mib`) or `limit-time` (the
+  rest), asked by the same pop-up, which bears its tier and commit and
+  the figures of the limits. It never holds the whole session: nothing
+  declared is the default profile. A permission of the manifest the
+  driver does not know is not held, and said in the log.
+- `--manifest` (`store::command_line`), as `ptyrc dev test` gives it:
+  `{id, version, permissions, limits, granted}`, `granted` the names
+  held, resolved before the spawn. The runner applies a limit whose
+  permission is granted, up to its ceiling; a no keeps the default.
+- Headless (no screen to ask): what has no answer is granted as
+  declared; the answer bears `"warnings": [LINE]`, naming each
+  permission so granted, and the line goes to the child's log. `ptyrc
+  app`, `ptyrc manage start`: each line on stderr.
 - The info bears `"store": ORIGIN` (`null` otherwise); `name` is
   `[app] id`.
 - `app.restart` of a store app takes no `argv`, `name` nor `declares`
-  (`not-usable`): it is started again as it is, from the same tree.
+  (`not-usable`): it is started again from the same tree, its grants
+  resolved again from the file (`store::regranted`: `granted` of
+  `--manifest` anew), the headless rule and its warning as at a start.
 - `app.list`: its own entry alone (Permissions, Its own).
 - The first start of a commit is told to the lock
   (`install::started`): the tree before it is pruned.
@@ -1312,6 +1324,9 @@ ptyrc manage --overlay             the menu in a modal widget (the hotkey)
   `frame.get` (the frame is there), then `app.restart` with `-f FRAME`
   in place of the `-f`, `-fX`, `--frame` or `--frame=` among its
   options, at their end when none (`manage::with_frame`).
+- `ls`, `log`: to a terminal, the names, arguments and log lines as
+  glyphs only (`ptyrc_vt::glyphs_only`, line ends kept); to a pipe, as
+  written. The last line of a log in a message: glyphs only.
 - `frames`: `ID KIND SIZE KEY IDLE APPS`, the frames on screen
   (`frame.list`, not inactive); `KEY`: the key, else the preset;
   `APPS`: the names of the apps whose `frames` hold it.
@@ -1697,7 +1712,7 @@ the whole session.
 
 `plan/store-model.md`, Permissions. Done: who asks, the check, the
 declaration, the file, the headless rule, the answers cut to a degree,
-the pop-up. Not done: `app.start {store}`.
+the pop-up, `app.start {store}`.
 
 - **The token.** The driver makes one per run of a child app: 128 bits
   of `/dev/urandom`, hex, in `PTYRC_TOKEN`. A restart makes another; an
@@ -1789,9 +1804,11 @@ the pop-up. Not done: `app.start {store}`.
     each permission missing, in the order of the names, in plain words
     (`popup::told`), its reason below, dim. The difference alone: what
     the file answers is not shown.
-  - Plain: ticked. Red (`text`, `keys-grab`, `keys-read`, `clicks`,
-    `clicks-grab`, `files-write`) and amber (`front`, `screen-wide`,
-    bright yellow): unticked, ticked by hand.
+  - Three colours, one table (`ptyrc_store::manifest::COLOURS`). Plain
+    (`clock`, `storage`, `limit-*` among them): ticked. Red (`text`,
+    `keys-grab`, `keys-read`, `clicks`, `clicks-grab`, `files-write`)
+    and amber (`front`, `screen-wide`, bright yellow): unticked, ticked
+    by hand. `limit-*`: the figures (`use up to 128 MiB of memory`).
   - Keys: `↑↓` or `jk`, `home`, `end`; space ticks; unticking a degree
     unticks those above it, ticking one ticks those below. enter: the
     answers written (`remember`; a yes and a no each), then the start
@@ -2033,7 +2050,8 @@ yet).
 - One character per cell of the rect: string index is column. A blank
   cell is a space, an inked one `#`; a wide glyph is `##` (its spacer
   is inked too). `screen.text` gives one character per glyph. Trailing
-  spaces are trimmed.
+  spaces are trimmed; every row of the rect is answered, an empty one
+  `""` (headless too).
 - Inked: the cell's text is not blank (not empty, not whitespace).
   Style and colour are not looked at, nor answered (not
   `Cell::has_ink`). Box-drawing is ink.

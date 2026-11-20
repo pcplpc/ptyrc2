@@ -171,26 +171,12 @@ pub struct TestOpts {
 /// The flags of `ptyrc-box` that hold the app to what its manifest
 /// declares, less `deny`.
 fn grants(m: &Manifest, deny: &[String]) -> Result<Vec<OsString>, Fail> {
-    let mut declared: Vec<&str> = m.permissions.iter().map(|p| p.name.as_str()).collect();
-    // `[limits]` asks `limit-memory`, `limit-time` (plan, Mechanism).
-    for l in &m.limits {
-        let p = match l.name.as_str() {
-            "memory-mib" | "canvas-screens" | "log-mib" => "limit-memory",
-            _ => "limit-time",
-        };
-        if !declared.contains(&p) {
-            declared.push(p);
-        }
-    }
+    let declared = declared(m);
     for d in deny {
-        let limit = ["limit-memory", "limit-time"].contains(&d.as_str());
-        if !manifest::PERMISSIONS.contains(&d.as_str()) && !limit {
+        if !manifest::PERMISSIONS.contains(&d.as_str()) {
             return Err(Fail::usage(
                 format!("--deny {d}: not a permission"),
-                format!(
-                    "permissions: {}, limit-memory, limit-time",
-                    manifest::PERMISSIONS.join(", ")
-                ),
+                format!("permissions: {}", manifest::PERMISSIONS.join(", ")),
             ));
         }
         if !declared.contains(&d.as_str()) {
@@ -207,6 +193,19 @@ fn grants(m: &Manifest, deny: &[String]) -> Result<Vec<OsString>, Fail> {
         flags.extend(["--words".into(), words.join(",").into()]);
     }
     Ok(flags)
+}
+
+/// The permissions of `[permissions]`, and those `[limits]` asks
+/// (`limit-memory`, `limit-time`; plan, Mechanism).
+fn declared(m: &Manifest) -> Vec<&str> {
+    let mut declared: Vec<&str> = m.permissions.iter().map(|p| p.name.as_str()).collect();
+    for l in &m.limits {
+        let p = manifest::limit_permission(&l.name);
+        if !declared.contains(&p) {
+            declared.push(p);
+        }
+    }
+    declared
 }
 
 /// The manifest as `ptyrc-box --manifest` takes it: what the app may
@@ -336,7 +335,11 @@ pub fn run(common: &Common, dir: &Path, given: &[String]) -> Result<ExitCode, Fa
         // A failed start waits for a change, as an exit does.
         let mut child = match manifest_of(dir).and_then(|m| {
             let args = init_args(&m, given)?;
-            let guest = guest(dir, &m)?;
+            // The author's own run: all it declares, its limits too.
+            let mut told = self::given(&m);
+            told["granted"] = json!(declared(&m));
+            let mut guest = guest(dir, &m)?;
+            guest.splice(0..0, ["--manifest".into(), told.to_string().into()]);
             eprintln!("ptyrc: starting {} {}", m.app.id, m.app.version);
             start(&program, &socket, &guest, &args)
         }) {

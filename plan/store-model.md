@@ -201,9 +201,9 @@ back as text.
   it the script. The interpreter is a guest of ABI 1 like any other:
   the sandbox is the same, and a hole in the interpreter stays inside
   it.
-- The interpreter [proposed]: QuickJS built to WebAssembly, about
-  1 MiB, built with ptyrc's release, not on the user's machine. Boa
-  (pure Rust) if a C toolchain in the build is refused: slower.
+- The interpreter [decided 2026-11-20]: QuickJS-ng built to
+  WebAssembly, 1.0 MiB (`sdk/js/README.md`), built with ptyrc's
+  release, not on the user's machine.
 - The API: `ptyrc.d.ts`, one file, typed, the whole of it.
 
   ```js
@@ -420,16 +420,16 @@ shown, unticked, ticked by hand.
 | `words` | `shape`, and the words listed | plain, the words shown | `shape` |
 | `text` | every cell and its style; titles; what the frames remember; `find` | red | `words`, else `shape`, else blank |
 | `front-widget` | a widget in front, with the driver's border and the app's name | plain | behind |
-| `front` | bare sprites in front; a tint or an opacity over the text | amber, or red [TBD] | behind |
-| `screen-wide` | `surface = "screen"`: anywhere, not its frame alone | amber, or plain [TBD] | its frame |
+| `front` | bare sprites in front; a tint or an opacity over the text | amber | behind |
+| `screen-wide` | `surface = "screen"`: anywhere, not its frame alone | amber | its frame |
 | `keys-arrows` | a grab of named keys that are not text | plain, the keys shown | `denied` |
 | `keys-grab` | a grab of other named keys; a modal | red | `denied` |
 | `keys-read` | every key (`input`) | red | no event |
 | `pointer` | movements anywhere (`hover`, `move`) | plain | no event |
 | `clicks` | clicks anywhere (`mouse`) | red | no event |
 | `clicks-grab` | clicks taken from the wrapped program | red | `denied` |
-| `clock` | the wall clock, a zone | default, or plain [TBD] | session time |
-| `storage` | a directory of its own, a quota | default, or plain [TBD] | `denied` |
+| `clock` | the wall clock, a zone | plain | session time |
+| `storage` | a directory of its own, a quota | plain | `denied` |
 | `files` | a file the user named: read; `files-write`: written | the user's hand (principle 4); written: red | `denied` |
 | `probe-git`, `probe-system` | the answers of the probes | plain; red with a sink | an empty answer |
 | `limit-*` | more memory, more time | plain | the default |
@@ -646,7 +646,7 @@ Its own permissions (owner), apart from the screen and the keys.
 
 ### Colours
 
-Two, as the owner asked, or three [TBD]: plain (listed, one yes for
+[decided] Three (2026-11-20): plain (listed, one yes for
 all); amber (can confuse, cannot leak: in front, the whole screen, a
 grab of arrows; listed apart, one yes); red (can leak or act: each
 ticked by hand).

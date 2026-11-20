@@ -4,7 +4,7 @@
 //! The interpreter is built apart:
 //!
 //! ```text
-//! cargo build --release --manifest-path sdk/js/interp/Cargo.toml
+//! sdk/js/interp/build.sh
 //! ```
 //!
 //! Where it is not built, each test passes and tests nothing; the
@@ -52,7 +52,7 @@ fn interpreter() -> Option<&'static [u8]> {
 
 fn read_interpreter() -> Option<Vec<u8>> {
     let path = std::env::var_os(script::ENV_JS).map_or_else(
-        || root().join("sdk/js/interp/target/wasm32-unknown-unknown/release/ptyrc_js.wasm"),
+        || root().join("sdk/js/interp/target/ptyrc-js.wasm"),
         PathBuf::from,
     );
     let wasm = std::fs::read(&path).ok();
@@ -66,7 +66,7 @@ fn read_interpreter() -> Option<Vec<u8>> {
         let _ = writeln!(
             std::io::stderr(),
             "script tests SKIPPED: no interpreter at {}; \
-             cargo build --release --manifest-path sdk/js/interp/Cargo.toml",
+             sdk/js/interp/build.sh",
             path.display()
         );
     }
@@ -143,6 +143,39 @@ fn args_reach_init_without_the_reserved_members() {
     assert!(logged(&report, r#"{"rate":3}"#), "{report}");
 }
 
+/// `manifest()`: what the runner was told of the manifest, granted;
+/// `null` without one. Not among the arguments.
+#[test]
+fn manifest_is_the_runners() {
+    let Some(wasm) = interpreter() else { return };
+    let files = [(
+        "app.js",
+        "import { log, manifest } from 'ptyrc';
+         export function init(args) {
+           const m = manifest();
+           log('args', Object.keys(args).join());
+           log('manifest', m === null ? 'null' : m.id + ' ' + m.granted.join() + ' ' + m.limits['tick-ms']);
+           m && (m.id = 'changed');
+           log('again', manifest()?.id);
+         }",
+    )];
+    let given = ptyrc_box::manifest::Given::parse(
+        r#"{"id": "a.b", "version": "1.0.0",
+            "permissions": [{"name": "screen.shape"}, {"name": "limit-time"}],
+            "granted": ["screen.shape", "limit-time"], "limits": {"tick-ms": 80}}"#,
+    )
+    .unwrap();
+    let granted = ["screen.shape".to_owned(), "limit-time".to_owned()];
+    let mut o = options(&files, json!({"x": 1}));
+    o.args = ptyrc_box::manifest::with_member(o.args, given.member(&granted));
+    let r = run(wasm, &o).unwrap();
+    assert!(logged(&r, "args x"), "{r}");
+    assert!(logged(&r, "manifest a.b screen.shape,limit-time 80"), "{r}");
+    assert!(logged(&r, "again a.b"), "{r}");
+    let r = run(wasm, &options(&files, json!({}))).unwrap();
+    assert!(logged(&r, "manifest null"), "{r}");
+}
+
 #[test]
 fn time_is_session_time_and_random_is_the_hosts() {
     let Some(a) = app(
@@ -174,8 +207,8 @@ fn errors_name_the_place_and_the_cure() {
         (
             "export function init() {\n  setTimeout(() => {}, 10);\n}",
             &[
-                "app.js:1:",
-                "ReferenceError: setTimeout is not defined",
+                "app.js:2:3: ReferenceError: setTimeout is not defined",
+                "    at init (app.js:2:3)",
                 "hint: no timer",
             ],
         ),
@@ -293,13 +326,36 @@ fn hostile_loops() {
     .unwrap();
     assert_eq!(r.end, Some(Error::Time("tick")));
     assert_eq!(r.ticks, 1);
-    // A promise chain without end is a loop like another.
+    // A queue of jobs without end is a loop like another.
+    for text in [
+        "export function init() { const f = () => { Promise.resolve().then(f); }; f(); }",
+        "export function init() { const f = () => queueMicrotask(f); f(); }",
+        "export async function init() { for (;;) await null; }",
+    ] {
+        let r = quick(&[("app.js", text)]).unwrap().unwrap();
+        assert_eq!(r.end, Some(Error::Time("init")), "{text}\n{r}");
+    }
+    let r = quick(&[(
+        "app.js",
+        "import { period } from 'ptyrc';
+         export function init() { period(50); }
+         export async function tick() { for (;;) await null; }",
+    )])
+    .unwrap()
+    .unwrap();
+    assert_eq!(r.end, Some(Error::Time("tick")), "{r}");
+    // A chain of promises, each resolved with the next, holds them all:
+    // the memory or the time ends it.
     let r = quick(&[(
         "app.js",
         "export function init() { const f = () => Promise.resolve().then(f); f(); }",
     )])
+    .unwrap()
     .unwrap();
-    assert_eq!(r.unwrap().end, Some(Error::Time("init")));
+    assert!(
+        r.end == Some(Error::Time("init")) || r.met.iter().any(|m| m == "memory"),
+        "{r}"
+    );
     assert!(start.elapsed() < Duration::from_secs(60));
 }
 
