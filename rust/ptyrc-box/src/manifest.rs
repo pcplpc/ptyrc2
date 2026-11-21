@@ -5,6 +5,7 @@
 //! limits granted, applied up to [`CEILINGS`].
 
 use crate::core::Limits;
+use ptyrc_rules::grants::{Degree, Grants, Permission};
 use serde_json::{Map, Value, json};
 use std::time::Duration;
 
@@ -113,7 +114,8 @@ impl Given {
     }
 
     /// The member of `init`: what the app may know of itself. `frame`:
-    /// 0 without `layout`, as `frame.get` and `draw.list` tell it.
+    /// 0 below `layout` (a degree of the ladder: `shape`, `words`,
+    /// `text` are above it), as `frame.get` and `draw.list` tell it.
     pub fn member(&self, granted: &[String]) -> Value {
         let permissions: Vec<Value> = (self.permissions.iter())
             .map(|(name, words)| match words.is_empty() {
@@ -136,7 +138,8 @@ impl Given {
             "limits": limits,
         });
         if let Some(frame) = self.frame {
-            let layout = granted.iter().any(|g| g == "layout");
+            let held = granted.iter().filter_map(|g| Permission::parse(g));
+            let layout = Grants::of(held).degree() >= Degree::Layout;
             member["frame"] = json!(if layout { frame } else { 0 });
         }
         member
@@ -179,13 +182,17 @@ mod tests {
         assert_eq!(m.get("frame"), None);
     }
 
-    /// The frame told whole with `layout`; else 0, the one frame.
+    /// The frame told whole from `layout` up; else 0, the one frame.
     #[test]
     fn the_frame_at_the_start() {
         let g = Given::parse(r#"{"id":"a","version":"1","frame":3}"#).unwrap();
         assert_eq!(g.frame, Some(3));
         assert_eq!(g.member(&["layout".into()])["frame"], json!(3));
-        assert_eq!(g.member(&["shape".into()])["frame"], json!(0));
+        for degree in ["shape", "words", "text"] {
+            assert_eq!(g.member(&[degree.into()])["frame"], json!(3), "{degree}");
+        }
+        assert_eq!(g.member(&["clock".into()])["frame"], json!(0));
+        assert_eq!(g.member(&[])["frame"], json!(0));
         assert!(Given::parse(r#"{"frame":"active"}"#).is_err());
         assert_eq!(Given::parse(r#"{"frame":null}"#).unwrap().frame, None);
     }

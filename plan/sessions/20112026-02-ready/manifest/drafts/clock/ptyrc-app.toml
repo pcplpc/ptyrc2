@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "clock"
+version = "0.1.0"
+summary = "One clock in a quiet corner."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "widget"
+
+[permissions]
+clock = "the time of day, in its zone"
+
+[options]
+utc = { type = "bool", default = false, doc = "UTC time" }
+tz = { type = "string", doc = "time zone, as Europe/Paris" }
+seconds = { type = "bool", default = true, doc = "faces without seconds" }
+big = { type = "bool", default = false, doc = "block digits only" }

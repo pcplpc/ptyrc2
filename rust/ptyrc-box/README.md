@@ -4,8 +4,8 @@ The runner of store apps: one WebAssembly guest, its limits, its
 canvases. `plan/store-model.md` is the plan; this file is the ABI.
 
 ```
-ptyrc-box [--no-profile] [--manifest JSON] [--assets DIR] [--seed N] [--script] MODULE [ARGS]
-ptyrc-box --headless [--no-profile] [--manifest JSON] [--assets DIR] [--script] MODULE [ARGS]
+ptyrc-box [--profile | --no-profile] [--manifest JSON] [--assets DIR] [--seed N] [--script] MODULE [ARGS]
+ptyrc-box --headless [--profile | --no-profile] [--manifest JSON] [--assets DIR] [--script] MODULE [ARGS]
           [--size CxR] [--for T] [--at T,...] [--seed N]
           [--tape FILE | --screen [T:]FILE...] [--json] [--styles] [--timing]
           [--grant NAME,...] [--deny NAME,...] [--words WORD,...]
@@ -17,7 +17,7 @@ ptyrc-box --headless [--no-profile] [--manifest JSON] [--assets DIR] [--script] 
           [--user-word WORD]... [--user-pattern TEXT]... [--user-regex RE]...
           [--front | --back] [--prefer P] [--alpha A] [--border B]
           [--surface widget|frame|screen]
-ptyrc-box --unit FILE [--no-profile] [--manifest JSON] --script APP.js [ARGS]
+ptyrc-box --unit FILE [--profile | --no-profile] [--manifest JSON] --script APP.js [ARGS]
 ```
 
 Runs `MODULE` (a binary module; with `--script`, `APP.js`) in the
@@ -33,8 +33,8 @@ runner; 2 usage; 5 the connection, or the OS profile refused.
 test`) read it: handed to `init` under `ptyrc:manifest`; its
 `[limits]` applied as far as `granted` (headless: the grants) holds
 `limit-memory`, `limit-time`. `frame`: the app's frame at the start,
-given by the driver (headless: 0, raw); told as given with `layout`,
-else 0.
+given by the driver (headless: 0, raw); told as given from `layout`
+up the ladder (`shape`, `words`, `text` above it), else 0.
 
 `--assets DIR`, live and headless: the tree `asset.list`, `asset.read`
 answer (Imports, `call`).

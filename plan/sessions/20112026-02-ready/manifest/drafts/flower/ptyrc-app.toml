@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "flower"
+version = "0.1.0"
+summary = "Add flowers next to the word \"flower\"."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "frame"
+frame = "largest"
+random = [["-a"]]
+
+[permissions]
+shape = "where its word is, to grow next to it (-a: any word)"
+words = { list = ["flower"], why = "where its word is, to grow next to it (-a: any word)" }
+front = "its word redrawn in bold, over the text"
+text = "where its word is, to grow next to it (-a: any word)"
+
+[options]
+word = { type = "word", doc = "the word [default: flower]" }
+anywhere = { type = "bool", default = false, short = "a", needs = ["text"], doc = "draw flowers anywhere: next to words of the screen, renewed" }
+count = { type = "int", doc = "number of flowers; 0: one per match, with -a 10 to 30 [default: 1; with -a, 5]" }

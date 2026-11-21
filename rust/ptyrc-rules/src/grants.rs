@@ -30,8 +30,8 @@ impl Degree {
 
 macro_rules! permissions {
     ($($variant:ident $name:literal,)*) => {
-        /// What the user grants, one yes or no each. The file and the
-        /// pop-up, to come, make and name them.
+        /// What the user grants, one yes or no each: in
+        /// `permissions.toml` or at the pop-up (`ptyrc-server`).
         #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
         pub enum Permission { $($variant,)* }
 

@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "cat"
+version = "0.1.0"
+summary = "One cat comes to visit you."
+license = "GPL-3.0-or-later"
+api = 1
+rust = "src/lib.rs"
+rustc = "1.85"
+surface = "frame"
+frame = "largest"
+
+[permissions]
+shape = "where the text is, to walk on it; its words, to find its things"
+words = { list = ["food", "fish", "toy"], why = "where the text is, to walk on it; its words, to find its things" }
+pointer = "the cats hunt the pointer"
+
+[options]
+count = { type = "int", doc = "cats [default: 1; 2 with -a]" }
+random = { type = "bool", default = false, short = "r", doc = "coats and features drawn" }
+food = { type = "bool", default = false, doc = "a plate now and then" }
+mice = { type = "bool", default = false, doc = "a mouse now and then" }
+fish = { type = "bool", default = false, doc = "a fish now and then" }
+toys = { type = "bool", default = false, doc = "a ball of yarn now and then" }
+hunt = { type = "bool", default = false, needs = ["pointer"], doc = "the cats hunt the host mouse" }
+all = { type = "bool", default = false, short = "a", needs = ["pointer"], doc = "all of these, two cats" }

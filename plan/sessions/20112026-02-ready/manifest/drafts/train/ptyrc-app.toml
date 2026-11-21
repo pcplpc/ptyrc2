@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "train"
+version = "0.1.0"
+summary = "The land going by a train window."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "widget"
+random = [[], ["-a"]]
+
+[permissions]
+clock = "the time of day and the season"
+
+[options]
+land = { type = "bool", default = false, short = "l", doc = "far ridges, trees, houses, what brushes the glass" }
+poles = { type = "bool", default = false, short = "p", doc = "poles and the sagging wire between them" }
+events = { type = "bool", default = false, short = "e", doc = "a tunnel, a bridge, a train the other way, a crossing, a station" }
+seasons = { type = "bool", default = false, short = "y", doc = "the season of the date" }
+sky = { type = "bool", default = false, short = "w", doc = "the weather of the day: clouds, rain, fog, snow" }
+all = { type = "bool", default = false, short = "a", doc = "-l -p -e -y -w, the line of the day" }
+line = { type = "string", default = "auto", choices = ["auto", "plain", "coast", "alps", "desert", "city", "random"], doc = "where it runs [default: plain]" }
+weather = { type = "string", default = "auto", choices = ["auto", "clear", "clouds", "rain", "fog", "snow"], doc = "this weather, not the day's" }
+after = { type = "float", default = 0.0, doc = "start that far into the trip [default: 0]" }
+random = { type = "bool", default = false, short = "r", doc = "at random, what is not given: the land, the season, the time, the weather; another at each run" }
+at = { type = "string", doc = "the time it starts at [default: now]" }
+season = { type = "string", default = "auto", choices = ["auto", "spring", "summer", "autumn", "winter"], doc = "the season it starts in" }
+speed = { type = "float", default = 1.0, doc = "seconds of the scene a second; 1440: a day a minute [default: 1]" }
+lat = { type = "float", default = 47.0, doc = "latitude, degrees [default: 47]" }
+rgb = { type = "bool", default = false, doc = "colours of 24 bits, not of the 256" }

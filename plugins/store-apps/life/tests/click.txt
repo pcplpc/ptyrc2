@@ -7,4 +7,5 @@
 ⠸⠓⡆⠒              ⡀          ⡀    ⠸  ⠰⣹⠨
 ⠂⠠⠃  ⠐⠂  ⢀⣀       ⠃        ⢀⡃⡀⠈⠰⡀     ⠈⠑
     ⢠⣤  ⠾⡡⠜     ⣤           ⠠⠔⢼⣾⡀  ⠶  ⢠
+lowered at 0 ms: frame.get, to the degree shape
 dropped at 1000 ms: click 20,4: not subscribed

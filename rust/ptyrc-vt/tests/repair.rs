@@ -210,6 +210,21 @@ fn desired(rng: &mut Rng, app: &Vt) -> Grid {
     grid
 }
 
+/// All the state of `vt` but its parser's scratch (meaningless in the
+/// ground state) and the identities of its grids (unique to each).
+fn model(vt: &Vt) -> String {
+    let all = format!("{vt:?}");
+    let all = &all[..all.rfind(", p: Parser").expect("parser field")];
+    let mut out = String::with_capacity(all.len());
+    let mut rest = all;
+    while let Some(i) = rest.find("epoch: ") {
+        out.push_str(&rest[..i + 7]);
+        rest = rest[i + 7..].trim_start_matches(|c: char| c.is_ascii_digit());
+    }
+    out.push_str(rest);
+    out
+}
+
 fn run(seed: u64, cols: u16, rows: u16, steps: usize) {
     let mut rng = Rng(seed | 1);
     let mut app = Vt::new(cols, rows);
@@ -254,7 +269,17 @@ fn run(seed: u64, cols: u16, rows: u16, steps: usize) {
         }
         let want = desired(&mut rng, &app);
         let mut out = Vec::new();
+        let mut fed = host.clone();
         repair(&mut host, &want, &mut out);
+        // The host takes some of the repair as its effect, not as bytes:
+        // the same as a terminal that parses them all.
+        fed.feed(&out);
+        assert_eq!(
+            model(&host),
+            model(&fed),
+            "seed {seed} step {step}: repair and its bytes differ\nout {:?}",
+            String::from_utf8_lossy(&out)
+        );
         assert!(
             host.grid() == &want,
             "seed {seed} step {step}: grid differs\nwant {:?}\nhost {:?}\nout {:?}",

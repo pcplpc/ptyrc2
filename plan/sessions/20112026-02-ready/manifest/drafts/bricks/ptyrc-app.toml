@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "bricks"
+version = "0.1.0"
+summary = "Brick breaker game that plays alone."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "frame"
+frame = "largest"
+random = [[], ["-a"]]
+
+[permissions]
+shape = "the text is the wall the balls break"
+keys-arrows = "the arrows steer it, until ctrl+t"
+
+[options]
+speed = { type = "float", default = 16.0, doc = "steps per second [default: 16]" }
+rules = { type = "bool", default = false, short = "r", doc = "hard, loose, bumper and bomb bricks" }
+bonuses = { type = "bool", default = false, short = "b", doc = "capsules: two balls for one, mostly; wide, twin, fire, small, fast" }
+multiplayer = { type = "bool", default = false, short = "m", doc = "two rackets, two scores" }
+effects = { type = "bool", default = false, short = "e", doc = "particles, a trail, combos, a best score" }
+all = { type = "bool", default = false, short = "a", doc = "-r -b -m -e" }
+grab = { type = "bool", default = false, needs = ["keys-arrows"], doc = "the arrows of the keyboard move the racket (with -m, the bottom one), the balls go half as fast; ctrl+t gives them back and ends" }

@@ -1970,7 +1970,9 @@ the pop-up, `app.start {store}`.
   `draw.update`, `draw.remove`, `draw.ext {id}` on a sprite it did not
   put: `no-sprite`, as an id that does not exist; `draw.clear {all}`:
   its own. `widget.set`, `.hide`, `.ask`, `.release` are of the
-  connection already. Errors `no-frame`, `no-sprite`: no hint.
+  connection already. Topic `widgets` (events, snapshot): its own
+  widgets alone. Below `layout`, `frame` of `widget.list` and
+  `widgets`: 0, as `move` tells it. Errors `no-frame`, `no-sprite`: no hint.
   `screen.text`, `screen.cells {sprites: true}`, with `text`: the
   sprites of its connections alone (`owners`, set by the driver;
   `Scene::compose_of`).
@@ -2172,7 +2174,7 @@ Methods (`frame` is a frame id or name, default `"raw"`):
 | `debug.dump` | | app grid, host grid, sprites, frames |
 
 Host functions (`driver/hostfn.rs`; the contract:
-`temp/20112026-01-store/design/host-functions.md`):
+`plan/sessions/20112026-01-store/design/host-functions.md`):
 
 | method | params | result |
 |---|---|---|

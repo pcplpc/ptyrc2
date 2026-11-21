@@ -85,7 +85,7 @@ Every request returns `Result<_, Error>`; nothing panics on a refusal.
 | `random(buf: &mut [u8])`, `random_u32() -> u32`, `random_below(n: u32) -> u32` | from the host (`--seed`); `random_below`: `0..n`, 0 for 0 |
 | `exit(code: i32) -> !` | the end |
 | `manifest() -> Option<&'static Manifest>` | what the app is told of itself at `init`; `None` before `init`, or run without one |
-| `Manifest` | `id`, `version: String`; `permissions`, `words`, `granted: Vec<String>`; `limits: Vec<(String, u64)>` (granted); `frame: Option<u64>` (below); `holds(&self, name: &str) -> bool` |
+| `Manifest` | `id`, `version: String`; `permissions`, `words`, `granted: Vec<String>`; `limits: Vec<(String, u64)>` (granted); `frame: Option<u64>` (below); `holds(&self, name: &str) -> bool`; `sees(&self, degree: &str) -> bool`: that degree or one above it held (`layout` < `shape` < `words` < `text`) |
 | `subscribe(topics: &[&str]) -> Result<(), Error>` | adds topics; never removes one (no unsubscribe). A `Sight`, a `Deck` subscribe as well: the app gets each event once, and passes it on. An unknown topic: `bad-params`, none added |
 | `size() -> Result<(u32, u32), Error>` | `(columns, rows)` of the screen (`session.info`); a change: event `size` `{"size": [c, r]}` |
 | `put(sprite: Value) -> Result<u64, Error>` | `draw.put` of a sprite as JSON; its id |
@@ -104,10 +104,10 @@ sprite.
 
 `Manifest::frame`: the id of the frame the app's surface is on at the
 start (`--frame`, else `[app] frame`, else `active`); `move` names the
-next. Live, it is that id only with `layout` held; without `layout`:
-0, and the `frame` of every request is ignored (its surface). Headless
+next. Live, it is that id only from `layout` up (`sees("layout")`);
+below: 0, and the `frame` of every request is ignored (its surface). Headless
 (`dev test`): 0, the one frame, raw. A live id is seen only by `ptyrc
-dev run`, with `layout` declared and granted.
+dev run`, with a degree declared and granted.
 
 ### JSON
 
@@ -176,7 +176,7 @@ A buffer of cells in the guest's memory, shown as one sprite.
 | `DOTS: [[u8; 2]; 4]` | `DOTS[y][x]`: the bit of the dot `(x, y)` of a cell |
 | `glyph(bits: u8) -> Option<char>` | `U+2800 + bits`; `None` for 0 |
 | `from_grid(grid: u8) -> u8` | `const`; the bits of a cell from bits row by row (bit `2y + x` the dot `(x, y)`) |
-| `Braille::new(width: u32, height: u32) -> Braille` | `2 * width` by `4 * height` dots in `width` by `height` cells, all off |
+| `Braille::new(width: u32, height: u32) -> Braille` | `2 * width` by `4 * height` dots in `width` by `height` cells, all off; a side below 1 panics |
 | `width() -> u32`, `height() -> u32` | cells |
 | `bits() -> &[u8]`, `bits_mut() -> &mut [u8]` | a byte a cell, `(cx, cy)` at `cy * width + cx` |
 | `set(x: i64, y: i64, on: bool)`, `get(x: i64, y: i64) -> bool` | a dot; outside: ignored, off |
@@ -187,7 +187,7 @@ A buffer of cells in the guest's memory, shown as one sprite.
 | `draw(&self, canvas: &mut Canvas, x: u32, y: u32, style: Option<&Run>) -> &Braille` | each row written at `(x, y)`, spaces included; `style`: its `fg`, `bg`, `attrs` on each cell (a space a hole unless it has a `bg`); `None`: the colours kept |
 | `paint(&self, canvas: &mut Canvas, x: u32, y: u32, fg: impl Fn(u32, u32) -> Color)` | a cell with a dot: its glyph in `fg(cx, cy)`; another: nothing drawn |
 | `NEAR: u32` | 24: two pixels are alike when their channels differ by this at most, summed |
-| `Half::new(width: u32, height: u32, color: Color) -> Half` | `width` by `2 * height` pixels in `width` by `height` cells, every pixel `color`: the top pixel the `fg` of `▀`, the bottom its `bg`; glyphs over them |
+| `Half::new(width: u32, height: u32, color: Color) -> Half` | `width` by `2 * height` pixels in `width` by `height` cells, every pixel `color`: the top pixel the `fg` of `▀`, the bottom its `bg`; glyphs over them; a side below 1 panics |
 | `width() -> u32`, `height() -> u32` | cells; pixels: `width` by `2 * height` |
 | `fill(color: Color) -> &mut Half`, `get(x: i64, y: i64) -> Option<Color>` | every pixel, the glyphs kept; a pixel, `None` outside |
 | `set(x: i64, y: i64, color: Color, alpha: f64)`, `rect(x: i64, y: i64, w: i64, h: i64, color, alpha)`, `disc(cx: f64, cy: f64, r: f64, color, alpha)` | `alpha` under 1: `mix(old, color, alpha)`; `disc`: the pixels whose centre `(x + .5, y + .5)` is within `r` |
@@ -232,8 +232,8 @@ of a frame, kept current by events, never read at a period.
 let sight = Sight::new(Options { cursor: true, ..Options::default() });
 ```
 
-Without `layout` held: the raw frame alone, no `frames`, no
-`frame.get`.
+Below `layout` (`sees("layout")` false): the raw frame alone, no
+`frames`, no `frame.get`.
 
 `ptyrc_app::dice`: draws for code that takes its source as an
 argument: the same run for a seed.

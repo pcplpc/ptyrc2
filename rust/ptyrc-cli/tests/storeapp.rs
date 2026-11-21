@@ -37,12 +37,12 @@ export function init(args) {
   const hud = call("draw.put", { content: { rows: ["h"] }, at: [0, 1], layer: "hud" });
   const mine = call("draw.list", {}).sprites.find((s) => s.id == hud.id);
   log("layer=" + mine.layer + " app=" + call("app.list", {}).apps[0].id);
-  let put = 2, error = "";
-  for (; put < 300; put++) {
-    try { call("draw.put", { content: { rows: ["."] }, at: [1, 1] }); }
-    catch (e) { error = e.code + ": " + e.message; break; }
-  }
-  log("put=" + put + " " + error);
+  // One batch: 300 calls of init would meet its 2 s, wall time, under load.
+  const one = { method: "draw.put", params: { content: { rows: ["."] }, at: [1, 1] } };
+  const results = call("batch", { calls: new Array(298).fill(one) }).results;
+  const failed = results.findIndex((r) => r.error);
+  const e = failed < 0 ? null : results[failed].error;
+  log("put=" + (failed < 0 ? 300 : 2 + failed) + " " + (e ? e.code + ": " + e.message : ""));
   log("word=" + args.word);
   period(0);
 }
@@ -112,6 +112,22 @@ fn wait_slow(mut ready: impl FnMut() -> bool, what: &str) {
         assert!(Instant::now() < deadline, "timeout: {what}");
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+/// Until the log of `id` holds `needle`; an app that exited fails at
+/// once, its log told.
+fn wait_log(client: &mut Client, id: u64, needle: &str) {
+    wait_slow(
+        || {
+            let apps = client.call("app.list", json!({})).unwrap();
+            let me = (apps["apps"].as_array().unwrap().iter()).find(|a| a["id"] == id);
+            let exited = me.is_some_and(|a| a["state"] == "exited");
+            let log = log_of(client, id);
+            assert!(!exited || log.contains(needle), "{id} exited: {log}");
+            log.contains(needle)
+        },
+        needle,
+    );
 }
 
 fn log_of(client: &mut Client, id: u64) -> String {
@@ -267,10 +283,7 @@ fn a_store_app_from_a_repository_to_the_screen() {
         )
         .unwrap();
     let probe_id = started["app"]["id"].as_u64().unwrap();
-    wait_slow(
-        || log_of(&mut client, probe_id).contains("word="),
-        "the probe has asked",
-    );
+    wait_log(&mut client, probe_id, "word=");
     let log = log_of(&mut client, probe_id);
     for method in ["input.send", "app.start", "tape.start"] {
         assert!(
@@ -590,7 +603,7 @@ fn a_store_app_follows_its_pane() {
         .call("app.start", json!({"store": "follows", "frame": left}))
         .unwrap();
     let id = started["app"]["id"].as_u64().unwrap();
-    wait_slow(|| log_of(&mut client, id).contains("drawn"), "drawn");
+    wait_log(&mut client, id, "drawn");
     let frame_of_its_sprite = |client: &mut Client| {
         let list = client.call("draw.list", json!({})).unwrap();
         (list["sprites"].as_array().unwrap().iter())
@@ -716,7 +729,7 @@ fn the_clicks_told_to_an_effect() {
     // A store app without `clicks-grab`: the program has it too.
     let started = client.call("app.start", json!({"store": "bombs"})).unwrap();
     let id = started["app"]["id"].as_u64().unwrap();
-    wait_slow(|| log_of(&mut client, id).contains("drawn"), "drawn");
+    wait_log(&mut client, id, "drawn");
     wait_for(|| placed(&mut client), "the sand placed");
     assert!(click(&mut host, &mut client, 13, 7));
     let log = log_of(&mut client, id);
@@ -855,7 +868,7 @@ fn a_store_app_calling_an_unknown_method_is_denied() {
         .call("app.start", json!({"store": "unknown"}))
         .unwrap();
     let id = started["app"]["id"].as_u64().unwrap();
-    wait_slow(|| log_of(&mut client, id).contains("done"), "the calls");
+    wait_log(&mut client, id, "done");
     let log = log_of(&mut client, id);
     assert!(!log.contains("unknown-method"), "{log}");
     for m in [
@@ -989,7 +1002,7 @@ fn the_launchers_prefer_border_back() {
     );
     let apps = client.call("app.list", json!({})).unwrap();
     let id = apps["apps"][0]["id"].as_u64().unwrap();
-    wait_slow(|| log_of(&mut client, id).contains("drawn"), "drawn");
+    wait_log(&mut client, id, "drawn");
     let list = client.call("draw.list", json!({})).unwrap();
     let sprite = (list["sprites"].as_array().unwrap().iter())
         .find(|s| s["anchor"].get("auto").is_some())
@@ -1086,7 +1099,7 @@ fn a_store_app_is_told_its_frame() {
     };
     let (a, b) = (start(&mut client, "seer"), start(&mut client, "blind"));
     for id in [a, b] {
-        wait_slow(|| log_of(&mut client, id).contains("drawn"), "drawn");
+        wait_log(&mut client, id, "drawn");
     }
     let log = log_of(&mut client, a);
     assert!(log.contains(&format!("frame={left}\n")), "{log}");
@@ -1202,7 +1215,7 @@ fn moved(name: &str, script: &str) {
         .call("app.start", json!({"store": name, "frame": left}))
         .unwrap();
     let id = started["app"]["id"].as_u64().unwrap();
-    wait_slow(|| log_of(&mut client, id).contains("drawn"), "drawn");
+    wait_log(&mut client, id, "drawn");
     let listed = client.call("app.list", json!({})).unwrap();
     let info = (listed["apps"].as_array().unwrap().iter()).find(|a| a["id"] == id);
     assert_eq!(info.unwrap()["moves"], json!(true), "{listed}");
@@ -1218,9 +1231,16 @@ fn moved(name: &str, script: &str) {
     assert_eq!(frame_of_its_sprite(&mut client), Some(json!(left)));
     let frame_of_its_widget = |client: &mut Client| {
         let list = client.call("widget.list", json!({})).unwrap();
-        list["widgets"][0]["frame"].clone()
+        let list = list["widgets"].as_array().unwrap();
+        let w = list.iter().find(|w| w["tag"] == "w");
+        w.map_or(Value::Null, |w| w["frame"].clone())
     };
     assert_eq!(frame_of_its_widget(&mut client), json!(left));
+
+    // Another's widget, shown: not its own.
+    let other = json!({"widgets": [{"tag": "other", "size": [3, 1], "content": {"rows": ["o"]}}]});
+    client.call("widget.declare", other).unwrap();
+    let other = client.call("widget.show", json!({"tag": "other"})).unwrap();
 
     // By the user: its sprite and its widget go along; it is told.
     let moved = client
@@ -1236,11 +1256,26 @@ fn moved(name: &str, script: &str) {
             "told",
         );
     }
-    let told = format!("\"frame\":{right}");
+    // Its widget told, on its one frame below `layout`: 0.
     wait_slow(
-        || (log_of(&mut client, id).lines()).any(|l| l.contains("widgets=") && l.contains(&told)),
+        || {
+            let log = log_of(&mut client, id);
+            let moved = |l: &&str| l.contains("widgets=") && l.contains("\"placed\"");
+            log.lines().filter(moved).count() >= 2
+        },
         "the widget told",
     );
+    let log = log_of(&mut client, id);
+    for line in log.lines().filter(|l| l.starts_with("widgets=")) {
+        assert!(
+            line.contains("\"frame\":0") || line.contains("\"frame\":null"),
+            "{line}"
+        );
+    }
+    // Another's widget: not told.
+    assert!(!log.contains("\"tag\":\"other\""), "{log}");
+    let hide = json!({"id": other["widget"]["id"]});
+    client.call("widget.hide", hide).unwrap();
     let text = client
         .call("screen.text", json!({"sprites": true}))
         .unwrap();
@@ -1490,7 +1525,7 @@ fn limits_granted_told_to_the_runner_and_anew_at_a_restart() {
     );
     assert_eq!(given["limits"], json!({"memory-mib": 128, "tick-ms": 100}));
     assert_eq!(given["id"], "limited");
-    wait_slow(|| log_of(&mut client, id).contains("up"), "started");
+    wait_log(&mut client, id, "up");
     assert!(log_of(&mut client, id).contains(warned));
 
     // A no to a limit, then a restart: the runner is told anew.
@@ -1711,7 +1746,7 @@ fn the_options_of_a_store_app() {
     let app = apps["apps"][0].clone();
     let id = app["id"].as_u64().unwrap();
     assert_eq!(told(&app)["granted"], json!(["shape", "keys-arrows"]));
-    wait_slow(|| log_of(&mut client, id).contains("pattern="), "the finds");
+    wait_log(&mut client, id, "pattern=");
     let log = log_of(&mut client, id);
     assert!(
         log.contains(r#""stop":{"file":"f0","name":"stop.txt"}"#),
@@ -1936,7 +1971,7 @@ fn the_seed_of_the_launcher() {
     let dice_of = |client: &mut Client, params: Value| {
         let started = client.call("app.start", params).unwrap();
         let id = started["app"]["id"].as_u64().unwrap();
-        wait_slow(|| log_of(client, id).contains("dice="), "the dice");
+        wait_log(client, id, "dice=");
         let log = log_of(client, id);
         let dice = log.split("dice=").nth(1).unwrap_or_default();
         dice.lines().next().unwrap_or_default().to_string()
@@ -1960,7 +1995,7 @@ fn the_seed_of_the_launcher() {
         .filter_map(|a| a["id"].as_u64())
         .max()
         .unwrap();
-    wait_slow(|| log_of(&mut client, last).contains("dice="), "the dice");
+    wait_log(&mut client, last, "dice=");
     assert!(log_of(&mut client, last).contains(&of_seven));
     for params in [
         json!({"store": "dice", "seed": -1}),

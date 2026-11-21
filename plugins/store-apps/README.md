@@ -7,19 +7,24 @@ app, their grants in `permissions.toml` under `[app."ptyrc/NAME"]`.
 Lookup and build: `rust/ptyrc-store/README.md`, Shipped.
 
 The protocol: `sdk/template/PROTOCOL.md`. The script API:
-`sdk/js/ptyrc.d.ts` (`ptyrc/deck` for widgets). Rust: `sdk/rust/ptyrc-app`.
-Examples: `sdk/js/examples`, `sdk/rust/examples`. The models here:
-`confetti` (sprites, effects, a show on its own clock, unit tests),
-`sand` (an effect, the pointer relayed, a permission by option),
-`clock` (a deck: variants by size, the wall clock, a zone, a tick on
-the second; code shared with other apps as modules of the tree).
+`sdk/js/ptyrc.d.ts` (`ptyrc/deck` for widgets). Rust:
+`sdk/rust/ptyrc-app/README.md`. Examples: `sdk/js/examples`,
+`sdk/rust/examples`. The models here:
+
+- `confetti`: sprites, effects, a show on its own clock, unit tests.
+- `sand`: an effect, the pointer relayed, a permission by option.
+- `clock`: a deck; variants by size, the wall clock, a zone, a tick on
+  the second; code shared as modules of the tree; an option refused in
+  `init`.
+- `life`: Rust; a Braille canvas, a `Sight`, draws from the seed,
+  permissions by option (`needs`), values refused by the manifest.
 
 ## A tree
 
 ```
 NAME/
   ptyrc-app.toml   [app] id = "NAME"; random = [...]
-  LICENSE.txt      a copy of the repository's, as `ptyrc dev new` writes it
+  LICENSE.txt      the repository's, as `ptyrc dev new` writes it
   app.js           or Cargo.toml, Cargo.lock, src/lib.rs (A Rust app)
   tests.js         unit tests: exports test_*
   x.js, x.tests.js a module and its tests; tests.js re-exports them
@@ -28,8 +33,8 @@ NAME/
   tests/*.screen   files the cases name (--screen tests/x.screen)
 ```
 
-- `LICENSE.txt`: the store wants the GPL text in each tree; git stores the
-  copies as one blob. The harness checks each is the repository's.
+- `LICENSE.txt`: the store wants the GPL text in each tree; git stores
+  the copies as one blob. The harness checks each is the repository's.
 - A module: code another app wants too (the twin's `_x`, or a part of
   another app it imports) is a file of its own, importing the SDK's
   modules alone. Its tests beside it, `x.tests.js`; `dev test --unit`
@@ -40,34 +45,31 @@ NAME/
 ## Shared code: `_shared/js/`, `_shared/rust/`
 
 Code of a family of our apps (`_arcade`, `_reef`, `_sky`, `_strip`,
-the fonts of `clock` and `timer`) has one source, `_shared/js/x.js`,
-copied into each tree that uses it, anywhere in it (`NAME/x.js`,
-`NAME/lib/x.js`): each tree stays whole, the store and the runner
-know nothing of it. A file of a tree named as one of `_shared/js/` is
-its copy: the harness checks it byte for byte, as it does `LICENSE.txt`;
-`PTYRC_SYNC=1` writes each copy from the source. Its tests,
-`_shared/js/x.tests.js`, are not copied: the harness runs them once.
-`_shared` is not an app: no manifest, a name the store refuses.
-Tenants: `digits.js` (`clock`; `timer` next).
+the fonts of `clock` and `timer`) has one source, copied into each
+tree that uses it: each tree stays whole, the store and the runner
+know nothing of it. `_shared` is not an app: no manifest, a name the
+store refuses. `PTYRC_SYNC=1` (the harness) writes each copy from its
+source.
 
-`_shared/rust/x.rs` likewise, copied as `NAME/src/x.rs` and declared
-`mod x;` there; its unit tests are inside (`#[cfg(test)]`), run once
-by the harness, natively, with `ptyrc-app`. Not `lib.rs`, `main.rs`.
-No tenant yet; the first: the grid of `stars` (`Grid`, `noise`,
-`runs`, `phase_of`), for `pond` and `shore`.
-- A Rust app: `app.wasm` is built from the tree on demand in a
-  checkout (`<cache>/ptyrc/shipped/NAME/`, at `ptyrc app`); a release
-  installs the trees in `<data>/ptyrc/shipped/` with `app.wasm` beside
-  each, built with the release. Nothing is fetched.
+- `_shared/js/x.js`: copied anywhere in a tree (`NAME/x.js`,
+  `NAME/lib/x.js`); a file of a tree named as one of `_shared/js/` is
+  its copy, checked byte for byte as `LICENSE.txt` is. Its tests,
+  `_shared/js/x.tests.js`, are not copied: the harness runs them once.
+  Tenants: `digits.js` (`clock`; `timer` next).
+- `_shared/rust/x.rs`: copied as `NAME/src/x.rs`, declared `mod x;`
+  there; never `lib.rs`, `main.rs`. Its unit tests inside
+  (`#[cfg(test)]`), run once by the harness, natively, with
+  `ptyrc-app`. No tenant yet; the first: the grid of `stars` (`Grid`,
+  `noise`, `runs`, `phase_of`), for `pond` and `shore`.
 
 ## A case
 
 `tests/CASE.args`: words split on white space, `#` to the end of a
 line a comment, no quoting (write JSON without spaces). Run in the
-tree: paths are relative to it. An app option named as one of `dev
-test` (`--size`, `--at`, ...) goes after `--`; before it,
-the flag is `dev test`'s (`dev check` and `dev test` say so). Name the
-Python test it carries in the first comment line.
+tree: paths are relative to it. The first comment line names the
+Python test it carries. An app option named as one of `dev test`
+(`--size`, `--at`, ...) goes after `--`; before it, the flag is `dev
+test`'s (`dev check` and `dev test` say so).
 
 ```
 ptyrc dev test NAME/ --cases [CASE...] [--bless]
@@ -77,24 +79,18 @@ Each case (those named alone), a line: `ok`, or `FAIL` and a diff
 (`-` expected, `+` got, two lines around); status 1 when one fails.
 `--bless` writes each `CASE.txt` from the run. The cases run at once;
 a Rust app is built once before them. It is the canonical runner: the
-harness below runs it, a tree's `test.sh` calls it.
-
-A second run from the first one's storage: `ptyrc dev test .
---storage-out tests/stored` once, the directory kept in the tree; the
-case `--storage tests/stored`. Not a case writing what another reads.
-`--timing` (not in a case): the wall time of the ticks and events; one
-over `tick-ms` named (`slow at T ms: ...`), status 1. Run it alone, on
-a quiet machine, with the release runner (below, Cost).
-
-The scene steps on its own clock, as the driver's: the screen at `T`
-is the same whatever other times `--at` asks.
+harness runs it, a tree's `test.sh` calls it.
 
 A run that ends with a status other than 0 fails its case, unless the
 report says that status (`ended: exit: N`, `result: VALUE (status
-N)`) and so `CASE.txt` holds the line: an option refused in `init`
-(`exit(2)`) is a case (`clock/tests/zone`). A value the manifest
-refuses (`choices`, `min`) stops `dev test` before the app, status 2:
-the report is its line, `ptyrc: --NAME: WHY` (`life/tests/kind`).
+N)`), and so `CASE.txt` holds the line: an option refused in `init`
+(`exit(2)`) is a case (`clock/tests/zone`, `life/tests/speed`). A
+value the manifest refuses (`choices`, `min`) stops `dev test` before
+the app, status 2: the report is the launcher's line, `ptyrc: --NAME:
+WHY` (`life/tests/kind`).
+
+The scene steps on its own clock, as the driver's: the screen at `T`
+is the same whatever other times `--at` asks.
 
 The wall clock: `--clock ISO` (default `2000-01-01T00:00:00Z`),
 `--zone NAME` the machine's (default `UTC`), `--deny clock` the time
@@ -111,6 +107,14 @@ effect that follows the pointer asks the driver (`"pointer": true`,
 `"bomb": true` in its params, `sand`): no pad sprite, no `hover`,
 `mouse` relayed by the app.
 
+A second run from the first one's storage: `ptyrc dev test .
+--storage-out tests/stored` once, the directory kept in the tree; the
+case `--storage tests/stored`. Not a case writing what another reads.
+
+`--timing`, never in a case: the wall time of the ticks and events;
+each one over `tick-ms` named (`slow at T ms: ...`), status 1. Run it
+alone, on a quiet machine, with the release runner (A Rust app, Cost).
+
 ## The harness
 
 ```
@@ -120,21 +124,22 @@ PTYRC_BLESS=1 ...                                   # --cases --bless
 PTYRC_SYNC=1 ...                                    # copies of _shared written
 ```
 
-A start of the runner compiles the interpreter: some 7 s of processor
-time in a debug build, 2 s in a release one. The cases run on
-`target/release/ptyrc-box` when it was built after the debug one
-(`cargo build --release -p ptyrc-box`; 2026-11-20, two trees: 13 s,
-176 s of processor time, against 4 s, 49 s); `PTYRC_BOX` names
-another (`ptyrc dev test` takes it, as the driver).
-
 Per tree: `ptyrc dev check`; the id its directory; `LICENSE.txt`; the
-copies of `_shared/`; each
-draw of `random` read by the options; each case against its `.txt`
-(`dev test --cases`); `dev test --unit` when `tests.js` exists; a Rust
-app's `cargo test`.
-Needs `sdk/js/interp/build.sh` (else the scripts are skipped, or fail
-with `PTYRC_REQUIRE_JS=1`) and `rustc` with its wasm target (else the
-Rust apps are skipped, or fail with `PTYRC_REQUIRE_RUSTC=1`). Bless only after reading the diff.
+copies of `_shared/`; each draw of `random` read by the options; each
+case against its `.txt` (`dev test --cases`); `dev test --unit` when
+`tests.js` exists; a Rust app's `cargo test`. Needs
+`sdk/js/interp/build.sh` (else the scripts are skipped, or fail with
+`PTYRC_REQUIRE_JS=1`) and `rustc` with its wasm target (else the Rust
+apps are skipped, or fail with `PTYRC_REQUIRE_RUSTC=1`). Bless only
+after reading the diff.
+
+A start of the runner compiles the interpreter: 7 to 12 s of
+processor time in a debug build, 2 to 3.3 s in a release one, by the
+load (2026-11-20). The cases run on `target/release/ptyrc-box` when it
+was built after the debug one (`cargo build --release -p ptyrc-box`;
+2026-11-20, two trees: 13 s, 176 s of processor time, against 4 s,
+49 s); `PTYRC_BOX` names another (`ptyrc dev test` takes it, as the
+driver).
 
 ## Moving an app
 
@@ -142,8 +147,8 @@ Rust apps are skipped, or fail with `PTYRC_REQUIRE_RUSTC=1`). Bless only after r
    and every test of it (`tests/test_NAME.py`, `test_apps.py`,
    `test_reads.py` and its `OPTIONS`; `_catalog.py`: `RANDOM`, `ASKS`,
    `READS`), and what it imports. Its row in
-   `temp/20112026-02-ready/audit/migration-plan.md` (c); its draft in
-   `temp/20112026-02-ready/manifest/drafts/NAME/`.
+   `plan/sessions/20112026-02-ready/audit/migration-plan.md` (c); its draft in
+   `plan/sessions/20112026-02-ready/manifest/drafts/NAME/`.
 2. The tier: a script, unless the app computes every cell of a
    frame-sized picture at each tick (then Rust).
 3. The manifest: `surface` as small as it goes (`frame` for an
@@ -151,13 +156,17 @@ Rust apps are skipped, or fail with `PTYRC_REQUIRE_RUSTC=1`). Bless only after r
    they go: what a no gives is in `PROTOCOL.md`; an app that works
    lowered says so in its reason. A permission one option needs alone:
    `needs = [...]` on that option, never in the default set.
+   `keys-arrows` is amber (unticked in the pop-up): asked so by the
+   option that grabs (`snake --grab`, `bricks --grab`).
 4. The options: every option of the twin, its short flag, choices,
-   `[args]`. Not the generic ones (`-f/--frame`, `--front`, `--border`,
-   `--prefer`, `--seed`): the launcher's. The twin's default frame
-   (`_cli.parser(..., frame=)`; none given: `raw`) is `[app] frame`
-   unless it is `active`; its default border and side (`_widgets.options`)
-   go to `new Deck({border})`, which the launcher's flags override. Not
-   the test hooks (`--print`, `--speed`, `--at`): `dev test`. An option
+   `[args]`. Not the launcher's (`ptyrc app NAME --help`, options of
+   ptyrc: `--frame`, `--front`, `--back`, `--prefer`, `--alpha`,
+   `--border`, `--seed`, `--wait`): no `seed` option. The twin's
+   default frame (`_cli.parser(..., frame=)`; none given: `raw`) is
+   `[app] frame` unless it is `active`; its default border and side
+   (`_widgets.options`) go to `new Deck({border})`, which the
+   launcher's flags override. Not the test hooks (`--print`,
+   `--speed`, `--at`): `dev test`, but those Decided keeps. An option
    the twin gave no default has none (`null` in `init`). `--no-X` of
    the twin: `X = { type = "bool", default = true }`. A bound or a rule
    the manifest cannot say (`--bursts 1..10`, two options exclusive):
@@ -169,16 +178,29 @@ Rust apps are skipped, or fail with `PTYRC_REQUIRE_RUSTC=1`). Bless only after r
    them on a clock of its own. Session time is `Date.now()` and
    `tick(now)`; the wall clock `now()`, `civil`, and `period(until(
    unixMs, 1000))` at each tick: the ticks fall on the second, live
-   and headless. A `Deck` cannot run in `--unit` (no
-   session): keep `render(w, h)` a call of a pure face, test the faces,
-   and the deck in cases. Colours are numbers: the twin's names
-   `bright-cyan` 14, `bright-magenta` 13, `bright-yellow` 11,
-   `bright-black` 8, `white` 7, `cyan` 6.
+   and headless. A `Deck` cannot run in `--unit` (no session): keep
+   `render(w, h)` a call of a pure face, test the faces, and the deck
+   in cases. Colours are numbers: the twin's names `bright-cyan` 14,
+   `bright-magenta` 13, `bright-yellow` 11, `bright-black` 8, `white`
+   7, `cyan` 6.
+   - The frame: told at `init`, `manifest().frame` (Rust:
+     `Manifest::frame`): `--frame`, else `[app] frame`, else `active`,
+     as the driver resolves it; 0 below `layout`, and headless. A
+     `Sight` reads it unless one is named; `move` names the next. No
+     frame option of the app's own.
+   - `subscribe` adds topics, never removes one: a `Sight`, a `Deck`
+     and the app subscribe side by side; the app gets each event once
+     and passes it on.
+   - A pointer event on a canvas names its sprite: compare `sprite` of
+     `hover`, `mouse` with `canvas.sprite()` (Rust: `Canvas::sprite()`):
+     `null` (`None`) before the first `present`; a new id once the
+     driver removed it and `present` put it again.
 6. The tests: each test of the twin carried over, as a unit test or a
    case; one that cannot be carried yet is named in your report with
    the gap that blocks it. A test of `--print` carries as the cases of
    the faces; a live test of `test_apps.py` as a case; `test_reads.py`
-   as a case with nothing `lowered` but what `--deny` asks.
+   as a case with nothing `lowered` but what `--deny` asks; a refusal
+   (`init`'s or the manifest's) as a case (A case).
 7. `random = [[...], ...]` in `[app]`: the draws of the menu's random
    app (`RANDOM` of `_catalog.py`); `[]`: never drawn; absent: drawn
    bare.
@@ -231,12 +253,16 @@ The model: `life`. Beside the lines above:
   builds `src/lib.rs` by `rustc` with its own copy. The tree's
   `Cargo.lock` committed.
 - `[app] rustc = "1.88"`: the floor of every Rust store app.
+- `app.wasm` is built from the tree on demand in a checkout
+  (`<cache>/ptyrc/shipped/NAME/`, at `ptyrc app`); a release installs
+  the trees in `<data>/ptyrc/shipped/` with `app.wasm` beside each,
+  built with the release. Nothing is fetched.
 - The SDK's modules, not the twin's: `ptyrc_app::canvas` (`Braille`,
   `Half`, `mix`, `xterm`: `_canvas`), `ptyrc_app::sight` (`Sight`:
   `_cli.Sight`), `ptyrc_app::dice` (`Dice`, `Host`, `Seeded`);
   `ptyrc_app::deck` for widgets, `.click` on a press and a wheel turn
   (`sdk/rust/ptyrc-app/README.md`, Drawing, Deck). Family code:
-  `_shared/rust/` (above).
+  `_shared/rust/`.
 - Draws: the pure code takes `&mut impl Dice`; `init` seeds a `Seeded`
   from `Host` (the launcher's `--seed`), a unit test from a number.
 - Time: steps counted from `now_ms` (`life`: generation `now_ms *
@@ -249,14 +275,13 @@ The model: `life`. Beside the lines above:
 
 ## Decided (`plan/interview.md`, 2026-11-20)
 
-- `keys-arrows` is amber: asked by the option that grabs (`needs =
-  ["keys-arrows"]`: `snake --grab`, `bricks --grab`), never by the
-  default start.
-- No `seed` option: `--seed` is the launcher's.
-- `ask`: no `--json`; `ptyrc --json app ask` prints the value as JSON.
+Beside what the steps above state (`needs`, `keys-arrows`, `--seed`):
+
+- `ask`: no `--json`; `ptyrc --json app ask` prints the value as JSON;
+  without it a string as it is, a list a line each.
 - `fishes --tank` is an app of its own, `tank`; the reef in `_shared`.
-- `marks` draws on its frame alone: `surface = "frame"`.
-  `timer -b`: `surface = "frame"`.
+- `marks` draws on its frame alone: `surface = "frame"`, no
+  `screen-wide`. `timer -b`: `surface = "frame"`.
 - Test hooks dropped and kept as `migration-plan.md` (c) lists:
   dropped `--speed`, `--at` of fire, globe, timer; `--speed` of
   gallery, pace; `--colour` of gallery, `--file` of minimap, `--seed`

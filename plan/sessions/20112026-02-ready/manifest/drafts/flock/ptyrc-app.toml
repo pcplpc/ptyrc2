@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "flock"
+version = "0.1.0"
+summary = "Starlings dance before a sunset."
+license = "GPL-3.0-or-later"
+api = 1
+rust = "src/lib.rs"
+rustc = "1.85"
+surface = "frame"
+frame = "largest"
+random = [[], ["-a"]]
+
+[permissions]
+shape = "where the text is, to perch on it"
+pointer = "the birds take flight from the pointer"
+
+[options]
+birds = { type = "float", default = 100.0, doc = "birds over 80 by 24 cells [default: 100]" }
+dusk = { type = "float", default = 300.0, doc = "the time the sun takes to go down [default: 300]" }
+at = { type = "float", default = 0.3, doc = "share of the dusk gone at the start: 0 the sun over the view, 0.8 it sets, 1 the night [default: 0.3]" }
+sun = { type = "float", default = 7.0, doc = "radius of the sun at 80 by 24 cells, 2 dots a column; 0: no sun [default: 7]" }
+wind = { type = "float", default = 1.0, doc = "strength of the breeze in the reeds, < 0 to the left [default: 1]" }
+clouds = { type = "bool", default = false, short = "c", doc = "bars of cloud, lit from under" }
+water = { type = "bool", default = false, short = "w", doc = "a lake, the sun's path on it" }
+reeds = { type = "bool", default = false, short = "r", doc = "reeds in the breeze, in front" }
+join = { type = "bool", default = false, short = "j", doc = "groups come in and join the flock" }
+double = { type = "bool", default = false, short = "d", doc = "a second, smaller flock, on its own way" }
+hawk = { type = "bool", default = false, short = "k", doc = "a hawk hunts now and then, the flock bursts" }
+night = { type = "bool", default = false, short = "n", doc = "the stars come out as it sets" }
+roost = { type = "bool", default = false, short = "o", doc = "the birds roost on the text" }
+all = { type = "bool", default = false, short = "a", doc = "-c -w -r -j -d -k -n -o" }

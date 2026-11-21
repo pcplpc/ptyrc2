@@ -154,7 +154,7 @@ pub struct Life {
     /// The cells off the text.
     clear: Option<Mask>,
     canvas: Option<Canvas>,
-    shown: Picture,
+    shown: Option<Picture>,
     guests: Option<Guests<Seeded>>,
     /// Generations to the next drop.
     guest: f64,
@@ -200,7 +200,7 @@ impl Life {
         if sized {
             self.world.resize(ww, wh);
             self.watch.reset();
-            self.shown = Picture::new(w, h);
+            self.shown = Some(Picture::new(w, h));
             self.canvas = None; // dropped: its sprite removed
             self.canvas = match Canvas::new(w, h) {
                 Some(c) => Some(c),
@@ -225,17 +225,11 @@ impl Life {
 
     fn draw(&mut self, landed: &[Landing]) {
         let clear = self.clear.as_deref();
-        picture(
-            &self.world,
-            self.o.colour,
-            self.o.trail,
-            clear,
-            &mut self.shown,
-        );
-        let Some(canvas) = &mut self.canvas else {
+        let (Some(canvas), Some(shown)) = (&mut self.canvas, &mut self.shown) else {
             return;
         };
-        let shown = &self.shown;
+        picture(&self.world, self.o.colour, self.o.trail, clear, shown);
+        let shown = &*shown;
         shown
             .dots
             .paint(canvas, 0, 0, |x, y| Color::Palette(shown.ink(x, y)));
@@ -307,7 +301,7 @@ impl App for Life {
             watch: Watch::default(),
             clear: None,
             canvas: None,
-            shown: Picture::new(0, 0),
+            shown: None,
             guests,
             guest,
             dice,

@@ -16,9 +16,9 @@
 //! applies them. `--surface widget|frame|screen`: the manifest's, on
 //! the one frame: draws clipped as the driver clips them.
 //! `--event`, `--key`, `--pointer`, `--click`, `--press`, `--release`,
-//! `--focus`, `--paste`:
-//! what the user does, at a session time.
-//! `--screen [T:]FILE`, again for each: the screen from T on.
+//! `--focus`, `--paste`, `--resize`: what the user does, at a session
+//! time. `--screen [T:]FILE`, again for each: the screen from T on;
+//! `--tape FILE`: a tape, its size the screen's.
 //! `--clock ISO`, `--zone NAME`, `--storage DIR`, `--file NAME=PATH`,
 //! `--write-file NAME=PATH` (the manifest's `write = true`),
 //! `--probe git|system=FILE.json`: the host functions (`hostfn`).
@@ -46,7 +46,8 @@
 //!
 //! The OS profile (`profile::apply`) is applied once the files are
 //! read and, live, the module loaded and the socket open.
-//! `--no-profile`: not applied, for debugging; said on stderr.
+//! `--no-profile`: not applied, for debugging; said on stderr. `--profile`:
+//! applied (the default), undoing an earlier `--no-profile`.
 //! `PTYRC_PROFILE=full`: a profile with a part missing is refused.
 //!
 //! Status: that of `exit`; 0 after SIGTERM; 70 a guest ended by the
@@ -66,8 +67,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 const USAGE: &str =
-    "usage: ptyrc-box [--no-profile] [--manifest JSON] [--assets DIR] [--seed N] [--script] MODULE [ARGS]
-       ptyrc-box --headless [--no-profile] [--manifest JSON] [--assets DIR] [--script] MODULE [ARGS]
+    "usage: ptyrc-box [--profile | --no-profile] [--manifest JSON] [--assets DIR] [--seed N] [--script] MODULE [ARGS]
+       ptyrc-box --headless [--profile | --no-profile] [--manifest JSON] [--assets DIR] [--script] MODULE [ARGS]
                  [--size CxR] [--for T] [--at T,...] [--seed N]
                  [--tape FILE | --screen [T:]FILE...] [--json] [--styles] [--timing]
                  [--grant NAME,...] [--deny NAME,...] [--words WORD,...]
@@ -79,7 +80,7 @@ const USAGE: &str =
                  [--user-word WORD]... [--user-pattern TEXT]... [--user-regex RE]...
                  [--front | --back] [--prefer P] [--alpha A] [--border B]
                  [--surface widget|frame|screen]
-       ptyrc-box --unit FILE [--no-profile] [--manifest JSON] --script APP.js [ARGS]
+       ptyrc-box --unit FILE [--profile | --no-profile] [--manifest JSON] --script APP.js [ARGS]
 T: milliseconds, or with a unit: 500ms, 2s";
 
 /// The permissions of the plan (`ptyrc-store`, `PERMISSIONS`).

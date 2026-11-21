@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! A run without a driver: the scene of `ptyrc-core` over a screen
-//! (empty, a text, a tape), the clock an argument. The same module,
+//! (empty, a text, texts from their times, a tape), the clock an
+//! argument. The same module,
 //! options and seed give the same report.
 
 use crate::assets::Assets;

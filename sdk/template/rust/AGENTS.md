@@ -68,7 +68,7 @@ ptyrc_app::app!(MyApp);
   `subscribe` adds to the topics held (a `Sight`, a `Deck` add theirs);
   hand each event to them, then use it.
 - The frame told at `init`, `manifest().and_then(|m| m.frame)`: a real id
-  live with `layout` held, else 0; headless always 0 (`PROTOCOL.md`,
+  live with a degree held (`layout` or above), else 0; headless always 0 (`PROTOCOL.md`,
   Manifest).
 
 ## Rules

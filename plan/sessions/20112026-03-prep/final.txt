@@ -1,0 +1,235 @@
+dbbc7ce
+Sat Nov 21 00:28:11 CET 2026
+ 00:28:11 up 12 days,  9:45,  1 user,  load average: 3.63, 55.64, 75.66
+== interp
+-rwxr-xr-x 1 peon peon 1090100 Nov 21 00:28 target/ptyrc-js.wasm
+== build
+   Compiling ptyrc-server v2.0.0 (/home/peon/git/perso/ptyrc/ptyrc2/rust/ptyrc-server)
+   Compiling ptyrc-cli v2.0.0 (/home/peon/git/perso/ptyrc/ptyrc2/rust/ptyrc-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.39s
+   Compiling ptyrc-server v2.0.0 (/home/peon/git/perso/ptyrc/ptyrc2/rust/ptyrc-server)
+   Compiling ptyrc-cli v2.0.0 (/home/peon/git/perso/ptyrc/ptyrc2/rust/ptyrc-cli)
+    Finished `release` profile [optimized] target(s) in 1m 39s
+== test
+     Running unittests src/lib.rs (target/debug/deps/ptyrc_box-0d45ad8ce50c2a79)
+test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+     Running unittests src/main.rs (target/debug/deps/ptyrc_box-8e67cf9e6706e14e)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/abi.rs (target/debug/deps/abi-37509434a322e33b)
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+     Running tests/cli.rs (target/debug/deps/cli-9eab5af5b528b0bc)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+     Running tests/hostile/main.rs (target/debug/deps/hostile-7200a2934489a5c9)
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s
+     Running tests/live.rs (target/debug/deps/live-73bfccdf98123d27)
+test repaint_200x60_at_30_hz ... ignored, needs the ptyrc binary
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/profile.rs (target/debug/deps/profile-f6e21e909c4a10c1)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.00s
+     Running tests/protocol.rs (target/debug/deps/protocol-7565285c12dbb478)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests/script.rs (target/debug/deps/script-ea5c0289a9059306)
+test speed ... ignored, a measure, not a test
+test result: ok. 25 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 4.52s
+     Running tests/ticks.rs (target/debug/deps/ticks-434a995679b34468)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.38s
+     Running unittests src/main.rs (target/debug/deps/ptyrc-82981c71c7328c5a)
+test manage::menu::tests::screens ... ignored, prints the screens: cargo test -p ptyrc-cli screens -- --ignored --nocapture
+test manage::menu::tests::screens_of_frames ... ignored, prints the screens of the frames
+test result: ok. 56 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.21s
+     Running tests/app.rs (target/debug/deps/app-05f81e08bc61219c)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+     Running tests/auto.rs (target/debug/deps/auto-0520b4dbeee31e85)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+     Running tests/cases.rs (target/debug/deps/cases-12757a73fe8137cb)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.53s
+     Running tests/check.rs (target/debug/deps/check-fbd729a958866956)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+     Running tests/close.rs (target/debug/deps/close-1cc07d2882de30e5)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+     Running tests/deck.rs (target/debug/deps/deck-f4300fdff6685eb8)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.81s
+     Running tests/dev.rs (target/debug/deps/dev-f74fa985dd891ddc)
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 62.75s
+     Running tests/devrust.rs (target/debug/deps/devrust-84eabd2e90898297)
+test a_failed_build_of_the_app_blames_its_sources ... ok
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.31s
+     Running tests/driver.rs (target/debug/deps/driver-88e540fc860a9fc6)
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.21s
+     Running tests/errors.rs (target/debug/deps/errors-3130f5f9fd2a5438)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.04s
+     Running tests/focus.rs (target/debug/deps/focus-94d1792c35b25b29)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.72s
+     Running tests/hide.rs (target/debug/deps/hide-bd31804951eca465)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.19s
+     Running tests/hostfn.rs (target/debug/deps/hostfn-e119796b91eb18b1)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.20s
+     Running tests/hotkey.rs (target/debug/deps/hotkey-11ff638be8efdea0)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.17s
+     Running tests/manage.rs (target/debug/deps/manage-81d6f1cfd0415388)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.69s
+     Running tests/overlay.rs (target/debug/deps/overlay-8ad2d8e4c32cc2d4)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.98s
+     Running tests/popup.rs (target/debug/deps/popup-68ba4965b558166f)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
+     Running tests/store.rs (target/debug/deps/store-75832946c4e17d9a)
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.98s
+     Running tests/store_apps.rs (target/debug/deps/store_apps-e6f273b05f6e8c41)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.03s
+     Running tests/storeapp.rs (target/debug/deps/storeapp-ac74cfcdb49c0e9e)
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 43.90s
+     Running tests/storerust.rs (target/debug/deps/storerust-2eb71074bad21b1b)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.17s
+     Running tests/tapes.rs (target/debug/deps/tapes-295752480b67a157)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+     Running tests/tools.rs (target/debug/deps/tools-f772176685d72f1c)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+     Running unittests src/lib.rs (target/debug/deps/ptyrc_core-8b0caa90c24b68f0)
+test frames::tests::bench_update_cost ... ignored
+test frames::tests_heat::cost_200x60 ... ignored, timing
+test scene::tests::cost_effect_tick_300x80 ... ignored, timing
+test scene::tests::cost_scene_200x60 ... ignored, timing
+test widgets::tests::look_cost_at_200x60 ... ignored
+test result: ok. 240 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 3.89s
+     Running unittests src/lib.rs (target/debug/deps/ptyrc_draw_bigtext-9973839de268da45)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/ptyrc_draw_borders-94fcf6b04e43ff7c)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/ptyrc_draw_rain-9a595dbc5824d39e)
+test tests::bench ... ignored, prints the cost of a tick: cargo test --release -p ptyrc-draw-rain bench -- --ignored --nocapture
+test result: ok. 10 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.07s
+     Running unittests src/lib.rs (target/debug/deps/ptyrc_draw_sand-9ed32772960f29d3)
+test tests::bench ... ignored, prints the cost of a tick: cargo test --release -p ptyrc-draw-sand bench -- --ignored --nocapture
+test tests::show ... ignored, prints a pile: cargo test -p ptyrc-draw-sand show -- --ignored --nocapture
+test tests::show_bomb ... ignored, prints a blast: cargo test -p ptyrc-draw-sand show_bomb -- --ignored --nocapture
+test result: ok. 28 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 4.28s
+     Running unittests src/lib.rs (target/debug/deps/ptyrc_draw_shapes-7744f7d9ec02f37b)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/ptyrc_draw_snow-a7e6455d47fe6ec6)
+test tests::bench ... ignored, prints the cost of a tick: cargo test --release -p ptyrc-draw-snow bench -- --ignored --nocapture
+test tests::show ... ignored, prints the snow: cargo test -p ptyrc-draw-snow show -- --ignored --nocapture
+test result: ok. 13 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 3.86s
+     Running unittests src/lib.rs (target/debug/deps/ptyrc_probe-3e78c3c652567019)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/git_parse.rs (target/debug/deps/git_parse-4ea8ef40b28d33fe)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/git_repo.rs (target/debug/deps/git_repo-b311afa0198018da)
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.01s
+     Running tests/system.rs (target/debug/deps/system-256fc5a0a60e54a4)
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+     Running unittests src/lib.rs (target/debug/deps/ptyrc_proto-4668c820e2dd8ef2)
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+     Running unittests src/lib.rs (target/debug/deps/ptyrc_rules-c4ad40e60f741a52)
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/ptyrc_server-071b42d2335918a0)
+test permissions::tests::what_is_not_known_is_ignored_with_a_warning ... ok
+test screen_tests::bench_burst_path ... ignored
+test screen_tests::speed_200x60 ... ignored, a measure, in release
+test result: ok. 141 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 2.01s
+     Running unittests src/lib.rs (target/debug/deps/ptyrc_store-a49fec2618615741)
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+     Running tests/build.rs (target/debug/deps/build-0a31053422c529f8)
+test probe_no_rustc ... ignored, run by no_rustc_says_how_to_get_it, PTYRC_RUSTC set
+test result: ok. 10 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 25.58s
+     Running tests/fetch.rs (target/debug/deps/fetch-38dda802738c1a33)
+test remote_config_ignored ... ok
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.16s
+     Running tests/index.rs (target/debug/deps/index-6945286ec1d6ea70)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.69s
+     Running tests/install.rs (target/debug/deps/install-2198fe9473a7c46c)
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+     Running tests/manifest.rs (target/debug/deps/manifest-5d2f526273014a08)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/registry.rs (target/debug/deps/registry-d1283387abc92ab3)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/shipped.rs (target/debug/deps/shipped-62dfb8c5a8a42ce4)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.03s
+     Running unittests src/lib.rs (target/debug/deps/ptyrc_tui_agent-07619921a9efdfea)
+test tests::bench ... ignored, prints the cost of a look at a screen: cargo test --release -p ptyrc-tui-agent-tui bench -- --ignored --nocapture
+test result: ok. 4 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/ptyrc_tui_glances-7ff94afe8a1fd192)
+test tests::bench ... ignored, prints the cost of a look at a screen: cargo test --release -p ptyrc-tui-glances bench -- --ignored --nocapture
+test result: ok. 3 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/ptyrc_tui_htop-1640ffbd467d4d69)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/ptyrc_tui_ranger-6338ed11fcda18b2)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/screens.rs (target/debug/deps/screens-9cdc9542a3b84162)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running unittests src/lib.rs (target/debug/deps/ptyrc_tui_tmux-6e88fd51bcd9d326)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests/compose.rs (target/debug/deps/compose-55616f417b9569e3)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+     Running unittests src/lib.rs (target/debug/deps/ptyrc_tui_vim-9600b9fe256414cc)
+test tests::bench ... ignored, prints the cost of a look at a screen: cargo test --release -p ptyrc-tui-vim bench -- --ignored --nocapture
+test result: ok. 5 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running unittests src/lib.rs (target/debug/deps/ptyrc_vt-6720bf025438e2b0)
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s
+     Running tests/repair.rs (target/debug/deps/repair-5a58dd2b5b370aa3)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.32s
+     Running tests/replay.rs (target/debug/deps/replay-026783bc0536b383)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.39s
+     Running tests/throughput.rs (target/debug/deps/throughput-6c7162856e3eb636)
+test repaint ... ignored
+test throughput ... ignored
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/vt.rs (target/debug/deps/vt-bd2269c7e52c6d40)
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+== clippy
+== pytest
+........................................................................ [ 92%]
+........................................................................ [ 98%]
+..................                                                       [100%]
+=============================== warnings summary ===============================
+plugins/client-apps/python/tests/test_pace.py: 201 warnings
+  /home/peon/git/perso/ptyrc/ptyrc2/plugins/client-apps/python/src/ptyrc_apps/pace.py:196: DeprecationWarning: os.path.commonprefix() is deprecated. Use os.path.commonpath() for longest path prefix.
+    keep = len(os.path.commonprefix([self.left, left]))
+
+python/ptyrc/tests/test_tools.py::test_arrows_move_a_sprite_and_vim_does_not_see_them
+python/ptyrc/tests/test_tools.py::test_a_sprite_is_clicked
+  /home/peon/.local/share/uv/python/cpython-3.15.0-linux-x86_64-gnu/lib/python3.15/pty.py:66: DeprecationWarning: This process (pid=929929) is multi-threaded, use of forkpty() may lead to deadlocks in the child.
+    pid, fd = os.forkpty()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1170 passed, 203 warnings in 53.09s
+== sdk
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.54s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.98s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.32s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.33s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.83s
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+== examples
+ok sdk/js/examples/clockface/test.sh
+ok sdk/js/examples/dots/test.sh
+ok sdk/js/examples/sand/test.sh
+ok sdk/js/examples/snake/test.sh
+ok sdk/js/examples/tally/test.sh
+ok sdk/rust/examples/clockface/test.sh
+ok sdk/rust/examples/sand/test.sh
+ok sdk/rust/examples/snake/test.sh
+ok sdk/rust/examples/tally/test.sh
+Sat Nov 21 00:35:56 CET 2026
+ 00:35:56 up 12 days,  9:53,  1 user,  load average: 19.49, 42.67, 62.05

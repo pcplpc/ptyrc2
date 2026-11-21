@@ -191,6 +191,17 @@ impl Manifest {
     pub fn holds(&self, name: &str) -> bool {
         self.granted.iter().any(|g| g == name)
     }
+
+    /// The screen seen at `degree` at least: it, or a degree above it
+    /// on the ladder `layout`, `shape`, `words`, `text`, is held. A
+    /// name off the ladder: [`Manifest::holds`].
+    pub fn sees(&self, degree: &str) -> bool {
+        const LADDER: [&str; 4] = ["layout", "shape", "words", "text"];
+        match LADDER.iter().position(|d| *d == degree) {
+            Some(i) => LADDER[i..].iter().any(|d| self.holds(d)),
+            None => self.holds(degree),
+        }
+    }
 }
 
 static MANIFEST: OnceLock<Option<Manifest>> = OnceLock::new();
@@ -720,6 +731,9 @@ mod tests {
         assert_eq!(m.permissions, ["shape", "words"]);
         assert_eq!(m.words, ["food"]);
         assert!(m.holds("shape") && m.holds("limit-time") && !m.holds("words"));
+        // The ladder: `shape` sees `layout`, not `words`.
+        assert!(m.sees("layout") && m.sees("shape") && !m.sees("words") && !m.sees("text"));
+        assert!(m.sees("limit-time") && !m.sees("clock"));
         assert_eq!(m.limits, [("tick-ms".to_string(), 100)]);
         assert_eq!(Manifest::of(&json!({"rate": 3})), None);
         let bare = json!({"ptyrc:manifest": {"id": "a"}});

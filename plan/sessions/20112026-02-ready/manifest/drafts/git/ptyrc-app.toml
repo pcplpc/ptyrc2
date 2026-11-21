@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "git"
+version = "0.1.0"
+summary = "A repository in widgets: head, status, log, pulse."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "widget"
+random = [[], ["-a"]]
+
+[permissions]
+files = "the repository named (--repo)"
+probe-git = "the state of the repository: runs git"
+clock = "the dates of the commits, in the local zone"
+
+[options]
+status = { type = "bool", default = false, short = "t", doc = "and the tag status" }
+log = { type = "bool", default = false, short = "l", doc = "and the tag log" }
+branches = { type = "bool", default = false, short = "b", doc = "and the tag branches" }
+stash = { type = "bool", default = false, short = "S", doc = "and the tag stash" }
+worktrees = { type = "bool", default = false, short = "w", doc = "and the tag worktrees" }
+pulse = { type = "bool", default = false, short = "p", doc = "and the tag pulse" }
+graph = { type = "bool", default = false, short = "g", doc = "the log as a graph, with the refs" }
+warn = { type = "bool", default = false, short = "W", doc = "a chase on the border of a warning" }
+all = { type = "bool", default = false, short = "a", doc = "all of the above" }
+monitor = { type = "string", doc = "the tags, comma-separated, of head,status,log,branches,stash,worktrees,pulse; shown even with nothing to tell" }
+merged = { type = "bool", default = false, doc = "one widget, the tags in turn" }
+repo = { type = "dir", doc = "a path in the repository" }
+every = { type = "float", default = 5.0, doc = "read again, when nothing told of a change [default: 5]" }
+cycle = { type = "float", default = 8.0, doc = "turn of --merged [default: 8]" }
+dirty = { type = "float", default = 14400.0, doc = "-W: a tree changed for that long is a warning [default: 4]" }

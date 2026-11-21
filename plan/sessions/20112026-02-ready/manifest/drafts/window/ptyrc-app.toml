@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "window"
+version = "0.1.0"
+summary = "House window on a landscape, day and night."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "widget"
+random = [[], ["-a"]]
+
+[permissions]
+clock = "the time of day and the season"
+
+[options]
+land = { type = "bool", default = false, short = "l", doc = "ridges, trees, houses lit at night" }
+seasons = { type = "bool", default = false, short = "y", doc = "the season of the date" }
+sky = { type = "bool", default = false, short = "w", doc = "the weather of the day: clouds, rain, fog, snow" }
+passing = { type = "bool", default = false, short = "p", doc = "birds, smoke, a balloon, a meteor; the stars twinkle" }
+cosy = { type = "bool", default = false, short = "c", doc = "curtains, a cat on the sill" }
+all = { type = "bool", default = false, short = "a", doc = "-l -y -w -p -c, the place of the day" }
+place = { type = "string", default = "auto", choices = ["auto", "countryside", "sea", "mountain", "city", "random"], doc = "what is outside [default: countryside]" }
+weather = { type = "string", default = "auto", choices = ["auto", "clear", "clouds", "rain", "fog", "snow"], doc = "this weather, not the day's" }
+random = { type = "bool", default = false, short = "r", doc = "at random, what is not given: the land, the season, the time, the weather; another at each run" }
+at = { type = "string", doc = "the time it starts at [default: now]" }
+season = { type = "string", default = "auto", choices = ["auto", "spring", "summer", "autumn", "winter"], doc = "the season it starts in" }
+speed = { type = "float", default = 1.0, doc = "seconds of the scene a second; 1440: a day a minute [default: 1]" }
+lat = { type = "float", default = 47.0, doc = "latitude, degrees [default: 47]" }
+rgb = { type = "bool", default = false, doc = "colours of 24 bits, not of the 256" }

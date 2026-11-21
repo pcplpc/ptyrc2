@@ -57,3 +57,4 @@ h: fg=238
 i: fg=79
 j: fg=67
 k: fg=61
+lowered at 0 ms: frame.get, to the degree shape

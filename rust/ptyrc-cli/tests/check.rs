@@ -77,4 +77,18 @@ fn the_keys_of_the_manifest() {
     ] {
         assert!(text.contains(said), "{said}: {text}");
     }
+    // A permission an option needs: asked only with it, said so.
+    let (status, text) = check(
+        &sb,
+        "needs",
+        summary,
+        "[permissions]\nkeys-arrows = \"steer\"\nshape = \"see\"\n\
+         [options]\ngrab = { type = \"bool\", default = false, doc = \"grab\", \
+         needs = [\"keys-arrows\"] }\n",
+    );
+    assert_eq!(status, Some(0), "{text}");
+    assert!(
+        text.contains("; asks keys-arrows (with --grab), shape\n"),
+        "{text}"
+    );
 }

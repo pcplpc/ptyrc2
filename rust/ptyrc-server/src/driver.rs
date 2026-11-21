@@ -2141,6 +2141,11 @@ impl Driver {
             // Sent after the answer, to this client only.
             for topic in topics.iter().filter(|t| !silent.contains(t)) {
                 let state = self.topic_state(topic, engine, false);
+                let state = (state.into_iter()).filter_map(|data| match topic == "widgets" {
+                    true => self.widget_to(conn, &data).unwrap_or(Some(data)),
+                    false => Some(data),
+                });
+                let state: Vec<Value> = state.collect();
                 let state = state.into_iter().map(|data| match &cut {
                     Some((degree, _, _)) => lower::event(topic, data, *degree),
                     None => data,
@@ -2689,6 +2694,11 @@ impl Driver {
                     Some(Ear::Deaf) | None => continue,
                 };
                 for data in self.topic_state(&topic, engine, true) {
+                    let data = match topic == "widgets" {
+                        true => self.widget_to(id, &data).unwrap_or(Some(data)),
+                        false => Some(data),
+                    };
+                    let Some(data) = data else { continue };
                     let data = match degree {
                         Some(degree) => lower::event(&topic, data, degree),
                         None => data,
@@ -3094,6 +3104,22 @@ impl Driver {
         }
     }
 
+    /// A `widgets` event to a narrowed app (Its own): its own widget
+    /// alone, `frame` 0 below `layout`, as `move` and `frame.get` tell
+    /// it. `None`: not narrowed, told as it is; `Some(None)`: not told.
+    fn widget_to(&self, conn: ConnId, data: &Value) -> Option<Option<Value>> {
+        let own = self.own(conn)?;
+        let owner = data.get("owner").and_then(Value::as_u64);
+        let mine = owner.is_some_and(|o| own.conns.contains(&ConnId(o)));
+        Some(mine.then(|| {
+            let mut told = data.clone();
+            if own.degree < Degree::Layout && !told["frame"].is_null() {
+                told["frame"] = json!(0);
+            }
+            told
+        }))
+    }
+
     fn emit(&mut self, topic: &str, data: Value) {
         if topic == "frames" {
             self.follow.seen = Some(data.clone());
@@ -3101,10 +3127,30 @@ impl Driver {
         if !self.topics.contains(topic) {
             return;
         }
+        let mut widget = HashMap::new();
+        if topic == "widgets" {
+            let readers = (self.conns.iter())
+                .filter(|(_, c)| c.topics.contains(topic) && !c.paused)
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>();
+            for id in readers {
+                if let Some(told) = self.widget_to(id, &data) {
+                    widget.insert(id, told);
+                }
+            }
+        }
         let message = event(topic, data.clone());
         let apps = self.apps.as_ref();
-        let reads = |c: &&mut Conn| c.topics.contains(topic) && !c.paused;
-        for conn in self.conns.values_mut().filter(reads) {
+        let reads = |c: &(&ConnId, &mut Conn)| c.1.topics.contains(topic) && !c.1.paused;
+        for (id, conn) in self.conns.iter_mut().filter(reads) {
+            match widget.remove(id) {
+                Some(Some(told)) => {
+                    conn.send(&event(topic, told));
+                    continue;
+                }
+                Some(None) => continue,
+                None => {}
+            }
             match ear(apps, conn, topic) {
                 Ear::Whole => conn.send(&message),
                 Ear::Cut(degree) => {

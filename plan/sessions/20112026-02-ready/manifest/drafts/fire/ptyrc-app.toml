@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "fire"
+version = "0.1.0"
+summary = "A fire, from a candle to a hearth."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "widget"
+random = [[], ["-a"]]
+
+[options]
+blocks = { type = "bool", default = false, short = "b", doc = "half blocks" }
+logs = { type = "bool", default = false, short = "l", doc = "a candle, a brazier, logs, a mantel" }
+cycle = { type = "bool", default = false, short = "c", doc = "it burns down, a log is put on" }
+sparks = { type = "bool", default = false, short = "k", doc = "sparks rise" }
+glow = { type = "bool", default = false, short = "g", doc = "the light of the fire" }
+all = { type = "bool", default = false, short = "a", doc = "-b -l -c -k -g" }
+burn = { type = "float", default = 3600.0, doc = "with -c: from a log to the next [default: 3600]" }

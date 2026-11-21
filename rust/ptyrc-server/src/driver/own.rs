@@ -357,6 +357,12 @@ impl Driver {
         };
         if let Some(Value::Array(items)) = answer.get_mut(member) {
             items.retain(|item| keep(item));
+            if method == "widget.list" && own.degree < Degree::Layout {
+                // Below `layout`, its one frame: 0, as `widgets` tells it.
+                (items.iter_mut())
+                    .filter(|item| !item["frame"].is_null())
+                    .for_each(|item| item["frame"] = json!(0));
+            }
             if method == "draw.list" {
                 let cut = self.cut_of(conn);
                 let cut = cut.as_ref().map(|(d, w, h)| (*d, w.as_slice(), h));

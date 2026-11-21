@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "pace"
+version = "0.1.0"
+summary = "Keys a minute and the words you type most."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "widget"
+random = [[], ["-a"]]
+
+[permissions]
+shape = "what is typed against what is shown"
+text = "what is typed against what is shown"
+keys-read = "every key typed, against what is shown"
+clock = "the dates of the words counted"
+storage = "the counts of the words, across sessions"
+files = "the file of words never counted (--stop)"
+
+[options]
+graph = { type = "bool", default = false, short = "g", doc = "the last half hour, in braille" }
+best = { type = "bool", default = false, short = "b", doc = "the highest pace of the session" }
+words = { type = "bool", default = false, short = "w", doc = "the words typed most, read from the screen" }
+bars = { type = "bool", default = false, short = "r", doc = "a bar a word; with -w" }
+colour = { type = "bool", default = false, short = "c", doc = "colours" }
+all = { type = "bool", default = false, short = "a", doc = "-g -b -w -r -c" }
+top = { type = "int", default = 10, doc = "words shown [default: 10]" }
+min = { type = "int", default = 4, doc = "letters of the shortest word counted [default: 4]" }
+stop = { type = "file", doc = "more words never counted, blanks between them" }
+window = { type = "float", default = 15.0, doc = "the pace is that of the last SECONDS [default: 15]" }

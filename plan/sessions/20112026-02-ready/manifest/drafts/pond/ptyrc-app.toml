@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "pond"
+version = "0.1.0"
+summary = "Still water, rings that break against the words."
+license = "GPL-3.0-or-later"
+api = 1
+rust = "src/lib.rs"
+rustc = "1.85"
+surface = "frame"
+frame = "largest"
+random = [[], ["-a"]]
+
+[permissions]
+shape = "where the text is: the fish swim around it"
+pointer = "the fish flee the pointer"
+clock = "the moon and the season of today"
+
+[options]
+pads = { type = "float", default = 6.0, doc = "lily pads over 80 by 24 cells [default: 6]" }
+drops = { type = "float", default = 10.0, doc = "drops a minute over 80 by 24 cells [default: 10]" }
+current = { type = "float", default = 0.6, doc = "the current, dots a second; 0: still water [default: 0.6]" }
+night = { type = "float", default = 300.0, doc = "the time the moon takes to cross the pond, with -m [default: 300]" }
+phase = { type = "float", doc = "phase of the moon: 0 new, 0.25 first quarter, 0.5 full [default: tonight's]" }
+season = { type = "string", default = "auto", choices = ["auto", "spring", "summer", "autumn", "winter"], doc = "what floats by, with -p [default: today's]" }
+koi = { type = "bool", default = false, short = "k", doc = "koi under the surface" }
+lotus = { type = "bool", default = false, short = "l", doc = "lotus in bloom on the pads" }
+rain = { type = "bool", default = false, short = "r", doc = "showers that come and go" }
+moon = { type = "bool", default = false, short = "m", doc = "the moon in the water" }
+petals = { type = "bool", default = false, short = "p", doc = "what the season sheds, adrift: petals, leaves" }
+insects = { type = "bool", default = false, short = "i", doc = "water striders, dragonflies" }
+all = { type = "bool", default = false, short = "a", doc = "-k -l -r -m -p -i" }

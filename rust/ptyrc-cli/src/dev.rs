@@ -79,11 +79,11 @@ pub enum Dev {
         /// that is not the default, and the legend
         #[arg(long)]
         styles: bool,
-        /// The wall time of the calls, host calls in them: a line for
-        /// each tick or event over tick-ms (50 ms), `slow at T ms: tick,
-        /// X ms`, `slow at T ms: event TOPIC, X ms`; a last line, the
-        /// ticks run, the mean and the max of one, the events and their
-        /// max. A slow call: status 1. Not in the report by default: it
+        /// The wall time of each tick and event, its host calls counted
+        /// in: a line for each over tick-ms (50 ms), `slow at T ms: tick,
+        /// X ms`, `slow at T ms: event TOPIC, X ms`; a last line, `ticks:
+        /// N; a tick, wall time: mean X ms, max X ms; events: N, max X
+        /// ms` (no event: no `events`). A slow call: status 1. Not in the report by default: it
         /// is not the same twice. --json: always, `ticks`, `tick_ms`,
         /// `events`, `event_ms`, `slow`. Run alone, on a quiet machine,
         /// with the release runner
@@ -120,7 +120,11 @@ pub enum Dev {
         /// answers a no (lowered, or `denied`)
         #[arg(long, value_name = "NAME,...")]
         deny: Vec<String>,
-        /// An event at session time T, to a topic subscribed and held
+        /// An event at session time T, to a topic subscribed and held.
+        /// `mouse` names its sprite: `sprite`, the id `draw.put` answered
+        /// or the `sprite` of a widget's info (`widget.list`); headless,
+        /// ids count from 1 in the order drawn, a widget's sprite with
+        /// them. --click T:X,Y needs no id (no wheel)
         #[arg(long = "event", value_name = "T:TOPIC:JSON")]
         events: Vec<String>,
         /// A key of the keyboard at session time T: to the app when it
@@ -471,8 +475,15 @@ fn check(dir: &Path) -> Result<ExitCode, Fail> {
             }
             if problems.is_empty() {
                 let a = &ok.manifest.app;
-                let asks: Vec<&str> = (ok.manifest.permissions.iter())
-                    .map(|p| p.name.as_str())
+                // A permission tied to an option: asked only with it.
+                let asks: Vec<String> = (ok.manifest.permissions.iter())
+                    .map(|p| {
+                        let with = ptyrc_store::options::asked_with(&ok.manifest, &p.name);
+                        match with.is_empty() {
+                            true => p.name.clone(),
+                            false => format!("{} (with {})", p.name, with.join(" or ")),
+                        }
+                    })
                     .collect();
                 let asks = match asks.is_empty() {
                     true => "asks no permission".to_string(),

@@ -63,12 +63,22 @@ fn is_default(cell: &Cell) -> bool {
     cell.style == Style::default() && cell.width == 1 && cell.text == " "
 }
 
+/// A change of colours only, `buf[at..end]`: given to the host as the
+/// change it makes, not as bytes to parse.
+struct Colours {
+    at: usize,
+    end: usize,
+    fg: Option<Color>,
+    bg: Option<Color>,
+}
+
 struct Painter<'a> {
     host: &'a Vt,
     buf: Vec<u8>,
     /// Where the host cursor is, when known.
     at: Option<(u16, u16)>,
     pen: Style,
+    colours: Vec<Colours>,
 }
 
 impl Painter<'_> {
@@ -108,7 +118,17 @@ impl Painter<'_> {
                 ..self.pen
             })
         {
+            let at = self.buf.len();
             write_sgr_from(&mut self.buf, &self.pen, &style);
+            if style.attrs == self.pen.attrs && style.ul == self.pen.ul {
+                // `write_sgr_from` wrote the colours that differ, alone.
+                self.colours.push(Colours {
+                    at,
+                    end: self.buf.len(),
+                    fg: (style.fg != self.pen.fg).then_some(style.fg),
+                    bg: (style.bg != self.pen.bg).then_some(style.bg),
+                });
+            }
         }
         self.pen = style;
     }
@@ -183,6 +203,7 @@ pub fn repair(host: &mut Vt, desired: &Grid, out: &mut Vec<u8>) {
         buf: std::mem::take(out),
         at: None,
         pen: entry_pen,
+        colours: Vec::new(),
     };
     if !modes.sync_update {
         p.buf.extend_from_slice(b"\x1b[?2026h");
@@ -303,8 +324,17 @@ pub fn repair(host: &mut Vt, desired: &Grid, out: &mut Vec<u8>) {
         p.buf.extend_from_slice(b"\x1b[?2026l");
     }
 
+    // Fed to `host`, but for the changes of colours: their effect is set,
+    // the bytes are not parsed (most of the cost with a colour a cell).
+    let colours = p.colours;
     *out = p.buf;
-    host.feed(&out[before..]);
+    let mut from = before;
+    for c in colours {
+        host.feed(&out[from..c.at]);
+        host.sgr_colours(c.fg, c.bg);
+        from = c.end;
+    }
+    host.feed(&out[from..]);
 }
 
 /// Rows of `grid` as text with SGR sequences, each ending in a reset.

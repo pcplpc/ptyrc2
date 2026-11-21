@@ -65,7 +65,7 @@ fn timing_fails_a_slow_tick() {
   (func (export "tick") (param i64) (local $i i32)
     (loop $l
       (local.set $i (i32.add (local.get $i) (i32.const 1)))
-      (br_if $l (i32.lt_u (local.get $i) (i32.const 200000000)))))
+      (br_if $l (i32.lt_u (local.get $i) (i32.const 800000000)))))
   {EVENT}
 "#
     ));

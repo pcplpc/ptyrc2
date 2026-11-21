@@ -657,6 +657,25 @@ fn section(m: &Manifest, o: &AppOption) -> String {
     }
 }
 
+/// What asks `name` for a run, when not every run does: the options
+/// that need it (`--NAME`; the positional: its name), and `a file` for
+/// `files` and `files-write` with a file option. Empty: always asked.
+pub fn asked_with(m: &Manifest, name: &str) -> Vec<String> {
+    let mut with: Vec<String> = (m.options.iter())
+        .filter(|o| o.needs.iter().any(|n| n == name))
+        .map(|o| format!("--{}", o.name))
+        .chain(
+            (m.args.iter().map(|p| &p.option))
+                .filter(|o| o.needs.iter().any(|n| n == name))
+                .map(|o| o.name.clone()),
+        )
+        .collect();
+    if matches!(name, "files" | "files-write") && all(m).any(|o| o.ty.named()) {
+        with.push("a file".into());
+    }
+    with
+}
+
 /// Every option, then the positional.
 fn all(m: &Manifest) -> impl Iterator<Item = &AppOption> {
     m.options.iter().chain(m.args.iter().map(|p| &p.option))

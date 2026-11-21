@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "minimap"
+version = "0.1.0"
+summary = "The text of a pane in braille, the view marked."
+license = "GPL-3.0-or-later"
+api = 1
+rust = "src/lib.rs"
+rustc = "1.85"
+surface = "widget"
+frame = "largest"
+random = [[], ["-a"]]
+
+[permissions]
+shape = "the text the frames remember, drawn small"
+text = "the text the frames remember, drawn small"
+
+[options]
+cursor = { type = "bool", default = false, short = "c", doc = "the line of the cursor" }
+heat = { type = "bool", default = false, short = "H", doc = "a hue for the lines edited, another for those visited, fading" }
+notes = { type = "bool", default = false, short = "n", doc = "comments in green" }
+all = { type = "bool", default = false, short = "a", doc = "-c -H -n" }
+mark = { type = "string", list = true, doc = "a regular expression: its lines in a colour; may be repeated" }
+width = { type = "int", default = 12, doc = "cells across [default: 12]" }
+fade = { type = "float", default = 60.0, doc = "a heat lasts SECONDS [default: 60]" }

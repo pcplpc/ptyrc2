@@ -193,8 +193,8 @@ declare module "ptyrc" {
     limits: { [key: string]: number };
     /**
      * The id of the frame its surface is on at the start, as `move`
-     * names the next. Live: that id with `layout` held, else 0;
-     * headless: 0. Absent: not told.
+     * names the next. Live: that id with a degree held (`layout` or
+     * above), else 0; headless: 0. Absent: not told.
      */
     frame?: number;
   }
@@ -664,8 +664,8 @@ declare module "ptyrc/canvas" {
  *   }
  *   export function event(topic, data) { sight.event(topic, data); }
  *
- * What it holds at each degree (`PROTOCOL.md`, cut answers): `layout`
- * refused, the raw frame and no `frames` event; `shape` refused, blank
+ * What it holds at each degree (`PROTOCOL.md`, cut answers): below
+ * `layout`, the raw frame and no `frames` event; `shape` refused, blank
  * rows of the size, `cursor` null, `degree` `"none"`; `words` alone, the
  * held words among `words`; `text: true` without `text`, the shape.
  */

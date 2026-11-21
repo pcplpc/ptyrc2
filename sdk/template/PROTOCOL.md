@@ -105,7 +105,7 @@ Cut answers:
 | `widget.hide` | `id` | `{}` | — |
 | `widget.ask` | `id`, `quiet`, `escape`, `close`: the user may focus it | `{"widget":info}`; keys come as topic `input` | — |
 | `widget.release` | `id` | `{}` | — |
-| `widget.list` | | `{"widgets":[info]}`: its own | — |
+| `widget.list` | | `{"widgets":[info]}`: its own; `frame` 0 below `layout` | — |
 | `widget.borders` | | `{"borders":[name]}` | — |
 | `app.list` | | its own entry | — |
 | `app.result` | `value` (any JSON, 64 KiB), `status` (0..255, default 0) | `{}`; the last holds; told in `app.list` as `"result": {"value","status"}`; `ptyrc app ID --wait` prints it and exits with the status | — |
@@ -170,7 +170,7 @@ Host functions (`clock.*`, `storage.*`, `app.result`, `file.*`,
 |---|---|---|
 | `size` | `{"size":[c,r]}` | — |
 | `draw` | `{"removed":[id],"frame","rows":[from,to]\|null}`: its sprites removed by the driver | — |
-| `widgets` | widget info, when it changes | — |
+| `widgets` | widget info of its own, when it changes; `frame` 0 below `layout` | — |
 | `move` | `{"frame":id}`: the user moved the app, or its frame left the screen and a pane took its place (its sprites moved along; `size` follows); 0 below `layout` | — |
 | `exit` | `{"status"}`: the program ended | — |
 | `frames` | frame infos | `layout` |
@@ -401,8 +401,9 @@ At `init`, `args["ptyrc:manifest"]`: `{"id", "version", "permissions":
 [{"name", "words"?}], "granted": [name], "limits": {KEY: N}, "frame"}`,
 the limits granted alone; `frame`: the id of the frame its surface is
 on at the start (that of `--frame`, else `[app] frame`, else `active`;
-`move` names the next). Live: that id with `layout` held; without it
-0, and the `frame` of every request is ignored (the surface's).
+`move` names the next). Live: that id with a degree held (`layout`
+or above); below `layout` 0, and the `frame` of every request is
+ignored (the surface's).
 Headless: 0, the one frame, raw; a live id is seen only under `ptyrc
 dev run`. A `Sight` reads it by default (Rust: `manifest()`).
 

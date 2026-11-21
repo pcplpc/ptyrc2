@@ -5,8 +5,8 @@
 //! [`Sight::new`] subscribes `frames`, `text`, `size`, `move` (and
 //! `cursor`); the app hands each event to [`Sight::event`] first, and
 //! starts a tick with [`Sight::look`]. The frame read: the app's,
-//! told at `init`, unless named. An app that does not hold
-//! `layout` (`manifest`) sees the raw frame alone: no `frames`, no
+//! told at `init`, unless named. An app below `layout`
+//! (`Manifest::sees`) sees the raw frame alone: no `frames`, no
 //! `frame.get`, each `text` its own.
 
 use crate::{Error, Value, call, json, log};
@@ -92,7 +92,7 @@ fn said(e: &Error) {
 
 impl Sight {
     pub fn new(options: Options) -> Sight {
-        let layout = crate::manifest().is_none_or(|m| m.holds("layout"));
+        let layout = crate::manifest().is_none_or(|m| m.sees("layout"));
         let mut topics = vec!["frames", "text", "size", "move"];
         if !layout {
             topics.remove(0);

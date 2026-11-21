@@ -44,8 +44,8 @@ fn build_runner() {
 }
 
 /// The runner the cases use: `target/release/ptyrc-box` when it was
-/// built after the debug one (a start compiles the interpreter: some
-/// 2 s of processor time against 7 s), else the debug one beside
+/// built after the debug one (a start compiles the interpreter: 3.3 s
+/// against 12 s, measured at load 60), else the debug one beside
 /// `ptyrc`. `PTYRC_BOX` set: that one.
 fn runner() -> Option<PathBuf> {
     if let Some(named) = std::env::var_os("PTYRC_BOX") {

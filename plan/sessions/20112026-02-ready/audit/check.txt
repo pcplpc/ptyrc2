@@ -1,0 +1,26 @@
+ask: ok: ask 0.1.0: 3 files, 36104 bytes; asks no permission 
+bricks: ok: bricks 0.1.0: 3 files, 36442 bytes; asks keys-arrows, shape 
+cat: ok: cat 0.1.0: 4 files, 36724 bytes; asks pointer, shape, words 
+clock: ok: clock 0.1.0: 3 files, 35762 bytes; asks clock 
+fire: ok: fire 0.1.0: 3 files, 36143 bytes; asks no permission 
+fishes: ok: fishes 0.1.0: 3 files, 36215 bytes; asks shape 
+flock: ok: flock 0.1.0: 4 files, 37411 bytes; asks pointer, shape 
+flower: ok: flower 0.1.0: 3 files, 36147 bytes; asks front, shape, text, words 
+gallery: ok: gallery 0.1.0: 4 files, 36697 bytes; asks files 
+git: ok: git 0.1.0: 3 files, 37026 bytes; asks clock, files, probe-git 
+globe: ok: globe 0.1.0: 3 files, 36193 bytes; asks no permission 
+life: ok: life 0.1.0: 4 files, 37201 bytes; asks pointer, shape 
+marks: ok: marks 0.1.0: 3 files, 35973 bytes; asks front, screen-wide, shape 
+minimap: ok: minimap 0.1.0: 4 files, 36553 bytes; asks shape, text 
+monitor: ok: monitor 0.1.0: 3 files, 35924 bytes; asks clock, probe-system 
+note: ok: note 0.1.0: 3 files, 36377 bytes; asks files, files-write 
+pace: ok: pace 0.1.0: 3 files, 36659 bytes; asks clock, files, keys-read, shape, storage, text 
+pond: ok: pond 0.1.0: 4 files, 37356 bytes; asks clock, pointer, shape 
+rain: ok: rain 0.1.0: 3 files, 35724 bytes; asks layout 
+shore: ok: shore 0.1.0: 4 files, 37154 bytes; asks pointer, shape 
+snake: ok: snake 0.1.0: 3 files, 36246 bytes; asks keys-arrows, shape 
+snow: ok: snow 0.1.0: 3 files, 36266 bytes; asks layout, pointer 
+stars: ok: stars 0.1.0: 4 files, 37391 bytes; asks clock, pointer, shape 
+timer: ok: timer 0.1.0: 3 files, 37011 bytes; asks clock, front-widget, keys-grab 
+train: ok: train 0.1.0: 3 files, 37319 bytes; asks clock 
+window: ok: window 0.1.0: 3 files, 37206 bytes; asks clock 

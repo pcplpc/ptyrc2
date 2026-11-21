@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "monitor"
+version = "0.1.0"
+summary = "Load, logins, open ports and disks in widgets."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "widget"
+
+[permissions]
+probe-system = "the processes, the sessions, the machine"
+clock = "the times of the logins"
+
+[options]
+monitor = { type = "string", doc = "comma-separated, of glance,connected,tcp-listen,disk-space [default: all]" }
+merged = { type = "bool", default = false, doc = "one widget, the monitors in turn" }
+every = { type = "float", default = 2.0, doc = "refresh [default: 2]" }
+cycle = { type = "float", default = 8.0, doc = "turn of --merged [default: 8]" }

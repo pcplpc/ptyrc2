@@ -165,6 +165,13 @@ const GRID: [u8; 256] = {
     out
 };
 
+fn size(what: &str, width: u32, height: u32) {
+    assert!(
+        width >= 1 && height >= 1,
+        "{what}::new({width}, {height}): 1 at least"
+    );
+}
+
 /// `2 * width` by `4 * height` dots in `width` by `height` cells, the
 /// glyph of a cell `U+2800 + bits`. A dot outside is ignored; read, it
 /// is off.
@@ -176,8 +183,9 @@ pub struct Braille {
 }
 
 impl Braille {
-    /// All dots off.
+    /// All dots off. A side below 1 panics.
     pub fn new(width: u32, height: u32) -> Braille {
+        size("Braille", width, height);
         Braille {
             w: width,
             h: height,
@@ -354,8 +362,9 @@ pub struct Half {
 }
 
 impl Half {
-    /// Every pixel `color`.
+    /// Every pixel `color`. A side below 1 panics.
     pub fn new(width: u32, height: u32, color: Color) -> Half {
+        size("Half", width, height);
         let n = width as usize * height as usize;
         Half {
             w: width,
@@ -659,6 +668,18 @@ mod tests {
         assert_eq!(named("red"), Some(1));
         assert_eq!(named("bright-white"), Some(15));
         assert_eq!((named("pink"), named("bright-")), (None, None));
+    }
+
+    #[test]
+    #[should_panic(expected = "Braille::new(0, 1): 1 at least")]
+    fn a_braille_of_no_cell_panics() {
+        Braille::new(0, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "Half::new(2, 0): 1 at least")]
+    fn a_half_of_no_cell_panics() {
+        Half::new(2, 0, Color::Rgb(0, 0, 0));
     }
 
     #[test]

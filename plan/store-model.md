@@ -8,7 +8,7 @@ apps travel.
 Status, 2026-11-20 (`git log 2d0ccb7..`): milestones 0 to 4 built;
 5 built but for the hosting; 6 the runner's profile and the build's
 (`rustc` alone); 7 begun: `confetti`, `sand` moved, 26 apps left
-(`temp/20112026-02-ready/audit/migration-plan.md`). The contract of what
+(`plan/sessions/20112026-02-ready/audit/migration-plan.md`). The contract of what
 exists is `plan/design.md`; this file keeps the reasons.
 
 Marks: **[decided]** by the owner; **[proposed]** the plan's choice,
@@ -62,8 +62,8 @@ app rewrites the file.
 - Every shipped app is to become a store app.
 - Where an app may draw follows from its manifest and its permissions.
 
-Decided since (`temp/19112026-01-wrap-up/answers.md`, and the owner's
-word of 2026-11-20 in `temp/20112026-01-store/handover.md`):
+Decided since (`plan/sessions/19112026-01-wrap-up/answers.md`, and the owner's
+word of 2026-11-20 in `plan/sessions/20112026-01-store/handover.md`):
 
 - The interpreter: QuickJS-ng, not Boa (4). For users without clang: a
   build server later; nothing now.
@@ -598,7 +598,7 @@ Drawn from these and from the threat. [proposed]
    follows its pane (`driver/heir.rs`). Not built: following or
    fleeing the pointer (`anchor {pointer}`, `motion {flee}`), gating
    by idle (`"when": "idle"`), a blend by heat (`"fade": "heat"`)
-   (`temp/20112026-01-store/design/host-functions.md`, Primitives).
+   (`plan/sessions/20112026-01-store/design/host-functions.md`, Primitives).
 
 3. **What comes back is read.** An answer of such a primitive (was it
    placed, where, is it hidden) is worth the permission that would
@@ -1085,7 +1085,7 @@ headless (`plan/design.md`, Protocol; `sdk/template/PROTOCOL.md`):
 Python twins kept), with the harness `rust/ptyrc-cli/tests/store_apps.rs`
 and the guide `plugins/store-apps/README.md`. The 26 apps left, their
 waves, the findings to settle first and the shared code:
-`temp/20112026-02-ready/audit/migration-plan.md`. Of its findings,
+`plan/sessions/20112026-02-ready/audit/migration-plan.md`. Of its findings,
 landed: a default frame (`[app] frame`), an option without a default,
 `--seed` the launcher's (seeds `random`), `dev probe`, `--key` to a
 `keys-read` holder, the headless clip, the single crate of rules; on
@@ -1192,4 +1192,4 @@ not wired. 7: two apps of 28.
 - macOS: the runner is portable, its OS profile is another. [decided]
   Start and log (19, 24).
 - Open: the questions of `migration-plan.md` (e) not landed (4 to 9);
-  the agents' choices listed in `temp/20112026-01-store/handover.md`.
+  the agents' choices listed in `plan/sessions/20112026-01-store/handover.md`.

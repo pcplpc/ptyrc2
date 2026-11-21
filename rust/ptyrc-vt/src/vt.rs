@@ -2,7 +2,7 @@
 //! The emulator: a byte stream to a `Grid`, a cursor, a pen and modes.
 
 use crate::event::{Cursor, VtEvent};
-use crate::grid::{Cell, Grid, Rect, Style};
+use crate::grid::{Cell, Color, Grid, Rect, Style};
 use crate::sgr::{self, Params};
 use smol_str::SmolStr;
 use unicode_width::UnicodeWidthChar;
@@ -447,6 +447,20 @@ impl Vt {
     }
 
     // Byte stream.
+
+    /// What an SGR of colours only does, `38`, `39`, `48`, `49` and their
+    /// short forms (`sgr::write_sgr_from`), without its bytes: the pen
+    /// takes `fg`, `bg` when given. The parser is in its ground state, as
+    /// after the sequence.
+    pub(crate) fn sgr_colours(&mut self, fg: Option<Color>, bg: Option<Color>) {
+        debug_assert!(self.in_ground());
+        if let Some(fg) = fg {
+            self.pen.fg = fg;
+        }
+        if let Some(bg) = bg {
+            self.pen.bg = bg;
+        }
+    }
 
     /// The final byte of a CSI: dispatch.
     fn csi_end(&mut self, fin: u8) {

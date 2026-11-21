@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "tank"
+version = "0.1.0"
+summary = "Fishes in one widget, a bowl to a tank."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "widget"
+random = [[], ["-a"]]
+
+[options]
+count = { type = "int", default = 8, doc = "fishes [default: 8]" }
+decorate = { type = "bool", default = false, short = "d", doc = "decorations in the tank" }
+bubbles = { type = "bool", default = false, short = "b", doc = "bubbles from the bottom" }
+random = { type = "bool", default = false, short = "r", doc = "random species, events" }
+all = { type = "bool", default = false, short = "a", doc = "-d -b -r" }

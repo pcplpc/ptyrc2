@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "ask"
+version = "0.1.0"
+summary = "A question in a widget, the answer on stdout."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "widget"
+wait = true
+random = []
+
+[options]
+multi = { type = "bool", default = false, short = "m", doc = "several options" }
+other = { type = "bool", default = false, short = "o", doc = "a last option, typed" }
+text = { type = "bool", default = false, short = "t", doc = "several lines typed" }
+default = { type = "string", doc = "the text to start from, or the option" }
+title = { type = "string", doc = "on the border [default: ask]" }
+timeout = { type = "float", default = 0.0, doc = "give up after this long [default: never]" }
+
+[args]
+words = { type = "string", min = 1, max = 16, doc = "the question, then the choices; none: a line is typed" }

@@ -288,3 +288,28 @@ Answers to the questions of
   Never `git commit -- PATHS`. Two agents at once.
 - Finished worktrees: removed when the branch is merged and the tree
   clean; the others listed, kept.
+
+## Clean slate (2026-11-21)
+
+Answers to the questions of
+`plan/handsoff/20261120T233632Z-next-steps.md`.
+
+- The 2 s bound of `init`: wall-clock time, as built; the time an app
+  waits on the driver counts.
+- `Braille::new`, `Half::new` in Rust: a side below 1 panics, as the
+  script throws (`bbea22e`). A bad colour: a panic in Rust, a throw in
+  script; left.
+- The scaffold's manifest: `surface = "frame"`; kept.
+- An unknown method under grants: `denied`, as live; no did-you-mean.
+  `dev check` is where a typo is caught.
+- The 21 merged worktrees `temp/wt-*` and their branches: removed.
+- The edits left in `.claude/worktrees/agent-afdd8c805524eb3e2`: a
+  repair that gives the host a change of colours as its effect; judged
+  by an agent, landed (`a209a22`); the worktree removed.
+- `temp/`: what the handoffs cite moved to `plan/sessions/` (same
+  paths below it; the drafts without their build); the rest removed
+  but `temp/ptyrc/`, the widget demos, the gallery's ranking, the
+  clone `tsa.archive.rip`.
+- Branches: `backup-before-identity` (its tree that of `5f062f7`) and
+  the merged `fork/*` removed here; `origin` unreachable from the
+  session, its branches left.

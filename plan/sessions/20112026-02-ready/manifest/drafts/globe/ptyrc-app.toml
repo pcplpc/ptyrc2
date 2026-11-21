@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "globe"
+version = "0.1.0"
+summary = "Snow globe, shaken now and then."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "widget"
+random = [[], ["-a"]]
+
+[options]
+shake = { type = "bool", default = false, short = "k", doc = "shaken now and then" }
+drift = { type = "bool", default = false, short = "d", doc = "the snow lies" }
+lights = { type = "bool", default = false, short = "l", doc = "a lit window, a garland, a glint" }
+random = { type = "bool", default = false, short = "r", doc = "a scene at random, one a shake" }
+all = { type = "bool", default = false, short = "a", doc = "-k -d -l -r" }
+scene = { type = "string", default = "auto", choices = ["auto", "church", "fir", "house", "snowman"], doc = "the scene [default: house]" }
+every = { type = "float", default = 45.0, doc = "with -k: between two shakes [default: 45]" }

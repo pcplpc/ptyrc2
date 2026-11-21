@@ -23,7 +23,9 @@ Read `plan/intent.md`, `plan/design.md` (binding contract) and
 
 - Edition 2024, one workspace at the root. `cargo test --workspace`,
   `cargo clippy --workspace --all-targets`, `cargo fmt`.
-- No `unsafe` outside `ptyrc-server`. No async runtime.
+- No `unsafe` outside `ptyrc-server` and one module of `ptyrc-box` (the
+  cache of the compiled interpreter); the FFI of the guest crates
+  accepted. No async runtime.
 - No clock in `ptyrc-vt` and `ptyrc-core`: time is an argument.
 - A new dependency goes in the crate's own `Cargo.toml`.
 

@@ -17,11 +17,11 @@ hint }`: `message` says what was refused (manifest errors as
 - `App { id, version, summary, license, api, entry: Entry::Script |
   Entry::Rust, rustc, assets, surface, frame, tape, wait, random }`;
   `surface` absent: `Widget`; `frame`: one of `manifest::FRAMES`
-  (`active`, `idle`, `largest`, `quietest`, `raw`), the frame of a start
-  without `--frame`, absent `None` (the driver's `active`); `all`
-  refused; `random`: the option words of each draw of the
-  menu's random app (`[[], ["-a"]]`), `[]` never drawn, absent `[[]]`;
-  bounds `RANDOM_MAX`.
+  (`active`, `idle`, `largest`, `quietest`, `raw`), the frame of a
+  start without `--frame`, absent `None` (the driver's `active`); `all`
+  refused; `random`: the option words of each draw of the menu's random
+  app (`[[], ["-a"]]`), `[]` never drawn, absent `[[]]`; bounds
+  `RANDOM_MAX`.
 - `Permission { name, why, words }`; names from `manifest::PERMISSIONS`;
   `words = { list = [...], why = "..." }`: 1 to 32 words, 3 to 32
   letters or digits, distinct ignoring case.
@@ -34,8 +34,9 @@ hint }`: `message` says what was refused (manifest errors as
   bound a value of an `int` or `float` of `[options]`
   (`AppOption::range`: `1 to 10`). `default` optional: a `bool`
   without one is `false`; any other `None`, `null` in `init`, shown
-  nowhere; `min`, `max`, `choices` rule a value given. `[args]`: `Positional { option, min,
-  max }`, one list, `min`, `max` the count of values. Types `int`,
+  nowhere; `min`, `max`, `choices` rule a value given. `[args]`:
+  `Positional { option, min, max }`, one list, `min`, `max` the count
+  of values. Types `int`,
   `float`, `bool`, `string`, `word`, `pattern`, `file`, `dir`. Refused
   at parse: a name in `RESERVED_OPTIONS` or `no-NAME`; a short twice or
   `h`; `choices` but of a `string`, a default outside them; `min`, `max`
@@ -52,8 +53,8 @@ the driver.
 
 - `read(manifest, words, cwd) -> Option<Launch>`: the launcher's
   options (`Launcher { frame, front, prefer, alpha, border, wait, seed
-  }`; `--seed N`, a `u64`: the member `seed` of `app.start`),
-  then the app's: `--NAME VALUE`, `--NAME=VALUE`, `-S VALUE`, `-SVALUE`,
+  }`; `--seed N`, a `u64`: the member `seed` of `app.start`), then the
+  app's: `--NAME VALUE`, `--NAME=VALUE`, `-S VALUE`, `-SVALUE`,
   `-abc` of bools, `--no-NAME`, `NAME=VALUE`; positionals for
   `[args]`, all after `--`. Files: `name_path` (absolute, canonical; a
   regular file or a directory; a file to write may be absent, its
@@ -63,9 +64,8 @@ the driver.
   `app.start`.
 - `resolve(manifest, args, files) -> Resolved { init, needs, words,
   patterns, files }`: each value of its type and rule (a `word` by
-  the rule of `words`, a `pattern` 1 to 256 bytes, 16 a run, a
-  number within `min`, `max`), each
-  handle given once and of its kind; the defaults filled in; `needs`
+  the rule of `words`, a `pattern` 1 to 256 bytes, 16 a run, a number
+  within `min`, `max`), each handle given once and of its kind; the defaults filled in; `needs`
   of what was given (`files` for a default file, `files-write` for a
   file to write). `Resolved::asked(manifest)`: the permissions
   declared for that run. `check_named(path, kind, write)`: the
@@ -103,7 +103,8 @@ let checked = check(&tree)?;                         // or DirTree::new(dir)
 - `check(&dyn Tree) -> Checked { manifest, files, dirs, size }`: paths
   (no `..`, `.git`, absolute, control), regular files and directories
   only, 512 files, 8 MiB, a `.js` 1 MiB, the manifest 64 KiB and valid,
-  the GPL-3 text as `LICENSE`/`COPYING` at the app root, the entry,
+  the GPL-3 text at the app root (`LICENSE`, `COPYING`, bare, `.md`
+  or `.txt`, case ignored: `LICENSE_FILES`), the entry,
   `assets` (each name under it by the runner's rule, `ASSET_RULE`),
   `tape`.
 - `check_all`: every problem (`Vec<Error>`, never empty); what needs
