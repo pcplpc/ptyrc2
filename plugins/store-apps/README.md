@@ -114,7 +114,8 @@ N)`), and so `CASE.txt` holds the line: an option refused in `init`
 (`exit(2)`) is a case (`clock/tests/zone`, `life/tests/speed`). A
 value the manifest refuses (`choices`, `min`) stops `dev test` before
 the app, status 2: the report is the launcher's line, `ptyrc: --NAME:
-WHY` (`life/tests/kind`).
+WHY` (`life/tests/kind`); of `[args]`, `ptyrc: NAME: WHY`
+(`note/tests/notfile`).
 
 The scene steps on its own clock, as the driver's: the screen at `T`
 is the same whatever other times `--at` asks.

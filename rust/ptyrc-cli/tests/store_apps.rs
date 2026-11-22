@@ -43,6 +43,9 @@ fn build_runner() {
     assert!(built.success(), "cargo build -p ptyrc-box");
 }
 
+/// Held by the steps of a tree that load the machine.
+static HEAVY: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// The runner the cases use: `target/release/ptyrc-box` when it was
 /// built after the debug one (a start compiles the interpreter: 3.3 s
 /// against 12 s, measured at load 60), else the debug one beside
@@ -312,10 +315,13 @@ fn shared_unit_tests() {
          license = \"GPL-3.0-or-later\"\napi = 1\nscript = \"app.js\"\n",
     )
     .unwrap();
-    let unit = ptyrc(
-        &dir,
-        &["dev".into(), "test".into(), ".".into(), "--unit".into()],
-    );
+    let unit = {
+        let _one = HEAVY.lock().unwrap_or_else(|e| e.into_inner());
+        ptyrc(
+            &dir,
+            &["dev".into(), "test".into(), ".".into(), "--unit".into()],
+        )
+    };
     assert!(
         unit.status.success(),
         "_shared/js: dev test --unit\n{}",
@@ -355,11 +361,18 @@ fn tree(dir: &Path, js: bool, bless: bool) -> Vec<String> {
     if bless {
         argv.push("--bless".into());
     }
-    let cases = ptyrc(dir, &argv);
+    // A Rust tree's build, a `cargo test`, the unit tests (10 s a test):
+    // one at a time, the trees' cases beside them.
+    let heavy = || HEAVY.lock().unwrap_or_else(|e| e.into_inner());
+    let cases = {
+        let _one = rust.then(heavy);
+        ptyrc(dir, &argv)
+    };
     if !cases.status.success() {
         fails.push(format!("dev test --cases\n{}", said(&cases)));
     }
     if !rust && dir.join("tests.js").is_file() {
+        let _one = heavy();
         let unit = ptyrc(
             dir,
             &["dev".into(), "test".into(), ".".into(), "--unit".into()],
@@ -369,6 +382,7 @@ fn tree(dir: &Path, js: bool, bless: bool) -> Vec<String> {
         }
     }
     if rust {
+        let _one = heavy();
         let target = Path::new(env!("CARGO_TARGET_TMPDIR"))
             .join("store-apps")
             .join(&name);
@@ -409,12 +423,27 @@ fn every_shipped_tree() {
     }
     build_runner();
     let bless = flag("PTYRC_BLESS");
-    let fails: Vec<String> = std::thread::scope(|s| {
-        let runs: Vec<_> = (trees.iter())
-            .map(|t| s.spawn(move || tree(t, js, bless)))
+    // A tree starts its cases at once: two trees at a time on 16 cores,
+    // else the bursts (hundreds runnable) trip the runner's time bounds.
+    let workers = std::thread::available_parallelism().map_or(2, |n| n.get().div_ceil(8));
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut found: Vec<(usize, Vec<String>)> = std::thread::scope(|s| {
+        let runs: Vec<_> = (0..workers)
+            .map(|_| {
+                s.spawn(|| {
+                    let mut out = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(t) = trees.get(i) else { break out };
+                        out.push((i, tree(t, js, bless)));
+                    }
+                })
+            })
             .collect();
         runs.into_iter().flat_map(|r| r.join().unwrap()).collect()
     });
+    found.sort_by_key(|(i, _)| *i);
+    let fails: Vec<String> = found.into_iter().flat_map(|(_, f)| f).collect();
     assert!(fails.is_empty(), "\n{}", fails.join("\n\n"));
 }
 

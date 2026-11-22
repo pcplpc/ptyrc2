@@ -515,7 +515,10 @@ pub fn hotkey_command() -> Vec<String> {
 /// The key after ctrl+t that hides all: the one character of
 /// `$PTYRC_HIDE_KEY`, a letter or a digit; empty: none; else `h`.
 pub fn hide_key() -> Option<u8> {
-    match std::env::var("PTYRC_HIDE_KEY").as_deref().map(str::as_bytes) {
+    match std::env::var("PTYRC_HIDE_KEY")
+        .as_deref()
+        .map(str::as_bytes)
+    {
         Ok(b"") => None,
         Ok(&[key]) if key.is_ascii_alphanumeric() => Some(key),
         _ => Some(b'h'),

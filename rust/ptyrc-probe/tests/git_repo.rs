@@ -37,8 +37,15 @@ fn base(name: &str) -> Base {
     Base { dir, git }
 }
 
+/// An executable script, written by a child process: a file written by
+/// this process stays open for writing in the children other test
+/// threads fork until they exec, and running it meanwhile fails with
+/// ETXTBSY (`spawn` in `Git::run`: `None`).
 fn script(path: &Path, body: &str) {
-    std::fs::write(path, format!("#!/bin/sh\n{body}")).unwrap();
+    let text = path.with_extension("text");
+    std::fs::write(&text, format!("#!/bin/sh\n{body}")).unwrap();
+    let done = Command::new("cp").arg(&text).arg(path).status().unwrap();
+    assert!(done.success());
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 

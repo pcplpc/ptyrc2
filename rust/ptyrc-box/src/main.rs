@@ -35,7 +35,7 @@
 //! FILE, a script of the tree of `APP.js` by relative path, its exports
 //! `test_*` run in order, each under the limits of an `event` but
 //! time (`script::UNIT_TEST`, `UNIT_FILE`); no
-//! session, `call` refused. The report on stdout; status 0 when all
+//! session, `call` refused but `asset.*` (`--assets DIR`). The report on stdout; status 0 when all
 //! passed, 1 else (`script::unit`).
 //!
 //! `--manifest JSON`: the manifest as its reader (the driver, `ptyrc dev
@@ -80,7 +80,7 @@ const USAGE: &str =
                  [--user-word WORD]... [--user-pattern TEXT]... [--user-regex RE]...
                  [--front | --back] [--prefer P] [--alpha A] [--border B]
                  [--surface widget|frame|screen]
-       ptyrc-box --unit FILE [--profile | --no-profile] [--manifest JSON] --script APP.js [ARGS]
+       ptyrc-box --unit FILE [--profile | --no-profile] [--manifest JSON] [--assets DIR] --script APP.js [ARGS]
 T: milliseconds, or with a unit: 500ms, 2s";
 
 /// The permissions of the plan (`ptyrc-store`, `PERMISSIONS`).
@@ -313,7 +313,12 @@ fn parse(argv: impl Iterator<Item = OsString>) -> Result<Cli, String> {
                         headless::KEY_NAMES
                     ));
                 }
-                cli.inject.push((t, Inject::Key(key.to_owned())));
+                // Named as the driver names it: `ctrl+U` is `ctrl+u`.
+                let key = match key.strip_prefix("ctrl+") {
+                    Some(c) if c.len() == 1 => format!("ctrl+{}", c.to_ascii_lowercase()),
+                    _ => key.to_owned(),
+                };
+                cli.inject.push((t, Inject::Key(key)));
             }
             flag @ ("--pointer" | "--click" | "--press" | "--release") => {
                 let v = string(value(flag)?);
@@ -720,6 +725,11 @@ fn host_fns(cli: &Cli, granted: &[String]) -> Result<HostFns, String> {
 }
 
 fn unit_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
+    // Read before the profile.
+    let assets = match read_assets(cli) {
+        Ok(a) => a,
+        Err(e) => return fail(2, e),
+    };
     if let Err(e) = confine(cli, false) {
         return fail(5, e);
     }
@@ -729,7 +739,7 @@ fn unit_run(cli: &Cli, wasm: &[u8], args: serde_json::Value) -> ExitCode {
     limits.hard = limits.hard.max(script::UNIT_TEST);
     limits.init = limits.init.max(script::UNIT_TEST);
     limits.late = limits.late.max(script::UNIT_TEST);
-    let (lines, status) = script::unit(wasm, &args, limits);
+    let (lines, status) = script::unit_with(wasm, &args, limits, assets);
     for line in lines {
         println!("{line}");
     }

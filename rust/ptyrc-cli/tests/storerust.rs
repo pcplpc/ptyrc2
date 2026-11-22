@@ -170,7 +170,9 @@ fn a_rust_app_with_a_dependency_is_refused() {
     }
     let sb = Sandbox::new("storerust-dep");
     let mut files = confetti();
-    files[1].1 = files[1].1.replace("[dependencies]\n", "[dependencies]\nserde = \"1\"\n");
+    files[1].1 = files[1]
+        .1
+        .replace("[dependencies]\n", "[dependencies]\nserde = \"1\"\n");
     let bare = repository(&sb.dir.join("dep"), &files);
     let out = sb.run(&[
         "store",

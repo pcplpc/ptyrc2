@@ -95,8 +95,8 @@ pub enum Dev {
         #[arg(long, value_name = "DIR")]
         storage_out: Option<PathBuf>,
         /// The unit tests of a script: the exports `test_*` of FILE, a
-        /// script of the app [default: tests.js]; no screen, no session.
-        /// Status 1 when one fails
+        /// script of the app [default: tests.js]; no screen, no session;
+        /// `asset.*` from `[app] assets`. Status 1 when one fails
         #[arg(long, value_name = "FILE", num_args = 0..=1, default_missing_value = "tests.js")]
         unit: Option<String>,
         /// The cases of the tree: each tests/CASE.args, the words after

@@ -1107,7 +1107,12 @@ pub fn read(m: &Manifest, words: &[String], cwd: &Path) -> Result<Option<Launch>
         let v = match o.ty.named() {
             true => {
                 let typed = v.as_str().unwrap_or_default().to_string();
-                file_value(&mut launch.files, o, cwd, &typed, false)?
+                let shown = match m.options.iter().any(|x| std::ptr::eq(x, o)) {
+                    true => format!("--{}", o.name),
+                    false => o.name.clone(),
+                };
+                (file_value(&mut launch.files, o, cwd, &typed, false))
+                    .map_err(|e| usage(format!("{shown}: {}", e.message)))?
             }
             false => v,
         };
@@ -1130,7 +1135,8 @@ pub fn read(m: &Manifest, words: &[String], cwd: &Path) -> Result<Option<Launch>
             if name_path(cwd, name, kind, o.write).is_err() {
                 continue;
             }
-            let v = file_value(&mut launch.files, o, cwd, name, true)?;
+            let v = (file_value(&mut launch.files, o, cwd, name, true))
+                .map_err(|e| usage(format!("{}: {}", o.name, e.message)))?;
             lists.insert(o.name.clone(), if o.list { json!([v]) } else { v });
         }
     }
@@ -1194,8 +1200,7 @@ fn file_value(
         return Err(usage(format!("{MAX_FILES} files at most a run")));
     }
     let kind = FileKind::of(o.ty);
-    let path =
-        name_path(cwd, typed, kind, o.write).map_err(|e| usage(format!("{}: {e}", o.name)))?;
+    let path = name_path(cwd, typed, kind, o.write).map_err(usage)?;
     let handle = format!("f{}", files.len());
     files.push(FileGiven {
         handle: handle.clone(),
@@ -1776,7 +1781,11 @@ mod tests {
         // Refused: absent to read, a directory as a file, a FIFO.
         assert!(read("--stop nothing.txt").is_err());
         assert!(read("--stop pics").is_err());
-        assert!(read("--dir stop.txt").is_err());
+        let e = read("--dir stop.txt").unwrap_err();
+        assert_eq!(
+            e.message,
+            "--dir: stop.txt: not a directory; regular files and directories only"
+        );
         let fifo = cwd.join("fifo");
         assert!(
             std::process::Command::new("mkfifo")

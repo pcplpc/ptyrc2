@@ -32,7 +32,8 @@
 // `assert`, `assertEqual`, `assertThrows`.
 //
 // Bytes: `Uint8Array.fromBase64(s)`, `bytes.toBase64()`, `atob`,
-// `btoa`; `TextEncoder`, `TextDecoder` (UTF-8 only) are global.
+// `btoa`; `TextEncoder`, `TextDecoder` (UTF-8 only; `fatal` throws) are
+// global.
 //
 // There is no timer, no network, no path, no console, no `require`:
 // `tick` is the only clock. `Date.now()` is session time (0 at the

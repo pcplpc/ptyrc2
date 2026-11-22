@@ -236,11 +236,16 @@ class TextEncoder {
 }
 
 class TextDecoder {
-  constructor(label = "utf-8") {
+  #fatal;
+  constructor(label = "utf-8", options = {}) {
     if (!/^utf-?8$/i.test(String(label))) throw new RangeError(`TextDecoder: ${label}: UTF-8 only`);
+    this.#fatal = Boolean(options?.fatal);
   }
   get encoding() {
     return "utf-8";
+  }
+  get fatal() {
+    return this.#fatal;
   }
   decode(input) {
     if (input === undefined) return "";
@@ -263,6 +268,7 @@ class TextDecoder {
         s += String.fromCodePoint(c);
         i += n + 1;
       } else {
+        if (this.#fatal) throw new TypeError(`TextDecoder: invalid UTF-8 at byte ${i}`);
         // The lead byte and the continuation bytes before the fault.
         s += "�";
         i += n < 0 || whole ? 1 : k;

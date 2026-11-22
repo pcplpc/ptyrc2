@@ -137,7 +137,7 @@ A tick on the second: at each tick, `period(until(now().unixMs,
 
 The engine's base64: `Uint8Array.fromBase64`, `toBase64`, `atob`,
 `btoa`. `TextEncoder`, `TextDecoder`: the prelude's, UTF-8 only, an
-invalid sequence a U+FFFD.
+invalid sequence a U+FFFD; `{ fatal: true }`: a `TypeError`.
 
 ## Unit tests
 

@@ -663,6 +663,28 @@ fn unit(files: &[(&str, &str)], limits: Limits) -> Option<(Vec<String>, u8)> {
 }
 
 #[test]
+fn unit_tests_read_the_assets_given() {
+    let Some(wasm) = interpreter() else {
+        return;
+    };
+    let tests = r#"
+        import { asset, assertEqual, assets } from "ptyrc";
+        export function test_assets() { assertEqual([assets(), asset("a.pic")], [["a.pic"], "pear"]); }
+    "#;
+    let o = options(&[("tests.js", tests)], json!({}));
+    let mut assets = ptyrc_box::assets::Assets::default();
+    assets.files.insert("a.pic".into(), b"pear".to_vec());
+    let (lines, status) = script::unit_with(wasm, &o.args, Limits::default(), Some(assets));
+    assert_eq!(
+        (lines, status),
+        (
+            vec!["ok   test_assets".to_string(), "1 passed, 0 failed".into()],
+            0
+        )
+    );
+}
+
+#[test]
 fn unit_tests_each_export_in_order_the_place_of_a_failure() {
     let tests = r#"
         import { assert, assertEqual, assertThrows } from "ptyrc";
@@ -740,7 +762,7 @@ fn unit_tests_under_the_limits_of_an_event() {
 #[test]
 fn text_bytes_and_base64() {
     let tests = r##"
-        import { assertEqual, cells, Canvas } from "ptyrc";
+        import { assertEqual, assertThrows, cells, Canvas } from "ptyrc";
         const enc = new TextEncoder(), dec = new TextDecoder();
         export function test_utf8() {
           const b = enc.encode("aé€😀");
@@ -749,6 +771,11 @@ fn text_bytes_and_base64() {
           assertEqual(enc.encode("\ud800"), new Uint8Array([0xef, 0xbf, 0xbd]));
           assertEqual(dec.decode(new Uint8Array([0xff, 0x41, 0xe2, 0x82, 0xc0, 0xed, 0xa0, 0x80])),
                       "�A�����");
+          const strict = new TextDecoder("utf-8", { fatal: true });
+          assertEqual([dec.fatal, strict.fatal], [false, true]);
+          assertEqual(strict.decode(b), "aé€😀");
+          for (const bad of [[0xff], [0xe2, 0x82], [0xed, 0xa0, 0x80], [0xc0, 0x80]])
+            assertThrows(() => strict.decode(new Uint8Array(bad)), TypeError);
         }
         export function test_base64() {
           const b = Uint8Array.fromBase64("G1sxOzJB");

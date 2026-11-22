@@ -132,6 +132,7 @@ const TESTS_LINE: &str = "ptyrc:tests";
 struct Bench {
     log: Vec<String>,
     random: u64,
+    assets: Option<crate::assets::Assets>,
 }
 
 impl crate::Host for Bench {
@@ -143,6 +144,9 @@ impl crate::Host for Bench {
     }
     fn size(&self) -> (u32, u32) {
         (80, 24)
+    }
+    fn assets(&self) -> Option<&crate::assets::Assets> {
+        self.assets.as_ref()
     }
     fn log(&mut self, text: &str) {
         self.log.extend(text.lines().map(str::to_owned));
@@ -172,6 +176,16 @@ pub const UNIT_FILE: Duration = Duration::from_secs(60);
 /// `UNIT_TEST`), `UNIT_FILE` in all. The lines of the report, and the
 /// status: 0 all passed, 1 one failed or the run ended.
 pub fn unit(wasm: &[u8], args: &Value, limits: crate::Limits) -> (Vec<String>, u8) {
+    unit_with(wasm, args, limits, None)
+}
+
+/// `unit`, `asset.*` answered from `assets` (`ptyrc-box --unit --assets DIR`).
+pub fn unit_with(
+    wasm: &[u8],
+    args: &Value,
+    limits: crate::Limits,
+    assets: Option<crate::assets::Assets>,
+) -> (Vec<String>, u8) {
     let started = std::time::Instant::now();
     let mut args = args.clone();
     if let Value::Object(o) = &mut args {
@@ -180,6 +194,7 @@ pub fn unit(wasm: &[u8], args: &Value, limits: crate::Limits) -> (Vec<String>, u
     let bench = Bench {
         log: Vec::new(),
         random: 1,
+        assets,
     };
     let mut runner = match crate::Runner::load(wasm, bench, limits) {
         Ok(r) => r,

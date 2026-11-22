@@ -132,11 +132,21 @@ fn says_status(report: &str, n: i32) -> bool {
 }
 
 /// A value of an option the launcher refused (status 2, nothing on
-/// stdout, its stderr `ptyrc: --NAME: WHY`; not an option unknown):
-/// its report is that line. A bound of the manifest is a case.
+/// stdout, its stderr `ptyrc: --NAME: WHY`, or `ptyrc: NAME: WHY` for
+/// `[args]`; not an option unknown): its report is that line. A bound
+/// of the manifest is a case.
 fn refusal(status: Option<i32>, stdout: &str, stderr: &str) -> Option<String> {
     let line = stderr.lines().next()?;
-    let why = line.strip_prefix("ptyrc: --")?;
+    let rest = line.strip_prefix("ptyrc: ")?;
+    let why = rest.strip_prefix("--").unwrap_or(rest);
+    let name = why.split_once(": ")?.0;
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return None;
+    }
     let refused = why.contains(": ") && !why.ends_with(": no such option");
     (status == Some(2) && stdout.is_empty() && refused).then(|| format!("{line}\n"))
 }
@@ -261,6 +271,11 @@ mod tests {
             refusal(Some(2), "", "ptyrc: --sise: no such option\n"),
             None
         );
+        // A value of [args].
+        let said = "ptyrc: files: d: not a regular file\n  [options]: ...\n";
+        let line = Some("ptyrc: files: d: not a regular file\n".to_string());
+        assert_eq!(refusal(Some(2), "", said), line);
+        assert_eq!(refusal(Some(2), "", "ptyrc: dev test: x: y\n"), None);
     }
 
     #[test]

@@ -554,8 +554,12 @@ pub fn unit(dir: &Path, file: &str) -> Result<ExitCode, Fail> {
         ));
     };
     let program = runner()?;
-    let status = Command::new(&program)
-        .args(["--unit", file])
+    let mut cmd = Command::new(&program);
+    cmd.args(["--unit", file]);
+    if let Some(a) = &m.app.assets {
+        cmd.arg("--assets").arg(dir.join(a));
+    }
+    let status = cmd
         .arg("--manifest")
         .arg(given(&m).to_string())
         .arg("--script")
