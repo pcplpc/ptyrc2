@@ -9,6 +9,10 @@ ptyrc-app clock --prefer bottom-right --big
 python -m ptyrc_apps.clock -s NAME
 ```
 
+Each app has a store twin, `plugins/store-apps/NAME/` (`fishes --tank`:
+`tank`), started by `ptyrc app ptyrc/NAME`; `ptyrc app NAME` starts this
+one while it exists. Their removal: `plan/sessions/22112026-01-migration/twins-removal.md`.
+
 | app | what it shows |
 |---|---|
 | `confetti` | the pops of the first ptyrc: finite animations of 3 by 3 cells, four colours a burst, behind the text; `--bursts N` at once at random offsets, each shot on a cold spot of the heatmap; a round every 3 s until interrupted; `--one-shot`: one round of persistent sprites: the app exits, the driver plays them. `--fancy`: big explosions, a native effect started with one call; `--random`: pops of several kinds, explosions of random size, scale, shape and colours; `--fireworks`: a rocket first, one sprite with a `motion` that brakes; `--sparkle`: twinkles; `-a`: all |

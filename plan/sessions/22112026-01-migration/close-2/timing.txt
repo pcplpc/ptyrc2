@@ -1,0 +1,14 @@
+flower 80x24 [--screen flower/tests/garden.screen -- -a --count 0] load 3.86: ticks: 200; a tick, wall time: mean 0.049 ms, max 3.133 ms 
+flower 200x60 [--screen /home/peon/git/perso/ptyrc/ptyrc2/plan/sessions/22112026-01-migration/games-snake/big.screen -- -a --count 0] load 3.86: ticks: 200; a tick, wall time: mean 1.088 ms, max 39.371 ms 
+fire 80x24 [-- -a] load 3.63: ticks: 100; a tick, wall time: mean 9.319 ms, max 20.096 ms; events: 2, max 7.683 ms 
+fire 200x60 [-- -a] load 3.63: ticks: 100; a tick, wall time: mean 9.379 ms, max 20.753 ms; events: 2, max 8.343 ms 
+marks 80x24 [--screen marks/tests/fruit.screen -- apple -i -e p[ea]+r] load 3.63: ticks: 0 
+marks 200x60 [--screen /home/peon/git/perso/ptyrc/ptyrc2/plan/sessions/22112026-01-migration/games-snake/big.screen -- dog lazy -i -e o[a-z]+ -e q[a-z]+] load 3.63: ticks: 0 
+fishes 80x24 [--screen fishes/tests/fox.screen -- -a] load 3.63: ticks: 303; a tick, wall time: mean 0.414 ms, max 4.418 ms 
+fishes 200x60 [--screen /home/peon/git/perso/ptyrc/ptyrc2/plan/sessions/22112026-01-migration/games-snake/big.screen -- -a] load 3.63: slow at 33 ms: tick, 56.485 ms ticks: 303; a tick, wall time: mean 1.942 ms, max 56.485 ms 
+stars 80x24 [--screen stars/tests/words.screen -- -a] load 3.63: ticks: 120; a tick, wall time: mean 0.077 ms, max 0.585 ms 
+stars 200x60 [--screen /home/peon/git/perso/ptyrc/ptyrc2/plan/sessions/22112026-01-migration/games-snake/big.screen -- -a] load 3.63: ticks: 120; a tick, wall time: mean 0.339 ms, max 2.272 ms 
+gallery 80x24 [-- -a --every 3] load 3.63: ticks: 19; a tick, wall time: mean 0.462 ms, max 1.075 ms; events: 15, max 0.106 ms 
+gallery 200x60 [-- -a --every 3] load 3.63: ticks: 19; a tick, wall time: mean 0.571 ms, max 1.239 ms; events: 15, max 0.102 ms 
+monitor 80x24 [--probe system=monitor/tests/full.json] load 3.63: ticks: 5; a tick, wall time: mean 4.901 ms, max 4.981 ms; events: 8, max 0.121 ms 
+monitor 200x60 [--probe system=monitor/tests/full.json] load 3.63: ticks: 5; a tick, wall time: mean 5.047 ms, max 5.058 ms; events: 8, max 0.148 ms 

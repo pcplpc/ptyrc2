@@ -1081,16 +1081,21 @@ headless (`plan/design.md`, Protocol; `sdk/template/PROTOCOL.md`):
 [recommended]), `storage.*`, `app.result`, `file.*` by handle,
 `probe.git` (no directory: the program's working directory
 [recommended]), `probe.system`; `asset.*` answered by the runner
-[recommended]. `confetti`, `sand` moved to `plugins/store-apps/` (the
-Python twins kept), with the harness `rust/ptyrc-cli/tests/store_apps.rs`
-and the guide `plugins/store-apps/README.md`. The 26 apps left, their
-waves, the findings to settle first and the shared code:
-`plan/sessions/20112026-02-ready/audit/migration-plan.md`. Of its findings,
-landed: a default frame (`[app] frame`), an option without a default,
-`--seed` the launcher's (seeds `random`), `dev probe`, `--key` to a
-`keys-read` holder, the headless clip, the single crate of rules; on
-the audit's recommendations, the owner's word not recorded. Not built:
-the Braille and half-block canvases, `Sight`, the `_shared` copies.
+[recommended]. Every app of the table but `manage` is a store app,
+`plugins/store-apps/NAME/` (29 trees: `fishes --tank` is `tank`), its
+look, behaviour and tests those of its Python twin; the twins kept,
+their removal the owner's
+(`plan/sessions/22112026-01-migration/twins-removal.md`). The harness:
+`rust/ptyrc-cli/tests/store_apps.rs`; the guide:
+`plugins/store-apps/README.md`; the plan:
+`plan/sessions/20112026-02-ready/audit/migration-plan.md`; the owner's
+answers: `plan/interview.md`, "Before the migration", "Clean slate".
+Built on the way: a default frame (`[app] frame`), an option without a
+default, `needs`, `--seed` the launcher's (seeds `random`), `dev
+probe`, `--key` to a `keys-read` holder, the headless clip, the single
+crate of rules, the Braille and half-block canvases (`ptyrc/canvas`,
+`ptyrc_app::canvas`), `Sight` (`ptyrc/sight`, `ptyrc_app::sight`), the
+family code of `_shared/`, copied into each tree.
 
 ## Code
 

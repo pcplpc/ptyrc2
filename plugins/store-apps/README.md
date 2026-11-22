@@ -16,6 +16,12 @@ The protocol: `sdk/template/PROTOCOL.md`. The script API:
 - `clock`: a deck; variants by size, the wall clock, a zone, a tick on
   the second; code shared as modules of the tree; an option refused in
   `init`.
+- `snake`: a grab of the arrows by option (`needs = ["keys-arrows"]`,
+  `input.grab` with `escape`); refused, it plays alone. Family code of
+  `_shared/js/` (`arcade.js`, `twister.js`).
+- `timer`: a period to when the next second ends; a modal by option
+  (`keys-grab`, `front-widget`: `widget.options` `modal`); a click on
+  its own widget (`.click`), no permission.
 - `ask`: a deck that asks for the keyboard (`key`, `paste`, `ask:
   {quiet: false}`), the answer to the caller (`result`, `exit`); the
   twin's `ptyrc.ui` models in `ui.js`, on the SDK's `Field`, `Listing`.
@@ -114,9 +120,10 @@ source.
   `_shared/js/x.tests.js`, are not copied: the harness runs them once.
   Tenants: `digits.js` (`clock`, `timer`), `reef.js` (`fishes`,
   `tank`), `arcade.js`, `twister.js` (`snake`, `bricks`; `twister.js`
-  `gallery`, `train`, `window` too: Python's `random.Random`, the twin's draws for a seed),
-  `foot.js` (`ask`, `note`: the twin's `ui.foot`), `rows.js` (`git`,
-  `monitor`: the twin's `monitor` helpers, `fit`, `items`, `table`), `sky.js`,
+  `gallery`, `train`, `window` too: Python's `random.Random`, the
+  twin's draws for a seed), `foot.js` (`ask`, `note`: the twin's
+  `ui.foot`), `rows.js` (`git`, `monitor`: the twin's `monitor`
+  helpers, `fit`, `items`, `table`), `sky.js`,
   `strip.js` (`train`, `window`: the twin's `_sky`, `_strip`, and
   `window.Era`, `drawn`; `strip.js` needs `sky.js` beside it; colours
   0xrrggbb, rounded half to even: the twin's pixels to the bit).
@@ -127,8 +134,8 @@ source.
   allows `dead_code`: a tenant uses a part. Tenants: `grid.rs` (`Grid`,
   `Dots`, `DOTS`, `noise`, `clear`, `walls_of`, `phase_of`), `sky.rs`
   (`Sky`, `breeze`; needs `grid`, `twister`), `twister.rs` (Python's
-  `random.Random`, `gauss` too): `stars`; `pond`, `shore` (`grid`,
-  `twister`); `flock` (all three).
+  `random.Random`, `gauss` too): `stars`, `flock` (all three); `pond`,
+  `shore` (`grid`, `twister`); `cat` (`twister`).
 
 ## A case
 
