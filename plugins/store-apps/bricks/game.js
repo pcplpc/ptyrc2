@@ -994,7 +994,7 @@ export class Game {
     const vx = clamp(((after[1] - lx - half) / half) * VX);
     const state = [after[1], before[2], vx, -before[4], after[6], 0, after[7], after[8]];
     const dents = new Map();
-    for (const [j, b, left] of flight.marks) if (j <= i) dents.set(b, left);
+    for (const m of flight.marks) if (m[0] <= i) dents.set(m[1], m[2]);
     const [gain, side, k, x, y] = this.trace(state, box, walls, AIM, { at: after[0], dents, racket: [lx, row, r.w] });
     if (side === null) {
       if (gain) return gain;
@@ -1282,7 +1282,10 @@ export class Game {
     const found = []; // [rank, -i, places in time]
     const late = []; // [moves short, -i, place]
     for (const i of flight.entries) {
-      const [k, x, y] = path[i + 1];
+      const p = path[i + 1];
+      const k = p[0];
+      const x = p[1];
+      const y = p[2];
       const spots = [];
       for (let lx = floor(x) - r.w + 1; lx < floor(x) + 1; lx++) if (dist.has(key(lx, floor(y)))) spots.push(key(lx, floor(y)));
       if (!spots.length) continue;
@@ -1385,9 +1388,14 @@ export class Game {
 
   settle(r, tx, ty, dist, walls) {
     const off = (c) => Math.abs(X(c) - tx) + 2 * Math.abs(Y(c) - ty) + 4 * Game.hidden(c, r.w, walls);
-    const near = [...dist].filter(([, m]) => m <= REACH).map(([c]) => c);
-    const goal = least(near, (c) => [off(c), dist.get(c), c]);
-    return off(key(r.x, r.y)) - off(goal) >= 3 ? goal : null;
+    // The least `[off, moves, cell]` within `REACH`, no list made.
+    let [goal, best, moves] = [null, 0, 0];
+    dist.forEach((m, c) => {
+      if (m > REACH) return;
+      const o = off(c);
+      if (goal === null || o < best || (o === best && (m < moves || (m === moves && c < goal)))) [goal, best, moves] = [c, o, m];
+    });
+    return goal !== null && off(key(r.x, r.y)) - best >= 3 ? goal : null;
   }
 
   static hidden(c, w, walls) {
