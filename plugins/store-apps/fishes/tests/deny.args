@@ -1,0 +1,3 @@
+# test_reads (shape): a no gives a blank view and no cursor; the
+# fishes swim over the text, hidden by none of it.
+--size 60x20 --for 3s --screen tests/fox.screen --count 4 --deny shape

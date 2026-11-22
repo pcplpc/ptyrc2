@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "fishes"
+version = "0.1.0"
+summary = "Fishes hides behind the text."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "frame"
+frame = "largest"
+random = [[], ["-a"]]
+
+# The view's shape and the cursor (`ptyrc/sight`); a no: a blank view,
+# no cursor, the fishes swim on in view cells, hidden by nothing.
+# `shape` is above `layout`: the frame told is the one read and drawn
+# on, a pane's id live.
+
+[permissions]
+shape = "where the text and the cursor are, to swim around them"
+
+[options]
+count = { type = "int", default = 8, min = 0, doc = "fishes [default: 8]" }
+shy = { type = "int", min = 0, doc = "fishes drawn to the text [default: half]" }
+decorate = { type = "bool", default = false, short = "d", doc = "decorations on the text" }
+bubbles = { type = "bool", default = false, short = "b", doc = "bubbles from the bottom" }
+random = { type = "bool", default = false, short = "r", doc = "random species, events" }
+all = { type = "bool", default = false, short = "a", doc = "-d -b -r" }

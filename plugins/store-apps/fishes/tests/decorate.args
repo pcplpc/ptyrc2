@@ -1,0 +1,3 @@
+# test_reef_remembers, live (-d): decorations stand on the lines, in
+# free cells right above them; none on the last row.
+--size 60x26 --for 4s --at 1.5s,4s --screen tests/page.screen -d --count 2

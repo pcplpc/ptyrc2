@@ -1,0 +1,25 @@
+--- 3000 ms
+
+
+
+
+
+the quick brown fox jumps over the lazy dog
+                                      <*//><
+
+
+
+
+the quick brown fox jumps over the lazy dog
+
+                 ><\\*>
+
+               <*//><                         ><\\*>
+
+the quick brown fox jumps over the lazy dog
+lowered at 0 ms: frame.get, to the degree none
+lowered at 0 ms: screen.cursor, to the degree none
+lowered at 33 ms: screen.shape, to the degree none
+lowered: layout, not declared: fine if intended; else the manifest would ask for it: [permissions] layout = "..."
+lowered: shape, declared and answered no
+note: declaring less is good: the user is asked less, and a lowered answer is an answer

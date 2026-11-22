@@ -1,0 +1,2 @@
+# test_tank (-a): sand, decorations, bubbles, random species.
+--size 80x24 --for 3s --at 2s,3s -a

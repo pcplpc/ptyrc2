@@ -1,0 +1,2 @@
+# test_fishes: four fishes on a blank screen, each shown whole.
+--size 80x24 --for 1s --count 4

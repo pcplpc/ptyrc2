@@ -1,0 +1,24 @@
+--- 10000 ms
+        <*//><         ><\\*>           ooooooooooooooooooooooooooooooooooooooo
+                                        ooooooooooooooooooooooooooooooooooooooo
+                                        ooooooooooooooooooooooooooooooooooooooo
+                                        ooooooooooooooooooooooooooooooooooooooo
+                                        ooooooooooooooooooooooooooooooooooooooo
+                                        ooooooooooooooooooooooooooooooooooooooo
+                                       >ooooooooooooooooooooooooooooooooooooooo
+                                       >ooooooooooooooooooooooooooooooooooooooo
+
+
+
+
+
+
+
+
+
+
+
+
+
+                               <*//><
+lowered at 0 ms: frame.get, to the degree shape

@@ -1,0 +1,3 @@
+# test_finger: the pointer over the tank (hover, its own widget): the
+# fishes come to it, nose to it; they go when the hover ends.
+--size 80x24 --for 6s --at 1.4s,3s,6s --pointer 1.5s:40,12 --pointer 1.6s:41,12 --pointer 2.8s:41,12

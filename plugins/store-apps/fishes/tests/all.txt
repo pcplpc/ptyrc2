@@ -1,0 +1,40 @@
+--- 3000 ms
+
+
+
+
+
+the quick brown fox jumps over the lazy dog
+                                      <*//><
+
+
+
+
+the quick brown fox jumps\over the lazy dog
+
+                 ><\\*>
+
+
+
+the quick brown>fox*jumps over the lazy dog
+              .
+--- 6000 ms
+
+
+
+
+
+the quick brown fox jumps over the lazy dog
+                          <*//><
+
+
+
+
+the quick brown fox jumps over\the lazy dog
+
+   .         .
+
+
+                                                         .
+the quick brown fox jumps<over\the lazy dog
+lowered at 0 ms: frame.get, to the degree shape

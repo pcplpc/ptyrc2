@@ -1,0 +1,4 @@
+# test_print (the variants): the screen shrinks, the driver picks a
+# smaller variant, 40x10 to the bowl of 9x4; -d: sand and decorations.
+--size 80x24 --for 10s --at 2.5s,4.5s,6.5s,8.5s,10s -d
+--resize 2.6s:40x14 --resize 4.6s:30x11 --resize 6.6s:24x10 --resize 8.6s:16x10

@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "tank"
+version = "0.1.0"
+summary = "Fishes in one widget, a bowl to a tank."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "widget"
+frame = "largest"
+random = [[], ["-a"]]
+
+# It reads nothing: the driver places the widget. Hover on its own
+# widget, the default profile, calls the fishes to the pointer.
+# `frame`: the twin's; without `layout` a widget is placed on the raw
+# frame (PROTOCOL.md, Manifest).
+
+[options]
+count = { type = "int", default = 8, doc = "fishes, as many as the water holds at most [default: 8]" }
+decorate = { type = "bool", default = false, short = "d", doc = "sand, and decorations on it" }
+bubbles = { type = "bool", default = false, short = "b", doc = "bubbles from the bottom" }
+random = { type = "bool", default = false, short = "r", doc = "random species" }
+all = { type = "bool", default = false, short = "a", doc = "-d -b -r" }

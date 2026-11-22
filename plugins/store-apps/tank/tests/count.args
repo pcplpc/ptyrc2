@@ -1,0 +1,2 @@
+# test_school (count=3): three fishes at most.
+--size 80x24 --for 2s --at 2s --count 3

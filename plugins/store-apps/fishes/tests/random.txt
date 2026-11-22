@@ -1,0 +1,126 @@
+--- 8000 ms
+
+
+    some words here and there, then more words
+                                                  <*//><
+
+line 1: the quick brown fox jumps over the lazy dog
+
+
+    some words here and there, then more words
+
+
+line 3: the quick brown fox jumps over the lazy dog
+
+.  _
+_\( some words here and there, then>more words
+`U'
+
+line 5: the quick brown fox jumps over the lazy dog
+
+
+    some words here and there, then more words
+                                       ><\\*>
+
+line 7: the quick brown fox jumps over the lazy dog
+--- 12000 ms
+                           <*//><
+
+    some words here and there, then more words
+
+
+line 1: the quick brown fox jumps over the lazy dog
+                              <*//><
+
+    some words here and there, then more words
+
+
+line 3: the quick brown fox jumps over the lazy dog
+
+   .-"""-.  _
+--/_some|words>here and there, then more words
+   `-'   `-'
+
+line 5: the quick brown fox jumps over the lazy dog
+      <*//><
+
+    some words here and there, then more words
+
+
+line 7: the quick brown fox jumps over the lazy dog
+--- 16000 ms
+   <*//><
+
+    some words here and there, then more words
+
+
+line 1: the quick brown fox jumps/over the lazy dog
+
+
+    some words here and there, then more words
+
+
+line 3: the quick brown fox jumps over the lazy dog
+
+           .-"""-.  _
+    some-words|here(and there, then more words
+           `U'   `U'
+          ><\\*>
+line 5: the quick brown fox jumps over the lazy dog
+
+
+    some words here and there, then more words
+
+
+line 7: the quick brown fox jumps over the lazy dog
+--- 20000 ms
+                    ><\\*>
+
+    some words here and there, then more words
+
+
+line 1: the quick brown fox jumps/over the lazy dog
+
+
+    some words here and there, then more words
+
+
+line 3: the quick brown fox jumps over the lazy dog
+
+                    .-"""-.  _
+    some words here/and|there,othen more words
+                    `U'   `U'
+                          ><\\*>
+line 5: the quick brown fox jumps over the lazy dog
+
+
+    some words here and there, then more words
+
+
+line 7: the quick brown fox jumps over the lazy dog
+--- 24000 ms
+                                            ><\\*>
+
+    some words here and there, then more words
+
+
+line 1: the quick brown fox jumps over the lazy dog
+
+
+    some words*here and there, then more words
+
+
+line 3: the quick brown fox jumps over the lazy dog
+
+                            .-"""-.  _
+    some words here and there,_then\more words
+                            `-'   `-'
+                                         ><\\*>
+line 5: the quick brown fox jumps over the lazy dog
+
+
+    some words here and there, then more words
+
+
+line 7: the quick brown fox jumps over the lazy dog
+lowered at 0 ms: frame.get, to the degree shape

@@ -1,0 +1,3 @@
+# test_fishes_all (-a): fishes, decorations on the lines, bubbles from
+# the bottom row; all behind the text. (DENSITY and EVERY are the app's.)
+--size 60x20 --for 6s --at 3s,6s --screen tests/fox.screen --count 4 -a
