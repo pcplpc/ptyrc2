@@ -2,30 +2,26 @@
 an apple, a pear, an Apple                                           apple    2
 $                                                                    p[ea]+r  1
 --- 1000 ms, styles
-   aaaaa    bbbb     aaaaa                                         cdddddddddeee
-                                                                   cfffffffffggg
-a: bg=226
-b: bg=120
+   aaaaa    bbbb     aaaaa                                         caaaaaaaaaddd
+                                                                   cbbbbbbbbbeee
+a: fg=16 bg=226
+b: fg=16 bg=120
 c: bg=236
-d: fg=16 bg=226
-e: fg=226 bg=236 bold
-f: fg=16 bg=120
-g: fg=120 bg=236 bold
+d: fg=226 bg=236 bold
+e: fg=120 bg=236 bold
 --- 2000 ms
 an apple, a pear, an Apple                                           apple    4
 $ echo APPLE                                                         p[ea]+r  1
 APPLE
 $
 --- 2000 ms, styles
-   aaaaa    bbbb     aaaaa                                         cdddddddddeee
-       aaaaa                                                       cfffffffffggg
+   aaaaa    bbbb     aaaaa                                         caaaaaaaaaddd
+       aaaaa                                                       cbbbbbbbbbeee
 aaaaa
-a: bg=226
-b: bg=120
+a: fg=16 bg=226
+b: fg=16 bg=120
 c: bg=236
-d: fg=16 bg=226
-e: fg=226 bg=236 bold
-f: fg=16 bg=120
-g: fg=120 bg=236 bold
+d: fg=226 bg=236 bold
+e: fg=120 bg=236 bold
 lowered at 0 ms: frame.get, to the degree shape, 2 times
 lowered at 0 ms: screen.find, to the degree shape, 4 times

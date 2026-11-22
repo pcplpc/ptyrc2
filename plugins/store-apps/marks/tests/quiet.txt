@@ -7,6 +7,6 @@ $
     aaaa
 aaaa
      aaaa
-a: bg=226
+a: fg=16 bg=226
 lowered at 0 ms: frame.get, to the degree shape
 lowered at 0 ms: screen.find, to the degree shape

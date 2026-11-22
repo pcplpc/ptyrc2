@@ -147,6 +147,9 @@ export class Marks {
           // The glyphs shown are the program's: these only say where.
           content: { rows: [text.replace(/\s/gu, "·")], style: { bg, fg } },
           blend: "tint",
+          // Asked: a store app's sprite is behind the text unless asked
+          // in front, where a tint takes the glyphs' colour too.
+          layer: "front",
         },
       });
     }

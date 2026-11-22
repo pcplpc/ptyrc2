@@ -68,7 +68,7 @@ export function test_look() {
   marks.look();
   const puts = d.log.filter(([m]) => m === "draw.put");
   assertEqual(puts.length, 3); // two tints and the display
-  assertEqual(puts[0][1].blend, "tint");
+  assertEqual([puts[0][1].blend, puts[0][1].layer], ["tint", "front"]);
   assertEqual(puts[0][1].anchor, { at: [3, 100], space: "frame" });
   assertEqual(d.log.find(([m]) => m === "screen.find")[1].ignore_case, true);
   assertEqual(d.log.find(([m]) => m === "frame.get")[1], { frame: 0 });

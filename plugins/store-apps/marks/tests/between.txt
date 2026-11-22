@@ -4,15 +4,13 @@ food: rice, fish                                                        FISH  1
 more food
 $
 --- 1000 ms, styles
-    aaaa                                                              bccccccddd
-aaaa        eeee                                                      bffffffggg
+    aaaa                                                              baaaaaaccc
+aaaa        dddd                                                      bddddddeee
      aaaa
-a: bg=226
+a: fg=16 bg=226
 b: bg=236
-c: fg=16 bg=226
-d: fg=226 bg=236 bold
-e: bg=120
-f: fg=16 bg=120
-g: fg=120 bg=236 bold
+c: fg=226 bg=236 bold
+d: fg=16 bg=120
+e: fg=120 bg=236 bold
 lowered at 0 ms: frame.get, to the degree shape
 lowered at 0 ms: screen.find, to the degree shape, 2 times
