@@ -148,6 +148,29 @@ const cellsOf = (x, y, w) => {
   return out;
 };
 
+const grids = new WeakMap();
+
+/** The room of a racket (`Game.free`), a set of left cells in `box`,
+ * on a grid of `box` and a cell around: the index of `(x, y)` is
+ * `(x - x0 + 1) * h + y - y0 + 1`, ordered as the keys; `at(c)` that
+ * of key `c`, -1 off the grid; `open`: 1 in the room; `keys`: the key
+ * of each index. Kept while the room lives. */
+function grid(room, box) {
+  const [x0, y0, x1, y1] = [box[0] - 1, box[1] - 1, box[2] + 1, box[3] + 1];
+  const [w, h] = [x1 - x0, y1 - y0];
+  const open = new Uint8Array(w * h);
+  const keys = new Float64Array(w * h);
+  for (let x = x0, i = 0; x < x1; x++) for (let y = y0; y < y1; y++) keys[i++] = key(x, y);
+  const at = (c) => {
+    const x = X(c);
+    const y = Y(c);
+    return x0 <= x && x < x1 && y0 <= y && y < y1 ? (x - x0) * h + y - y0 : -1;
+  };
+  for (const c of room) open[at(c)] = 1;
+  const n = w * h;
+  grids.set(room, { h, at, open, keys, seen: new Int32Array(n), banned: new Int32Array(n), edge: new Int32Array(n), around: new Int32Array(n), stamp: 0 });
+}
+
 export class Brick {
   constructor(n, x, y, kind = "plain", lives = 1, color = 0, due = 0) {
     Object.assign(this, { n, x, y, kind, lives, color, due });
@@ -896,10 +919,30 @@ export class Game {
       phase &= (1 << gear) - 1;
       const weight = Math.max(0.25, 1 - (at + k) / 200);
       for (let m = 0; m < moves; m++) {
-        let hits;
-        [x, y, vx, vy, hits] = fly(x, y, vx, vy, hard);
+        // `fly`, its hits kept in two cells, null when none: no list.
+        const cx = floor(x);
+        const cy = floor(y);
+        let across = null;
+        let down = null;
+        let nx = x + vx;
+        if (floor(nx) !== cx && hard(key(floor(nx), cy))) {
+          across = key(floor(nx), cy);
+          vx = -vx;
+          nx = x;
+        }
+        let ny = y + vy;
+        if (floor(ny) !== cy && hard(key(floor(nx), floor(ny)))) {
+          down = key(floor(nx), floor(ny));
+          vy = -vy;
+          ny = y;
+        }
+        x = nx;
+        y = ny;
         index += 1;
-        for (const [cell, flat] of hits) {
+        for (let j = 0; j < 2; j++) {
+          const cell = j === 0 ? across : down;
+          if (cell === null) continue;
+          const flat = j === 1;
           last = index;
           const cx = X(cell);
           if (Y(cell) === row && lx <= cx && cx < end && !walls.has(cell)) {
@@ -974,6 +1017,7 @@ export class Game {
     const k = `${box.join(",")}:${this.version}`;
     if (kept && kept[0] === k) return kept[1];
     const room = this.room(box, w, []);
+    grid(room, box);
     this.fits.set(w, [k, room]);
     return room;
   }
@@ -984,7 +1028,6 @@ export class Game {
   reachOf(r, room, depth, goals = null, first = false) {
     const bad = this.bad(r);
     const start = key(r.x, r.y);
-    let edge = [start];
     const dist = new Map([[start, 0]]);
     let left = null;
     if (goals !== null) {
@@ -992,18 +1035,44 @@ export class Game {
       for (const g of goals) if (room.has(g) && !bad.has(g) && g !== start) left.add(g);
       if (!left.size || (first && goals.has(start))) return [dist, false];
     }
+    // On the grid of the room: a cell an index, `seen`, `banned` this
+    // call's when they hold its stamp.
+    const g = grids.get(room);
+    const { open, keys, seen, banned, h } = g;
+    const stamp = ++g.stamp;
+    for (const c of bad) {
+      const i = g.at(c);
+      if (i >= 0) banned[i] = stamp;
+    }
+    // A layer sorted in place (no comparator to call): `edge`, then
+    // `around`, `n` long.
+    let [edge, around] = [g.edge, g.around];
+    let ne = 0;
+    const i0 = g.at(start);
+    if (i0 >= 0) {
+      seen[i0] = stamp;
+      edge[ne++] = i0;
+    }
     for (let moves = 1; moves < depth + 1; moves++) {
-      const around = new Set();
-      for (const c of edge) {
-        for (const n of [c + 1, c - 1, c + ACROSS, c - ACROSS]) if (room.has(n) && !dist.has(n) && !bad.has(n)) around.add(n);
+      let n = 0;
+      for (let e = 0; e < ne; e++) {
+        const i = edge[e];
+        // As the keys: a row down, up, a column right, left.
+        for (let k = 0; k < 4; k++) {
+          const c = k === 0 ? i + 1 : k === 1 ? i - 1 : k === 2 ? i + h : i - h;
+          if (open[c] === 1 && seen[c] !== stamp && banned[c] !== stamp) {
+            seen[c] = stamp;
+            around[n++] = c;
+          }
+        }
       }
-      if (!around.size) break;
-      const layer = [...around].sort((a, b) => a - b);
-      for (const c of layer) dist.set(c, moves);
-      edge = layer;
+      if (!n) break;
+      around.subarray(0, n).sort();
+      for (let e = 0; e < n; e++) dist.set(keys[around[e]], moves);
+      [edge, around, ne] = [around, edge, n];
       if (left !== null) {
         let found = false;
-        for (const c of layer) if (left.delete(c)) found = true;
+        for (let e = 0; e < ne; e++) if (left.delete(keys[edge[e]])) found = true;
         if (!left.size || (first && found)) return [dist, false];
       }
     }
