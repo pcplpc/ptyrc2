@@ -1,0 +1,3 @@
+# test_reads.py (shore): shape answered no: no froth on the words;
+# nothing drawn behind them all the same.
+--size 80x24 --for 1s --at 1s --screen tests/words.screen --deny shape -- --at 40

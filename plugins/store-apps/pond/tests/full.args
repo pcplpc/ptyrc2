@@ -1,0 +1,2 @@
+# test_print (-a --phase 0.5): every part, the full moon.
+--size 80x24 --for 1s --at 1s -a --phase 0.5

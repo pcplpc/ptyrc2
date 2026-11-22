@@ -1,0 +1,2 @@
+# test_flock: 2 s behind two lines of text, a dusk of 40 s; the text whole,
+--size 80x24 --for 2s --at 1s,2s --screen tests/words.screen --dusk 40

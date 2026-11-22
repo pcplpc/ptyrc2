@@ -1,0 +1,3 @@
+# test_stars_all, test_print (-a): twinkles, a turn, figures, the milky
+# way, meteors, fireflies, a meadow; the text whole.
+--size 80x24 --for 3s --at 500ms,1500ms,3s --screen tests/words.screen --night 20 -a

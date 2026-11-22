@@ -1,0 +1,2 @@
+# test_split_and_scare, live: the host mouse in the thick of the flock at 1 s; they leave the place, less once it rests.
+--size 80x24 --for 4s --at 1s,1500ms,2s,4s --pointer 1000:44,3 -- --at 0.4

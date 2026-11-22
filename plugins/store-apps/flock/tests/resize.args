@@ -1,0 +1,2 @@
+# The view narrows at 1 s: the scene and the text read again.
+--size 80x24 --for 2s --at 900ms,2s --screen tests/words.screen --resize 1s:50x12 -w

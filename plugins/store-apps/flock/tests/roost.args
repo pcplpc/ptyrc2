@@ -1,0 +1,2 @@
+# test_roost_and_join (perches): at night the birds roost on the tops of the words.
+--size 80x24 --for 1s --at 1s --screen tests/words.screen -o --dusk 50 -- --at 0.98

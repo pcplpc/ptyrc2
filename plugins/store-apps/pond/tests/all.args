@@ -1,0 +1,3 @@
+# test_pond_all: koi, lotus, showers, the full moon, petals, striders
+# and dragonflies (sprites) behind the text.
+--size 80x24 --for 3s --at 500ms,3s --screen tests/words.screen --pads 30 --drops 200 -a --phase 0.5 --season spring

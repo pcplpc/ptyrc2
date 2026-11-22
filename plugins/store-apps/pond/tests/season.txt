@@ -1,0 +1,1 @@
+ptyrc: --season: "monsoon": one of spring, summer, autumn, winter

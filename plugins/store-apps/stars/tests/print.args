@@ -1,0 +1,3 @@
+# test_print (--print 40x12 --phase 0.5): the scene, a full moon, the
+# grass along the bottom.
+--size 40x12 --for 1s --at 0,1s --phase 0.5

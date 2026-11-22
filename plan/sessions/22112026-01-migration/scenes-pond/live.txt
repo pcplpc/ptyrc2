@@ -1,0 +1,98 @@
+1 pond: running
+$ ptyrc -s h manage ls (status 0)
+ID  KIND   STATE    SINCE      PID  NAME  ARGS
+ 1  child  running     7s  1397855  pond  --manifest {"frame":1,"granted":["shape","pointer","clock"],"id":"pond","limits":{},"permissions":[{"name":"clock"},{"name":"pointer"},{"name":"shape"}],"version":"0.1.0"} /home/peon/git/perso/ptyrc/ptyrc2/temp/live-pond/cache/ptyrc/shipped/pond/tree/app.wasm {"all":false,"current":0.6,"drops":0.0,"insects":false,"koi":true,"lotus":false,"moon":false,"night":300.0,"pads":0.0,"petals":false,"phase":null,"rain":false,"season":null}
+$ ptyrc -s h shot --ansi --sprites --no-cursor (status 0)
+                                                                           ⠐    
+                                                                                
+words in the way                                                   ⠈   ⠤        
+                                                                            ⠐⠒  
+   more words here                                                             ⠉
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                  ⠉⠁       ⠠⠄⠈                                                  
+                                                                                
+                                                                                
+                                                                                
+          ⣶⣄        ⠄                                                           
+          ⣿⣿⡆                                               ⠐    ⡀              
+          ⢿⣿⡇                                           ⠒⠂                      
+           ⠻⡇                                        ⢀⣀                         
+            ⢿⣄                        ⣠⣄         ⠄⠄                             
+            ⠙⠟                        ⢛⡋                          ⠐             
+                                       ⣷⣀                      ⠐                
+                                       ⠹⣿⣷⣦⣄           ⠠                        
+                                        ⠈⠻⠿⠿⠿                                   
+    ⠐⠊⠁
+koi at (40, 21)
+$ ptyrc -s h shot --ansi --sprites --no-cursor (status 0)
+                                                                                
+                                                                                
+words in the way                                                       ⠄        
+                                                                            ⠒   
+   more words here                                                            ⠈⠉
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                  ⠁        ⠠⠄⠁                                                  
+                                                                                
+                                                                                
+          ⡀                                                                     
+         ⢸⣿⣦       ⠠                                                            
+         ⠈⣿⣿⠇      ⠂                                                            
+          ⢻⣿                                           ⠐                        
+          ⠈⣥                                         ⣀                          
+           ⠸⣷⡆                                                                  
+            ⠉                                                     ⠐             
+                                           ⡀⠄⠄⠄⡀               ⠒ ⠈              
+                                       ⠠⣾⣦⡁⣀⠄⠄⡀⠐⠄      ⠠⠄                       
+                                         ⠌⠉⡋⠿⣿⣿⣶⣼                               
+    ⠐⠁                                   ⠈⢄⠈⠐⠘⠛⢻⠿⠷
+$ ptyrc -s h shot --ansi --sprites --no-cursor (status 0)
+                                                                                
+                                                                                
+words in the way                          ⠒                                     
+                                          ⠂                                     
+   more words here                                                            ⠂ 
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+        ⢿⣷⣦⡀                                                                    
+        ⠈⢿⣿⣧       ⠄                                                            
+          ⢻⡏      ⠐                                                             
+          ⢰⡂               ⠈⠉                                                   
+          ⢸⣷⠆                                                                   
+                                                                                
+                                                                  ⠂             
+                                                              ⠐⠒ ⠉              
+                                                       ⣀            ⠠⠄⠁         
+                                              ⣶⣦⡀     ⢀                         
+                                                ⠉⠻⣶⣦⣤⣤⣶⡶
+$ ptyrc -s h text (status 0)
+
+
+words in the way
+
+   more words here
+$ ptyrc -s h manage log 1 (status 0)
+ptyrc-box: profile: landlock ABI 9 (the kernel's: 10): files, renames across directories (refer), truncate, TCP bind and connect, ioctl on devices, abstract unix sockets, signals; every thread
+ptyrc-box: profile: seccomp, every thread: 41 calls allowed, 31 kill the process, the rest EPERM
+ptyrc-box: init done
+$ ptyrc -s h manage stop 1 (status 0)
+1 pond: exited 0
+$ ptyrc -s h shot --ansi --sprites --no-cursor (status 0)
+                                                                                
+                                                                                
+words in the way                                                                
+                                                                                
+   more words here

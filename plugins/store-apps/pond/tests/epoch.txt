@@ -1,0 +1,27 @@
+--- 2000 ms
+                       ⠉⠁
+
+
+     ⠐   ⠐⠂                               ⠢⡀
+
+
+                      ⢀
+        ⠐   ⠄  ⠂    ⣠⣴⡶⠂
+                   ⠺⠿⠯                          ⠐⠂
+                    ⠈⠿⠟
+                                                     ⠐⠂
+                                                          ⠠
+                                                         ⠁
+                                                        ⠂
+     ⡀                                                 ⠈
+     ⠈⠂
+
+
+
+
+
+
+                             ⠄
+lowered at 0 ms: clock.now, to the degree none
+lowered at 0 ms: frame.get, to the degree shape
+lowered: clock, declared and answered no

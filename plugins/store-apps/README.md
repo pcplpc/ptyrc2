@@ -61,8 +61,12 @@ source.
 - `_shared/rust/x.rs`: copied as `NAME/src/x.rs`, declared `mod x;`
   there; never `lib.rs`, `main.rs`. Its unit tests inside
   (`#[cfg(test)]`), run once by the harness, natively, with
-  `ptyrc-app`. No tenant yet; the first: the grid of `stars` (`Grid`,
-  `noise`, `runs`, `phase_of`), for `pond` and `shore`.
+  `ptyrc-app`. A file names the others it needs (`crate::grid`) and
+  allows `dead_code`: a tenant uses a part. Tenants: `grid.rs` (`Grid`,
+  `Dots`, `DOTS`, `noise`, `clear`, `walls_of`, `phase_of`), `sky.rs`
+  (`Sky`, `breeze`; needs `grid`, `twister`), `twister.rs` (Python's
+  `random.Random`, `gauss` too): `stars`; `pond`, `shore` (`grid`,
+  `twister`); `flock` (all three).
 
 ## A case
 

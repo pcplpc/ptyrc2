@@ -1,0 +1,4 @@
+# test_pointer: koi, nothing else; the host mouse on three cells of
+# the view: each told, the koi near it dart off, a ring where one took fright.
+--size 80x24 --for 6s --at 1s,2500ms,4s,6s --pads 0 --drops 0 -k
+--pointer 1000:70,20 --pointer 2000:3,1 --pointer 3000:40,12 --pointer 3100:41,12

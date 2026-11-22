@@ -1,0 +1,2 @@
+# test_print (--print -a --at 0.7): every part of the scene, the sun low.
+--size 80x24 --for 1s --at 1s -a -- --at 0.7

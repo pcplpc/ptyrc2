@@ -1,0 +1,2 @@
+# -r: showers; a ring stops against a line of words.
+--size 80x24 --for 3s --at 1s,3s --screen tests/line.screen --pads 0 --drops 0 -r

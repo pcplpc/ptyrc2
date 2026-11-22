@@ -1,0 +1,3 @@
+# test_the_host_mouse_over_the_beach: the host mouse on a sandpiper at
+# 1 s (14 s in): those about it fly off; a crab nearby bolts.
+--size 80x24 --for 3s --at 1s,1250ms,1500ms,3s -b -c --pointer 1000:24,11 -- --at 13

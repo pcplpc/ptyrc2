@@ -1,0 +1,2 @@
+# test_reads.py (flock): shape answered no: no perches; nothing drawn behind the text all the same.
+--size 80x24 --for 1s --at 1s --screen tests/words.screen --deny shape -o -- --at 0.98

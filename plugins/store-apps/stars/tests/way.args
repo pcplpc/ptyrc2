@@ -1,0 +1,3 @@
+# The moon crosses in --night 20 s, then stays down 4 s; a larger moon,
+# a breeze to the left.
+--size 60x16 --for 24s --at 0,5s,10s,15s,19s,23s --night 20 --moon 8 --wind -2 --phase 0.3

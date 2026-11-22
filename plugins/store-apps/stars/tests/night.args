@@ -1,0 +1,2 @@
+# test_print: --night 0 refused in init (exit 2).
+--size 20x4 --for 1s --night 0

@@ -1,0 +1,4 @@
+# test_fly, test_fear: striders and a dragonfly; the pointer on the
+# dragonfly: it leaves; the striders near slide off and come back.
+--size 80x24 --for 6s --at 1s,1200ms,2s,6s --pads 0 --drops 0 -i
+--pointer 1050:48,6 --pointer 1100:47,6

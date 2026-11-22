@@ -1,0 +1,2 @@
+# test_print: --dusk 0 refused in init (exit 2).
+--size 20x4 --for 1s --dusk 0

@@ -1,0 +1,4 @@
+# test_reads.py (stars): pointer answered no: the moves reach nobody,
+# the grass stays as it is.
+--size 80x24 --for 3s --at 900ms,1500ms,3s --wind 0 -w --deny pointer
+--pointer 1000:31,19 --pointer 1100:30,22 --pointer 1200:31,22

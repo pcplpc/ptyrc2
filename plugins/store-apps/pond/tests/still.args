@@ -1,0 +1,2 @@
+# --current 0: still water: the light on the swell stays where it is.
+--size 40x12 --for 30s --at 1s,30s --pads 0 --drops 0 --current 0

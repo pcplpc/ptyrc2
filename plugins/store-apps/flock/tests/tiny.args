@@ -1,0 +1,2 @@
+# test_print (--print 3x2 -a): a view of 3 by 2 cells.
+--size 3x2 --for 1s --at 1s -a

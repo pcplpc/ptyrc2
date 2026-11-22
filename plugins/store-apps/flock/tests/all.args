@@ -1,0 +1,2 @@
+# test_flock_all (-a --at 0.9): clouds, lake, reeds, stars; the birds go to roost.
+--size 80x24 --for 2s --at 1s,2s --screen tests/words.screen -a --dusk 40 -- --at 0.9

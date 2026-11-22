@@ -1,0 +1,3 @@
+# test_stars_without_grass, test_print (-a --no-grass): stars down to
+# the last row, no firefly.
+--size 80x24 --for 3s --at 500ms,3s --screen tests/words.screen --night 20 -a --no-grass

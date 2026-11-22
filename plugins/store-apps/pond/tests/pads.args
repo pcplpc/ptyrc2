@@ -1,0 +1,2 @@
+# test_print: --pads -1 refused (the manifest's min); so --drops, --current.
+--size 20x4 --for 1s --pads -1

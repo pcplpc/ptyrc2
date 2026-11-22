@@ -1,0 +1,2 @@
+# test_night: -n, a day of 20 s, 9 s in: night, the moon on the water.
+--size 80x24 --for 1s --at 1s -n --day 20 -- --at 8

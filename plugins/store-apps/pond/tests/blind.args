@@ -1,0 +1,3 @@
+# test_reads.py (pond): shape answered no: the view is blank to the
+# app, rings come beside the text; behind it all the same.
+--size 80x24 --for 1s --screen tests/words.screen --deny shape --pads 30 --drops 200

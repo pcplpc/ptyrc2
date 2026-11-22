@@ -1,0 +1,6 @@
+# test_the_host_mouse_in_the_grass: a meadow of 4 rows, no wind; the
+# pointer on the row over the grass, on it: the blades part about it;
+# off it at 2 s: they swing back, then rest as they were.
+--size 80x24 --for 8s --at 900ms,1500ms,2200ms,8s --wind 0 -w
+--pointer 1000:31,19 --pointer 1100:30,22 --pointer 1200:31,22
+--pointer 2000:31,10

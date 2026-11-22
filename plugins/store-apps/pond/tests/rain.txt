@@ -1,0 +1,43 @@
+--- 1000 ms
+        ⢀
+
+
+     ⠠⠄  ⠤⠄
+                                      ⠠⠈ ⠁⢐
+                                      ⠈⢀  ⠄
+
+
+                                                ⠐⠶⠄
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                                                     ⠄
+                                      ⠐
+
+
+
+                                                                           ⠄
+
+
+
+
+
+
+                            ⢀⣀
+--- 3000 ms
+
+
+
+         ⠐
+
+
+
+        ⠈   ⠒⠂ ⠒
+
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                                                     ⠐
+                                                         ⡀ ⠄
+                                                         ⢀
+                                                       ⠠⠉ ⠠⢀
+                                                       ⠈⠑
+                                                   ⠄
+                                                 ⠐
+lowered at 0 ms: frame.get, to the degree shape

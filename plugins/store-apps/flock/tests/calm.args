@@ -1,0 +1,2 @@
+# Asks pointer answered no: the pointer scares nothing.
+--size 80x24 --for 2s --at 2s --deny pointer --pointer 1000:44,3 -- --at 0.4

@@ -1,0 +1,2 @@
+# test_the_animals_flee_the_pointer: sandpipers and crabs at 14 s, no pointer.
+--size 80x24 --for 2s --at 1s,2s -b -c -- --at 13

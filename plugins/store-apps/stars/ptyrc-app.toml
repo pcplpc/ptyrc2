@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "stars"
+version = "0.1.0"
+summary = "A night sky behind the text, a moon that crosses it, grass in a breeze."
+license = "GPL-3.0-or-later"
+api = 1
+rust = "src/lib.rs"
+rustc = "1.88"
+surface = "frame"
+frame = "largest"
+random = [[], ["-a"]]
+
+[permissions]
+shape = "where the text is: the sky is around it"
+pointer = "the pointer in the grass parts the blades; without it they only sway"
+clock = "the phase of the moon tonight; without it, that of the start of 1970"
+
+[options]
+stars = { type = "float", default = 70.0, min = 0.0, doc = "stars over 80 by 24 cells" }
+night = { type = "float", default = 300.0, doc = "seconds the moon takes to cross the sky, more than 0" }
+moon = { type = "float", default = 5.0, min = 0.0, doc = "radius of the moon, 2 dots a column; 0: no moon" }
+phase = { type = "float", doc = "phase of the moon: 0 new, 0.25 first quarter, 0.5 full; none: tonight's" }
+wind = { type = "float", default = 1.0, doc = "strength of the breeze, < 0 to the left; 0: none" }
+twinkle = { type = "bool", short = "t", doc = "the stars twinkle" }
+turn = { type = "bool", short = "r", doc = "the sky turns, slower than the moon" }
+constellations = { type = "bool", short = "c", doc = "three constellations, their lines drawn" }
+galaxy = { type = "bool", short = "g", doc = "the milky way, a band of dust" }
+meteors = { type = "bool", short = "m", doc = "a shooting star now and then" }
+bugs = { type = "bool", short = "b", doc = "fireflies over the grass" }
+wild = { type = "bool", short = "w", doc = "a meadow: taller grass, flowers" }
+all = { type = "bool", short = "a", doc = "-t -r -c -g -m -b -w" }
+grass = { type = "bool", default = true, doc = "grass along the bottom; --no-grass: the sky only, and none of -b -w" }

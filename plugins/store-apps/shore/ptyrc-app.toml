@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "shore"
+version = "0.1.0"
+summary = "A beach behind the text, seen from above: waves, their lace, a tide."
+license = "GPL-3.0-or-later"
+api = 1
+rust = "src/lib.rs"
+rustc = "1.88"
+surface = "frame"
+frame = "largest"
+random = [[], ["-a"]]
+
+[permissions]
+shape = "where the text is: froth gathers over and under the words in the water"
+pointer = "the sandpipers and the crabs flee the pointer; without it they never take fright"
+
+[options]
+waves = { type = "float", default = 8.0, doc = "seconds between two waves, more than 0" }
+tide = { type = "float", default = 300.0, doc = "seconds the tide takes to come in and go out, more than 0" }
+day = { type = "float", default = 240.0, doc = "with -n, seconds from an afternoon to the next, more than 0" }
+sand = { type = "float", default = 420.0, min = 0.0, doc = "grains of sand over 80 by 24 cells" }
+at = { type = "float", default = 0.0, doc = "start this long into the scene, seconds" }
+drift = { type = "bool", short = "d", doc = "shells, pebbles, a line of wrack" }
+ripples = { type = "bool", short = "r", doc = "ripple marks in the sand" }
+crabs = { type = "bool", short = "c", doc = "crabs, sideways on the wet sand" }
+birds = { type = "bool", short = "b", doc = "sandpipers, in groups, by the water" }
+walker = { type = "bool", short = "w", doc = "footprints the waves wipe" }
+night = { type = "bool", short = "n", doc = "dusk, night, the moon on the water" }
+all = { type = "bool", short = "a", doc = "-d -r -c -b -w -n" }
