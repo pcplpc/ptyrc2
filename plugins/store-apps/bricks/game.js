@@ -160,7 +160,10 @@ function grid(room, box) {
   const [w, h] = [x1 - x0, y1 - y0];
   const open = new Uint8Array(w * h);
   const keys = new Float64Array(w * h);
-  for (let x = x0, i = 0; x < x1; x++) for (let y = y0; y < y1; y++) keys[i++] = key(x, y);
+  for (let x = x0, i = 0; x < x1; x++) {
+    const k = key(x, y0); // a row down is one more
+    for (let y = 0; y < h; y++) keys[i++] = k + y;
+  }
   const at = (c) => {
     const x = X(c);
     const y = Y(c);
