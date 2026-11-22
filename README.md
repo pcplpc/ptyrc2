@@ -30,8 +30,9 @@ Then attach an application to it:
 ptyrc app bricks
 ```
 
-Wrap a `tmux` session with `ptyrc tmux attach`, then use `ctrl+t ctrl+t` to
-manage the running driver from the inside:
+Attach an existing `tmux` session using `ptyrc tmux attach`.
+
+Then use `ctrl+t ctrl+t` inside to manage the running driver and start clients:
 
 ![tutorial](doc/tutorial.gif)
 
