@@ -1,0 +1,1841 @@
+scene one seed=7 w=80 h=24 until=150.0 count=1
+screen
+| 
+| 
+| 
+| 
+|   ##############################
+| 
+| 
+| 
+| 
+| 
+|     ##################################################
+| 
+| 
+| 
+| 
+| 
+| ####################          #########################
+| 
+| 
+| 
+| ######################################################################
+screen
+| 
+| 
+| 
+| 
+| 
+| 
+|           ########################################
+| 
+| 
+| 
+| 
+| 
+| 
+| ############################################################
+| 
+| 
+| 
+| 
+|                               ##############################
+ev 20.0 cursor 12 3
+ev 24.0 cursor -
+ev 40.0 idle 1
+ev 75.0 idle 0
+ev 80.0 screen 1
+ev 90.0 cover 0.5
+ev 91.0 cover 0.0
+ev 100.0 cursor 40 5
+ev 101.0 cursor 41 6
+ev 110.0 cursor -
+ev 115.0 idle 1
+ev 130.0 screen 0
+sum 0 9b6c71e1ca44057d
+sum 1 b81a8fddefca0e56
+sum 2 936f4214baff1631
+sum 3 f6be6ab78d913516
+sum 4 ad4a0ea430b1ffae
+sum 5 c3a65cbffb200f54
+sum 6 66916ed8f478f045
+sum 7 5e1422ebbf2f553e
+sum 8 c33bbcaf82e27ff2
+sum 9 d076823e789a1eaa
+sum 10 b5144f68871dea37
+sum 11 8d9d3c4a856a991f
+sum 12 58bb8502bac1ff9f
+sum 13 f9dfa945ccea3b55
+sum 14 89cd85743d977ab8
+sum 15 abd7ca6fea56fd03
+sum 16 1c5a75e3afb4c39f
+sum 17 7ce30d15ba0ef201
+sum 18 975a9a0e1fc498ec
+sum 19 89b6b49f47256a9f
+sum 20 8c7adae8c7b6df67
+sum 21 555669c98b850947
+sum 22 d0cc7f834e8ff3de
+sum 23 d5e75934e0dff2ac
+sum 24 69df51ea3debecbd
+sum 25 86ff3d62239576f1
+sum 26 09fa4df5d1e4a6b6
+sum 27 0e1d7898a5a7d7a1
+sum 28 6d7626ea1d37e8f7
+sum 29 db1e9832d1cf9645
+sum 30 bdb35698dc016c7c
+sum 31 68c8c3d53450a4a8
+sum 32 3afd1f65ff6f568e
+sum 33 081f21862c82f42a
+sum 34 f94136e038b33227
+sum 35 7ea69458dd384101
+sum 36 5445aca7f4e62cf5
+sum 37 311ec1af36947dd1
+sum 38 ae3cd6484189255e
+sum 39 6f992573568085c2
+sum 40 772e881f862372c5
+sum 41 2a41790b6590dfa9
+sum 42 e66ee59da1a2cd92
+sum 43 7001ec7e319c7462
+sum 44 35c25e0779f2b0fd
+sum 45 6899e5f2ebee4524
+sum 46 53124706b56cc83a
+sum 47 73791f95cb3c68cf
+sum 48 c1bbb0e69cf2d548
+sum 49 3067ae812e7a183d
+sum 50 802689530e1c125e
+sum 51 ca52e5aada42aa31
+sum 52 2ec3248cf4e89bbd
+sum 53 531b2ebb144c90a7
+sum 54 f8cee4df4bc676c1
+sum 55 1eab76461e022565
+sum 56 4ebbaac29fad8e6f
+sum 57 c333b51e24c9bb3d
+sum 58 c5d8bff2979e92f5
+sum 59 d4c5c99c9ab8378d
+sum 60 57c315bb23e820f1
+sum 61 12530a2625bc04f4
+sum 62 fbc870dfdc1469f5
+sum 63 904e51387a7fa59a
+sum 64 dba7bd04638bb88b
+sum 65 5ce47d9af6400c81
+sum 66 8d8ac1235c906046
+sum 67 331ea0f7a2c40fc8
+sum 68 a8aa242777a2ab65
+sum 69 44ff5fddc885d632
+sum 70 23212a78b458ef39
+sum 71 8de5fc65ea69f1fc
+sum 72 c63fcf1909c9b870
+sum 73 0a93862224640bef
+sum 74 74326dea74480cfc
+sum 75 8f69f3bdfd27f514
+sum 76 51b7e9aeb7c16f33
+sum 77 9b7f53566cc3a58e
+sum 78 418d17e62ed6fb26
+sum 79 2b9f92021d20f6d9
+sum 80 985a0b03a0907eff
+sum 81 a675196c50a4028d
+sum 82 55080ff545314375
+sum 83 a761f4a1d307b576
+sum 84 68e0308499dab18d
+sum 85 d3e5815f11a84554
+sum 86 88ca1cbfea16c4d9
+sum 87 faa8098137415924
+sum 88 05536930405b588d
+sum 89 63d8037eb2c04922
+sum 90 cb12986a01524d95
+sum 91 a2e0048816f0c8d6
+sum 92 9bad0254f901f6e3
+sum 93 e5afcdf93a02fb09
+sum 94 d028e6785b452591
+sum 95 2e264a8cd21ac0a3
+sum 96 783d27518bdf4a37
+sum 97 ce77301e185e1089
+sum 98 c798934fd1910f20
+sum 99 ef742435dd3f56b0
+sum 100 135ef854195ecd1b
+sum 101 449e921675366592
+sum 102 5c0a9f496374b88e
+sum 103 2047d70005f27f09
+sum 104 54b22d9d3a01969b
+sum 105 0692cf7fd165c0c6
+sum 106 435c18502a26f7b0
+sum 107 64a8f60f8106186b
+sum 108 5dfbf102c1465526
+sum 109 e9c9c0b2f5279640
+sum 110 b4ee8285793303e0
+sum 111 e3bda08003cfaf32
+sum 112 970eecd59f15d3a7
+sum 113 95891fdcdde28af1
+sum 114 322fe3be65bf29e3
+sum 115 870617fca37eee73
+sum 116 f62d83638ab6b941
+sum 117 8ff0dc98c5fe510d
+sum 118 ec5deff1faef88bc
+sum 119 5592d161ab9d2063
+sum 120 07644caffee730c5
+sum 121 66dff3a5fa262d9d
+sum 122 530ea76a0eafff0a
+sum 123 bfaff5dd8c444220
+sum 124 5594e45e10887b79
+sum 125 d1966279008e4c2c
+sum 126 1a6482a9cbea8897
+sum 127 ed9c1fc17c8b1f95
+sum 128 92bd8132cd68cc43
+sum 129 2ff699427d5feca3
+sum 130 8a07299615ea1103
+sum 131 0b15527e5864039e
+sum 132 4db42bebd77404c4
+sum 133 2f0b370deb8d7792
+sum 134 8c8fc83b4c9ba840
+sum 135 550628f77e3e3b9b
+sum 136 d157e727f30f685e
+sum 137 7aa834d58c1e704e
+sum 138 075f246ccd34eea7
+sum 139 b473518403a74f34
+sum 140 bad9466a33c33a89
+sum 141 96a9fce710a9c42f
+sum 142 aaf8536380220297
+sum 143 6221a5d9df25de49
+sum 144 ce2b885ad2225fd3
+sum 145 954c087e2333a389
+sum 146 51d433d6381f56d4
+sum 147 321d8b38d7f4c57d
+sum 148 52d5e9efe3d0407f
+sum 149 56d0b3e1daf1d372
+end
+scene three seed=11 w=80 h=24 until=150.0 count=3 varied=1
+screen
+| 
+| 
+| 
+| 
+|   ##############################
+| 
+| 
+| 
+| 
+| 
+|     ##################################################
+| 
+| 
+| 
+| 
+| 
+| ####################          #########################
+| 
+| 
+| 
+| ######################################################################
+screen
+| 
+| 
+| 
+| 
+| 
+| 
+|           ########################################
+| 
+| 
+| 
+| 
+| 
+| 
+| ############################################################
+| 
+| 
+| 
+| 
+|                               ##############################
+ev 30.0 idle 1
+ev 60.0 idle 0
+ev 70.0 screen 1
+ev 85.0 cursor 20 12
+ev 88.0 cursor -
+ev 100.0 screen 0
+sum 0 6a823fc260bcb06d
+sum 1 8cdeeeb95943dd0d
+sum 2 8e5d60fe87a5c58a
+sum 3 9488ad3d7f4cbb84
+sum 4 22b80f3643522b52
+sum 5 f53319b9e4b750dc
+sum 6 23ad4f32ed6bc251
+sum 7 2aefbb0ba6b8c567
+sum 8 9fcfcbc0eacd7b0d
+sum 9 5d2950c94bab3425
+sum 10 c919830e8055a081
+sum 11 551d04ebdb0eea12
+sum 12 d3e5003be62ac9be
+sum 13 590c65dbb03d575a
+sum 14 e7e09e4bde5b262d
+sum 15 830cce2d16709dcf
+sum 16 e5ef765905ab6766
+sum 17 302b2d33251928d7
+sum 18 9cf8a2419a9a199f
+sum 19 e1f3a27d89126b94
+sum 20 55cb302b990dc44a
+sum 21 cb72d40147c28365
+sum 22 8d5a5344abce7ff6
+sum 23 8e768552c084ab13
+sum 24 4da1c6af1f5f095b
+sum 25 25794bc71bed382d
+sum 26 3fe22eab0bef8e54
+sum 27 659c5bb036b8bfc3
+sum 28 8ac6d5cd90550635
+sum 29 b6d142bb2d7bb2ee
+sum 30 d931760aa63da8d8
+sum 31 9cc9689a00e6c32d
+sum 32 032d4ccfc9199533
+sum 33 dbefd22fd7d3dbf7
+sum 34 41bd8b8fa2b1adfb
+sum 35 ea3676da86f205da
+sum 36 f1b5bde658208152
+sum 37 d539172ac76f897b
+sum 38 577ccc2c59963440
+sum 39 276a0c46776e4a7e
+sum 40 83f16c7c097f8239
+sum 41 41344d46806cb8cf
+sum 42 4ded03a677b2aa8f
+sum 43 27ddfbdc4f87d780
+sum 44 e1d167f745216db7
+sum 45 5c4c56ba8eca4cdc
+sum 46 7a41b3585fd3a7a7
+sum 47 f6d3179a1f5a3893
+sum 48 3ca55c3566bf2ab6
+sum 49 ea9c9f4b93e3c485
+sum 50 864418c83079a8a2
+sum 51 92872018e25dee05
+sum 52 63c1d8b3af249b08
+sum 53 074036efdeaa6a52
+sum 54 ff9b9ac0803f1b44
+sum 55 12e2e0ac58eb0898
+sum 56 4b2169fe68f16d09
+sum 57 39b3b866313f675b
+sum 58 0773d5caacf7a671
+sum 59 c12dc5ab6275ae0e
+sum 60 3e64166d8b81e47c
+sum 61 49781c2321e34fd0
+sum 62 d184f1f5a7fa0807
+sum 63 161478e5fefb269b
+sum 64 49e9fc56e27aee01
+sum 65 486a1d3db52c8207
+sum 66 add3c460434f5e15
+sum 67 c4d5fa3b8f8601dc
+sum 68 53cc7ff5cab6c716
+sum 69 544d8d9b2efbe20d
+sum 70 89826637156d7861
+sum 71 be0e037a41f3f968
+sum 72 6375cde55622301e
+sum 73 057946b91af3131a
+sum 74 42e6362626925a94
+sum 75 1093c4142ac1587c
+sum 76 e758a9285fcd0c16
+sum 77 993dc5f3bcdb0641
+sum 78 9f3377c510d702f0
+sum 79 b39e58fc94d61716
+sum 80 0b3fafa4e5193967
+sum 81 afb443aa428f2091
+sum 82 2f8c436c6817f0eb
+sum 83 74d2530c150ca896
+sum 84 e4c2224cf74ffd4b
+sum 85 0c44194c26d73af5
+sum 86 aacd558bb12b4236
+sum 87 25095acdd40eb02d
+sum 88 a6a185ccc4ab1497
+sum 89 945038aaacab044f
+sum 90 88c91b191c80853c
+sum 91 01673299c865646d
+sum 92 4c7b5ff92bbaab6d
+sum 93 2c84192e3dbed2da
+sum 94 6987c4a7717d262f
+sum 95 3681c1a17c5fd377
+sum 96 53fb61769283048f
+sum 97 f692127dd10436de
+sum 98 251d896bafc4f7eb
+sum 99 c576849f61e33239
+sum 100 1f15c712d2793ffb
+sum 101 f9ba564823aaf237
+sum 102 c4e05894668d2a00
+sum 103 0ac89f69296eeec4
+sum 104 2fe76c2383878ac1
+sum 105 87cc2fc4bdc0ac51
+sum 106 9934928d81041470
+sum 107 10425c4ecaafe45b
+sum 108 7a77e141d1ecf92c
+sum 109 998449062a7b17a5
+sum 110 086e524badc40133
+sum 111 a918053f8dc4b139
+sum 112 0a3ed7e5650ae012
+sum 113 4dae5e159cc361be
+sum 114 7d146ad9db63bdad
+sum 115 5b54a769f72b9f88
+sum 116 6375073eda4fe2af
+sum 117 3f5a68019400de0d
+sum 118 79277bbff2f35ad8
+sum 119 102c82748e2965f1
+sum 120 5b029a30cf184c29
+sum 121 f3da3314811b1d9a
+sum 122 fa5e2e1167fba3fe
+sum 123 6ff739381ee619d5
+sum 124 245cbddcdd5665a9
+sum 125 7c7c76260925cf14
+sum 126 7dce6ce4a5c3593c
+sum 127 43dd7b05b31141eb
+sum 128 7edf8fa82786ecdf
+sum 129 abef528bd523f92c
+sum 130 4135b387185095ea
+sum 131 2d8a95f9b652438c
+sum 132 ee6ff9b38f4bc733
+sum 133 c7f0c2ec1cff7197
+sum 134 98e2034f617798c5
+sum 135 7a6449cfb057d813
+sum 136 d4dbf130676c04fc
+sum 137 ca0f7d8a038c7f0c
+sum 138 3c9940f7d192d091
+sum 139 ad8303ebb5840103
+sum 140 3fe63f190a87f963
+sum 141 3db044cb76892c53
+sum 142 272bd2690c9925f4
+sum 143 f11d053c89ee0dbb
+sum 144 1c4f5e7277263b7f
+sum 145 c5b6d44f07695aba
+sum 146 d02cdc49a3f38e69
+sum 147 5118633124905b8a
+sum 148 308424de60ba14b8
+sum 149 67665115875f1232
+end
+scene food seed=3 w=80 h=24 until=200.0 count=2 food=1
+screen
+| 
+| 
+| 
+| 
+|   ##############################
+| 
+| 
+| 
+| 
+| 
+|     ##################################################
+| 
+| 
+| 
+| 
+| 
+| ####################          #########################
+| 
+| 
+| 
+| ######################################################################
+screen
+| 
+| 
+| 
+|   ## food ####
+| 
+| 
+| 
+| 
+| 
+|     ############################## fish ##########
+| 
+| 
+| 
+| 
+| 
+| #################### toy #########################
+| 
+| 
+| 
+| ######################################################################
+ev 60.0 screen 1
+ev 120.0 screen 0
+ev 150.0 idle 1
+sum 0 d3c5f7ce26f732d1
+sum 1 a938c7bf88ab290a
+sum 2 8dd73061b6f0dd1d
+sum 3 70afe6d91cf40a74
+sum 4 dca1ec512c2975a5
+sum 5 0e1dee5a2e591007
+sum 6 2762157ba9dccca0
+sum 7 309d4b4e3150302c
+sum 8 097f362a8f7030a9
+sum 9 25af38023f83d82d
+sum 10 fc5bd67526e6c814
+sum 11 fa2970522baef98d
+sum 12 45f044b416c7c636
+sum 13 bbbf7778664cae3a
+sum 14 b2c859a972bcbaa1
+sum 15 fd34071dd7b29b82
+sum 16 c70cd77754cd1610
+sum 17 716263d9411e03db
+sum 18 57d12dafd8f13f60
+sum 19 fe43ee362f241799
+sum 20 ac395c7d040339c7
+sum 21 d6a85aaf2fb51e12
+sum 22 e948c719b0630a36
+sum 23 4930896c4f364fa8
+sum 24 c2dbdb47b1c9ba2d
+sum 25 e70c0f1881ab7e82
+sum 26 c5bf993568674d8e
+sum 27 eaed5f579249f41c
+sum 28 f2ca323dd3a76b08
+sum 29 0b8c40926ff697e8
+sum 30 f828145235c542c5
+sum 31 8b97959ee3d7a936
+sum 32 3c0560e7ba96f2b6
+sum 33 1c8ba38acabd3a6e
+sum 34 fc48421f91b26130
+sum 35 3f579ce0aee0ad39
+sum 36 cf0dd6835b63fd2d
+sum 37 9ba9eb3f2debce28
+sum 38 380401b032a3e880
+sum 39 e5154448317055b0
+sum 40 e7781c637f7dcc41
+sum 41 9ebc158cf97de95e
+sum 42 cd2de1ede3fcaebd
+sum 43 851fecaf176794c9
+sum 44 bf86cd737ba5e018
+sum 45 1232c98599e2a3e8
+sum 46 8b0495c5ff7c363b
+sum 47 05f854cef00c2a57
+sum 48 d3ed303d5a4f3178
+sum 49 b4a152e32357d3e9
+sum 50 96e168f026fcf0ce
+sum 51 c2b1be9525d832d4
+sum 52 adbe791986739da3
+sum 53 66cfe9e61ee4617b
+sum 54 4e57ba2fe32fd2c5
+sum 55 031f96baf5d534d8
+sum 56 c3138df55f1ef94f
+sum 57 f4e9167e85676528
+sum 58 0fde4abfdd6e7f6b
+sum 59 29b1f8d0826816e8
+sum 60 7a6a93305a584b19
+sum 61 f0efe1a560dfcd97
+sum 62 9e4d3877ab89860e
+sum 63 4640184bb6b42b8b
+sum 64 b94ffe08ed8467bc
+sum 65 e1efd56724aba69a
+sum 66 3764aed8f7a99e6c
+sum 67 e6e06018b3817e72
+sum 68 8323412f2f43f7ee
+sum 69 ec51fceb353e3d2e
+sum 70 fd94bc3c6c39e6f8
+sum 71 a55e5843b8fafcf1
+sum 72 e26e8fe963fec6ca
+sum 73 10361de442bf4125
+sum 74 6571172f73cdd4b9
+sum 75 a4eadcad5cfd1432
+sum 76 d52e460f36de9d14
+sum 77 9d67bf819503373d
+sum 78 5b22aac68412ee18
+sum 79 164abfc67d0a4ba8
+sum 80 d939caf6bf40fe69
+sum 81 2ad7db81b6c22d00
+sum 82 d53a65e8cb70ef01
+sum 83 ec602a91e5b1f44a
+sum 84 aeb4db2ec1b81bd1
+sum 85 fb4a6cbac23964ba
+sum 86 d059cb712d6d615f
+sum 87 f3b3197d85fb96f4
+sum 88 5d2b14f0f2eb4fcd
+sum 89 600036cede1926f9
+sum 90 f131020b28c91f29
+sum 91 31afdbc9f092362d
+sum 92 8c41af034dbfdc13
+sum 93 c31c65185c169f67
+sum 94 e4aaf30363c9ed58
+sum 95 c802fe0e368c900a
+sum 96 d672dd8db5c799e5
+sum 97 33ccd694ab7d3b81
+sum 98 410753a96d4011ea
+sum 99 be1e6bb26d5de3fe
+sum 100 b9f1c0d383f51420
+sum 101 b69cd27c03746f62
+sum 102 7f4105782c888db8
+sum 103 185a16e2f82aaba3
+sum 104 68104b36e546e58a
+sum 105 d5dacde9ed3275dd
+sum 106 04440f106738e725
+sum 107 f12a861a1a58d1e6
+sum 108 5a115b08ccb7f483
+sum 109 cee20f5cc8a1ce27
+sum 110 65b738361e0c1887
+sum 111 49809cb25de2d234
+sum 112 a7cf2db68aaa5cb4
+sum 113 c518d59e20296cde
+sum 114 d6af429a910f4a20
+sum 115 56b31c36edb0a7a4
+sum 116 ef37cfcbe7129276
+sum 117 3102c62f18cb563f
+sum 118 da56e31f7b5ac5f9
+sum 119 518a24e4ccea3614
+sum 120 49823884afe68ca4
+sum 121 2e1e24062447e219
+sum 122 a5ddb2e75c5ea8fb
+sum 123 cf7c151720a01fd2
+sum 124 1a9926d8753bf7a6
+sum 125 9a01f76c988a570d
+sum 126 b3a447208287ca42
+sum 127 eb0a86838244d625
+sum 128 2f3c4c6cfc56c848
+sum 129 1e4738642e89288a
+sum 130 94ea4d4a4e681b3a
+sum 131 dc270fb7d25505be
+sum 132 146c3bb43f889275
+sum 133 ae73d2baf8ab4dae
+sum 134 6254f552fc7e2289
+sum 135 3851c16eb93af19c
+sum 136 67d31e4ccbcc138a
+sum 137 5bf0b36cdf8cd07a
+sum 138 eb80e5878dd0b872
+sum 139 b2a4c42cf25efdb5
+sum 140 7404a476edb2a62d
+sum 141 738fe97603dc11b3
+sum 142 bda0c04fc992801c
+sum 143 eb175e9ca757c908
+sum 144 bf8ce3ea3e47cea9
+sum 145 b3291a41928707ec
+sum 146 064a330d56fc0e8f
+sum 147 e079c3d0df61631c
+sum 148 b5da4b67db4bc099
+sum 149 06314f966a025035
+sum 150 03c7354ecac0688e
+sum 151 9434a660f1d639b8
+sum 152 4ef78a4f9318d159
+sum 153 a0b5db38db65f6b0
+sum 154 d9b292cd716490c9
+sum 155 749c1725a2dfdf12
+sum 156 46e2857db8a16e6d
+sum 157 bb4b2e9789d3521e
+sum 158 bf931dfa6e5c5aaf
+sum 159 e173d376ea2b007f
+sum 160 cc9b9fdaedeba296
+sum 161 c64a94f097fe6467
+sum 162 b21246f0ed3ba0e1
+sum 163 840cbcaded67091c
+sum 164 9b203ddbfdb5b7a9
+sum 165 f988676400e611e8
+sum 166 1783e4011251ca28
+sum 167 6565022b8663af14
+sum 168 7ca6cc7b8a10f321
+sum 169 81ae6f2317b901ce
+sum 170 5d6fc6a2a0dccb20
+sum 171 85ceb3ce4f0378ae
+sum 172 d3d3f5c111616e58
+sum 173 17ed76597e306a54
+sum 174 22f234de1c34dd25
+sum 175 a6d472116f535226
+sum 176 13b1b7faaa82a7b5
+sum 177 1b5837b0df00c107
+sum 178 0efdb6c690aadd9f
+sum 179 88520bf9a0cbf117
+sum 180 4b461101bb4483c9
+sum 181 99d23bee5fc40285
+sum 182 34a1a11683645294
+sum 183 f956d8684cae3280
+sum 184 b9d0bf9dd98e1934
+sum 185 52a1924a1aa80433
+sum 186 76113970f9fa6c4b
+sum 187 43682ebe0c5499bb
+sum 188 9adcc6180d438eb9
+sum 189 dafb8cde9a3818b8
+sum 190 b31c1642a6a15aeb
+sum 191 e08a43e1078544a9
+sum 192 b0391c00523b07e6
+sum 193 3eb5334ee396ee85
+sum 194 dcff52f8d90fb26a
+sum 195 299bbbf18d6fb5ac
+sum 196 28c3786a33ada84d
+sum 197 4c8d473152721944
+sum 198 bc8d58aa6538fd7b
+sum 199 6d1e25919b55663e
+end
+scene mice seed=5 w=80 h=24 until=200.0 count=2 mice=1
+screen
+| 
+| 
+| 
+| 
+|   ##############################
+| 
+| 
+| 
+| 
+| 
+|     ##################################################
+| 
+| 
+| 
+| 
+| 
+| ####################          #########################
+| 
+| 
+| 
+| ######################################################################
+screen
+| 
+| 
+| 
+| 
+| 
+| 
+|           ########################################
+| 
+| 
+| 
+| 
+| 
+| 
+| ############################################################
+| 
+| 
+| 
+| 
+|                               ##############################
+ev 90.0 screen 1
+ev 140.0 idle 1
+ev 170.0 idle 0
+sum 0 8aecbf4f2f74e317
+sum 1 64c614b422690542
+sum 2 429863bd898c16db
+sum 3 89ce7855ab501b09
+sum 4 f3a0bb2d66a51a81
+sum 5 fbdc37f9699041b6
+sum 6 44a74dba07aaafa9
+sum 7 8414b74e5ea85f7b
+sum 8 e71d441d0596e7f9
+sum 9 4c650ae64f05b157
+sum 10 680ab34ae9b49609
+sum 11 d677085fc31820a4
+sum 12 043a949b7b811a34
+sum 13 7d08c1e441544538
+sum 14 2292b2484ef76233
+sum 15 14e23af9156d27ad
+sum 16 40293cf8f00a4e37
+sum 17 12f2626f17931a39
+sum 18 683cee28edf1d19f
+sum 19 f3653b06000d4a73
+sum 20 0f4af95ed3d214ec
+sum 21 6d2d0214ec76eee1
+sum 22 2be09da7bd7b5eb5
+sum 23 4b4b7e70a7e1a8b0
+sum 24 6aac9aafa9f5ca6d
+sum 25 04da629a4d28efc7
+sum 26 207a9891435dfb3c
+sum 27 b8f6d2ea504464fd
+sum 28 4946a3c7c398d3fd
+sum 29 1ea436aee541e850
+sum 30 c1897ce818502339
+sum 31 b29fb89a6318f8cc
+sum 32 6b3b37b5ddbf6a0e
+sum 33 7287afeb585534db
+sum 34 5986088f355f4722
+sum 35 051979cd2b86ac09
+sum 36 570089db3e438f8e
+sum 37 23c066c9da227295
+sum 38 afa30a071a61d526
+sum 39 21b1e3a1b3ccb4f3
+sum 40 4eaf2a24b0df0147
+sum 41 15698c339ae85530
+sum 42 8c68de5c2fd5de17
+sum 43 edcc756d4a10d9a9
+sum 44 9879ba95981da4c6
+sum 45 192a22b86e9ba09e
+sum 46 c6b8c6a885e375ef
+sum 47 054af9fe06a84c7f
+sum 48 9a8f5af2e06374e8
+sum 49 e1aeeb31e70680ef
+sum 50 1ee91a736e512286
+sum 51 1521c8a5db8d9c59
+sum 52 f1ee550e5270df95
+sum 53 84dcb7e4586250b2
+sum 54 034b4cb28fb933c7
+sum 55 aaf3be82c3081202
+sum 56 4e524ad82cb52cdf
+sum 57 46a4337df7682c95
+sum 58 7393dfad7ecb4cff
+sum 59 d7f3b527cf67c65e
+sum 60 b30b52715ccaef7a
+sum 61 98d0bb736c648b47
+sum 62 b90bfee6971afa99
+sum 63 d10b447d2a89cb8a
+sum 64 60f51c667d9d8480
+sum 65 16572310eae42026
+sum 66 06ba2874e56946d8
+sum 67 a35d82ef31b8adb9
+sum 68 64f26a6040c3781a
+sum 69 062a441b12c57bd2
+sum 70 13f52d9c58871d81
+sum 71 2b958320e7d80eb3
+sum 72 dc3e380deb88e180
+sum 73 a5d008c83a48afe2
+sum 74 8cac54bb140ce210
+sum 75 a2ba0db1fda8d513
+sum 76 8ff6d6ef05d50f54
+sum 77 af02e002b05a9e71
+sum 78 797893e9f33da8f7
+sum 79 ca90a74fef885782
+sum 80 57904107cae9405d
+sum 81 1dc823706cdb42f2
+sum 82 56daffbe7f794710
+sum 83 e1c10886b55e0cde
+sum 84 4edba9b1aa9713e2
+sum 85 9f0eea5e0a92b502
+sum 86 ef55e7a9b9b11b66
+sum 87 9e51d55c78586b00
+sum 88 efcf628689f52e2d
+sum 89 83709e4e40c466c9
+sum 90 052f1555678681da
+sum 91 f96f1ea697ef70af
+sum 92 87e44a33b3e9f1ca
+sum 93 5598caff162645a3
+sum 94 1572bbd1b8551859
+sum 95 5dc896df54712775
+sum 96 6612e79ac0218623
+sum 97 0b712e15bf046a62
+sum 98 c29007e49b52d27d
+sum 99 6a2614cf9791449c
+sum 100 51a0dabafd815560
+sum 101 4ad24a989f0f0ebb
+sum 102 916f7b5687c04155
+sum 103 1aaa6adcd5a164bc
+sum 104 914fca849f1707f5
+sum 105 36b8301301f683a3
+sum 106 e7af62f54f3e138b
+sum 107 f720f525157f7432
+sum 108 3d6c0f87af2d837a
+sum 109 2ecc445b77e46410
+sum 110 2e7eb88dd5d5d7d7
+sum 111 49d571232c97a5d2
+sum 112 6586221faa55aa36
+sum 113 4f0b0584f924435b
+sum 114 631b172a5f8d6c23
+sum 115 04bab4ad689f5978
+sum 116 6922205768dd72ce
+sum 117 61547da59d9a11dd
+sum 118 6d14b2922f31a4de
+sum 119 5d599dff96558ec8
+sum 120 8bcb07612900e60d
+sum 121 27850caeaecc4e28
+sum 122 38343004c24ca23e
+sum 123 2aaeacd250291be9
+sum 124 02e6e9f9d5036c01
+sum 125 c325a4c38d98b2ce
+sum 126 89c34776e1951191
+sum 127 35ed9d7f2fb8f0e6
+sum 128 e985bbb5c17a5fa2
+sum 129 ec7c807f71dcf19f
+sum 130 3b630bc75de891e8
+sum 131 64ef810fbfe988c7
+sum 132 0c693379347bcf1f
+sum 133 619cd68f17b0fcb3
+sum 134 139eac350c67371b
+sum 135 cd23892a4c9e08fc
+sum 136 ac45ca7b6db89b1a
+sum 137 b99580790d28c2db
+sum 138 6ef8a583f86216d1
+sum 139 17d391ce6f77baa9
+sum 140 d8746b7bf7fac242
+sum 141 13a26e324430ac19
+sum 142 717afda31a6749ca
+sum 143 fd0aa3d7ec7052c0
+sum 144 ec8b5cc62bff5749
+sum 145 f051f7f7b9ea43ee
+sum 146 24b64511a7b8110c
+sum 147 fc41da95e296d72a
+sum 148 633090a78f1f9816
+sum 149 a1c56f8bff3852d5
+sum 150 3d4fc67e77e539de
+sum 151 66c06dfd578db04c
+sum 152 baa39e0a5bd0e71a
+sum 153 3c88635eb3e0b130
+sum 154 95922a656e9509ef
+sum 155 b0a83c9b0da9c046
+sum 156 aa7403bc855a7d57
+sum 157 010606d4ad1001da
+sum 158 1da3388b9fdb9aad
+sum 159 d7f9f54fad7f5438
+sum 160 b553eacf142b04e8
+sum 161 795f1045e4c229d4
+sum 162 1fb4d76e7bb42dd5
+sum 163 6b3c17feb8614f47
+sum 164 b453e4cc35ea4c2e
+sum 165 7200422a92cdf437
+sum 166 7cf5a1b19bd61770
+sum 167 2687f12e46fe4e47
+sum 168 e4b2707168362711
+sum 169 db1cb5496d53c48f
+sum 170 217386d5e8a1af88
+sum 171 51d44c8e5c652fd0
+sum 172 00e5a42e82ba4cce
+sum 173 fbb11d2cd15ef351
+sum 174 2434fd56e85b6cc4
+sum 175 5a3f6e2d80bdebcc
+sum 176 22bc5b6dfa07d723
+sum 177 8d97fb1a926f6849
+sum 178 c9b9b862de1f03ce
+sum 179 1f0ee11be862b829
+sum 180 34598c8f01c9a005
+sum 181 844ea4a3ab295614
+sum 182 c49e4fcdada93eb9
+sum 183 51708a2529087b9c
+sum 184 a747af1f6e2b1cec
+sum 185 0b637f0f793bcf3a
+sum 186 a3b51652a49e4327
+sum 187 d248344c1f875cc1
+sum 188 537a4483c1f9136b
+sum 189 ab2ad62d6b2911a0
+sum 190 cc214ac84567bee1
+sum 191 32892ea05b201ec0
+sum 192 1cbdcce5fef0cf29
+sum 193 0a4917cf397d42d8
+sum 194 f02cf3047ee34c06
+sum 195 96714d2403f9b4c0
+sum 196 959d2e0ec3ddc2c5
+sum 197 a9c59783d63e95e1
+sum 198 e11788aa6480f8c9
+sum 199 092d4afe368f19ac
+end
+scene fish seed=9 w=80 h=24 until=200.0 count=3 fish=1
+screen
+| 
+| 
+| 
+| 
+|   ##############################
+| 
+| 
+| 
+| 
+| 
+|     ##################################################
+| 
+| 
+| 
+| 
+| 
+| ####################          #########################
+| 
+| 
+| 
+| ######################################################################
+screen
+| 
+| 
+| 
+|   ## food ####
+| 
+| 
+| 
+| 
+| 
+|     ############################## fish ##########
+| 
+| 
+| 
+| 
+| 
+| #################### toy #########################
+| 
+| 
+| 
+| ######################################################################
+ev 100.0 screen 1
+ev 160.0 screen 0
+sum 0 9887ac0195bd5099
+sum 1 071c33fa9844962f
+sum 2 971c204c1559ef0c
+sum 3 104a833b297ce7d8
+sum 4 73bc84ffb5ae6464
+sum 5 5a961ea99ad4b418
+sum 6 5605b65315886b0f
+sum 7 dbe643968355732d
+sum 8 86de0249339d4398
+sum 9 42db6e833826ec5a
+sum 10 a2af14cac72a583a
+sum 11 db9751d35a19e805
+sum 12 d8af83a960e41aa2
+sum 13 3d1d80f6e19027ec
+sum 14 1b74f9600366bce7
+sum 15 a4902906293fa19f
+sum 16 71d34f69261e9eca
+sum 17 495288edc04bfa6d
+sum 18 4b86c1769461a53c
+sum 19 0ff0015fc1844434
+sum 20 4e73925b3bed8839
+sum 21 8b1f18a3b66be88a
+sum 22 ec02817366476f92
+sum 23 5d6092409bd1ba50
+sum 24 7efa89f2fea80006
+sum 25 f988e56f8954e9d7
+sum 26 a6d06912494fe024
+sum 27 99132dafbd476737
+sum 28 be70a428968db8ea
+sum 29 ac0abe58b17d9cb2
+sum 30 cc9c350535c3c156
+sum 31 90aedf92e7e6536d
+sum 32 a549a81e6e98ba35
+sum 33 c054d0c9e2272b35
+sum 34 a0b2a6da8058527e
+sum 35 9e7e63d1cd36e5f3
+sum 36 92f6ee3655d69a1f
+sum 37 ec6a73b09b49025b
+sum 38 6b0c02b549bde7f1
+sum 39 004e3af14db4de38
+sum 40 cd89cbc3740c7b72
+sum 41 27386cd896705502
+sum 42 b317ffbf153b23a8
+sum 43 87ef6eee0707ee17
+sum 44 5dadba3f7d72d85e
+sum 45 ee6806a29367ab67
+sum 46 946fa2a3c35ce331
+sum 47 0df851363cc1c767
+sum 48 b19d722ca10c4815
+sum 49 a33f202516a49d3e
+sum 50 8a555a49f47a9720
+sum 51 e866ee2ed78a01a5
+sum 52 b5308e97b24777d9
+sum 53 63807c080c9b4944
+sum 54 c6625c5375290706
+sum 55 c95ce195f8fa6bb7
+sum 56 f7eb572c23716c07
+sum 57 379373a7b16b5499
+sum 58 ea93138f642852e0
+sum 59 659f45a9f9f0c178
+sum 60 42ffe0fe4940640e
+sum 61 23b8f36c91a131f9
+sum 62 ec53c87ff7298716
+sum 63 d2591c1f2e9ea848
+sum 64 8fb985ef270e1f5a
+sum 65 7488203af7631625
+sum 66 45e4c89c7996cb77
+sum 67 132de3c499dd0ccd
+sum 68 02d58cf31509c005
+sum 69 a76381c176fecff7
+sum 70 56626a9c85b2fa77
+sum 71 7abe5446978a7399
+sum 72 62115625273b8f42
+sum 73 6941f8c140d5ef47
+sum 74 ff4b255c182539ac
+sum 75 31c417eda4618a00
+sum 76 04c9301d3db5cc02
+sum 77 6d436cce9427dff6
+sum 78 e6c00790fa035cc1
+sum 79 0d187387a01912a2
+sum 80 c259ef6cd5a3c260
+sum 81 9a72cd70b3b5a8ec
+sum 82 8869309a4ddc4413
+sum 83 e61196fee02ce57d
+sum 84 ebd075ce00aa2032
+sum 85 13d9c2fa82d1de03
+sum 86 526099282bf02bcd
+sum 87 e5cfb867aadb800b
+sum 88 4b8c2e9189ca4b57
+sum 89 a1409dd3f46d25ce
+sum 90 f72eee472c98580b
+sum 91 2f95b06a99ca9198
+sum 92 a056a11f06d252dc
+sum 93 5385920a35e8e064
+sum 94 71570a530995c08a
+sum 95 eb36e8f0532377ce
+sum 96 79e07ad3787733ac
+sum 97 00abd39d0f070c6d
+sum 98 3956cdf4d669bfb2
+sum 99 b1ffec18f26deab8
+sum 100 08e6dcf443be952d
+sum 101 99f389f017a70f49
+sum 102 2daee1cf4d8c2c4a
+sum 103 e24e35dfd022aa31
+sum 104 fe59eb2d2e56bac3
+sum 105 22646ea6f2bff720
+sum 106 8b47b8b85f04dd37
+sum 107 cf964b0d12dd9aa4
+sum 108 bc222e2dcf85b92f
+sum 109 1d82e4b183498c19
+sum 110 cbedc8c51b683446
+sum 111 b1b254d393cceaf1
+sum 112 81cd52ff173c9d8b
+sum 113 53d44d928dd4587b
+sum 114 e09d17e5048520e0
+sum 115 1512d0bc63e8c45a
+sum 116 295c27f693ccc3ce
+sum 117 938b0a9e232bdbf3
+sum 118 156136ee5dade79c
+sum 119 a2e5cee8c21b4fce
+sum 120 c7ad99345a2539ce
+sum 121 052c1a4e6899b7cb
+sum 122 d86fecd795f99206
+sum 123 e137bd2e2149b61a
+sum 124 a9d536885f9244fc
+sum 125 f85b3d30ebcfa332
+sum 126 2e7ac88165429da9
+sum 127 db11a6d012e05da7
+sum 128 40d98b7b13cc291a
+sum 129 b29f228e50f215dc
+sum 130 588c49e652837ba9
+sum 131 d66ab03c99f15a3d
+sum 132 6b885027a46d3ca3
+sum 133 65eef53c6390cd11
+sum 134 0b2aae5fd8c695ae
+sum 135 4c7ad571ba35be2c
+sum 136 af656a4026b7dcd9
+sum 137 9499e42886a34ca4
+sum 138 da08dcbda7bb107f
+sum 139 c41ce2c3d5767a6c
+sum 140 3d5a75e5aeab382d
+sum 141 859f736c3f5b0af6
+sum 142 0ec627eddedc5beb
+sum 143 1043732e9fe30d74
+sum 144 d641b950d4ca0688
+sum 145 4332f4e6131163ed
+sum 146 aae7b4027f94dc5b
+sum 147 7abd8d0ac58e1f94
+sum 148 ec684e24aa327f73
+sum 149 736dc950e5da61a4
+sum 150 df300b80d3c581f9
+sum 151 f7b932663c91eea1
+sum 152 53289d10120d1af1
+sum 153 83fb27265e945425
+sum 154 2490962be1ead453
+sum 155 30e8c91c94b60558
+sum 156 1b2914fa9d2094c5
+sum 157 3e5693ccd916351b
+sum 158 2750ea85e88147f8
+sum 159 2fb304d3bf209077
+sum 160 a3bfc991c2da82c2
+sum 161 ce705c65a95ab98d
+sum 162 e760f52af07c9e41
+sum 163 d6b89104ae04a2d1
+sum 164 2f41931ab23de115
+sum 165 3bb140542330b0ca
+sum 166 b1937609e854332b
+sum 167 4dbdca1a401d2334
+sum 168 e6d92a4ba7ba5aff
+sum 169 30fb37fce9f81eaa
+sum 170 23d11a14fcf5673a
+sum 171 72c2d1a74e3fb746
+sum 172 9c01019329ec3b03
+sum 173 ad7cb6afaf0de1b0
+sum 174 02f7cfb8c386aedc
+sum 175 4420a9adb3e40a11
+sum 176 7c7c333690b79c98
+sum 177 a111fa9d63b4cdd8
+sum 178 b70ae0e853556434
+sum 179 dac69b44193ac5fe
+sum 180 484ac46ca247531c
+sum 181 707bedd28db470e3
+sum 182 be2d366bc21e3144
+sum 183 1f5fe8aa0566e7eb
+sum 184 d3ef17fa9c848923
+sum 185 18e50fe76fe7e862
+sum 186 4f8618a15899f9ae
+sum 187 7183dd6f4c6d3aa0
+sum 188 b81b2b08dbbff0b8
+sum 189 8851251beb43665b
+sum 190 926f022c142a99cc
+sum 191 2a5e50893ddec9f6
+sum 192 5f0f82dccda7469a
+sum 193 c7379391fea23628
+sum 194 2dc1a0f824289f64
+sum 195 d082afeb124038d0
+sum 196 2bce843ee75452bb
+sum 197 5e13fbf92ce187b7
+sum 198 6140b9edba5a2675
+sum 199 2fabebbe918153a7
+end
+scene toys seed=13 w=80 h=24 until=200.0 count=2 toys=1
+screen
+| 
+| 
+| 
+| 
+|   ##############################
+| 
+| 
+| 
+| 
+| 
+|     ##################################################
+| 
+| 
+| 
+| 
+| 
+| ####################          #########################
+| 
+| 
+| 
+| ######################################################################
+screen
+| 
+| 
+| 
+|   ## food ####
+| 
+| 
+| 
+| 
+| 
+|     ############################## fish ##########
+| 
+| 
+| 
+| 
+| 
+| #################### toy #########################
+| 
+| 
+| 
+| ######################################################################
+ev 100.0 screen 1
+ev 160.0 screen 0
+sum 0 f2d06060ed34575b
+sum 1 57f95fe742be2534
+sum 2 85c15bf766c7291c
+sum 3 da4c2c18a1645259
+sum 4 2d12600088eaf139
+sum 5 20cd1a397ab326f7
+sum 6 af845093136534e8
+sum 7 d27079e46cfd365c
+sum 8 e55352aa437a7e97
+sum 9 86091e47daad3f5b
+sum 10 ab304ffba38a8355
+sum 11 c4ad1a734ad32500
+sum 12 78c249185e206619
+sum 13 6d71e6c6744853a8
+sum 14 153fd77f354cfb84
+sum 15 bbaa7b218ec42db6
+sum 16 531ef3fae423c8f5
+sum 17 5cec0adcd1059e60
+sum 18 b2f6231f19c9b6e7
+sum 19 db71c7003b10b3bb
+sum 20 62a3dd74d5e31c03
+sum 21 a56b42c0323a6b75
+sum 22 03e0e18ae9ef65dc
+sum 23 fc546f34d6f5779d
+sum 24 f78ab5eab8a2a13a
+sum 25 6301b4577e891fc6
+sum 26 c3d75236ded8f59c
+sum 27 fa0de6c5e6991af8
+sum 28 9902f9e75bc83b10
+sum 29 ca79a0b58dbabfd9
+sum 30 eb5139544f29c06c
+sum 31 1f45a1d1f9a456ff
+sum 32 cc38ef7bf15f2bd4
+sum 33 b2578540304cba36
+sum 34 3feb91f5ec8d3915
+sum 35 6dab68064d409c34
+sum 36 86b1b846a1659230
+sum 37 b796e0f81775df01
+sum 38 22bce69522688802
+sum 39 a74f716a59ed3bfb
+sum 40 5cb49a0565553489
+sum 41 13ec272c2394c9bd
+sum 42 55cb179899e71fdc
+sum 43 4e72fef537246d55
+sum 44 03be743beca39d9a
+sum 45 9f463574f88b7678
+sum 46 41f75cb7ca965765
+sum 47 5a821e498ef0dac5
+sum 48 f169f94bdfa89985
+sum 49 6b0332273803dc53
+sum 50 11d75865717dd21f
+sum 51 9496e75891ffd853
+sum 52 2154cf876d1b7e93
+sum 53 7d779dd0970bdc1e
+sum 54 cfc987848168cc0a
+sum 55 3724359a24827775
+sum 56 27cd4b4c796c1d40
+sum 57 b7d6a5385f85b967
+sum 58 1309edb404f3dc2f
+sum 59 181dcf985a45789a
+sum 60 7bac82cccb2028e2
+sum 61 543e91efbab57172
+sum 62 24f22150e5128c7a
+sum 63 0c59be450a6d113f
+sum 64 4b5fd535cb06e891
+sum 65 ac09758b86e1ef10
+sum 66 36d8d6b6803b50f6
+sum 67 9d73f6a629764cb3
+sum 68 83d950328385c8fb
+sum 69 14800ddd48ca8947
+sum 70 b8d6817b51cd66de
+sum 71 ec0cb5baacf689ab
+sum 72 6f9efc7ed2a2bc60
+sum 73 b326574410e5e835
+sum 74 9fd98df949a0b08d
+sum 75 4da1122cadc7abd6
+sum 76 d757cbe612b94433
+sum 77 612496aa07201749
+sum 78 f0341584c669a695
+sum 79 548c3a6eb2948e20
+sum 80 9ef5b7ed8ac85f1c
+sum 81 b26cf73b9c3f2d75
+sum 82 99ab0691d285eb6c
+sum 83 7a66674bb43e93d0
+sum 84 8d07943d7b8d26d8
+sum 85 fc9a65bbed258117
+sum 86 c4f5d6b0159a19e7
+sum 87 8ba372553699ce0d
+sum 88 be1c502fc3f61721
+sum 89 a535fbb3ce641fe0
+sum 90 2b9439746cd7d228
+sum 91 2f7a3f9d0c5ec2f2
+sum 92 1e42f907c1e7aafd
+sum 93 5959e776b2469707
+sum 94 bf8b300012da076f
+sum 95 dd7ef555e1f8e693
+sum 96 5ead03c94a5436fe
+sum 97 d4126c2730870217
+sum 98 87e4e460afce1199
+sum 99 3f484f5a78aa69d2
+sum 100 aa48a847b7281adb
+sum 101 6f1f93749c6da0ac
+sum 102 cfad17e3b899ea2e
+sum 103 ddae1f740183d944
+sum 104 242b1604cd0de7be
+sum 105 21325ab2c7cb4c56
+sum 106 fd5871b4a6714c06
+sum 107 045077f864ac10e6
+sum 108 1a85d3429fbc7684
+sum 109 a85e07a692fe506b
+sum 110 4549574562935231
+sum 111 a984327e9e703693
+sum 112 b7b2d441673910d9
+sum 113 0a434bdf0c02a8fe
+sum 114 c194e2ec2313caaa
+sum 115 dcad7199b5533fb7
+sum 116 c0d981c1bfb65bbf
+sum 117 b59d4c7d570ffc40
+sum 118 65635c4303e0edff
+sum 119 b72b7e8b91149144
+sum 120 7f3af583a243361d
+sum 121 048a9cc96aeb6b02
+sum 122 919aff0328c9ad7a
+sum 123 ff1b91a1c9c56d30
+sum 124 a24c97cd0d474477
+sum 125 de533ccba0785141
+sum 126 7f4e929382624ece
+sum 127 9296a952812aced2
+sum 128 4a6ad0f639026d7b
+sum 129 dcdbd34126e11278
+sum 130 753d71953a8d33fb
+sum 131 ebf220339bdb2c15
+sum 132 106a5988842a9e88
+sum 133 54da47a726dedb85
+sum 134 6350df01bf51b805
+sum 135 5466e245993f162b
+sum 136 1789a7271687ec48
+sum 137 44c184cba1011b30
+sum 138 e4699bde3d19b60b
+sum 139 0e63b2a72fe1e599
+sum 140 76475d577e1314da
+sum 141 3491b4465b866e79
+sum 142 cebc02799e5b07bc
+sum 143 fcd590d7ed339008
+sum 144 e376055ffc914f21
+sum 145 a75ed87256b6551d
+sum 146 7099bca83f6549bc
+sum 147 99059c8bdad5c2e2
+sum 148 6f827b75d7d1a519
+sum 149 a722e76228d3e441
+sum 150 b5dc9327600396c2
+sum 151 519e492e63717ef2
+sum 152 703f387578b8e193
+sum 153 0062605a9ab393d1
+sum 154 afb8b35a1a26565d
+sum 155 a4d98684a1bfac11
+sum 156 f1b313921e7a10e1
+sum 157 ffc3c1c1c7d9e73d
+sum 158 92a16a51027a2d23
+sum 159 12dccac4aef171d4
+sum 160 8f7bdea8ac27f2cb
+sum 161 3131d6d32a63d0e5
+sum 162 59ff8173d8719aee
+sum 163 f85030522ab9294c
+sum 164 b572c781642ebc5a
+sum 165 37a258cce0c5b5cb
+sum 166 8a6ef54586f5f434
+sum 167 98110ce0b847968b
+sum 168 2ad2b93590389e9f
+sum 169 91cd529d0aca41ef
+sum 170 4e3f8a8a0256b23a
+sum 171 b5354f35898d7ac6
+sum 172 a222a23a137aaf94
+sum 173 e0809639b8e612bd
+sum 174 85c8f8d669ddb287
+sum 175 b9330de8fd563e6d
+sum 176 c8b63c1e36467b34
+sum 177 621faa39d8c5aac5
+sum 178 a4db5e062d1747e2
+sum 179 7b92a1cd04ba01d5
+sum 180 9d6ed77b5089e62f
+sum 181 2ac2498c4a992ab8
+sum 182 eee26abc3de89ac3
+sum 183 2e2a0d86b247a6ed
+sum 184 aa23fb3e35ab7e77
+sum 185 1c7c33c276e87000
+sum 186 98b4818a9a797b07
+sum 187 9ad8f71e2dd72e1d
+sum 188 560b5ce278263ea7
+sum 189 917888b7e39d9b6e
+sum 190 2a0032d727960dd0
+sum 191 9c68f1e314f64283
+sum 192 2154a6635996f009
+sum 193 4380df2b0b9fafe3
+sum 194 0847ce1091d53dcc
+sum 195 b991d14a115b121c
+sum 196 d89e65144aa1bdcf
+sum 197 81451a78f2d2ce1d
+sum 198 230450d1b70103e3
+sum 199 98b77ba72fea6c6c
+end
+scene hunt seed=17 w=80 h=24 until=120.0 count=2 hunt=1
+screen
+| 
+| 
+| 
+| 
+|   ##############################
+| 
+| 
+| 
+| 
+| 
+|     ##################################################
+| 
+| 
+| 
+| 
+| 
+| ####################          #########################
+| 
+| 
+| 
+| ######################################################################
+ev 5.0 hover 30 8
+ev 6.0 hover 33 8
+ev 7.0 hover 36 9
+ev 12.0 hover 20 14
+ev 20.0 hover 22 14
+ev 30.0 hover -
+ev 40.0 hover 50 2
+ev 41.0 hover 45 6
+ev 60.0 hover 10 18
+ev 90.0 hover -
+sum 0 7cf90de75ac41111
+sum 1 bd78e68d5c5ea555
+sum 2 37557d081a6b3df6
+sum 3 9b0ac68aeb041204
+sum 4 3ed6261b5535a126
+sum 5 88465308ac6a2ea9
+sum 6 cff3507bd4df6fa4
+sum 7 158575a4116aa1ec
+sum 8 5402417d71861566
+sum 9 2d2cba9b37cd4322
+sum 10 1ca9d0dbd9617210
+sum 11 dad4607d914af1fd
+sum 12 844c3b52bf58db13
+sum 13 a12b6400b4084fe4
+sum 14 16e153320ba457ef
+sum 15 75a2c41e3e9745bc
+sum 16 27e5b9d75b31d500
+sum 17 b06627b10ff66240
+sum 18 d9b9dbaf844eee1f
+sum 19 101af78ddc822a5c
+sum 20 b8b744f2e2841ab7
+sum 21 400289e0d0e43444
+sum 22 f0e5c4aeab9a1529
+sum 23 2c4d9ab1461a2d04
+sum 24 459ac2b2355dd714
+sum 25 f24b843569698926
+sum 26 bf2d7420cb9a526a
+sum 27 69c2cbebdbfcc2c8
+sum 28 7c15e9cfc09b9c86
+sum 29 139674e3935273b5
+sum 30 7e0c6c6da839dc38
+sum 31 d7dc04eccf7497ac
+sum 32 5933118678d62872
+sum 33 5ec55b30f214bfa5
+sum 34 d5ed2a1fbce5b5e6
+sum 35 958f232a9a431173
+sum 36 33e9a28fa2df6657
+sum 37 7afbe7690e653898
+sum 38 fa49258a8c8f682c
+sum 39 85504442fd553032
+sum 40 100fa02587e4baf4
+sum 41 fa274e7a543bc951
+sum 42 8d90cd08d7a45685
+sum 43 9738bd5890ede883
+sum 44 551fa0b38944e0e4
+sum 45 e154cf98050892d8
+sum 46 8995f5527f971463
+sum 47 3af3b265878f1cf7
+sum 48 ce38fac91b459a80
+sum 49 714aa0ba9a3a98e1
+sum 50 5019c43bdc507459
+sum 51 14c9b51c26620acf
+sum 52 7431c8f9b0b715c6
+sum 53 25505ed5ae0cafbe
+sum 54 5a6c02cf5a70e3db
+sum 55 6dc94e2c9666ca21
+sum 56 28334f90e446b55f
+sum 57 9caf8f5ec284cd78
+sum 58 573f2217841c4cc3
+sum 59 493493ba6667bb2b
+sum 60 b6e3d3c4381803bb
+sum 61 a2020eee4cb8f043
+sum 62 642daeb8626fcd19
+sum 63 b015002018ab8016
+sum 64 71313e181d029060
+sum 65 ebc47938d0b7e76c
+sum 66 36e715c17fb14476
+sum 67 dbc1fd23e1ba1995
+sum 68 1f0fb4bc9c3ba01b
+sum 69 ae0bb4fdf0044647
+sum 70 f6fe5b2f07966d9a
+sum 71 66aafb1920198e3b
+sum 72 3bfad8504050d9d8
+sum 73 b91a2ed333cbd4b5
+sum 74 c9597d964ee7782f
+sum 75 809fb260227babaf
+sum 76 0e22d8411a73fa1b
+sum 77 f6a8e18e83c4f917
+sum 78 1cb2b4114e2906b7
+sum 79 679ebc2528fdb50b
+sum 80 8b46020caea52b4c
+sum 81 ac62478a55cae8a8
+sum 82 4e7ea412825853de
+sum 83 5e140d98e9d7c690
+sum 84 d24bee6f4f4641bd
+sum 85 68c52bd08d617a45
+sum 86 c9a838045b429d69
+sum 87 dbd6bd352225f7c8
+sum 88 b3db60aafc372b27
+sum 89 5fed82e85fc9ce8c
+sum 90 59f3d2619409f245
+sum 91 e334e9694cc1260b
+sum 92 23cdd3520cfac596
+sum 93 2a24ed72772bdfd8
+sum 94 247c2b8b71f6d9e6
+sum 95 2f621a0cc13ccc1d
+sum 96 8d6861c5d8ef2d25
+sum 97 cb2ad267f7184343
+sum 98 798058698646664d
+sum 99 36fe6185298c4641
+sum 100 b60c261d9857356e
+sum 101 c9abd7f543f3e2da
+sum 102 d81b3f8699dd7624
+sum 103 45574fccba346d2d
+sum 104 b52996baa899399d
+sum 105 284af485a401e6e5
+sum 106 2dece2fb5627119e
+sum 107 86bc53680bbdf867
+sum 108 f13cad2df34a1e56
+sum 109 91f12ad2c9710bb0
+sum 110 16f3556f9e415b3b
+sum 111 7e7c3108fd51a8a1
+sum 112 0b3281c07366b550
+sum 113 0c293d3722debd64
+sum 114 665654889c1e49c8
+sum 115 414c6b1a37668730
+sum 116 f266eb974a35f8b0
+sum 117 fc06f238777403f4
+sum 118 b5924eb2f74d1b5c
+sum 119 b1beccd467f8d51c
+end
+scene all seed=21 w=80 h=24 until=240.0 count=2 fish=1 food=1 hunt=1 mice=1 toys=1 varied=1
+screen
+| 
+| 
+| 
+| 
+|   ##############################
+| 
+| 
+| 
+| 
+| 
+|     ##################################################
+| 
+| 
+| 
+| 
+| 
+| ####################          #########################
+| 
+| 
+| 
+| ######################################################################
+screen
+| 
+| 
+| 
+|   ## food ####
+| 
+| 
+| 
+| 
+| 
+|     ############################## fish ##########
+| 
+| 
+| 
+| 
+| 
+| #################### toy #########################
+| 
+| 
+| 
+| ######################################################################
+ev 30.0 hover 30 8
+ev 31.0 hover 35 9
+ev 50.0 hover -
+ev 80.0 screen 1
+ev 120.0 idle 1
+ev 150.0 idle 0
+ev 200.0 screen 0
+sum 0 266c62469c4f4334
+sum 1 1f313b07dbf40d34
+sum 2 4ef203567fff24e6
+sum 3 56bea50d4c483e26
+sum 4 49ec2ee147f287a6
+sum 5 7b537d5284a22f09
+sum 6 d2d90e4c50339129
+sum 7 bbc3c51050dfcd2d
+sum 8 06039c5c49c9cdd8
+sum 9 193fe213af690f36
+sum 10 7f603829e61791d8
+sum 11 855a1c402d2f27e7
+sum 12 4d8ac0669a52e48c
+sum 13 a6b3c217a89c7fc1
+sum 14 e6d202169e6dd595
+sum 15 0e401a8effa92326
+sum 16 8e5e095268a7bd4a
+sum 17 0d69e49f9dc2f755
+sum 18 757e845d10619d18
+sum 19 6ffbf0b55d0dda76
+sum 20 b4fe7c4718780740
+sum 21 94c0c9b947ebccd2
+sum 22 85f7d4b9b1450369
+sum 23 2614930a22791e8f
+sum 24 00cfeb41b86dd88d
+sum 25 3b0abe171cc928af
+sum 26 7e19fdb659d25c61
+sum 27 dd8c0ad6c30b3a12
+sum 28 526864b9a279fe05
+sum 29 5ed37df4565034f4
+sum 30 0f1c86e381fd1885
+sum 31 8c44900afb8a9bed
+sum 32 8b42da06a054d84f
+sum 33 ef50c79676cdac6b
+sum 34 f14843708c1413e4
+sum 35 f9f6541030cfeac0
+sum 36 857d512bc5e6b052
+sum 37 4af82253c12b8132
+sum 38 df520cfaeea10f13
+sum 39 76e77b34f635a5ca
+sum 40 08b1b1d29a3a989d
+sum 41 f86c45304d55ff84
+sum 42 469a0e04e3ca5338
+sum 43 63f2abfe48d54c93
+sum 44 3d3e2b76e2a2d75b
+sum 45 eb30db51df171e5b
+sum 46 1825c10627f6ba86
+sum 47 ad0fc810fc8c5a31
+sum 48 7c79eda8aa359741
+sum 49 3f3097e32ff6eb4c
+sum 50 cbd6c79eed068d0c
+sum 51 b87b4d22c3f43d26
+sum 52 353280ed48174a2e
+sum 53 cecc98ee2b7fcf04
+sum 54 abe71779eeee1be1
+sum 55 e31c3cdd03d1ff72
+sum 56 c0846c7e04a3b22b
+sum 57 cf656ab0332ddbdc
+sum 58 84ca2caf6f5db7ca
+sum 59 36d88f70f81ce651
+sum 60 6c66260fa4350749
+sum 61 d9399883a4b70375
+sum 62 6eb1cd66becd5a6d
+sum 63 f49a1efd8b222db3
+sum 64 f0783f4170628d83
+sum 65 da3ce3a6ac36f9ba
+sum 66 c06eae9f7563b70a
+sum 67 adfcca97574c4583
+sum 68 42206939d45cf98e
+sum 69 c2bbf11488bfc0c9
+sum 70 d04c17dcedb2ba92
+sum 71 083f25888cfaa4fb
+sum 72 cb911f60b0ce9f64
+sum 73 725dedde6cb0875a
+sum 74 55113150aafba726
+sum 75 4febdb1c8dd18794
+sum 76 7edff222d68836e2
+sum 77 7c57c972ba13e465
+sum 78 4f122c984e6dacd5
+sum 79 2a900cfcad323026
+sum 80 70f4858ddfe4416e
+sum 81 cede4c769cba11f1
+sum 82 81f00e825c052bb1
+sum 83 8deddf52be334c71
+sum 84 7d9e292d9521d56a
+sum 85 289cb6ce63ed355d
+sum 86 fee6c5b76f067adf
+sum 87 43c2a196518c74c6
+sum 88 dc9667cea51cf18e
+sum 89 c04f431e431fa0f0
+sum 90 606819e979fbbc26
+sum 91 7e7be83d669c7ff7
+sum 92 25fb2df37c0a54a1
+sum 93 fa6f3b661bed2ed8
+sum 94 39a3e7cba969f37e
+sum 95 85da1f02b7002065
+sum 96 d17f81c4006d847b
+sum 97 2ac592ded29fd3be
+sum 98 12aac0d1e81836bc
+sum 99 1da7d2d4bed9e542
+sum 100 362184ac37534a4d
+sum 101 74f0c0e3e684da75
+sum 102 872d5cbeee3507bc
+sum 103 cc4467c8914c5639
+sum 104 4c66e78f1ee5d9b2
+sum 105 c04e532aa230220b
+sum 106 fb1896f13fe37154
+sum 107 2f6850a12095f42f
+sum 108 fde6300b2a03b026
+sum 109 208a587638c2cf00
+sum 110 dc868e409690503c
+sum 111 bf411cfba1527a49
+sum 112 d00e92075780ae97
+sum 113 f947f8b59900b9c8
+sum 114 ccae0fe54350bb1f
+sum 115 3009ce67984e33ff
+sum 116 941e61fad803fb73
+sum 117 6e64e0204dfa830e
+sum 118 bcb4554bdd864a24
+sum 119 398d53dcd0a9cec1
+sum 120 45aaf71bba630c2d
+sum 121 e44e057ab9ba4706
+sum 122 32271f86f26f558a
+sum 123 a5a00d7dddb0748b
+sum 124 d1d25d48ff612844
+sum 125 81e0411ab6c7fd43
+sum 126 e4f3a104a40ef43b
+sum 127 6329c078e747dd65
+sum 128 34d4aa1b6d0d58a1
+sum 129 dfb86b74aca428f2
+sum 130 7b9e879afbc70e55
+sum 131 c0f7efda5b4b94f1
+sum 132 1120f1c2a8359907
+sum 133 26bd95fd72b486c9
+sum 134 f9656d22a23926df
+sum 135 1dab70e62432db47
+sum 136 7c9b837a5348e08b
+sum 137 63842ef4a91aa6c0
+sum 138 aa674f4a896085dc
+sum 139 fc8657636f3c4cb9
+sum 140 d21a164850a68544
+sum 141 5cae9dd6c8adf6b2
+sum 142 922c7218daae6cb5
+sum 143 ef2bd3aa30827b3f
+sum 144 f30d362b097d5d39
+sum 145 d8bfdb4d5ff09bd3
+sum 146 ca3dc63c332be69c
+sum 147 66513f55d639b7bf
+sum 148 8e68e170df8ced0c
+sum 149 a1a4f1c4626af715
+sum 150 a95ac085a1475ae4
+sum 151 ca64199c7aff39b5
+sum 152 06346cf73479399a
+sum 153 ca2c6c7f7b9f46f3
+sum 154 baa15547023a8073
+sum 155 7e352c962c05f333
+sum 156 a1c5cb72ef7a1d16
+sum 157 d6bf2cdb7f263cb7
+sum 158 46fcb59e47b4919e
+sum 159 7e1089dcf045360d
+sum 160 e6b0166dea647d97
+sum 161 aafcd30261ca6fb2
+sum 162 8fe6f854c4b92cc5
+sum 163 8089ad0552eee602
+sum 164 bd9373954ac11bc4
+sum 165 ac7b3d3d1715d982
+sum 166 781d7117706d3b0c
+sum 167 c3ac1392c1992c4f
+sum 168 91a3c606684736dc
+sum 169 db5247e83c355b19
+sum 170 721d25882e699ba0
+sum 171 a1371eec663a16b2
+sum 172 b96cbaaaae6f0aef
+sum 173 0f656a61d9f8015e
+sum 174 5978ac62aab2d4e9
+sum 175 307436df4a39e3f9
+sum 176 8355787881b1ee41
+sum 177 469a3225dc5255cf
+sum 178 ee740d4a40487edc
+sum 179 3d9a91f73f797b5c
+sum 180 c878ceeb4f5ca8e5
+sum 181 61d47bb926eb631f
+sum 182 4de0aa11a738b174
+sum 183 1b94e3bec7c875e5
+sum 184 08b0d01d2489c2a7
+sum 185 d1a4b65bd984f169
+sum 186 30352d6ee53bd074
+sum 187 5a6c04839d2c97a3
+sum 188 31d7528090f06b90
+sum 189 c807a8a448385f71
+sum 190 a3e724e844195dac
+sum 191 36722ebcda6c967b
+sum 192 6018ec18668e7494
+sum 193 33b982e50e01d8c2
+sum 194 6e5caa0ebe6433f2
+sum 195 975855c463570db5
+sum 196 41fa0fa7e9bebd8d
+sum 197 d7092da32fc86831
+sum 198 182b124627f456e1
+sum 199 a5408cbd5df72321
+sum 200 ce5b6d53aeedee0a
+sum 201 96eca716d01134a0
+sum 202 46e9ce0fedf3ee21
+sum 203 069af83e55c91faa
+sum 204 371d905c4cdbe3d5
+sum 205 e94929fd14802b64
+sum 206 5567b45be25543ac
+sum 207 68df874c7b6907d9
+sum 208 d69e5da8c63d037b
+sum 209 a6156f1eb7bf230c
+sum 210 85dd31e23eda3e9a
+sum 211 0b9cb6a67a59f1bc
+sum 212 a3d42067b58c9d06
+sum 213 83a1278765549d85
+sum 214 3695fac6a5b60e30
+sum 215 686ccd139a1d5de3
+sum 216 7d9582dfacf5feed
+sum 217 8365b2738a5377d2
+sum 218 46eaa33e280e30ed
+sum 219 00f3a887dead61fd
+sum 220 36429faf055b972b
+sum 221 6993d567c7186f9d
+sum 222 2dd6c592d86e21aa
+sum 223 4ce0c6ab40551d04
+sum 224 544f0f576159df76
+sum 225 e8ee293c5b6c4bd2
+sum 226 6912d688609e190b
+sum 227 38843c13e7c4943a
+sum 228 e084e97ea3106dd9
+sum 229 f162c4e3e30d1f59
+sum 230 9c5dff16f31549f1
+sum 231 764342fb07d1186a
+sum 232 cb01d7d75bcdfd34
+sum 233 accef07e4503c552
+sum 234 5efcdb1329f461c7
+sum 235 93331a3c2d9614ea
+sum 236 31942a80bf4c6cbb
+sum 237 e893405c71460fd6
+sum 238 efef87f0efe77143
+sum 239 4fb679c9f1ce60da
+end

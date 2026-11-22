@@ -43,6 +43,15 @@ The protocol: `sdk/template/PROTOCOL.md`. The script API:
   `plan/sessions/22112026-01-migration/files-minimap/twin.py`).
   Headless remembers the view alone: the growth of the map is a live
   run's (`files-minimap/live.txt`).
+- `cat`: Rust; a pure world drawn through a trait (`world::Stage`),
+  sprites by handle in `batch`es (a `draw.put` there gets its id from
+  the results), `draw.list` for what is seen and covered; `Sight` with
+  `words`, in frame cells (`words` is more than `layout`: the view's
+  box from the frame's `origin`); `idle` with `snapshot`; `hover` on a
+  mat of its own, applied at the next tick; the period from what is
+  next due. The twin step for step (`src/world.txt`, made by
+  `plan/sessions/22112026-01-migration/cat-2/twin.py`); its soaks pure
+  and headless (`tests/soak`).
 - `pace`: every key on its way to the program (`keys-read`: `input`
   `{bytes}`; `--key` headless); the row of the cursor read at each
   `text`, `cursor` event (a case: `--screen T:FILE` after the keys, the

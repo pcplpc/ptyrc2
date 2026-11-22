@@ -1,0 +1,45 @@
+--- 1000 ms
+
+
+
+
+  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+
+
+
+
+    yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+
+
+
+
+
+zzzzzzzzzzzzzzzzzzzz          wwwwwwwwwwwwwwwwwwwwwwwww
+                             /\_/\
+                            ( O.O )
+                            _> ^ <
+vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+--- 3000 ms
+
+
+
+
+  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+
+
+
+
+    yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+
+
+
+
+
+zzzzzzzzzzzzzzzzzzzz          wwwwwwwwwwwwwwwwwwwwwwwww
+                             /\_/\
+                            ( o.o )
+                            ~> ^ <
+vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+lowered at 0 ms: frame.get, to the degree words

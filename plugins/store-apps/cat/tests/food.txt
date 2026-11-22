@@ -1,0 +1,64 @@
+--- 2000 ms
+
+
+      \oOo/
+  some food here and more text\
+                          (O.O)--=-~
+                          ''     ``
+
+
+     <///><
+    a fish swims by in the long line of the text ok
+
+
+                              /\_/\
+                             ( O.O )
+    ⢮⡷                       _> ^ <
+the toy box                   wwwwwwwwwwwwwwwwwwwwwwwww
+
+
+
+vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+--- 10000 ms
+
+             /\_/\_.~
+      \.o./( -.- )__)
+  some food here and more text
+
+
+
+
+
+    a fish swims by in the long line of the text ok
+
+
+
+
+    ⢮⡷
+the toy box                   wwwwwwwwwwwwwwwwwwwwwwwww
+
+                                                 ~._/\_/\
+                                                 (__( o.o )<+++><
+vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+--- 30000 ms
+                 z
+             /\_/\__
+           ( -.- )__)
+  some food here and more text
+
+
+
+
+
+    a fish swims by in the long line of the text ok
+
+
+     /\_/\
+    ( -.- )
+     > ^ <~
+the toy box                   wwwwwwwwwwwwwwwwwwwwwwwww
+
+
+
+vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+lowered at 0 ms: frame.get, to the degree words

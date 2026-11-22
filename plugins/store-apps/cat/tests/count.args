@@ -1,0 +1,2 @@
+# test_cat_count: three cats, a coat each; --count out of 1..12, refused by the manifest (count13).
+--size 80x24 --for 8s --at 8s --screen tests/ledges.screen --count 3

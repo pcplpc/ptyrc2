@@ -1,0 +1,119 @@
+ptyrc: building ptyrc/cat with rustc 1.96.0
+1 cat: running
+
+
+
+
+
+
+
+
+$ ptyrc -s h manage ls (status 0)
+ID  KIND   STATE    SINCE      PID  NAME  ARGS
+ 1  child  running     2s  1540752  cat   --manifest {"frame":1,"granted":["shape","words","pointer"],"id":"cat","limits":{},"permissions":[{"name":"pointer"},{"name":"shape"},{"name":"words","words":["food","fish","toy"]}],"version":"0.1.0"} /home/peon/git/perso/ptyrc/ptyrc2/temp/live-cat/cache/ptyrc/shipped/cat/tree/app.wasm {"all":false,"count":2,"fish":false,"food":false,"hunt":true,"mice":false,"random":false,"toys":false}
+$ ptyrc -s h shot --ansi --sprites --no-cursor (status 0)
+                                                                                
+      \oOo/                                                                     
+  some food here and more text                                                  
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+    yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy                          
+                                                                                
+                                                                                
+        /\_/\                /\_/\                                              
+      \( O.O )              ( -.- )                                             
+    ⢮⡷  > ^ <~              ~> ^ <                                              
+the toy box                   wwwwwwwwwwwwwwwwwwwwwwwww                         
+                                                                                
+                                                                                
+                                                                                
+vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+$ ptyrc -s h shot --ansi --sprites --no-cursor (status 0)
+                                                                                
+      \oOo/                                                                     
+  some food here and more text                                                  
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+    yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy                          
+                                                                                
+                                                                                
+                                                                                
+                          __/\_/\                                               
+⠐⠦⣄⡠⢶⠤⣀⠔⠢⢄⡠⡄             (__( -.- )                                             
+the toy box⡇                  wwwwwwwwwwwwwwwwwwwwwwwww                         
+          /\_/\ ?                                                               
+         ( O.o )                                                                
+     ⢾⡵⠔⠢⣄>⠓^⣀<~                                                                
+vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+$ ptyrc -s h shot --ansi --sprites --no-cursor (status 0)
+                                                                                
+      \oOo/                                                                     
+  some food here and more text                                                  
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+    yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy                          
+                                                                                
+                                                                                
+                           Z                                                    
+                         ___/\_/\                                               
+                        (___( -.- )                                             
+the toy box                   wwwwwwwwwwwwwwwwwwwwwwwww                         
+              /\_/\                                                             
+             ( O.O )                                                            
+             _> ^ <                                                             
+vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+$ ptyrc -s h text (status 0)
+
+
+  some food here and more text
+
+
+
+
+
+    yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+
+
+
+
+
+the toy box                   wwwwwwwwwwwwwwwwwwwwwwwww
+
+
+
+vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+$ ptyrc -s h manage log 1 (status 0)
+ptyrc-box: profile: landlock ABI 9 (the kernel's: 10): files, renames across directories (refer), truncate, TCP bind and connect, ioctl on devices, abstract unix sockets, signals; every thread
+ptyrc-box: profile: seccomp, every thread: 41 calls allowed, 31 kill the process, the rest EPERM
+ptyrc-box: init done
+$ ptyrc -s h manage stop 1 (status 0)
+1 cat: exited 0
+$ ptyrc -s h shot --ansi --sprites --no-cursor (status 0)
+                                                                                
+                                                                                
+  some food here and more text                                                  
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+    yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy                          
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+the toy box                   wwwwwwwwwwwwwwwwwwwwwwwww                         
+                                                                                
+                                                                                
+                                                                                
+vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv

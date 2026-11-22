@@ -1,0 +1,2 @@
+# test_cat_food: a plate by each `food`, a fish by `fish`, a ball by `toy`; the cats eat.
+--size 80x24 --for 30s --at 2s,10s,30s --screen tests/words.screen --count 2

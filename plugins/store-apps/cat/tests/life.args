@@ -1,0 +1,2 @@
+# test_cat_life: it drops in, walks, sits; the pane idle: a yawn, sleep; busy again: awake.
+--size 80x24 --for 40s --at 2s,10s,20s,26s,40s --screen tests/ledges.screen --event 18s:idle:{"frame":0,"idle":true,"score":1,"free":1} --event 25s:idle:{"frame":0,"idle":false,"score":0,"free":1}

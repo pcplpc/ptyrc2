@@ -1,0 +1,2 @@
+# test_cat_fish_and_toys_served, test_cat_play_options: a fish, a ball of yarn.
+--size 80x24 --for 40s --at 15s,25s,40s --screen tests/ledges.screen --fish --toys --count 2

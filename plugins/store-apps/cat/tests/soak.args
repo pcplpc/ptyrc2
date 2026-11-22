@@ -1,0 +1,2 @@
+# test_cat_soak (headless, plan (c)): -a, four cats, ten minutes; screens, idle, the pointer change; nothing left over at the end.
+--size 80x24 --for 600s --at 300s,600s --screen tests/words.screen --screen 200s:tests/ledges.screen --screen 400s:tests/words.screen --screen 550s:tests/ledges.screen -a --count 4 --pointer 5s:30,8 --pointer 100s:35,9 --pointer 101s:37,9 --pointer 250s:10,15 --event 300s:idle:{"frame":0,"idle":true,"score":1,"free":1} --event 350s:idle:{"frame":0,"idle":false,"score":0,"free":1}

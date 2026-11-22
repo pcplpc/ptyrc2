@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "cat"
+version = "0.1.0"
+summary = "Cats on the text; they sleep when nothing moves."
+license = "GPL-3.0-or-later"
+api = 1
+rust = "src/lib.rs"
+rustc = "1.88"
+surface = "frame"
+frame = "largest"
+
+[permissions]
+shape = "where the text is, to stand on it"
+words = { list = ["food", "fish", "toy"], why = "the words that get a plate, a fish, a ball of yarn" }
+pointer = { why = "the cats hunt the pointer (--hunt)" }
+
+[options]
+count = { type = "int", min = 1, max = 12, doc = "cats [default: 1; 2 with -a]" }
+random = { type = "bool", short = "r", doc = "coats and features drawn" }
+food = { type = "bool", doc = "a plate now and then" }
+mice = { type = "bool", doc = "a mouse now and then" }
+fish = { type = "bool", doc = "a fish now and then" }
+toys = { type = "bool", doc = "a ball of yarn now and then" }
+hunt = { type = "bool", needs = ["pointer"], doc = "the cats hunt the host mouse" }
+all = { type = "bool", short = "a", needs = ["pointer"], doc = "all of these, two cats" }

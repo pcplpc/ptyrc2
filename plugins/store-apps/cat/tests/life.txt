@@ -1,0 +1,111 @@
+--- 2000 ms
+
+
+
+
+  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+
+
+
+
+    yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+
+
+
+
+
+zzzzzzzzzzzzzzzzzzzz          wwwwwwwwwwwwwwwwwwwwwwwww
+                             /\_/\
+                            ( o.o )
+                            ~> ^ <
+vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+--- 10000 ms
+
+
+
+
+  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+
+                                                  /\_/\
+                                                 ( O.O )
+                                                  > ^ <_
+    yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+
+
+
+
+
+zzzzzzzzzzzzzzzzzzzz          wwwwwwwwwwwwwwwwwwwwwwwww
+
+
+
+vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+--- 20000 ms
+
+
+
+
+  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+
+
+                                                   /\_/\__
+                                                 ( -.- )__)
+    yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+
+
+
+
+
+zzzzzzzzzzzzzzzzzzzz          wwwwwwwwwwwwwwwwwwwwwwwww
+
+
+
+vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+--- 26000 ms
+
+
+
+
+  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+
+                                                  /\_/\
+                                                 ( o.o )
+                                                  > ^ <~
+    yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+
+
+
+
+
+zzzzzzzzzzzzzzzzzzzz          wwwwwwwwwwwwwwwwwwwwwwwww
+
+
+
+vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+--- 40000 ms
+
+
+
+
+  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+
+
+
+
+    yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+
+
+
+
+
+zzzzzzzzzzzzzzzzzzzz          wwwwwwwwwwwwwwwwwwwwwwwww
+                                    /\_/\
+                                   ( o.o )
+                                   ~> ^ <
+vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+lowered at 0 ms: frame.get, to the degree words

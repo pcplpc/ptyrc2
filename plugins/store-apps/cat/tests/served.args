@@ -1,0 +1,2 @@
+# test_cat_served_and_mice: a plate of --food, a mouse of --mice.
+--size 80x24 --for 40s --at 12s,25s,40s --screen tests/ledges.screen --food --mice

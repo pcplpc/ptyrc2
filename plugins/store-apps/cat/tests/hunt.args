@@ -1,0 +1,2 @@
+# test_cat_pointer, test_cat_hunts_the_host_mouse: the cat after the host pointer.
+--size 80x24 --for 12s --at 4s,8s,12s --screen tests/ledges.screen --hunt --pointer 3s:30,8 --pointer 3500ms:34,8 --pointer 4s:38,9 --pointer 7s:20,14

@@ -1,0 +1,23 @@
+--- 8000 ms
+
+                    /\_/\
+                   ( o.o )
+                    > ^ <~
+  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+
+                              /\_/\
+                             ( o.o )
+                             ~> ^ <
+    yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+
+
+                                                       /\_/\
+                                                      ( o.o )
+                                                      _> ^ <
+zzzzzzzzzzzzzzzzzzzz          wwwwwwwwwwwwwwwwwwwwwwwww
+
+
+
+vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+lowered at 0 ms: frame.get, to the degree words
