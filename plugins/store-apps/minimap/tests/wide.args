@@ -1,0 +1,2 @@
+# --width 20: a wider column, the text two columns a dot.
+--size 80x12 --for 1500ms --at 1500ms --screen tests/page.screen --width 20

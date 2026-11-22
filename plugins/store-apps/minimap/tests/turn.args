@@ -1,0 +1,4 @@
+# test_live: the pages turned: the map read again after each burst, the
+# lines edited in heat (-H), fading over --fade 6 s; the cursor's line
+# kept on the prompt.
+--size 80x12 --for 9s --at 1500ms,2600ms,5s,9s --styles --screen tests/page.screen --screen 2s:tests/page2.screen --screen 2500ms:tests/page3.screen -H -c --fade 6

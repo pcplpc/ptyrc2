@@ -1,0 +1,4 @@
+# test_hover: the pointer on the map: the line there told beside it, in
+# front; on the border: taken away; on the next row (the prompt), then off the widget.
+--size 80x16 --for 3s --at 1500ms,1800ms,2100ms,2400ms --screen tests/hover.screen
+--pointer 1400:68,8 --pointer 1700:68,7 --pointer 2000:68,9 --pointer 2300:2,14

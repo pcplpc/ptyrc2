@@ -1,0 +1,3 @@
+# --window 0: refused in init.
+--size 40x8 --for 1s
+--window 0

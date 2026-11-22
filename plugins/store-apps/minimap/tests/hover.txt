@@ -1,0 +1,56 @@
+--- 1500 ms
+$ printf 'alpha %s\n' one two three
+alpha one
+alpha two
+alpha three
+$
+
+
+                                                                 ╭────────────╮
+                            $ printf 'alpha %s\n' one two three  │⣿⡏⠉⠉⠁       │
+                                                                 │⠁           │
+                                                                 │            │
+                                                                 │            │
+                                                                 ╰──────── 16 ╯
+--- 1800 ms
+$ printf 'alpha %s\n' one two three
+alpha one
+alpha two
+alpha three
+$
+
+
+                                                                 ╭────────────╮
+                                                                 │⣿⡏⠉⠉⠁       │
+                                                                 │⠁           │
+                                                                 │            │
+                                                                 │            │
+                                                                 ╰──────── 16 ╯
+--- 2100 ms
+$ printf 'alpha %s\n' one two three
+alpha one
+alpha two
+alpha three
+$
+
+
+                                                                 ╭────────────╮
+                                                                 │⣿⡏⠉⠉⠁       │
+                                                              $  │⠁           │
+                                                                 │            │
+                                                                 │            │
+                                                                 ╰──────── 16 ╯
+--- 2400 ms
+$ printf 'alpha %s\n' one two three
+alpha one
+alpha two
+alpha three
+$
+
+
+                                                                 ╭────────────╮
+                                                                 │⣿⡏⠉⠉⠁       │
+                                                                 │⠁           │
+                                                                 │            │
+                                                                 │            │
+                                                                 ╰──────── 16 ╯

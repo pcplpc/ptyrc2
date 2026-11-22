@@ -1,0 +1,3 @@
+# test_face_notes: comments in green (-n), code grey; a line of code
+# among comments is code; the view band over all.
+--size 80x12 --for 1500ms --at 1500ms --styles --screen tests/code.screen -n --width 6

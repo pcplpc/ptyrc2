@@ -1,0 +1,25 @@
+--- 6000 ms
+$ echo hourglass widget
+
+
+
+
+
+
+
+
+                                    ╭──────────────────────────╮
+                                    │88 k/min            18 wpm│
+                                    │1 widget                 1│
+                                    │2 echo                   1│
+                                    │                          │
+                                    │                          │
+                                    │                          │
+                                    │                          │
+                                    │                          │
+                                    │                          │
+                                    │                          │
+                                    │                          │
+                                    ╰──────────────────── pace ╯
+storage: words.4 = "{\"words\":{\"echo\":[1,946684802.05]}}"
+storage: words.5 = "{\"words\":{\"widget\":[1,946684802.45]}}"

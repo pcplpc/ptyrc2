@@ -1,0 +1,3 @@
+# test_print 40x6 -w --top 3: the board of three words.
+--size 40x8 --for 2s --storage tests/stored
+-w --top 3 -g

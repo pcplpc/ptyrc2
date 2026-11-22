@@ -1,0 +1,2 @@
+# test_print: --mark ( refused in init: no regular expression (exit 2).
+--size 40x8 --for 1s --mark (

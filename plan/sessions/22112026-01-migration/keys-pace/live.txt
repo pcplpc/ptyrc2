@@ -1,0 +1,121 @@
+$ ptyrc -s h app ptyrc/pace -a (status 0)
+1 pace: running
+$ ptyrc -s h shot --sprites --no-cursor (status 0)
+<svg xmlns="http://www.w3.org/2000/svg" width="756.0" height="432.0" viewBox="0 0 756.0 432.0" font-family="DejaVu Sans Mono, Menlo, Consolas, Liberation Mono, monospace" font-size="14">
+<rect width="100%" height="100%" fill="#000000"/>
+<text x="0.0" y="13.5" textLength="512.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">$ echo hourglass widget hourglass 9f86d081884cdeadbeef widget</text>
+<text x="0.0" y="31.5" textLength="453.6" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">hourglass widget hourglass 9f86d081884cdeadbeef widget</text>
+<text x="0.0" y="49.5" textLength="100.8" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">$ stty -echo</text>
+<text x="0.0" y="67.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">$</text>
+<text x="0.0" y="85.5" textLength="243.6" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">sh: hunter: command not found</text>
+<text x="0.0" y="103.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">$</text>
+<text x="235.2" y="103.5" textLength="285.6" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">╭────────────────────────────────╮</text>
+<text x="0.0" y="121.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">$</text>
+<text x="235.2" y="121.5" textLength="67.2" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│0 k/min</text>
+<text x="310.8" y="121.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#ffff00" xml:space="preserve">▲</text>
+<text x="327.6" y="121.5" textLength="25.2" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">380</text>
+<text x="470.4" y="121.5" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">0 wpm│</text>
+<text x="235.2" y="139.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="504.0" y="139.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00d7d7" xml:space="preserve">⢸</text>
+<text x="512.4" y="139.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="157.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="243.6" y="157.5" textLength="268.8" lengthAdjust="spacingAndGlyphs" fill="#00afaf" xml:space="preserve">⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣸</text>
+<text x="512.4" y="157.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="175.5" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│1</text>
+<text x="260.4" y="175.5" textLength="33.6" lengthAdjust="spacingAndGlyphs" fill="#ffd700" font-weight="bold" xml:space="preserve">echo</text>
+<text x="344.4" y="175.5" textLength="151.2" lengthAdjust="spacingAndGlyphs" fill="#ffd700" xml:space="preserve">██████████████████</text>
+<text x="504.0" y="175.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">2</text>
+<text x="512.4" y="175.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="193.5" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│2</text>
+<text x="260.4" y="193.5" textLength="235.2" lengthAdjust="spacingAndGlyphs" fill="#ffaf00" xml:space="preserve">widget    ██████████████████</text>
+<text x="504.0" y="193.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">2</text>
+<text x="512.4" y="193.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="211.5" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│3</text>
+<text x="260.4" y="211.5" textLength="235.2" lengthAdjust="spacingAndGlyphs" fill="#ff8700" xml:space="preserve">hourglass ██████████████████</text>
+<text x="504.0" y="211.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">2</text>
+<text x="512.4" y="211.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="229.5" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│4</text>
+<text x="260.4" y="229.5" textLength="159.6" lengthAdjust="spacingAndGlyphs" fill="#ff875f" xml:space="preserve">stty      █████████</text>
+<text x="504.0" y="229.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">1</text>
+<text x="512.4" y="229.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="247.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="512.4" y="247.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="265.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="512.4" y="265.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="283.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="512.4" y="283.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="301.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="512.4" y="301.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="319.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="512.4" y="319.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="337.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="512.4" y="337.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="355.5" textLength="226.8" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">╰──────────────────────────</text>
+<text x="470.4" y="355.5" textLength="33.6" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">pace</text>
+<text x="512.4" y="355.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">╯</text>
+</svg>
+$ ptyrc -s h manage stop 1 (status 0)
+1 pace: exited 0
+$ ptyrc -s h manage ls (status 0)
+ID  KIND   STATE     SINCE      PID  NAME  ARGS
+ 1  child  exited 0     1s  1475507  pace  --manifest {"frame":0,"granted":["shape","text","keys-read","clock","storage"],"id":"pace","limits":{},"permissions":[{"name":"clock"},{"name":"files"},{"name":"keys-read"},{"name":"shape"},{"name":"storage"},{"name":"text"}],"version":"0.1.0"} --assets /home/peon/git/perso/ptyrc/ptyrc2/plugins/store-apps/pace/words --script /home/peon/git/perso/ptyrc/ptyrc2/plugins/store-apps/pace/app.js {"all":true,"bars":false,"best":false,"colour":false,"graph":false,"min":4,"stop":null,"top":10,"window":15.0,"words":false}
+storage file: state/ptyrc/storage/ptyrc%2Fpace/words.4 {"words":{"echo":[2,1795316959.814]}}
+storage file: state/ptyrc/storage/ptyrc%2Fpace/words.13 {"words":{"hourglass":[2,1795316955.623]}}
+storage file: state/ptyrc/storage/ptyrc%2Fpace/words.5 {"words":{"widget":[2,1795316958.625]}}
+storage file: state/ptyrc/storage/ptyrc%2Fpace/words.1 {"words":{"stty":[1,1795316959.164]}}
+$ ptyrc -s h app ptyrc/pace -a (status 0)
+2 pace: running
+$ ptyrc -s h shot --sprites --no-cursor (status 0)
+<svg xmlns="http://www.w3.org/2000/svg" width="756.0" height="432.0" viewBox="0 0 756.0 432.0" font-family="DejaVu Sans Mono, Menlo, Consolas, Liberation Mono, monospace" font-size="14">
+<rect width="100%" height="100%" fill="#000000"/>
+<text x="0.0" y="13.5" textLength="159.6" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">$ echo again widget</text>
+<text x="0.0" y="31.5" textLength="100.8" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">again widget</text>
+<text x="0.0" y="49.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">$</text>
+<text x="235.2" y="103.5" textLength="285.6" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">╭────────────────────────────────╮</text>
+<text x="235.2" y="121.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="243.6" y="121.5" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#ffff00" font-weight="bold" xml:space="preserve">72</text>
+<text x="268.8" y="121.5" textLength="42.0" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">k/min</text>
+<text x="319.2" y="121.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#ffff00" xml:space="preserve">▲</text>
+<text x="336.0" y="121.5" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">72</text>
+<text x="462.0" y="121.5" textLength="58.8" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">14 wpm│</text>
+<text x="235.2" y="139.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="504.0" y="139.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00d7d7" xml:space="preserve">⢸</text>
+<text x="512.4" y="139.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="157.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="243.6" y="157.5" textLength="268.8" lengthAdjust="spacingAndGlyphs" fill="#00afaf" xml:space="preserve">⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣸</text>
+<text x="512.4" y="157.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="175.5" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│1</text>
+<text x="260.4" y="175.5" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#ffd700" font-weight="bold" xml:space="preserve">widget</text>
+<text x="344.4" y="175.5" textLength="151.2" lengthAdjust="spacingAndGlyphs" fill="#ffd700" xml:space="preserve">██████████████████</text>
+<text x="504.0" y="175.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">3</text>
+<text x="512.4" y="175.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="193.5" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│2</text>
+<text x="260.4" y="193.5" textLength="235.2" lengthAdjust="spacingAndGlyphs" fill="#ffaf00" xml:space="preserve">echo      ██████████████████</text>
+<text x="504.0" y="193.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">3</text>
+<text x="512.4" y="193.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="211.5" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│3</text>
+<text x="260.4" y="211.5" textLength="184.8" lengthAdjust="spacingAndGlyphs" fill="#ff8700" xml:space="preserve">hourglass ████████████</text>
+<text x="504.0" y="211.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">2</text>
+<text x="512.4" y="211.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="229.5" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│4</text>
+<text x="260.4" y="229.5" textLength="134.4" lengthAdjust="spacingAndGlyphs" fill="#ff875f" xml:space="preserve">stty      ██████</text>
+<text x="504.0" y="229.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">1</text>
+<text x="512.4" y="229.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="247.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="512.4" y="247.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="265.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="512.4" y="265.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="283.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="512.4" y="283.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="301.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="512.4" y="301.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="319.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="512.4" y="319.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="337.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="512.4" y="337.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="235.2" y="355.5" textLength="226.8" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">╰──────────────────────────</text>
+<text x="470.4" y="355.5" textLength="33.6" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">pace</text>
+<text x="512.4" y="355.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">╯</text>
+</svg>
+$ ptyrc -s h manage stop 1 (status 0)
+1 pace: exited 0

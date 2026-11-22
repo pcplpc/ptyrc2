@@ -1,0 +1,104 @@
+--- 1500 ms
+line 1 word
+line 2 word word
+line 3 word word word                                            ╭────────────╮
+line 4 word word word word                                       │⣿⣷⣤⡀        │
+line 5 word word word word word                                  │⣿⣿⣿⣿⣦⣄      │
+line 6 word word word word word word                             │⡿⠦⠄         │
+line 7 word word word word word word word                        │            │
+line 8 word word word word word word word word                   ╰──────── 12 ╯
+line 9
+line 10 word
+line 11 word word
+:
+--- 1500 ms, styles
+
+
+                                                                 aaaaaaaaaaaaaa
+                                                                 abbbbbbbbbbbba
+                                                                 abbbbbbbbbbbba
+                                                                 acccccccccccca
+                                                                 adddddddddddda
+                                                                 aaaaaaaaaa  aa
+a: dim
+b: fg=255 bg=237
+c: fg=255 bg=60
+d: fg=242
+--- 2600 ms
+line 13 word word word word
+line 14 word word word word word
+line 15 word word word word word word                            ╭────────────╮
+line 16 word word word word word word word                       │⣿⣿⣿⣷⣤⡀      │
+line 17 word word word word word word word word                  │⣿⣍⡉⠉⠉⠉      │
+line 18                                                          │⡿⠿⠿⠦        │
+line 19 word                                                     │            │
+line 20 word word                                                ╰──────── 12 ╯
+line 21 word word word
+line 22 word word word word
+line 23 word word word word word
+:
+--- 2600 ms, styles
+
+
+                                                                 aaaaaaaaaaaaaa
+                                                                 abbbbbbbbbbbba
+                                                                 abbbbbbbbbbbba
+                                                                 acccccccccccca
+                                                                 adddddddddddda
+                                                                 aaaaaaaaaa  aa
+a: dim
+b: fg=208 bg=237
+c: fg=208 bg=60
+d: fg=242
+--- 5000 ms
+line 13 word word word word
+line 14 word word word word word
+line 15 word word word word word word                            ╭────────────╮
+line 16 word word word word word word word                       │⣿⣿⣿⣷⣤⡀      │
+line 17 word word word word word word word word                  │⣿⣍⡉⠉⠉⠉      │
+line 18                                                          │⡿⠿⠿⠦        │
+line 19 word                                                     │            │
+line 20 word word                                                ╰──────── 12 ╯
+line 21 word word word
+line 22 word word word word
+line 23 word word word word word
+:
+--- 5000 ms, styles
+
+
+                                                                 aaaaaaaaaaaaaa
+                                                                 abbbbbbbbbbbba
+                                                                 abbbbbbbbbbbba
+                                                                 acccccccccccca
+                                                                 adddddddddddda
+                                                                 aaaaaaaaaa  aa
+a: dim
+b: fg=172 bg=237
+c: fg=172 bg=60
+d: fg=242
+--- 9000 ms
+line 13 word word word word
+line 14 word word word word word
+line 15 word word word word word word                            ╭────────────╮
+line 16 word word word word word word word                       │⣿⣿⣿⣷⣤⡀      │
+line 17 word word word word word word word word                  │⣿⣍⡉⠉⠉⠉      │
+line 18                                                          │⡿⠿⠿⠦        │
+line 19 word                                                     │            │
+line 20 word word                                                ╰──────── 12 ╯
+line 21 word word word
+line 22 word word word word
+line 23 word word word word word
+:
+--- 9000 ms, styles
+
+
+                                                                 aaaaaaaaaaaaaa
+                                                                 abbbbbbbbbbbba
+                                                                 abbbbbbbbbbbba
+                                                                 acccccccccccca
+                                                                 adddddddddddda
+                                                                 aaaaaaaaaa  aa
+a: dim
+b: fg=255 bg=237
+c: fg=255 bg=60
+d: fg=242

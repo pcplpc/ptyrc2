@@ -1,0 +1,4 @@
+# test_print, test_faces: no option: the pace alone, `k/min`; ten keys
+# typed at 2 s: 40 keys a minute over the 15 s, falling to 0 after.
+--size 40x8 --for 20s --at 1.5s,2.5s,10s,20s
+--key 2s:a --key 2s:b --key 2s:c --key 2s:d --key 2s:e --key 2s:f --key 2s:g --key 2s:h --key 2s:i --key 2s:j

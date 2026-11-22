@@ -1,0 +1,2 @@
+# test_print: --fade 0 refused in init (exit 2).
+--size 40x8 --for 1s --fade 0

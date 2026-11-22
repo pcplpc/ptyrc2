@@ -35,6 +35,23 @@ The protocol: `sdk/template/PROTOCOL.md`. The script API:
   writes in memory (`files: NAME written`).
 - `life`: Rust; a Braille canvas, a `Sight`, draws from the seed,
   permissions by option (`needs`), values refused by the manifest.
+- `minimap`: Rust; a deck over the text a frame remembers
+  (`frame.text`, read after a burst of events); regular expressions of
+  the user as `pattern` options, found by the driver (`screen.find
+  {known}`), whatever the degree; a sprite in front beside the widget;
+  the twin's faces by hashes (`src/twin.json`, made by
+  `plan/sessions/22112026-01-migration/files-minimap/twin.py`).
+  Headless remembers the view alone: the growth of the map is a live
+  run's (`files-minimap/live.txt`).
+- `pace`: every key on its way to the program (`keys-read`: `input`
+  `{bytes}`; `--key` headless); the row of the cursor read at each
+  `text`, `cursor` event (a case: `--screen T:FILE` after the keys, the
+  cursor at the end of its last line); permissions by option
+  (`needs`); words shipped as an asset, more in a named file
+  (`--stop`); the counts in `storage.*`, written within a second of a
+  change (headless never calls `stop`), read back by a second run
+  (`--storage tests/stored`); the twin's faces by hashes (`twin.js`,
+  made by `plan/sessions/22112026-01-migration/keys-pace/twin.py`).
 
 ## A tree
 

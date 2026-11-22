@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "minimap"
+version = "0.1.0"
+summary = "The text of a frame in Braille, the view marked."
+license = "GPL-3.0-or-later"
+api = 1
+rust = "src/lib.rs"
+rustc = "1.88"
+surface = "frame"
+frame = "largest"
+random = [[], ["-a"]]
+
+# The patterns of --mark are the user's: `screen.find` of each is
+# answered as under `text`, remembered rows too.
+
+[permissions]
+shape = "the ink of the text the frame remembers, drawn small; the view, the cursor"
+text = "the line under the pointer told beside the map; comments (-n); without it, the map alone"
+front = "the line under the pointer, over the text"
+
+[options]
+cursor = { type = "bool", default = false, short = "c", doc = "the line of the cursor" }
+heat = { type = "bool", default = false, short = "H", doc = "a hue for the lines edited, another for those visited, fading" }
+notes = { type = "bool", default = false, short = "n", doc = "comments in green" }
+all = { type = "bool", default = false, short = "a", doc = "-c -H -n" }
+mark = { type = "pattern", list = true, regex = true, doc = "a regular expression: its lines in a colour; may be repeated" }
+width = { type = "int", default = 12, min = 2, max = 40, doc = "cells across" }
+fade = { type = "float", default = 60.0, doc = "a heat lasts SECONDS, more than 0" }

@@ -1,0 +1,28 @@
+# test_live: -a; typed on the program: the pace goes up, the words echoed
+# are counted (echo twice: `-echo`), a hash is not, a word rubbed out is
+# counted as shown, what is not echoed is not read; the counts kept.
+--size 100x30 --for 6s --at 1.5s,3.2s,4.2s,6s
+--screen tests/live/0.screen
+--key 2000:e --key 2000:c --key 2000:h --key 2000:o --key 2000:space
+--screen 2050:tests/live/1.screen
+--key 2200:h --key 2200:o --key 2200:u --key 2200:r --key 2200:g --key 2200:l --key 2200:a --key 2200:s --key 2200:s --key 2200:space
+--screen 2250:tests/live/2.screen
+--key 2400:w --key 2400:i --key 2400:d --key 2400:g --key 2400:e --key 2400:t --key 2400:space
+--screen 2450:tests/live/3.screen
+--key 2600:h --key 2600:o --key 2600:u --key 2600:r --key 2600:g --key 2600:l --key 2600:a --key 2600:s --key 2600:s --key 2600:space
+--screen 2650:tests/live/4.screen
+--key 2800:9 --key 2800:f --key 2800:8 --key 2800:6 --key 2800:d --key 2800:0 --key 2800:8 --key 2800:1 --key 2800:8 --key 2800:8 --key 2800:4 --key 2800:c --key 2800:d --key 2800:e --key 2800:a --key 2800:d --key 2800:b --key 2800:e --key 2800:e --key 2800:f --key 2800:space
+--screen 2850:tests/live/5.screen
+--key 3000:w --key 3000:i --key 3000:d --key 3000:g --key 3000:t --key 3000:e --key 3000:backspace --key 3000:backspace --key 3000:e --key 3000:t
+--screen 3050:tests/live/6.screen
+--key 3200:enter
+--screen 3250:tests/live/7.screen
+--key 3400:s --key 3400:t --key 3400:t --key 3400:y --key 3400:space --key 3400:- --key 3400:e --key 3400:c --key 3400:h --key 3400:o
+--screen 3450:tests/live/8.screen
+--key 3600:enter
+--screen 3650:tests/live/9.screen
+--key 3800:h --key 3800:u --key 3800:n --key 3800:t --key 3800:e --key 3800:r --key 3800:space --key 3800:s --key 3800:e --key 3800:c --key 3800:r --key 3800:e --key 3800:t
+--screen 3850:tests/live/10.screen
+--key 4000:enter
+--screen 4050:tests/live/11.screen
+-a

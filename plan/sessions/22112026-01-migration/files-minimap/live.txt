@@ -1,0 +1,110 @@
+$ ptyrc -s h app ptyrc/minimap -a --mark line 3  (status 0)
+1 minimap: running
+ptyrc: building ptyrc/minimap with rustc 1.96.0
+widget: [{'tag': 'minimap', 'state': 'placed', 'rect': [65, 7, 14, 8], 'size': [12, 6], 'title': '24'}] band: [0, 1, 2, 3, 4, 5]
+$ ptyrc -s h shot --sprites --ansi --no-cursor (status 0)
+line 0                                                                          
+line 1 word                                                                     
+line 2 word word                                                                
+line 3 word word word                                                           
+line 4 word word word word                                                      
+line 5 word word word word word                                                 
+line 6 word word word word word word                                            
+line 7 word word word word word word word                        ╭────────────╮ 
+line 8 word word word word word word word word                   │⣿⣦⣀         │ 
+line 9                                                           │⣿⣿⣿⣷⣄⡀      │ 
+line 10 word                                                     │⣿⣍⡉⠉⠉⠉      │ 
+line 11 word word                                                │⣿⣿⣿⣦⣀       │ 
+line 12 word word word                                           │⣿⡛⠛⠛⠛⠓      │ 
+line 13 word word word word                                      │⡿⠿⠷⠄        │ 
+line 14 word word word word word                                 ╰──────── 24 ╯ 
+line 15 word word word word word word                                           
+line 16 word word word word word word word                                      
+line 17 word word word word word word word word                                 
+line 18                                                                         
+line 19 word                                                                    
+line 20 word word                                                               
+line 21 word word word                                                          
+line 22 word word word word                                                     
+text
+paged: [{'tag': 'minimap', 'state': 'placed', 'rect': [65, 2, 14, 18], 'size': [12, 16], 'title': '115'}] band: [11, 12, 13, 14]
+$ ptyrc -s h shot --sprites --ansi --no-cursor (status 0)
+line 92 word word                                                               
+line 93 word word word                                                          
+line 94 word word word word                                      ╭────────────╮ 
+line 95 word word word word word                                 │⣿⣷⣶⣤⣀⡀      │ 
+line 96 word word word word word word                            │⣿⣿⣯⣍⣉⠉      │ 
+line 97 word word word word word word word                       │⣿⣯⣭⣉⠉⠉      │ 
+line 98 word word word word word word word word                  │⣿⣿⣟⡛⠛⠓      │ 
+line 99                                                          │⣿⣟⣛⠛⠛⠒      │ 
+line 100 word                                                    │⣿⣿⡿⠿⠶⠦      │ 
+line 101 word word                                               │⣿⡿⠿⠷⠶⠤      │ 
+line 102 word word word                                          │⣿⣿⣿⣶⣤⣄      │ 
+line 103 word word word word                                     │⣿⣿⣷⣦⣤⣀      │ 
+line 104 word word word word word                                │⣿⣷⣶⣤⣀⡀      │ 
+line 105 word word word word word word                           │⣿⣿⣯⣍⣉⠉      │ 
+line 106 word word word word word word word                      │⣿⣯⣭⣉⠉⠉      │ 
+line 107 word word word word word word word word                 │⣿⣿⣟⡛⠛⠓      │ 
+line 108                                                         │⣿⣿⣛⠛⠛⠒      │ 
+line 109 word                                                    │⠛⠛⠛⠛⠓       │ 
+line 110 word word                                               │            │ 
+line 111 word word word                                          ╰─────── 115 ╯ 
+line 112 word word word word                                                    
+line 113 word word word word word                                               
+line 114 word word word word word word                                          
+:
+top: [{'tag': 'minimap', 'state': 'placed', 'rect': [65, 2, 14, 18], 'size': [12, 16], 'title': '115'}] band: [0, 1, 2]
+$ ptyrc -s h shot --sprites --ansi --no-cursor (status 0)
+line 0                                                                          
+line 1 word                                                                     
+line 2 word word                                                 ╭────────────╮ 
+line 3 word word word                                            │⣿⣷⣶⣤⣀⡀      │ 
+line 4 word word word word                                       │⣿⣿⣯⣍⣉⠉      │ 
+line 5 word word word word word                                  │⣿⣯⣭⣉⠉⠉      │ 
+line 6 word word word word word word                             │⣿⣿⣟⡛⠛⠓      │ 
+line 7 word word word word word word word                        │⣿⣟⣛⠛⠛⠒      │ 
+line 8 word word word word word word word word                   │⣿⣿⡿⠿⠶⠦      │ 
+line 9                                                           │⣿⡿⠿⠷⠶⠤      │ 
+line 10 word                                                     │⣿⣿⣿⣶⣤⣄      │ 
+line 11 word word                                                │⣿⣿⣷⣦⣤⣀      │ 
+line 12 word word word                                           │⣿⣷⣶⣤⣀⡀      │ 
+line 13 word word word word                                      │⣿⣿⣯⣍⣉⠉      │ 
+line 14 word word word word word                                 │⣿⣯⣭⣉⠉⠉      │ 
+line 15 word word word word word word                            │⣿⣿⣟⡛⠛⠓      │ 
+line 16 word word word word word word word                       │⣿⣿⣛⠛⠛⠒      │ 
+line 17 word word word word word word word word                  │⠛⠛⠛⠛⠓       │ 
+line 18                                                          │            │ 
+line 19 word                                                     ╰─────── 115 ╯ 
+line 20 word word                                                               
+line 21 word word word                                                          
+line 22 word word word word                                                     
+:
+$ ptyrc -s h shot --sprites --ansi --no-cursor (status 0)
+line 0                                                                          
+line 1 word                                                                     
+line 2 word word                                                 ╭────────────╮ 
+line 3 word word word                                    line 0  │⣿⣷⣶⣤⣀⡀      │ 
+line 4 word word word word                                       │⣿⣿⣯⣍⣉⠉      │ 
+line 5 word word word word word                                  │⣿⣯⣭⣉⠉⠉      │ 
+line 6 word word word word word word                             │⣿⣿⣟⡛⠛⠓      │ 
+line 7 word word word word word word word                        │⣿⣟⣛⠛⠛⠒      │ 
+line 8 word word word word word word word word                   │⣿⣿⡿⠿⠶⠦      │ 
+line 9                                                           │⣿⡿⠿⠷⠶⠤      │ 
+line 10 word                                                     │⣿⣿⣿⣶⣤⣄      │ 
+line 11 word word                                                │⣿⣿⣷⣦⣤⣀      │ 
+line 12 word word word                                           │⣿⣷⣶⣤⣀⡀      │ 
+line 13 word word word word                                      │⣿⣿⣯⣍⣉⠉      │ 
+line 14 word word word word word                                 │⣿⣯⣭⣉⠉⠉      │ 
+line 15 word word word word word word                            │⣿⣿⣟⡛⠛⠓      │ 
+line 16 word word word word word word word                       │⣿⣿⣛⠛⠛⠒      │ 
+line 17 word word word word word word word word                  │⠛⠛⠛⠛⠓       │ 
+line 18                                                          │            │ 
+line 19 word                                                     ╰─────── 115 ╯ 
+line 20 word word                                                               
+line 21 word word word                                                          
+line 22 word word word word                                                     
+:
+left: []
+$ ptyrc -s h manage ls (status 0)
+ID  KIND   STATE    SINCE      PID  NAME     ARGS
+ 1  child  running    14s  1459552  minimap  --manifest {"frame":2,"granted":["shape","text","front"],"id":"minimap","limits":{},"permissions":[{"name":"front"},{"name":"shape"},{"name":"text"}],"version":"0.1.0"} /home/peon/git/perso/ptyrc/ptyrc2/temp/minimap-live/cache/ptyrc/shipped/minimap/tree/app.wasm {"all":true,"cursor":false,"fade":60.0,"heat":false,"mark":["line 3 "],"notes":false,"width":12}

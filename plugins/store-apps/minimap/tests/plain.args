@@ -1,0 +1,2 @@
+# test_face_view, live: no option: grey ink on the band of the view.
+--size 80x12 --for 1500ms --at 1500ms --styles --screen tests/code.screen

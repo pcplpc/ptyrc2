@@ -1,0 +1,4 @@
+# test_faces: under the pointer, a word's count and when it was typed.
+--size 60x16 --for 4s --at 1.5s,3s,4s --clock 2000-01-01T01:00:00Z --storage tests/stored
+--pointer 2.5s:40,4
+-w -r

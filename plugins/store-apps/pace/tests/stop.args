@@ -1,0 +1,10 @@
+# test_options: --stop FILE: its words never counted (hourglass).
+--size 100x30 --for 6s
+--screen tests/live/0.screen
+--key 2000:e --key 2000:c --key 2000:h --key 2000:o --key 2000:space
+--screen 2050:tests/live/1.screen
+--key 2200:h --key 2200:o --key 2200:u --key 2200:r --key 2200:g --key 2200:l --key 2200:a --key 2200:s --key 2200:s --key 2200:space
+--screen 2250:tests/live/2.screen
+--key 2400:w --key 2400:i --key 2400:d --key 2400:g --key 2400:e --key 2400:t --key 2400:space
+--screen 2450:tests/live/3.screen
+-w --stop tests/mine.words

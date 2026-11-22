@@ -1,0 +1,3 @@
+# test_options: a --stop file not UTF-8: refused in init.
+--size 40x8 --for 1s
+--stop tests/bad.words

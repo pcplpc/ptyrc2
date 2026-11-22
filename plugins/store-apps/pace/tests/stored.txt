@@ -1,0 +1,28 @@
+--- 1500 ms
+$
+
+
+
+
+                   ╭────────────────────╮
+                   │0 k/min        0 wpm│
+                   │1 echo             2│
+                   │2 widget           2│
+                   │3 hourglass        2│
+                   ╰────────────── pace ╯
+--- 4000 ms
+$ echo
+
+
+
+
+                   ╭────────────────────╮
+                   │20 k/min       4 wpm│
+                   │1 echo             3│
+                   │2 widget           2│
+                   │3 hourglass        2│
+                   ╰────────────── pace ╯
+storage: words.1 = "{\"words\":{\"stty\":[1,946684803.45]}}" (given, not written)
+storage: words.13 = "{\"words\":{\"hourglass\":[2,946684802.65]}}" (given, not written)
+storage: words.4 = "{\"words\":{\"echo\":[3,946688402.05]}}"
+storage: words.5 = "{\"words\":{\"widget\":[2,946684803.25]}}" (given, not written)

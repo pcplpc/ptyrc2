@@ -1,0 +1,4 @@
+# test_live: over a page: the view a band (the whole page, headless
+# remembers no row past the top), the cursor's line (-c), the lines of
+# --mark in the ink of their pattern; the widget a cell from the edge.
+--size 80x12 --for 1500ms --at 1500ms --styles --screen tests/page.screen -a --mark line.3

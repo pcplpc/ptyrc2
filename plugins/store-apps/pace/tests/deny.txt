@@ -1,0 +1,11 @@
+--- 3000 ms
+
+
+
+           ╭────────────────╮
+           │0 k/min ▲ 0     │
+           ╰────────── pace ╯
+dropped at 2000 ms: key a: to the program, not grabbed
+dropped at 2000 ms: key b: to the program, not grabbed
+dropped at 2000 ms: key c: to the program, not grabbed
+lowered: keys-read, declared and answered no

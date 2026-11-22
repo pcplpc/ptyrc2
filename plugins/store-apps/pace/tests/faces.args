@@ -1,0 +1,4 @@
+# test_print: -a on a small screen, then larger: the variants of the
+# ladder, the graph and the board (the counts of `live`).
+--size 40x12 --for 6s --at 1.5s,6s --resize 3s:90x24 --storage tests/stored
+-a --top 4

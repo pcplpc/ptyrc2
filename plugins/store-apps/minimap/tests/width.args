@@ -1,0 +1,2 @@
+# test_print: --width 1 refused (the manifest's min).
+--size 40x8 --for 1s --width 1

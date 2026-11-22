@@ -1,0 +1,7 @@
+# test_live, the save: a second run reads the counts of the first
+# (`--storage-out tests/stored` from `live`); a word typed adds to them.
+--size 60x16 --for 4s --at 1.5s,4s --clock 2000-01-01T01:00:00Z --storage tests/stored
+--screen tests/live/0.screen
+--key 2s:e --key 2s:c --key 2s:h --key 2s:o --key 2s:space
+--screen 2050:tests/live/1.screen
+-w --top 3

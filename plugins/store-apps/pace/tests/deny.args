@@ -1,0 +1,4 @@
+# keys-read denied: no key is heard, the pace stays 0.
+--size 40x8 --for 3s --deny keys-read
+--key 2s:a --key 2s:b --key 2s:c
+-b

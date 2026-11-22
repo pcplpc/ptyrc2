@@ -1,0 +1,4 @@
+# test_reads.py (minimap): text answered no: the map from the shapes,
+# no comment (-n), no tip.
+--size 80x12 --for 1800ms --at 1800ms --styles --screen tests/code.screen -n --deny text
+--pointer 1500:68,3

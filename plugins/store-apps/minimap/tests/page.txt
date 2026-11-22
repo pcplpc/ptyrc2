@@ -1,0 +1,27 @@
+--- 1500 ms
+line 1 word
+line 2 word word
+line 3 word word word                                            ╭────────────╮
+line 4 word word word word                                       │⣿⣷⣤⡀        │
+line 5 word word word word word                                  │⣿⣿⣿⣿⣦⣄      │
+line 6 word word word word word word                             │⡿⠦⠄         │
+line 7 word word word word word word word                        │            │
+line 8 word word word word word word word word                   ╰──────── 12 ╯
+line 9
+line 10 word
+line 11 word word
+:
+--- 1500 ms, styles
+
+
+                                                                 aaaaaaaaaaaaaa
+                                                                 abbbbbbbbbbbba
+                                                                 acccccccccccca
+                                                                 adddddddddddda
+                                                                 aeeeeeeeeeeeea
+                                                                 aaaaaaaaaa  aa
+a: dim
+b: fg=226 bg=237
+c: fg=255 bg=237
+d: fg=255 bg=60
+e: fg=242

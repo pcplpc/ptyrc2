@@ -1,0 +1,25 @@
+--- 1500 ms
+$ cat tool.py
+#!/usr/bin/env python3
+# A tool: the comments in green.                                 ╭────────────╮
+import sys                                                       │⣿⡿⠶⠤        │
+                                                                 │⢶⣖⠒⠂        │
+# The main: reads, writes.                                       │⡨⠟⠛⠓⠂       │
+def main():                                                      │            │
+    # one line                                                   ╰──────── 12 ╯
+    for line in sys.stdin:
+        print(line.upper())  # TODO
+    return 0
+$
+--- 1500 ms, styles
+
+
+                                                                 aaaaaaaaaaaaaa
+                                                                 abbbbbbbbbbbba
+                                                                 abbbbbbbbbbbba
+                                                                 abbbbbbbbbbbba
+                                                                 acccccccccccca
+                                                                 aaaaaaaaaa  aa
+a: dim
+b: fg=255 bg=237
+c: fg=242
