@@ -1,3 +1,1 @@
---- 1000 ms
-refused at 0 ms: screen.find (bad-params)
-ended: exit: 2
+ptyrc: --mark: "(": not a regular expression: unclosed group
