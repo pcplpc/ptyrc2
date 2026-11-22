@@ -420,7 +420,9 @@ impl File {
         })
     }
 
-    /// The names of the regular files of a directory (`file.list`).
+    /// The names of the regular files of a directory (`file.list`), by
+    /// name, 1024 at most: those named as a key (`[A-Za-z0-9._-]`, 1 to
+    /// 64 bytes, not starting with `.`); the others left out, unsaid.
     pub fn list(&self) -> Result<Vec<String>, Error> {
         Ok(names(&call("file.list", self.params())?["entries"], "name"))
     }

@@ -285,7 +285,11 @@ declare module "ptyrc" {
      * changed since.
      */
     write(content: string | Uint8Array, options?: { ifMtime?: number }): { size: number; mtimeMs: number };
-    /** The regular files of a directory, by name. */
+    /**
+     * The regular files of a directory, by name, 1024 at most: those
+     * named as a key (`[A-Za-z0-9._-]`, 1 to 64 bytes, not starting with
+     * `.`); the others left out, unsaid.
+     */
     list(): string[];
     /** The file `name` of this directory. */
     child(name: string): File;

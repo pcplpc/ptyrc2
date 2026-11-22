@@ -121,7 +121,7 @@ Cut answers:
 | `asset.read` | `name`, `as` (`"text"`, `"base64"`), `offset`, `len` (1 MiB at most) | `{"text" \| "base64", "size", "eof"}`; none of that name: `no-file` | — |
 | `file.stat` | `file` (a handle), `name` (a file of a `dir`) | `{"exists", "size", "mtime_ms"}`; absent: `{"exists": false}` | — |
 | `file.read` | `file`, `name`, `as` (`"text"`, `"base64"`), `offset`, `len` (1 MiB at most) | `{"text" \| "base64", "size", "mtime_ms", "eof"}`; a file of 16 MiB at most | — |
-| `file.list` | `file` (a `dir`) | `{"entries":[{"name","size"}]}`: its regular files of a valid name, 1024 at most | — |
+| `file.list` | `file` (a `dir`) | `{"entries":[{"name","size"}]}`: its regular files named as a `key`, by name, 1024 at most; the others left out, unsaid | — |
 | `file.write` | `file`, `text` or `base64` (the whole, 1 MiB), `if_mtime_ms` | `{"size","mtime_ms"}`; another mtime: `not-usable`; 16 a second with `storage.set` | `files-write`, and `write = true` |
 | `probe.git` | `repo` (a `dir` handle; absent: the program's directory), `parts`, `log` (1..200), `since` (a stamp) | `{"repo": {...} \| null, "stamp"}`; `since` the stamp now: `{"unchanged": true, "stamp"}`; a real read a second | `probe-git` |
 | `probe.system` | `parts` (`glance`, `logins`, `listeners`, `disks`), `top` (0..16) | `{"glance", "logins", "listeners", "disks"}`; shares between two samples, the first zeros | `probe-system` |
@@ -148,8 +148,8 @@ press is taken from the program with `clicks-grab`. Limits of the driver: 256 sp
 Host functions (`clock.*`, `storage.*`, `app.result`, `file.*`,
 `probe.*`):
 
-- A `key`: 1 to 64 bytes of `[A-Za-z0-9._-]`, not starting with `.`;
-  else `bad-params`. The values are the app's origin's: kept by an
+- A `key`, a `name` of `file.*`: 1 to 64 bytes of `[A-Za-z0-9._-]`,
+  not starting with `.`; else `bad-params`. The values are the app's origin's: kept by an
   update, removed by `ptyrc store rm --purge`.
 - `clock.*` held, `storage.*`, `file.*`, `probe.*` held read the
   disk or run `git`: not in a `batch` (`bad-request`).
