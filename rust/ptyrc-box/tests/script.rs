@@ -132,6 +132,34 @@ fn draws_and_ticks() {
     assert!(screen[1].starts_with(" hi "), "{report}");
 }
 
+/// The run's end is a SIGTERM: `stop`, after the last screen; its
+/// writes kept, its error the run's end.
+#[test]
+fn stop_at_the_end() {
+    let Some(report) = app(r#"
+        import { call, storage } from "ptyrc";
+        export function init() {}
+        export function stop() {
+          storage.set("saved", "yes");
+          call("draw.put", { text: "late", anchor: { at: [0, 0] } });
+        }
+        "#)
+    else {
+        return;
+    };
+    assert_eq!(report.end, None, "{report}");
+    assert_eq!(
+        report.storage.get("saved").map(String::as_str),
+        Some("yes"),
+        "{report}"
+    );
+    assert!(!report.screens[0].1[0].contains("late"), "{report}");
+    let report =
+        app("export function init() {}\nexport function stop() { throw new Error('no'); }")
+            .expect("the interpreter");
+    assert!(report.end.is_some(), "{report}");
+}
+
 #[test]
 fn args_reach_init_without_the_reserved_members() {
     let Some(wasm) = interpreter() else { return };

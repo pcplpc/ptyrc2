@@ -48,8 +48,9 @@ status 0 when all passed, else 1 (`script::unit`).
 
 `--headless`: no session; `headless::run` (Library). The report on
 stdout (`--json`: one JSON value), the log on stderr. `T`: ms, or
-`500ms`, `2s`. Defaults: 80x24, 1 s, the end, seed 1. Status: 0, or
-that of `exit`, or 70.
+`500ms`, `2s`. Defaults: 80x24, 1 s, the end, seed 1. At `--for`, the
+last screen taken, `stop`, as at SIGTERM. Status: 0, or that of
+`exit`, or 70.
 
 - `--tape FILE`: a tape played under the app (`Under::Tape`); it gives
   the size, so no `--size`, no `--screen`. `--screen [T:]FILE`, again

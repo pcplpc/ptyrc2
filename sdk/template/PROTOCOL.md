@@ -252,6 +252,8 @@ calls a second), `headless`.
   "VALUE" (given, not written)`; the value cut past 60 characters;
   `storage` not held: one line, the storage given not used), `files:`
   (written); `--json` their values whole.
+- The end of `--for`: `stop`, as at SIGTERM, after the last screen;
+  what it writes is in the report.
 - A second run from the first one's storage: `ptyrc dev test .
   --storage-out tests/stored` once, the directory kept in the tree;
   the case `--storage tests/stored`. Not one case writing what another

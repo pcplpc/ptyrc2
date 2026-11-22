@@ -2860,6 +2860,11 @@ pub fn run(wasm: &[u8], options: &Options) -> Result<Report, Error> {
             hidden.extend(runner.host().hidden_notes(now));
         }
     }
+    // The run's end, as a SIGTERM: `stop`, after the last screen.
+    if done.is_ok() {
+        runner.host_mut().set_now(end);
+        done = runner.stop(end);
+    }
     // Ended early: the screens left show what stays.
     for t in at {
         let host = runner.host_mut();
