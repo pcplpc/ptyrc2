@@ -1,0 +1,2 @@
+# test_options: an unknown monitor.
+-- --monitor glance,cpu

@@ -1,0 +1,2 @@
+# test_live: the tags of test_git.repo(), every one; the head chases (-W).
+--size 120x40 --for 3s --probe git=tests/base.json -- -a

@@ -1,0 +1,252 @@
+{
+ "repo": {
+  "name": "app",
+  "now": 1800000000.0,
+  "head": {
+   "oid": "abcdef1",
+   "branch": null,
+   "upstream": null,
+   "ahead": 0,
+   "behind": 0,
+   "gone": false,
+   "initial": false
+  },
+  "changes": [],
+  "counts": {
+   "staged": 0,
+   "unstaged": 0,
+   "untracked": 0,
+   "conflict": 0
+  },
+  "state": "",
+  "state_since": null,
+  "dirty_since": null,
+  "log": [
+   {
+    "oid": "aaaaaaa",
+    "at": 1799999880.0,
+    "author": "Ada",
+    "subject": "Merge side",
+    "refs": [
+     "HEAD -> main",
+     "tag: v1.0",
+     "origin/main"
+    ],
+    "graph": [
+     "*",
+     "|\\"
+    ]
+   },
+   {
+    "oid": "bbbbbbb",
+    "at": 1799996400.0,
+    "author": "Bob",
+    "subject": "a side commit with a subject long enough to wrap twice",
+    "refs": [
+     "side"
+    ],
+    "graph": [
+     "| *",
+     "|/"
+    ]
+   },
+   {
+    "oid": "ccccccc",
+    "at": 1799910000.0,
+    "author": "Ada",
+    "subject": "base",
+    "refs": [],
+    "graph": [
+     "*"
+    ]
+   }
+  ],
+  "days": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   3,
+   0,
+   1,
+   7,
+   0,
+   0,
+   2,
+   12,
+   1,
+   4
+  ],
+  "stashes": [
+   {
+    "n": 0,
+    "at": 1799999700.0,
+    "subject": "WIP on main: aaaaaaa Merge side"
+   },
+   {
+    "n": 1,
+    "at": 1799913600.0,
+    "subject": "On side: tried another way"
+   }
+  ],
+  "branches": [
+   {
+    "name": "main",
+    "current": true,
+    "at": 1799999880.0,
+    "upstream": "origin/main",
+    "ahead": 2,
+    "behind": 1,
+    "gone": false,
+    "subject": "Merge side"
+   },
+   {
+    "name": "side",
+    "current": false,
+    "at": 1799996400.0,
+    "upstream": null,
+    "ahead": 0,
+    "behind": 0,
+    "gone": false,
+    "subject": "a side commit"
+   },
+   {
+    "name": "old",
+    "current": false,
+    "at": 1799100000.0,
+    "upstream": "origin/old",
+    "ahead": 0,
+    "behind": 0,
+    "gone": true,
+    "subject": "forgotten"
+   }
+  ],
+  "worktrees": [
+   {
+    "name": "app",
+    "oid": "1234567",
+    "branch": "main",
+    "flags": [],
+    "current": false
+   },
+   {
+    "name": "app-fix",
+    "oid": "abcdef1",
+    "branch": null,
+    "flags": [
+     "detached",
+     "locked"
+    ],
+    "current": false
+   },
+   {
+    "name": "gone",
+    "oid": "abcdef1",
+    "branch": "side",
+    "flags": [
+     "prunable"
+    ],
+    "current": false
+   }
+  ]
+ },
+ "stamp": "s0"
+}

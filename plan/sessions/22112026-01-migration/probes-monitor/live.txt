@@ -1,0 +1,82 @@
+# Transcript of live.py (2026-11-22); the name of one process of the machine replaced by "agent".
+[  3.3 s] $ ptyrc -s h app ptyrc/monitor --monitor glance,tcp-listen --every 1 (status 0)
+1 monitor: running
+widgets: [('glance', 'placed', 'glance', [56, 13]), ('tcp-listen', 'placed', 'listening', [56, 2])]
+[  8.3 s] shot:
+$
+                     ┌────────────────────────────────────────────────────────┐
+                     │cpu  ━────────────────────────────────────   3%         │
+                     │core ▁▁▁▁▁▁▁▁▁▁▁▁▂▁▁▁                                   │
+                     │mem  ━━━━━━━━━━━━━━━━━━━━━━━━━━━──────────  73%  10G/14G│
+                     │swap ━━━━━━━━━━━━━━━━━━━━━━━━━━━──────────  73%  12G/16G│
+                     │load 12.97 8.90 6.75                          up 13d 13h│
+                     │net  ↓ 11K/s   ↑ 4.3K/s                                 │
+                     │                                                        │
+                     │    pid  process     cpu   mem                          │
+                     │4017301  python       7%   30M                          │
+                     │ 276660  htop         6%   13M                          │
+                     │    795  pulseaudio   5%   13M                          │
+                     │1114290  chromium     4%  203M                          │
+                     │1514175  agent       3%  434M                          │
+                     └──────────────────────────────────────────────── glance ┘
+                     ┌────────────────────────────────────────────────────────┐
+                     │port  address  user                                     │
+                     │5355  *        systemd-resolve                          │
+                     └───────────────────────────────────────────── listening ┘
+[  8.3 s] typed: python3 -m http.server 48765 --bind 0.0.0.0 >/dev/null 2>&1 & echo started
+  tcp-listen: the port opened: after 0.6 s
+[  9.5 s] shot:
+$ python3 -m http.server 48765 --bind 0.0.0.0 >/dev/null 2>&1 & echo started
+[1] 1555161
+started
+$
+                     ┌────────────────────────────────────────────────────────┐
+                     │cpu  ━╾───────────────────────────────────   4%         │
+                     │core ▁▁▁▁▁▁▁▁▁▁▁▁▂▁▁▁                                   │
+                     │mem  ━━━━━━━━━━━━━━━━━━━━━━━━━━━──────────  73%  10G/14G│
+                     │swap ━━━━━━━━━━━━━━━━━━━━━━━━━━━──────────  73%  12G/16G│
+                     │load 11.93 8.76 6.72                          up 13d 13h│
+                     │net  ↓ 12K/s   ↑ 5.6K/s                                 │
+                     │                                                        │
+                     │    pid  process   cpu   mem                            │
+                     │1555161  python3   12%   26M                            │
+                     │1514175  agent     8%  434M                            │
+                     │4017301  python     8%   30M                            │
+                     │ 276660  htop       7%   13M                            │
+                     │1114290  chromium   4%  203M                            │
+                     └──────────────────────────────────────────────── glance ┘
+                     ┌────────────────────────────────────────────────────────┐
+                     │ port  address  user             process                │
+                     │ 5355  *        systemd-resolve  ?                      │
+                     │48765  0.0.0.0  peon             python3                │
+                     └───────────────────────────────────────────── listening ┘
+[  9.5 s] typed: kill %1
+  tcp-listen: the port gone: after 0.6 s
+[ 10.6 s] shot:
+$ python3 -m http.server 48765 --bind 0.0.0.0 >/dev/null 2>&1 & echo started
+[1] 1555161
+started
+$ kill %1
+$                    ┌────────────────────────────────────────────────────────┐
+                     │cpu  ━────────────────────────────────────   3%         │
+                     │core ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁                                   │
+                     │mem  ━━━━━━━━━━━━━━━━━━━━━━━━━━━──────────  73%  10G/14G│
+                     │swap ━━━━━━━━━━━━━━━━━━━━━━━━━━━──────────  73%  12G/16G│
+                     │load 11.93 8.76 6.72                          up 13d 13h│
+                     │net  ↓ 7.4K/s   ↑ 5.5K/s                                │
+                     │                                                        │
+                     │    pid  process          cpu   mem                     │
+                     │4017301  python            7%   30M                     │
+                     │ 276660  htop              6%   13M                     │
+                     │1114290  chromium          4%  203M                     │
+                     │ 649682  Isolated Web Co   4%   60M                     │
+                     │    795  pulseaudio        4%   13M                     │
+                     └──────────────────────────────────────────────── glance ┘
+                     ┌────────────────────────────────────────────────────────┐
+                     │port  address  user                                     │
+                     │5355  *        systemd-resolve                          │
+                     └───────────────────────────────────────────── listening ┘
+widgets: [('glance', 'placed', 'glance', [56, 13]), ('tcp-listen', 'placed', 'listening', [56, 2])]
+[ 10.6 s] $ ptyrc -s h manage ls (status 0)
+ID  KIND   STATE    SINCE      PID  NAME     ARGS
+ 1  child  running     7s  1555082  monitor  --manifest {"frame":0,"granted":["clock","probe-system"],"id":"monitor","limits":{},"permissions":[{"name":"clock"},{"name":"probe-system"}],"version":"0.1.0"} --script /home/peon/git/perso/ptyrc/ptyrc2/plugins/store-apps/monitor/app.js {"cycle":8.0,"every":1.0,"merged":false,"monitor":"glance,tcp-listen"}

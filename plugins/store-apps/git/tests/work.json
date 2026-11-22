@@ -1,0 +1,225 @@
+{
+  "repo": {
+    "branches": [
+      {
+        "ahead": 0,
+        "at": 1795317674.0,
+        "behind": 0,
+        "current": true,
+        "gone": false,
+        "name": "main",
+        "subject": "second",
+        "upstream": null
+      },
+      {
+        "ahead": 0,
+        "at": 1795317674.0,
+        "behind": 0,
+        "current": false,
+        "gone": false,
+        "name": "side",
+        "subject": "second",
+        "upstream": null
+      }
+    ],
+    "changes": [
+      {
+        "added": 2,
+        "code": "M",
+        "deleted": 1,
+        "kind": "unstaged",
+        "path": "a.txt"
+      },
+      {
+        "added": 1,
+        "code": "A",
+        "deleted": 0,
+        "kind": "staged",
+        "path": "b.txt"
+      },
+      {
+        "added": null,
+        "code": "?",
+        "deleted": null,
+        "kind": "untracked",
+        "path": "c.txt"
+      }
+    ],
+    "counts": {
+      "conflict": 0,
+      "staged": 1,
+      "unstaged": 1,
+      "untracked": 1
+    },
+    "days": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      2
+    ],
+    "dirty_since": 1795317674.456965,
+    "head": {
+      "ahead": 0,
+      "behind": 0,
+      "branch": "main",
+      "gone": false,
+      "initial": false,
+      "oid": "4a5f17d",
+      "upstream": null
+    },
+    "log": [
+      {
+        "at": 1795317674.0,
+        "author": "t",
+        "graph": [
+          "*"
+        ],
+        "oid": "4a5f17d",
+        "refs": [
+          "HEAD -> main",
+          "side"
+        ],
+        "subject": "second"
+      },
+      {
+        "at": 1795317674.0,
+        "author": "t",
+        "graph": [
+          "*"
+        ],
+        "oid": "496dbdc",
+        "refs": [],
+        "subject": "first"
+      }
+    ],
+    "name": "work",
+    "now": 1795317805.2206223,
+    "stashes": [
+      {
+        "at": 1795317674.0,
+        "n": 0,
+        "subject": "WIP on main: 4a5f17d second"
+      }
+    ],
+    "state": "",
+    "state_since": null,
+    "worktrees": [
+      {
+        "branch": "main",
+        "current": true,
+        "flags": [],
+        "name": "work",
+        "oid": "4a5f17d"
+      }
+    ]
+  },
+  "stamp": "c2e06032595f8aad"
+}

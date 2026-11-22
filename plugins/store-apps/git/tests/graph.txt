@@ -1,0 +1,17 @@
+--- 3000 ms
+
+
+
+
+
+
+
+
+
+       ╭────────────────────────────────────────────────────────────────╮
+       │●   aaaaaaa  2m main v1.0 origin/main Merge side                │
+       ││╲                                                              │
+       ││ ● bbbbbbb  1h side a side commit with a subject long enough t…│
+       ││╱                                                              │
+       │●   ccccccc  1d base                                            │
+       ╰─────────────────────────────────────────────────────────── log ╯

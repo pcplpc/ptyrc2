@@ -1,0 +1,2 @@
+# test_live_hover: the pointer on a commit tells it in full; away, folded; read again (5 s) while told, its rows grown; 3 s after the last move, folded.
+--size 80x24 --for 10s --at 2500,3500,6800,9500 --probe git=tests/base.json --pointer 3000:20,12 --pointer 4000:0,20 --pointer 4500:20,12 -- --monitor log

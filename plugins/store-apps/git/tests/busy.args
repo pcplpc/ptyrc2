@@ -1,0 +1,2 @@
+# test_head, test_warnings: a rebase left open, the tree dirty: told in head.
+--size 60x16 --for 3s --probe git=tests/busy.json -- -W --dirty 4

@@ -1,0 +1,2 @@
+# test_main: --print: the head alone, no upstream, the title the repository's.
+--for 3s --probe git=tests/work.json

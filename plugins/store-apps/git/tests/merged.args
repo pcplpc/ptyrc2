@@ -1,0 +1,2 @@
+# test_live_follows: --merged, the tags in turn; the title of each.
+--size 80x24 --for 5s --at 2500,4500 --probe git=tests/work.json -- --merged --monitor head,log --cycle 2

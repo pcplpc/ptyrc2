@@ -1,0 +1,2 @@
+# test_merged: one widget, the monitors in turn (--cycle 3); its title follows.
+--size 80x24 --for 10s --at 2500,4500,7500,9900 --probe system=tests/full.json -- --merged --cycle 3 --monitor glance,disk-space,tcp-listen

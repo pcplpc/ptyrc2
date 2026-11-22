@@ -1,0 +1,157 @@
+{
+ "glance": {
+  "cpu": 0.5,
+  "cores": [
+   0.6,
+   0.33333333333333337
+  ],
+  "load": [
+   0.52,
+   0.48,
+   0.4
+  ],
+  "memory": {
+   "total": 16384000000,
+   "available": 6144000000,
+   "swap_total": 8192000000,
+   "swap_free": 6144000000
+  },
+  "uptime": 277000.5,
+  "rx": 420000.0,
+  "tx": 210000.0,
+  "top": [
+   {
+    "pid": 1,
+    "name": "p1",
+    "cpu": 1.5,
+    "mem": 4096000
+   },
+   {
+    "pid": 2,
+    "name": "p2",
+    "cpu": 0.1,
+    "mem": 4096000
+   },
+   {
+    "pid": 5,
+    "name": "p5",
+    "cpu": 0.02,
+    "mem": 4096000
+   },
+   {
+    "pid": 6,
+    "name": "p6",
+    "cpu": 0.01,
+    "mem": 4096000
+   },
+   {
+    "pid": 7,
+    "name": "p7",
+    "cpu": 0.005,
+    "mem": 4096000
+   }
+  ]
+ },
+ "logins": {
+  "now": 1800000000.0,
+  "seats": [
+   {
+    "user": "bob",
+    "origin": "203.0.113.70",
+    "ttys": [
+     "pts/5"
+    ],
+    "login": 1799999400.0,
+    "idle": 30.0,
+    "what": "htop"
+   },
+   {
+    "user": "alice",
+    "origin": "tmux",
+    "ttys": [
+     "pts/1",
+     "pts/2"
+    ],
+    "login": 1799992800.0,
+    "idle": 3.0,
+    "what": "vim"
+   },
+   {
+    "user": "root",
+    "origin": "local",
+    "ttys": [
+     "tty1"
+    ],
+    "login": 1799740800.0,
+    "idle": 172800,
+    "what": "login"
+   },
+   {
+    "user": "carol-the-admin",
+    "origin": "a-very-long-host.example.org",
+    "ttys": [
+     "pts/9"
+    ],
+    "login": 1799100000.0,
+    "idle": null,
+    "what": null
+   }
+  ]
+ },
+ "listeners": [
+  {
+   "addr": "*",
+   "port": 22,
+   "user": "root",
+   "process": "sshd"
+  },
+  {
+   "addr": "2001:db8::1",
+   "port": 443,
+   "user": "www-data",
+   "process": "nginx"
+  },
+  {
+   "addr": "0.0.0.0",
+   "port": 8000,
+   "user": "alice",
+   "process": null
+  },
+  {
+   "addr": "192.168.1.10",
+   "port": 8080,
+   "user": "alice",
+   "process": "python3"
+  }
+ ],
+ "disks": [
+  {
+   "point": "/",
+   "device": "/dev/sda2",
+   "size": 107374182400,
+   "used": 99857989632,
+   "free": 2147483648
+  },
+  {
+   "point": "/boot",
+   "device": "/dev/sda1",
+   "size": 536870912,
+   "used": 134217728,
+   "free": 402653184
+  },
+  {
+   "point": "/mnt/my disk",
+   "device": "/dev/sdb1",
+   "size": 4294967296000,
+   "used": 1288490188800,
+   "free": 3006477107200
+  },
+  {
+   "point": "/run/media/alice/A_RATHER_LONG_LABEL",
+   "device": "/dev/sdc1",
+   "size": 68719476736,
+   "used": 0,
+   "free": 68719476736
+  }
+ ]
+}

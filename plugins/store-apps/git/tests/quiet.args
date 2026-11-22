@@ -1,0 +1,2 @@
+# Out of a repository: every tag but head hidden.
+--size 80x24 --for 3s --probe git=tests/none.json -- -a

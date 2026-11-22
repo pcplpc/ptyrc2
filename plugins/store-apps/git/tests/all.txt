@@ -1,0 +1,40 @@
+--- 3000 ms
+
+
+
+
+
+                               ╭────────────────────────────────────────────────────────╮
+                               │UU clash.py                                             │
+  ╭────────────────────────╮   │M  src/staged.py                                        │
+  │                    ⢠ ⢸ │   │MM both.py                                              │
+  │⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣆⣼⣀⣾⣼│   │R  new name.py                                          │
+  │26 this week  last 2m   │   │ M src/changed file.py                                  │
+  ╰───────────────── pulse ╯   │?? notes/                                               │
+                               ╰──────────────────────────────────────────────── status ╯
+
+
+
+
+                                    ╭──────────────────────────────────────────────╮
+ ╭──────────────────────────────╮   │main → origin/main  ↑2 ↓1                     │  ╭──────────────────────────────╮
+ │● main   2m  ↑2 ↓1  Merge side│   │✖1 conflict  ●3 staged  +2 changed  ?1 new    │  │0  5m  Merge side             │
+ │  side   1h         a side co…│   │▲ 1 conflict                                  │  │1  1d  side: tried another way│
+ │  old   10d  gone   forgotten │   │▲ 1 behind origin/main                        │  ╰─────────────────────── stash ╯
+ ╰──────────────────── branches ╯   │aaaaaaa 2m Merge side                         │
+                                    ╰───────────────────────────────────────── app ╯
+
+
+
+
+                           ╭────────────────────────────────────────────────────────────────╮
+                           │●   aaaaaaa  2m main v1.0 origin/main Merge side                │
+                           ││╲                                                              │
+                           ││ ● bbbbbbb  1h side a side commit with a subject long enough t…│
+                           ││╱                                                              │
+                           │●   ccccccc  1d base                                            │
+                           ╰─────────────────────────────────────────────────────────── log ╯
+
+                                                    ╭──────────────╮
+                                                    │3 worktrees   │
+                                                    ╰─── worktrees ╯

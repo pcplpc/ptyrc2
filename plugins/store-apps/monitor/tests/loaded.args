@@ -1,0 +1,2 @@
+# test_warnings: the load past twice the cores, the processor, the fullest disk in red.
+--size 130x40 --for 3s --probe system=tests/loaded.json -- --monitor glance,disk-space,tcp-listen

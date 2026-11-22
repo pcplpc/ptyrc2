@@ -1,0 +1,66 @@
+--- 2500 ms
+
+
+
+
+
+
+
+
+
+
+       ╭────────────────────────────────────────────────────────────────╮
+       │aaaaaaa  2m Merge side                                          │
+       │bbbbbbb  1h a side commit with a subject long enough to wrap tw…│
+       │ccccccc  1d base                                                │
+       ╰─────────────────────────────────────────────────────────── log ╯
+--- 3500 ms
+
+
+
+
+
+
+
+
+
+
+       ╭────────────────────────────────────────────────────────────────╮
+       │aaaaaaa  2m Merge side                                          │
+       │bbbbbbb  1h a side commit with a subject long enough to wrap    │
+       │            twice                                               │
+       ╰─────────────────────────────────────────────────────────── log ╯
+--- 6800 ms
+
+
+
+
+
+
+
+
+       ╭────────────────────────────────────────────────────────────────╮
+       │aaaaaaa  2m Merge side                                          │
+       │bbbbbbb  1h a side commit with a subject long enough to wrap    │
+       │            twice                                               │
+       │            Bob · Jan 15 07:00                                  │
+       │            side                                                │
+       │ccccccc  1d base                                                │
+       ╰─────────────────────────────────────────────────────────── log ╯
+--- 9500 ms
+
+
+
+
+
+
+
+
+       ╭────────────────────────────────────────────────────────────────╮
+       │aaaaaaa  2m Merge side                                          │
+       │bbbbbbb  1h a side commit with a subject long enough to wrap tw…│
+       │ccccccc  1d base                                                │
+       │                                                                │
+       │                                                                │
+       │                                                                │
+       ╰─────────────────────────────────────────────────────────── log ╯

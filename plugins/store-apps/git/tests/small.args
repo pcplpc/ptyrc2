@@ -1,0 +1,2 @@
+# The small variants on a small screen.
+--size 56x16 --for 3s --probe git=tests/base.json -- -t -l

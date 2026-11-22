@@ -1,0 +1,2 @@
+# test_main, test_live: every tag of a real repository (ptyrc dev probe git); one work tree: no tag worktrees.
+--size 120x40 --for 3s --probe git=tests/work.json -- -a

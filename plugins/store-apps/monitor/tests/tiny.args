@@ -1,0 +1,2 @@
+# test_tiny_variants: the one-row variants, the screen too small for more.
+--size 60x12 --for 3s --probe system=tests/full.json

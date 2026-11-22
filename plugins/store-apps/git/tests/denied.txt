@@ -1,0 +1,17 @@
+--- 3000 ms
+
+
+
+
+
+
+
+
+
+
+
+                           ╭────────────────────────╮
+                           │not a git repository    │
+                           ╰─────────────────── git ╯
+lowered at 0 ms: probe.git, to the degree none, 4 times
+lowered: probe-git, declared and answered no

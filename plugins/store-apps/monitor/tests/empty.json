@@ -1,0 +1,27 @@
+{
+ "glance": {
+  "cpu": 0.0,
+  "cores": [],
+  "load": [
+   0.0,
+   0.0,
+   0.0
+  ],
+  "memory": {
+   "total": 0,
+   "available": 0,
+   "swap_total": 0,
+   "swap_free": 0
+  },
+  "uptime": 0.0,
+  "rx": 0.0,
+  "tx": 0.0,
+  "top": []
+ },
+ "logins": {
+  "now": 1800000000.0,
+  "seats": []
+ },
+ "listeners": [],
+ "disks": []
+}

@@ -1,0 +1,2 @@
+# probe-git refused: as out of a repository, lowered.
+--for 3s --probe git=tests/base.json --deny probe-git -- -t

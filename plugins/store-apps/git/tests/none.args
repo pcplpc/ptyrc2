@@ -1,0 +1,2 @@
+# test_main: out of a repository, the tags named shown all the same.
+--size 60x16 --for 3s --probe git=tests/none.json -- --monitor worktrees,head

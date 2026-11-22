@@ -1,0 +1,2 @@
+# test_lists: branches, stash, worktrees.
+--size 120x30 --for 3s --probe git=tests/lines.json -- --monitor branches,stash,worktrees

@@ -1,0 +1,25 @@
+--- 3000 ms
+
+
+
+
+
+
+
+
+                                    ┌────────────────────────────────────────────────────────┐
+                                    │no local disks                                          │
+                                    └───────────────────────────────────────────────── disks ┘
+
+
+
+
+
+
+
+
+                                    ┌────────────────────────────────────────────────────────┐
+                                    │no one logged in                                        │
+                                    └───────────────────────────────────────────── connected ┘
+lowered at 0 ms: probe.system, to the degree none, 2 times
+lowered: probe-system, declared and answered no

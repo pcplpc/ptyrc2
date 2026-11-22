@@ -1,0 +1,2 @@
+# test_status: the paths, their lines.
+--size 80x24 --for 3s --probe git=tests/lines.json -- --monitor status

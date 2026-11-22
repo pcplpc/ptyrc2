@@ -1,0 +1,2 @@
+# test_empty_states on an empty machine (test_monitor.EMPTY).
+--size 160x50 --for 5s --probe system=tests/empty.json

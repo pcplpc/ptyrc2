@@ -1,0 +1,2 @@
+# the widgets after a resize: the variants of the new screen.
+--size 130x40 --for 6s --at 2500,5900 --probe system=tests/full.json --resize 3000:70x20 -- --monitor glance,connected

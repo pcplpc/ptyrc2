@@ -1,0 +1,2 @@
+# test_read_awkward: detached; a long branch cut.
+--size 80x24 --for 3s --probe git=tests/lost.json -- -b

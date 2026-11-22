@@ -1,0 +1,13 @@
+--- 3000 ms
+
+
+
+              ┌──────────────────────────────┐
+              │cpu  ━━━━━━━━━━──────────  50%│
+              │mem  ━━━━━━━━━━━━╾───────  62%│
+              │load 0.52 0.48 0.40   up 3d 4h│
+              │net  ↓ 410K/s   ↑ 205K/s      │
+              └────────────────────── glance ┘
+note: widget connected hidden at 3000 ms: no room in 60x12 for its smallest variant, 20x1 inside its border, with the margin and the gaps (from text, the cursor's row, other widgets): PROTOCOL.md, Headless
+note: widget tcp-listen hidden at 3000 ms: no room in 60x12 for its smallest variant, 18x1 inside its border, with the margin and the gaps (from text, the cursor's row, other widgets): PROTOCOL.md, Headless
+note: widget disk-space hidden at 3000 ms: no room in 60x12 for its smallest variant, 20x1 inside its border, with the margin and the gaps (from text, the cursor's row, other widgets): PROTOCOL.md, Headless

@@ -1,0 +1,110 @@
+{
+ "glance": {
+  "cpu": 0.95,
+  "cores": [
+   0.1,
+   0.97,
+   0.0,
+   0.5
+  ],
+  "load": [
+   9.0,
+   6.0,
+   1.5
+  ],
+  "memory": {
+   "total": 8589934592,
+   "available": 536870912,
+   "swap_total": 0,
+   "swap_free": 0
+  },
+  "uptime": 59,
+  "rx": 0,
+  "tx": 1000000.0,
+  "top": []
+ },
+ "logins": {
+  "now": 1800000000.0,
+  "seats": [
+   {
+    "user": "bob",
+    "origin": "203.0.113.70",
+    "ttys": [
+     "pts/5"
+    ],
+    "login": 1799999400.0,
+    "idle": 30.0,
+    "what": "htop"
+   },
+   {
+    "user": "alice",
+    "origin": "tmux",
+    "ttys": [
+     "pts/1",
+     "pts/2"
+    ],
+    "login": 1799992800.0,
+    "idle": 3.0,
+    "what": "vim"
+   },
+   {
+    "user": "root",
+    "origin": "local",
+    "ttys": [
+     "tty1"
+    ],
+    "login": 1799740800.0,
+    "idle": 172800,
+    "what": "login"
+   },
+   {
+    "user": "carol-the-admin",
+    "origin": "a-very-long-host.example.org",
+    "ttys": [
+     "pts/9"
+    ],
+    "login": 1799100000.0,
+    "idle": null,
+    "what": null
+   }
+  ]
+ },
+ "listeners": [
+  {
+   "addr": "0.0.0.0",
+   "port": 8000,
+   "user": "alice",
+   "process": null
+  }
+ ],
+ "disks": [
+  {
+   "point": "/",
+   "device": "/dev/sda2",
+   "size": 107374182400,
+   "used": 99857989632,
+   "free": 2147483648
+  },
+  {
+   "point": "/boot",
+   "device": "/dev/sda1",
+   "size": 536870912,
+   "used": 134217728,
+   "free": 402653184
+  },
+  {
+   "point": "/mnt/my disk",
+   "device": "/dev/sdb1",
+   "size": 4294967296000,
+   "used": 1288490188800,
+   "free": 3006477107200
+  },
+  {
+   "point": "/run/media/alice/A_RATHER_LONG_LABEL",
+   "device": "/dev/sdc1",
+   "size": 68719476736,
+   "used": 0,
+   "free": 68719476736
+  }
+ ]
+}

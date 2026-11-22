@@ -1,0 +1,2 @@
+# --repo: a directory named (the probe answers from the fixture).
+--for 3s --probe git=tests/work.json -- --repo tests

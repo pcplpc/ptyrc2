@@ -1,0 +1,2 @@
+# A row of data each (few.json): heights trimmed to the rows, the head kept when it fitted.
+--size 160x50 --for 5s --probe system=tests/few.json

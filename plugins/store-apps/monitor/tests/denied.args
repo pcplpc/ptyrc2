@@ -1,0 +1,2 @@
+# probe-system refused: as not held.
+--size 130x40 --for 3s --probe system=tests/full.json --deny probe-system -- --monitor connected,disk-space

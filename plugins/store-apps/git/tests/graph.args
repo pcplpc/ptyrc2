@@ -1,0 +1,2 @@
+# test_log: the log as a graph, with its refs.
+--size 80x24 --for 3s --probe git=tests/base.json -- --monitor log -g

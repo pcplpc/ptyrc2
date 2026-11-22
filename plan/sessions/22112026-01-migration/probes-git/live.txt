@@ -1,0 +1,75 @@
+[  3.2 s] $ ptyrc -s h app ptyrc/git -t -l (status 0)
+1 git: running
+widgets: [('head', 'placed', 'work', [46, 3]), ('status', 'placed', 'status', [18, 1]), ('log', 'placed', 'log', [64, 2])]
+[  7.3 s] shot:
+$
+                                        ╭──────────────────╮
+                                        │working tree clean│
+                                        ╰────────── status ╯
+                          ╭──────────────────────────────────────────────╮
+                          │main  no upstream                             │
+                          │✓ clean                                       │
+                          │4b47db8 3s second                             │
+                          ╰──────────────────────────────────────── work ╯
+                 ╭────────────────────────────────────────────────────────────────╮
+                 │4b47db8  3s second                                              │
+                 │7c43fea  3s first                                               │
+                 ╰─────────────────────────────────────────────────────────── log ╯
+[  7.3 s] typed: echo three >> a.txt
+  head: a.txt changed (the work tree: a read of --every): after 0.9 s
+[  8.4 s] typed: git add a.txt
+  head: a.txt staged (the index: the stamp): after 0.6 s
+[  9.4 s] shot:
+$ echo three >> a.txt
+$ git add a.txt
+$
+                     ╭────────────────────────────────────────────────────────╮
+                     │●1  +1                                                  │
+                     ╰──────────────────────────────────────────────── status ╯
+                          ╭──────────────────────────────────────────────╮
+                          │main  no upstream                             │
+                          │●1 staged                                     │
+                          │4b47db8 9s second                             │
+                          ╰──────────────────────────────────────── work ╯
+                 ╭────────────────────────────────────────────────────────────────╮
+                 │4b47db8  9s second                                              │
+                 │7c43fea  9s first                                               │
+                 ╰─────────────────────────────────────────────────────────── log ╯
+[  9.4 s] typed: git commit -qm 'third, seen by the stamp'
+  log: the commit: after 0.9 s
+[ 10.5 s] shot:
+$ echo three >> a.txt
+$ git add a.txt
+$ git commit -qm 'third, seen by the stamp'
+$
+                                        ╭──────────────────╮
+                                        │working tree clean│
+                                        ╰────────── status ╯
+                          ╭──────────────────────────────────────────────╮
+                          │main  no upstream                             │
+                          │✓ clean                                       │
+                          │7c5b4ca 1s third, seen by the stamp           │
+                          ╰──────────────────────────────────────── work ╯
+                 ╭────────────────────────────────────────────────────────────────╮
+                 │7c5b4ca  1s third, seen by the stamp                            │
+                 │4b47db8 10s second                                              │
+                 │7c43fea 10s first                                               │
+                 ╰─────────────────────────────────────────────────────────── log ╯
+[ 10.5 s] typed: cd /
+  out of the repository: after 0.7 s
+widgets: [('head', 'placed', 'git', [24, 1])]
+[ 11.5 s] shot:
+$ echo three >> a.txt
+$ git add a.txt
+$ git commit -qm 'third, seen by the stamp'
+$ cd /
+$
+                                     ╭────────────────────────╮
+                                     │not a git repository    │
+                                     ╰─────────────────── git ╯
+[ 11.5 s] typed: cd /home/peon/git/perso/ptyrc/ptyrc2/temp/live-git/work
+  back: after 0.7 s
+widgets: [('head', 'placed', 'work', [46, 3]), ('status', 'placed', 'status', [18, 1]), ('log', 'placed', 'log', [64, 3])]
+[ 12.5 s] $ ptyrc -s h manage ls (status 0)
+ID  KIND   STATE    SINCE      PID  NAME  ARGS
+ 1  child  running     9s  1536465  git   --manifest {"frame":0,"granted":["clock","probe-git"],"id":"git","limits":{},"permissions":[{"name":"clock"},{"name":"files"},{"name":"probe-git"}],"version":"0.1.0"} --script /home/peon/git/perso/ptyrc/ptyrc2/plugins/store-apps/git/app.js {"all":false,"branches":false,"cycle":8.0,"dirty":4.0,"every":5.0,"graph":false,"log":true,"merged":false,"monitor":null,"pulse":false,"repo":null,"stash":false,"status":true,"warn":false,"worktrees":false}

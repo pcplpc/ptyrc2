@@ -1,0 +1,2 @@
+# test_options: an unknown tag.
+-- --monitor head,ci

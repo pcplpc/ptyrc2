@@ -61,6 +61,20 @@ The protocol: `sdk/template/PROTOCOL.md`. The script API:
   change (headless never calls `stop`), read back by a second run
   (`--storage tests/stored`); the twin's faces by hashes (`twin.js`,
   made by `plan/sessions/22112026-01-migration/keys-pace/twin.py`).
+- `git`: a probe (`probe.git`): the answer, not the means; asked each
+  second with the last stamp (`unchanged` costs no read), without it
+  every `--every`; the answers as `--probe git=tests/X.json`, those of
+  the twin's states written by its script, one by `ptyrc dev probe
+  git` on a scratch repository; `Source` on a fake `call` under
+  `--unit`; the twin's faces by hashes (`twin.js`, made by
+  `plan/sessions/22112026-01-migration/probes-git/twin.py`).
+- `monitor`: a probe (`probe.system`): the parts of the monitors shown,
+  every `--every`; the answers as `--probe system=tests/X.json`, the
+  twin's data written by its script; not held, every part empty, the
+  empty states; `Source` on a fake `call`; the twin's faces by hashes
+  (`twin.js`, made by
+  `plan/sessions/22112026-01-migration/probes-monitor/twin.py`). A
+  value that changes is a live run's (`probes-monitor/live.txt`).
 
 ## A tree
 
@@ -101,7 +115,8 @@ source.
   Tenants: `digits.js` (`clock`, `timer`), `reef.js` (`fishes`,
   `tank`), `arcade.js`, `twister.js` (`snake`, `bricks`; `twister.js`
   `gallery`, `train`, `window` too: Python's `random.Random`, the twin's draws for a seed),
-  `foot.js` (`ask`, `note`: the twin's `ui.foot`), `sky.js`,
+  `foot.js` (`ask`, `note`: the twin's `ui.foot`), `rows.js` (`git`,
+  `monitor`: the twin's `monitor` helpers, `fit`, `items`, `table`), `sky.js`,
   `strip.js` (`train`, `window`: the twin's `_sky`, `_strip`, and
   `window.Era`, `drawn`; `strip.js` needs `sky.js` beside it; colours
   0xrrggbb, rounded half to even: the twin's pixels to the bit).
