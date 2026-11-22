@@ -31,7 +31,7 @@
 
 import { call, period, PtyrcError } from "ptyrc";
 import { Sight } from "ptyrc/sight";
-import { Batch, CALM, COLORS, Events, Fish, LENGTH, NEAR, NEAR_MOVING, Reef, SPECIES, choice, copysign, pad, randint, reach, sample, swim, uniform } from "./reef.js";
+import { Batch, CALM, COLORS, Events, Fish, LENGTH, NEAR, NEAR_MOVING, Reef, SPECIES, choice, copysign, inkSums, pad, randint, reach, sample, swim, uniform } from "./reef.js";
 
 export const BEAT = 1 / 30; // seconds a tick
 export const WAIT = [2.0, 5.0]; // seconds out of view before a fish goes
@@ -66,25 +66,36 @@ export function tide(cells, due, box, now, rnd, lengths = null) {
 /** For each spot of the view, `[x, y, n]`: `n` cells of a fish of
  * `length` there that `rows`, the view's text, hides. */
 export function cover(rows, box, length = LENGTH) {
+  return spots(rows, box, length, 0, true);
+}
+
+/** The spots where the text hides a fish but a cell at most. */
+export const hideouts = (rows, box, length = LENGTH) => spots(rows, box, length, length - 1, false);
+
+/** The spots of `cover` where `n` is `least` or more: `[x, y, n]`, or
+ * `[x, y]` but for `told`. */
+function spots(rows, box, length, least, told) {
   const [x0, y0, x1, y1] = box;
-  const out = [];
   const last = Math.max(x0, x1 - length);
+  const out = [];
   for (let y = y0; y <= y1 && y - y0 < rows.length; y++) {
-    const row = rows[y - y0];
     // Ink before each column: a sum over a window is a difference.
-    const before = [0];
-    for (let i = 0; i < row.length; i++) before.push(before[i] + (row[i] !== " " && row[i].trim() !== ""));
-    const ink = (i) => before[Math.min(i, row.length)];
-    for (let x = x0; x <= last; x++) out.push([x, y, ink(x - x0 + length) - ink(x - x0)]);
+    const ink = inkSums(rows[y - y0], last - x0 + length);
+    for (let x = x0; x <= last; x++) {
+      const n = ink[x - x0 + length] - ink[x - x0];
+      if (n >= least) out.push(told ? [x, y, n] : [x, y]);
+    }
   }
   return out;
 }
 
-/** The spots where the text hides a fish but a cell at most. */
-export const hideouts = (rows, box, length = LENGTH) =>
-  cover(rows, box, length)
-    .filter(([, , n]) => n >= length - 1)
-    .map(([x, y]) => [x, y]);
+/** The spot of `spots` that is `cell`, or null. */
+function among(spots, cell) {
+  if (cell === null) return null;
+  const [x, y, n] = [cell[0], cell[1], cell.length];
+  for (const s of spots) if (s[0] === x && s[1] === y && s.length === n && (n <= 2 || same(s, cell))) return s;
+  return null;
+}
 
 /** Where a shy fish heads, kept in `fish.home`; null for a bold one, or
  * when no spot is out of the cursor's reach. `spots`: `hideouts`. The
@@ -97,7 +108,7 @@ export function lure(fish, spots, cursor, dt, rnd) {
   }
   const n = fish.length;
   const safe = cursor === null ? spots : spots.filter((s) => reach(s[0], s[1], cursor, n) >= NEAR_MOVING);
-  const home = safe.find((s) => same(s, fish.home)) ?? null;
+  const home = among(safe, fish.home);
   if (home === null) fish.home = null;
   else if (same(fish.cell.slice(0, 2), home)) {
     fish.stay -= dt;
@@ -109,12 +120,20 @@ export function lure(fish, spots, cursor, dt, rnd) {
     }
   }
   if (fish.home === null && safe.length) {
-    let best = null;
+    // The nearest, a draw a spot to break the ties. A spot farther by
+    // its square than the best by more than rounding cannot win.
+    const [fx, fy] = [fish.x, fish.y];
+    let [best, near, square, tie] = [null, 0, Infinity, 0];
     for (const s of safe) {
-      const key = [Math.hypot(s[0] - fish.x, s[1] - fish.y), rnd()];
-      if (!best || key[0] < best[0][0] || (key[0] === best[0][0] && key[1] < best[0][1])) best = [key, s];
+      const dx = s[0] - fx;
+      const dy = s[1] - fy;
+      const d2 = dx * dx + dy * dy;
+      const r = rnd();
+      if (d2 > square * (1 + 1e-9)) continue;
+      const d = Math.hypot(dx, dy);
+      if (best === null || d < near || (d === near && r < tie)) [best, near, square, tie] = [s, d, d2, r];
     }
-    fish.home = best[1];
+    fish.home = best;
     fish.stay = uniform(rnd, ...STAY);
   }
   return fish.home;
