@@ -2,15 +2,15 @@
 
 # `ptyrc2` - the pty remote controller
 
-Wrap your favorite tools in a terminal driver, which accepts clients that can
+Wrap your favorite tools in a terminal driver which accepts clients that can
 customize what you see:
 
 ![main-demo](doc/main.gif)
 
-This can drive anything that works in a terminal, like
+**This can drive anything that works in a terminal** like
 [selenium](https://www.selenium.dev/) can drive anything a browser can do.
 
-This started as [`ptyrc`](https://github.com/pcplpc/ptyrc), a wrapper around
+This started as [`ptyrc`](https://github.com/pcplpc/ptyrc) — a wrapper around
 [`pty`](https://docs.python.org/3/library/pty.html) made by hand with love.
 Now rebuild with the machine.
 
@@ -30,7 +30,7 @@ Then attach an application to it:
 ptyrc app bricks
 ```
 
-Attach an existing `tmux` session using `ptyrc tmux attach`.
+Attach an existing `tmux` session by running `ptyrc tmux attach` inside.
 
 Then use `ctrl+t ctrl+t` inside to manage the running driver and start clients:
 
