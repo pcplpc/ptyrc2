@@ -394,12 +394,56 @@ export function depths(rows, width) {
   return out;
 }
 
-const inked = (row, x) => x < row.length && row[x].trim() !== "";
+/** Ink before each column of `row`, `width` cells: `[0, ...]`, a sum
+ * over a window a difference. Ink: a cell that is not white space. */
+export function inkSums(row, width) {
+  const out = new Int32Array(width + 1);
+  const n = Math.min(width, row.length);
+  for (let x = 0; x < width; x++) {
+    let k = 0;
+    if (x < n) {
+      const c = row.charCodeAt(x);
+      k = c === 32 || (c >= 9 && c <= 13) ? 0 : c < 128 ? 1 : row[x].trim() !== "" ? 1 : 0;
+    }
+    out[x + 1] = out[x] + k;
+  }
+  return out;
+}
 
-/** `inked` of the cells of `rows`, `width` a row: what `stand` takes
- * as `ink`, read once for all its calls on the same rows. */
+/** The ink of `rows`, `width` a row, read once for all the calls of
+ * `stand` on the same rows. `sums`: `inkSums` of each row; `clear`:
+ * for each cell, the free rows right above it; `runs`: those of `free`,
+ * kept. */
 export function inkOf(rows, width) {
-  return rows.map((row) => Array.from({ length: width }, (_, x) => inked(row, x)));
+  const sums = rows.map((row) => inkSums(row, width));
+  const clear = [];
+  for (let y = 0; y < rows.length; y++) {
+    const c = new Int32Array(width);
+    if (y > 0) {
+      const [up, s] = [clear[y - 1], sums[y - 1]];
+      for (let x = 0; x < width; x++) c[x] = s[x + 1] === s[x] ? up[x] + 1 : 0;
+    }
+    clear.push(c);
+  }
+  return { width, sums, clear, runs: new Map() };
+}
+
+/** The runs of columns free for `h` rows above row `g`: `[a, b, ...]`,
+ * columns `a` to `b - 1`. */
+function free(ink, g, h) {
+  const key = `${g},${h}`;
+  let out = ink.runs.get(key);
+  if (out) return out;
+  out = [];
+  const [clear, width] = [ink.clear[g], ink.width];
+  for (let x = 0; x < width; x++) {
+    if (clear[x] < h) continue;
+    const a = x;
+    while (x < width && clear[x] >= h) x++;
+    out.push(a, x);
+  }
+  ink.runs.set(key, out);
+  return out;
 }
 
 /** Columns where a box of `w` x `h` cells stands on row `g` of `rows`,
@@ -407,17 +451,15 @@ export function inkOf(rows, width) {
  * box free, and a free column on each side. */
 export function stand(rows, g, width, w, h, ink = null) {
   if (!(h <= g && g < rows.length)) return [];
-  const at = ink ? (y, x) => ink[y][x] : (y, x) => inked(rows[y], x);
-  const shut = new Array(width).fill(false);
-  for (let y = g - h; y < g; y++) for (let x = 0; x < width; x++) shut[x] ||= at(y, x);
+  if (ink === null || ink.width !== width) ink = inkOf(rows, width);
+  const sums = ink.sums[g];
+  const runs = free(ink, g, h);
   const out = [];
-  for (let x = 0; x <= width - w; x++) {
-    let ground = 0;
-    for (let i = x; i < x + w; i++) ground += at(g, i);
-    if (3 * ground < 2 * w) continue;
-    let free = true;
-    for (let i = Math.max(0, x - 1); i < Math.min(width, x + w + 1) && free; i++) free = !shut[i];
-    if (free) out.push(x);
+  for (let i = 0; i < runs.length; i += 2) {
+    // The box and a column each side in the run, but at an edge.
+    const [a, b] = [runs[i], runs[i + 1]];
+    const last = Math.min(width - w, b === width ? width - w : b - 1 - w);
+    for (let x = a === 0 ? 0 : a + 1; x <= last; x++) if (3 * (sums[x + w] - sums[x]) >= 2 * w) out.push(x);
   }
   return out;
 }
