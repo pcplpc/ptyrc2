@@ -1,0 +1,2 @@
+# test_marks: a pattern that is no regular expression is refused.
+-e (

@@ -1,0 +1,2 @@
+# test_reads (-a): words of the text, 4 letters or more; no bold.
+--size 40x12 --for 1.5s --at 1.5s --screen tests/reads.screen -a

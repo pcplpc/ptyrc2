@@ -17,7 +17,7 @@
 // (`frame.heat`, `shape`; without it, cold everywhere) and aims at a
 // cold cell, away from the previous ones.
 
-import { call, exit, period } from "ptyrc";
+import { call, exit, manifest, period } from "ptyrc";
 
 export const PERIOD = 3000;
 export const MAX_BURSTS = 10; // the max of --bursts in the manifest
@@ -303,19 +303,27 @@ export class Show {
 }
 
 let show = null;
+let frame = 0; // the frame told: at `init`, by `move`
 
-function heat() {
-  return call("frame.heat", {}).classes;
+/** The heat classes of the frame told; `c`: the host's `call`. */
+export function heat(c = call) {
+  return c("frame.heat", { frame }).classes;
 }
 
 export function init(args) {
   const o = options(args);
+  frame = manifest()?.frame ?? 0;
+  call("subscribe", { topics: ["move"] });
   const put = (sprite) => call("draw.put", sprite);
-  show = new Show(o, { put, heat, rnd: Math.random }, Date.now());
+  show = new Show(o, { put, heat: () => heat(), rnd: Math.random }, Date.now());
   show.sparkle();
   period(33);
 }
 
 export function tick(now) {
   if (!show.step(now) && show.o.oneShot) exit(0);
+}
+
+export function event(topic, data) {
+  if (topic === "move" && data?.frame != null) frame = data.frame;
 }

@@ -1,0 +1,2 @@
+# front denied: the flower grows, its word is not redrawn in bold.
+--size 40x12 --for 1s --at 1s --styles --screen tests/word.screen --deny front

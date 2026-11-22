@@ -1,0 +1,6 @@
+# test_snow: it lies over the line, a cell away from the prompt of its
+# own row, and on the floor, two rows deep at most; none over the text.
+# The line written again at 12 s, every cell: its snow melts; the floor
+# keeps its own. (The twin tunes the rate to 0 first: the effect's.)
+--for 16s --at 11s,13s,16s --cover --rate 200 --wind 0 --max-depth 2
+--screen tests/line.screen --screen 12s:tests/changed.screen

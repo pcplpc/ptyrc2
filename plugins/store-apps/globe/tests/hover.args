@@ -1,0 +1,3 @@
+# test_shaker: the pointer over the globe (hover, its own widget)
+# shakes it: the snow swirls, then falls thick.
+--size 80x24 --for 6s --at 1.4s,1.6s,2s,6s --pointer 1.5s:40,12 --pointer 1.6s:41,12

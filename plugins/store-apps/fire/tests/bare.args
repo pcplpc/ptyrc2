@@ -1,0 +1,3 @@
+# test_fire (bare): one widget, the largest variant, the flame in
+# glyphs, border round; test_print (the scene of each size: unit tests).
+--size 80x24 --for 3s --at 2s,3s

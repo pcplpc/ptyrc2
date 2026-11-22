@@ -1,0 +1,5 @@
+--- 1000 ms
+refused at 0 ms: screen.find (bad-params)
+lowered at 0 ms: frame.get, to the degree shape
+lowered at 0 ms: screen.find, to the degree shape
+ended: exit: 1

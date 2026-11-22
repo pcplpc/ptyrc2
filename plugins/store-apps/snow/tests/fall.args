@@ -1,0 +1,2 @@
+# test_snow_without_cover: by default the flakes only fall.
+--for 4s --at 2s,4s --rate 900 --wind 0 --screen tests/line.screen

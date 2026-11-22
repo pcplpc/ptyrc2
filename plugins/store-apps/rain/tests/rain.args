@@ -1,0 +1,3 @@
+# test_rain: drops splash on the row over the line of text and on the
+# floor; behind the text, nothing shows.
+--for 2500ms --at 1s,2500ms --rate 300 --screen tests/line.screen

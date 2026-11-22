@@ -1,0 +1,3 @@
+# test_reads (`--no-hud food`): the marks alone, no display; nothing
+# lowered but the degree of the cut answers.
+--for 1s --styles --screen tests/food.screen --no-hud food

@@ -1,0 +1,2 @@
+# test_max_depth: --max-depth must not be negative.
+--cover --max-depth -1

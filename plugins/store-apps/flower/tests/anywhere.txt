@@ -1,0 +1,50 @@
+--- 1000 ms
+
+       ,-.-,
+     ( \ / )
+      ) o (      ,-,
+     ( / \ )    ( o )
+      `-'-'      `-'
+       \|/       \|/
+        |         |
+garden of stones
+--- 1000 ms, styles
+
+       ababa
+     b b b b
+      b c b      ddd
+     b b b b    d d d
+      babab      ddd
+       eee       ddd
+        e         d
+a: fg=214
+b: fg=198
+c: fg=214 bold
+d: fg=28
+e: fg=34
+--- 3000 ms
+
+      ,-.-,     ,-.-,
+     ( \ / )   ( \ / )
+      ) o (     ) o (
+     ( / \ )   ( / \ )
+      `-'-'     `-'-'
+       \|/       \|/
+        |         |
+garden of stones
+--- 3000 ms, styles
+
+      ababa     ccccc
+     a a a a   c c c c
+      a d a     c e c
+     a a a a   c c c c
+      ababa     ccccc
+       fff       ggg
+        f         g
+a: fg=198
+b: fg=214
+c: fg=141
+d: fg=214 bold
+e: fg=220 bold
+f: fg=34
+g: fg=28

@@ -1,0 +1,2 @@
+# The default: 20 drops a second over 80 columns, on a blank pane.
+--for 3s --at 3s

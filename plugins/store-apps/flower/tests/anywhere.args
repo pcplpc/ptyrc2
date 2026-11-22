@@ -1,0 +1,2 @@
+# test_flower_anywhere: -a, flowers next to words of the text, no bold.
+--size 40x12 --for 3s --at 1s,3s --styles --screen tests/garden.screen -a

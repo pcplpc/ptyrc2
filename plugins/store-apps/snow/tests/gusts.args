@@ -1,0 +1,2 @@
+# The default: 14 flakes a second, the wind gusting every 6 to 15 s.
+--for 20s --at 20s

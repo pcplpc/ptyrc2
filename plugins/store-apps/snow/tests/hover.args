@@ -1,0 +1,4 @@
+# test_hover, test_reads (--hover: nothing lowered): the pointer on the
+# floor takes the snow there, three cells of its row; beside it the
+# snow stays; the pointer at rest, it snows there again.
+--for 20s --at 9s,11s,20s -a --rate 900 --wind 0 --pointer 10s:40,23

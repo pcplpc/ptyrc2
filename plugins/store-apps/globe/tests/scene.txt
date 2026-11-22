@@ -1,0 +1,1 @@
+ptyrc: --scene: "boat": one of church, fir, house, snowman

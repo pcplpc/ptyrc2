@@ -1,0 +1,23 @@
+--- 500 ms
+
+
+flower
+
+
+
+                    o
+                   \|
+                    |
+                       flower
+--- 2000 ms
+        \|/
+        -*-
+flower  /|\
+         |
+        \|          \|/
+                    -*-
+                    /|\
+                    /
+                   \|
+                       flower
+lowered at 0 ms: frame.get, to the degree words

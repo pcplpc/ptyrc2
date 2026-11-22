@@ -1,0 +1,19 @@
+--- 1000 ms
+cat food.txt                                                            food  3
+food: rice, fish
+more food
+$
+--- 1000 ms, styles
+    aaaa                                                              bccccccddd
+aaaa
+     aaaa
+a: bg=226
+b: bg=236
+c: fg=16 bg=226
+d: fg=226 bg=236 bold
+lowered at 0 ms: frame.get, to the degree none
+lowered at 0 ms: screen.find, to the degree none
+lowered: shape, declared and answered no
+lowered: layout, not declared: fine if intended; else the manifest would ask for it: [permissions] layout = "..."
+lowered: front, declared and answered no
+note: declaring less is good: the user is asked less, and a lowered answer is an answer

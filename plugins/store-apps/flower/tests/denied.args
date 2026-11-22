@@ -1,0 +1,2 @@
+# words denied: "flower" is not shown in the shape, nothing grows.
+--size 40x12 --for 1.5s --at 1.5s --screen tests/reads.screen --deny words

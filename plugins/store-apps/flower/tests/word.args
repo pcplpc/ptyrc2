@@ -1,0 +1,3 @@
+# test_flower: one flower off the row of "a flower", the word bold
+# over the text (a tint in front); it grows, then sways.
+--size 40x12 --for 2s --at 0.5s,1s,2s --styles --screen tests/word.screen

@@ -8,13 +8,14 @@
 // `bomb` in its params): `--hover` the cell under it, `--bomb` a press
 // released on the pile. The app is told nothing.
 
-import { call, exit, log, period, random } from "ptyrc";
+import { call, exit, log, manifest, period, random } from "ptyrc";
 
 const MAX_RATE = 1000;
 const LOOK = 500; // ms between two looks at a pane not idle yet
 
 let opts;
 let sand = null; // the effect's sprite
+let frame = 0; // the frame told: at `init`, by `move`
 
 function u32() {
   const b = random(4);
@@ -35,6 +36,11 @@ export function options(args) {
   };
 }
 
+/** Whether the frame told is idle; `c`: the host's `call`. */
+export function idle(c = call) {
+  return c("frame.idle", { frame }).idle;
+}
+
 function pour() {
   const params = { rate: opts.rate, cursor: opts.cursor, seed: u32() };
   if (opts.hover) params.pointer = true;
@@ -49,20 +55,23 @@ function pour() {
 
 export function init(args) {
   opts = options(args);
+  frame = manifest()?.frame ?? 0;
   if (opts.now) return pour();
   // The event, and a look at each tick: a host may tell no `idle`.
-  call("subscribe", { topics: ["idle"] });
-  if (call("frame.idle", {}).idle) pour();
+  call("subscribe", { topics: ["idle", "move"] });
+  if (idle()) pour();
   else period(LOOK);
 }
 
 export function tick() {
   if (sand !== null) period(0);
-  else if (call("frame.idle", {}).idle) pour();
+  else if (idle()) pour();
 }
 
 export function event(topic, data) {
-  if (topic === "idle" && sand === null && data.idle) {
+  if (topic === "move" && data?.frame != null) frame = data.frame;
+  const mine = data?.frame == null || data.frame === frame;
+  if (topic === "idle" && sand === null && data.idle && mine) {
     pour();
     period(0);
   }

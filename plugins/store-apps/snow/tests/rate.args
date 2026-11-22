@@ -1,0 +1,2 @@
+# test_snow: a negative rate is refused.
+--rate -1

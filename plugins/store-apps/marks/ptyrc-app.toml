@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "marks"
+version = "0.2.0"
+summary = "Highlight the matches of patterns."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "frame"
+frame = "raw"
+random = []
+
+# The patterns given are the user's: `screen.find` of each is answered
+# as under `text`, remembered rows too; the app reads no other text.
+
+[permissions]
+shape = "when the text changes, to find the patterns again"
+front = "the matches tinted over the text; the counts"
+
+[options]
+regex = { type = "pattern", list = true, regex = true, short = "e", doc = "a regular expression to mark; may be repeated" }
+ignore-case = { type = "bool", default = false, short = "i", doc = "ignore case" }
+hud = { type = "bool", default = true, doc = "a display of the counts" }
+
+[args]
+patterns = { type = "pattern", min = 0, max = 16, doc = "text to mark" }

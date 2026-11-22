@@ -1,0 +1,2 @@
+# test_options_between_the_words: options between the patterns.
+--for 1s --styles --screen tests/food.screen -- FOOD -i FISH

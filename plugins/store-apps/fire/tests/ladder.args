@@ -1,0 +1,4 @@
+# test_print (the variants): the screen shrinks, the driver picks a
+# smaller variant; -b -l: the hearth, the brazier, the candle.
+--size 80x24 --for 8s --at 2.5s,4.5s,6.5s,8s -b -l
+--resize 2.6s:44x14 --resize 4.6s:24x9 --resize 6.6s:18x8

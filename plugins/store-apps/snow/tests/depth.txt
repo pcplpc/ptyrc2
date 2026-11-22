@@ -1,0 +1,1 @@
+ptyrc: --max-depth: -1: at least 0

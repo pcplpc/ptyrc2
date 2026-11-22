@@ -1,0 +1,2 @@
+# test_fuel, test_embers: -c --burn 10, a log alight, then embers.
+--size 50x16 --for 9.5s --at 3s,9.5s -c -l --burn 10

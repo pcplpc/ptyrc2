@@ -1,0 +1,24 @@
+--- 1000 ms
+
+
+
+
+
+        (@)
+          \
+          |
+a flower
+--- 1000 ms, styles
+
+
+
+
+
+        aba
+          c
+          c
+a: fg=219
+b: fg=231 bold
+c: fg=40
+lowered at 0 ms: frame.get, to the degree words
+lowered: front, declared and answered no

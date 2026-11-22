@@ -1,0 +1,3 @@
+# The matches of the view, on a screen scrolled: headless remembers no
+# row past the top: the count is of the view alone.
+--size 40x8 --for 1s --styles --screen tests/long.screen food

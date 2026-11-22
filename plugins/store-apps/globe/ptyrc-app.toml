@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "globe"
+version = "0.2.0"
+summary = "A snow globe in a quiet room of the screen, shaken now and then."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "widget"
+frame = "raw"
+random = [[], ["-a"]]
+
+# It reads nothing: the driver places the widget. Hover on its own
+# widget, the default profile, shakes the globe.
+
+[options]
+shake = { type = "bool", default = false, short = "k", doc = "shaken now and then" }
+drift = { type = "bool", default = false, short = "d", doc = "the snow lies" }
+lights = { type = "bool", default = false, short = "l", doc = "a lit window, a garland, a glint" }
+random = { type = "bool", default = false, short = "r", doc = "a scene at random, one a shake" }
+all = { type = "bool", default = false, short = "a", doc = "-k -d -l -r" }
+scene = { type = "string", choices = ["church", "fir", "house", "snowman"], doc = "the scene [default: house]" }
+every = { type = "float", default = 45.0, doc = "with -k: seconds between two shakes, more than 0" }

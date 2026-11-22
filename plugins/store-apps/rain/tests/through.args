@@ -1,0 +1,2 @@
+# test_rain, -t: the drops fall behind the line too, down to the floor.
+--for 2500ms --at 1s,2500ms --rate 300 -t --screen tests/line.screen

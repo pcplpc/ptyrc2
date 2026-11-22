@@ -1,0 +1,5 @@
+# test_marks: three matches on the row of the output, a colour a
+# pattern, and the display of the counts; new text marked when it
+# shows, without asking (typed, then printed).
+--for 2s --at 1s,2s --styles --screen tests/fruit.screen --screen 1500ms:tests/more.screen
+apple -i -e p[ea]+r

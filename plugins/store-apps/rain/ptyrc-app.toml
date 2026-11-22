@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "rain"
+version = "0.2.0"
+summary = "Quiet rain behind the text."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "frame"
+frame = "raw"
+
+# The effect `rain` of the driver reads the text, the cursor and the
+# heat under it, and follows the frame: the app reads nothing.
+
+[options]
+rate = { type = "float", default = 20.0, min = 0.0, max = 2000.0, doc = "drops per second over 80 columns" }
+transparent = { type = "bool", default = false, short = "t", doc = "the drops fall through the text and the cursor, down to the bottom of the pane" }

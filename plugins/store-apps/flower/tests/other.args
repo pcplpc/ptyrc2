@@ -1,0 +1,3 @@
+# test_reads (--word WORDS): that word, not "flower"; held by the
+# option, with words denied.
+--size 40x12 --for 1.5s --at 1.5s --screen tests/reads.screen --word WORDS --deny words

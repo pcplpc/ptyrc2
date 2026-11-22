@@ -1,0 +1,3 @@
+# test_reads (--word "of a"): not a word, refused at the start (the
+# twin looked for it in the text).
+--size 40x12 --word of-a

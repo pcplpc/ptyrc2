@@ -11,7 +11,9 @@ import {
   POPS,
   SHAPES,
   Show,
+  event,
   flight,
+  heat,
   options,
   rocket,
   spot,
@@ -228,4 +230,14 @@ export function test_avoids_hot() {
   const log = run({ bursts: 2, duration: 0.3, fancy: true }, 2, { stop: 13, classes });
   assertEqual(log.length, 13);
   assert(log.every(([, s]) => origin(s)[1] >= 12));
+}
+
+// The frame told (`init`, `move`) named in each read.
+export function test_frame_told() {
+  const log = [];
+  const c = (m, p) => (log.push([m, p]), { classes: [] });
+  heat(c);
+  event("move", { frame: 7 });
+  heat(c);
+  assertEqual(log, [["frame.heat", { frame: 0 }], ["frame.heat", { frame: 7 }]]);
 }

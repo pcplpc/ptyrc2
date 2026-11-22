@@ -1,0 +1,24 @@
+--- 1000 ms
+food 14                         food  7
+food 15
+food 16
+food 17
+food 18
+food 19
+food 20
+$
+--- 1000 ms, styles
+aaaa                          bccccccddd
+aaaa
+aaaa
+aaaa
+aaaa
+aaaa
+aaaa
+a: bg=226
+b: bg=236
+c: fg=16 bg=226
+d: fg=226 bg=236 bold
+lowered at 0 ms: frame.get, to the degree shape
+lowered at 0 ms: screen.find, to the degree shape
+note: the screen at 0 ms: 13 rows past 8, scrolled off the top, as a terminal does

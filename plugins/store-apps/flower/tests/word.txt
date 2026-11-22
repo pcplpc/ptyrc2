@@ -1,0 +1,71 @@
+--- 500 ms
+
+
+
+
+
+
+          o
+          |
+a flower
+--- 500 ms, styles
+
+
+
+
+
+
+          a
+          a
+  bbbbbb
+a: fg=40
+b: bold
+--- 1000 ms
+
+
+
+
+
+        (@)
+          \
+          |
+a flower
+--- 1000 ms, styles
+
+
+
+
+
+        aba
+          c
+          c
+  dddddd
+a: fg=219
+b: fg=231 bold
+c: fg=40
+d: bold
+--- 2000 ms
+
+
+
+
+
+         (@)
+          |
+          |
+a flower
+--- 2000 ms, styles
+
+
+
+
+
+         aba
+          c
+          c
+  dddddd
+a: fg=198
+b: fg=231 bold
+c: fg=40
+d: bold
+lowered at 0 ms: frame.get, to the degree words

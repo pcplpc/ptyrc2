@@ -1,0 +1,2 @@
+# test_reads (flower, bare): the word "flower" alone, under words.
+--size 40x12 --for 1.5s --at 1.5s --screen tests/reads.screen

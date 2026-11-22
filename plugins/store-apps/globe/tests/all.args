@@ -1,0 +1,3 @@
+# test_globe (-a; --prefer is the launcher's): shaken, the snow lies,
+# lights, a scene at random.
+--size 80x24 --for 3s --at 2s,3s -a

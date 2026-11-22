@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "flower"
+version = "0.2.0"
+summary = "Flowers planted next to a word of the screen."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "frame"
+frame = "largest"
+random = [["-a"]]
+
+# The word: the view's shape with it shown (`screen.shape {words}`);
+# `--word` is held by the option, the default by `words`. `-a`: words
+# of the text (`screen.text`, `screen.find`).
+
+[permissions]
+shape = "where the text is still, to plant next to its word"
+words = { list = ["flower"], why = "where its word is, to grow next to it" }
+front = "its word redrawn in bold, over the text"
+text = "the words of the screen, to grow next to any (-a)"
+
+[options]
+word = { type = "word", doc = "the word [default: flower]" }
+anywhere = { type = "bool", default = false, short = "a", needs = ["text"], doc = "draw flowers anywhere: next to words of the screen, renewed" }
+count = { type = "int", min = 0, doc = "number of flowers; 0: one per match, with -a 10 to 30 [default: 1; with -a, 5]" }

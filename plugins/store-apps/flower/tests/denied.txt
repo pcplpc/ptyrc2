@@ -1,0 +1,7 @@
+--- 1500 ms
+food fish_toy flower WORDS of a
+
+toy
+lowered at 0 ms: frame.get, to the degree shape
+lowered at 50 ms: screen.shape, to the degree shape
+lowered: words, declared and answered no

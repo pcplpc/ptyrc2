@@ -1,0 +1,2 @@
+# test_fire (-a): blocks, logs, cycle, sparks, glow; the hearth border.
+--size 80x24 --for 3s --at 2s,3s -a

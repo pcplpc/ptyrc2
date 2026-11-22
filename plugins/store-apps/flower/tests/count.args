@@ -1,0 +1,2 @@
+# --count 0: a flower a match, one a scan.
+--size 40x12 --for 2s --at 0.5s,2s --screen tests/two.screen --count 0

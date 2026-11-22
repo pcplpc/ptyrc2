@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "snow"
+version = "0.2.0"
+summary = "Snow; with --cover it lies on the lines of text and melts where they change."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "frame"
+frame = "raw"
+
+# The effect `snow` of the driver reads the text, the cursor and the
+# heat under it, and follows the frame. The driver tells it the pointer
+# (`--hover`): the app reads nothing and is told nothing.
+
+[options]
+rate = { type = "float", default = 14.0, min = 0.0, max = 1000.0, doc = "flakes per second over 80 columns" }
+cover = { type = "bool", default = false, doc = "the snow lies on the text and the floor; else it only falls" }
+wind = { type = "float", default = -1.0, min = -20.0, max = 20.0, doc = "drift, columns per second, < 0 to the left; it gusts; 0: none" }
+max-depth = { type = "int", min = 0, doc = "with --cover: rows a pile of snow holds; 0: no limit [default: 3; 0 with --all]" }
+hover = { type = "bool", default = false, doc = "the host mouse takes the snow it is over, and what falls there" }
+all = { type = "bool", default = false, short = "a", doc = "--cover and --hover; --max-depth is 0 unless given" }

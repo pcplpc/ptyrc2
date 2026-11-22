@@ -1,0 +1,4 @@
+# test_print (every globe): the screen shrinks, the driver picks a
+# smaller variant, 30x13 to 11x5.
+--size 80x24 --for 8s --at 2.5s,4.5s,6.5s,8s
+--resize 2.6s:44x14 --resize 4.6s:36x11 --resize 6.6s:20x8

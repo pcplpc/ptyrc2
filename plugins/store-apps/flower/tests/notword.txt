@@ -1,0 +1,1 @@
+ptyrc: --word: "of-a": a word is 3 to 32 letters or digits, whole; to find anything else the app must ask text
