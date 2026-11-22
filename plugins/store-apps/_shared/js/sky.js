@@ -188,11 +188,16 @@ export class Sky {
     this.stars = (1 - step(-13.0, -3.0, this.sun)) * (1 - this.cover) * (1 - 0.35 * this.moonlight);
     this.season = seasonOf(this.day, this.lat);
     this.shades = new Map(); // `c,depth` -> shaded
+    this.columns = new Map(); // `u` -> `column(u)`
     this._ambient = null;
     this._haze = null;
   }
 
-  clear(u, v) {
+  /** What `clear` takes of `u` alone: `[zenith, horizon, glow]`, kept
+   * a column. */
+  column(u) {
+    let out = this.columns.get(u);
+    if (out !== undefined) return out;
     const [i, t] = keyed(KEYS, this.sun);
     const low = this.hour < 12 ? DAWN : DUSK;
     const ends = [];
@@ -204,14 +209,22 @@ export class Sky {
       }
       ends.push([zenith, horizon]);
     }
-    const zenith = mix(ends[0][0], ends[1][0], t);
-    const horizon = mix(ends[0][1], ends[1][1], t);
-    let c = mix(zenith, horizon, Math.min(1.0, Math.max(0.0, v)) ** 1.6);
+    let glow = null;
     if (-8.0 < this.sun && this.sun < 30.0) {
       const near = Math.exp(-(((u - this.sunX) / 0.22) ** 2));
       const height = step(-8.0, 1.0, this.sun) * (1 - step(8.0, 30.0, this.sun));
-      c = mix(c, GLOW, 0.45 * near * height * Math.max(0.0, v) ** 2);
+      glow = 0.45 * near * height;
     }
+    out = [mix(ends[0][0], ends[1][0], t), mix(ends[0][1], ends[1][1], t), glow];
+    if (this.columns.size >= 1024) this.columns.clear();
+    this.columns.set(u, out);
+    return out;
+  }
+
+  clear(u, v) {
+    const [zenith, horizon, glow] = this.column(u);
+    let c = mix(zenith, horizon, Math.min(1.0, Math.max(0.0, v)) ** 1.6);
+    if (glow !== null) c = mix(c, GLOW, glow * Math.max(0.0, v) ** 2);
     if (this.moonlight) c = mix(c, rgb(70, 90, 160), 0.22 * this.moonlight);
     return c;
   }
