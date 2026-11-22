@@ -2,5 +2,5 @@ origin = "https://github.com/pcplpc/ptyrc2"
 manifest = "sdk/js/examples/confetti/ptyrc-app.toml"
 
 [[version]]
-commit = "5edcc80d4ecf89d58c1fed44adf6e58ad24900d8"
+commit = "53eeec6f8eeaf259e41ab083e7163dad0d6dbcc6"
 tier = "untested"
