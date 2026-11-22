@@ -1,0 +1,4 @@
+# test_hover_and_title: the pointer on a glass alone: the time over the
+# neck, while it stays.
+--size 16x13 --for 6s --at 2s,3.5s,5.5s --pointer 3s:7,5
+-g 10m

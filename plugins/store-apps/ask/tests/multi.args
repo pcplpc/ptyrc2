@@ -1,0 +1,5 @@
+# test_written (a list): -m, `--default b` ticked; `a` ticked by
+# `space`: the result `["a","b"]`.
+--size 40x12 --for 2.5s --at 1.7s --styles
+--focus 1.5s:ask --key 1.6s:up --key 1.65s:space --key 2s:enter
+-m Which? a b c --default b

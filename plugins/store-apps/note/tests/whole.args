@@ -1,0 +1,4 @@
+# test_options (--print), test_fits_or_not, test_reads (a file named,
+# read, nothing lowered): the note wrapped, its largest face, round.
+--size 80x24 --for 1.5s
+-- tests/TODO.md

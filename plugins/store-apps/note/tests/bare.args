@@ -1,0 +1,3 @@
+# test_options (--print nope.md), test_reads: no file named: TODO.md of
+# the working directory, absent: "no TODO.md"; to be written, so named.
+--size 40x8 --for 1.5s

@@ -1,0 +1,5 @@
+# test_glass_drawn, test_hover_and_title: -g, the glass and the digits
+# beside it; smaller, the glass alone, the time its title.
+--size 80x24 --for 12s --at 2s,5s,8s,11s --resize 2.5s:40x14 --resize 5.5s:20x16
+--resize 8.5s:16x11
+-g 2m

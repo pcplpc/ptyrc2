@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "gallery"
+version = "0.1.0"
+summary = "Framed pictures, hung one after the other."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "widget"
+frame = "raw"
+assets = "pictures/"
+random = [[], ["-a"]]
+
+[permissions]
+files = "the pictures named: a --file, the *.pic of a --dir"
+
+[options]
+every = { type = "string", default = "10m", doc = "a picture hangs this long: 90, 30s, 10m, 1h" }
+kind = { type = "string", doc = "kinds to hang, comma separated: portrait, landscape, still, animal, abstract, silly [default: all]" }
+file = { type = "file", list = true, doc = "a picture file; may be repeated" }
+dir = { type = "dir", list = true, doc = "a directory of *.pic; may be repeated" }
+move = { type = "bool", default = false, short = "m", doc = "the pictures move" }
+label = { type = "bool", default = false, short = "l", doc = "the plate names the author too" }
+hover = { type = "bool", default = false, short = "o", doc = "under the pointer: eyes follow it, the plate names the author" }
+wall = { type = "bool", default = false, short = "w", doc = "three pictures at once" }
+all = { type = "bool", default = false, short = "a", doc = "-m -l -o -w" }
+count = { type = "int", doc = "pictures at once [default: 1; -w: 3]" }
+candidates = { type = "bool", default = false, doc = "every picture of the collection, not the ship list only" }

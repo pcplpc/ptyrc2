@@ -1,0 +1,107 @@
+before: '# List\n\n- [ ] first\n- [x] second\n' mode 0o640
+$ ptyrc -s h app ptyrc/note -i -c TODO.md (status 0)
+1 note: running
+widget: [{'tag': 'note', 'state': 'placed', 'asks': 'quiet', 'focused': False, 'title': 'TODO.md 1/2'}]
+$ ptyrc -s h shot --sprites --no-cursor (status 0)
+<svg xmlns="http://www.w3.org/2000/svg" width="588.0" height="360.0" viewBox="0 0 588.0 360.0" font-family="DejaVu Sans Mono, Menlo, Consolas, Liberation Mono, monospace" font-size="14">
+<rect width="100%" height="100%" fill="#000000"/>
+<text x="84.0" y="121.5" textLength="420.0" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">╭────────────────────────────────────────────────╮</text>
+<text x="84.0" y="139.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="92.4" y="139.5" textLength="184.8" lengthAdjust="spacingAndGlyphs" fill="#00cd00" xml:space="preserve">━━━━━━━━━━━━━━━━━━━━━━</text>
+<text x="277.2" y="139.5" textLength="184.8" lengthAdjust="spacingAndGlyphs" fill="#7f7f7f" xml:space="preserve">──────────────────────</text>
+<text x="470.4" y="139.5" textLength="25.2" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" font-weight="bold" xml:space="preserve">1/2</text>
+<text x="495.6" y="139.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="84.0" y="157.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="92.4" y="157.5" textLength="33.6" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" font-weight="bold" xml:space="preserve">List</text>
+<text x="495.6" y="157.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="84.0" y="175.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="495.6" y="175.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="84.0" y="193.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="92.4" y="193.5" textLength="58.8" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">☐ first</text>
+<text x="495.6" y="193.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="84.0" y="211.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="92.4" y="211.5" textLength="67.2" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">☑ second</text>
+<text x="495.6" y="211.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="84.0" y="229.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="495.6" y="229.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">│</text>
+<text x="84.0" y="247.5" textLength="268.8" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">╰───────────────────────────────</text>
+<text x="361.2" y="247.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00cdcd" opacity="0.6" xml:space="preserve">&gt;</text>
+<text x="369.6" y="247.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold" xml:space="preserve">&gt;</text>
+<text x="378.0" y="247.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00cdcd" opacity="0.6" xml:space="preserve">&gt;</text>
+<text x="394.8" y="247.5" textLength="92.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">TODO.md 1/2</text>
+<text x="495.6" y="247.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" opacity="0.6" xml:space="preserve">╯</text>
+</svg>
+focused: [{'tag': 'note', 'state': 'placed', 'asks': 'quiet', 'focused': True, 'title': 'TODO.md 1/2'}]
+ticked: '# List\n\n- [x] first\n- [x] second\n' mode 0o640
+added: '# List\n\n- [x] first\n- [ ] third\n- [x] second\n' mode 0o640
+moved: '# List\n\n- [ ] third\n- [x] first\n- [x] second\n' mode 0o640
+edited: '# List\n\n- [ ] 3rd\n- [x] first\n- [x] second\n' mode 0o640
+deleted: '# List\n\n- [ ] 3rd\n- [x] second\n' mode 0o640
+$ ptyrc -s h shot --sprites --no-cursor (status 0)
+<svg xmlns="http://www.w3.org/2000/svg" width="588.0" height="360.0" viewBox="0 0 588.0 360.0" font-family="DejaVu Sans Mono, Menlo, Consolas, Liberation Mono, monospace" font-size="14">
+<rect width="100%" height="100%" fill="#000000"/>
+<text x="84.0" y="121.5" textLength="344.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">╭────────────────────────────────────────</text>
+<text x="428.4" y="121.5" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold" xml:space="preserve">──────</text>
+<text x="478.8" y="121.5" textLength="25.2" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">──╮</text>
+<text x="84.0" y="139.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="92.4" y="139.5" textLength="33.6" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" font-weight="bold" xml:space="preserve">List</text>
+<text x="495.6" y="139.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="84.0" y="157.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="92.4" y="157.5" textLength="42.0" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">☐ 3rd</text>
+<text x="495.6" y="157.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<rect x="92.4" y="162.0" width="403.2" height="18.0" fill="#e5e5e5"/>
+<text x="84.0" y="175.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="92.4" y="175.5" textLength="67.2" lengthAdjust="spacingAndGlyphs" fill="#000000" xml:space="preserve">☑ second</text>
+<text x="495.6" y="175.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="84.0" y="193.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="495.6" y="193.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="84.0" y="211.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="495.6" y="211.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="84.0" y="229.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="92.4" y="229.5" textLength="386.4" lengthAdjust="spacingAndGlyphs" fill="#7f7f7f" xml:space="preserve">space tick  a add  e edit  d delete  esc leave</text>
+<text x="495.6" y="229.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="84.0" y="247.5" textLength="25.2" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">╰──</text>
+<text x="109.2" y="247.5" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold" xml:space="preserve">──────</text>
+<text x="159.6" y="247.5" textLength="344.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">─────────────────────────── TODO.md 1/2 ╯</text>
+</svg>
+$ ptyrc -s h shot --sprites --no-cursor (status 0)
+<svg xmlns="http://www.w3.org/2000/svg" width="588.0" height="360.0" viewBox="0 0 588.0 360.0" font-family="DejaVu Sans Mono, Menlo, Consolas, Liberation Mono, monospace" font-size="14">
+<rect width="100%" height="100%" fill="#000000"/>
+<text x="84.0" y="103.5" textLength="252.0" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">╭─────────────────────────────</text>
+<text x="336.0" y="103.5" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold" xml:space="preserve">──────</text>
+<text x="386.4" y="103.5" textLength="117.6" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">─────────────╮</text>
+<text x="84.0" y="121.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="92.4" y="121.5" textLength="33.6" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" font-weight="bold" xml:space="preserve">List</text>
+<text x="495.6" y="121.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="84.0" y="139.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="92.4" y="139.5" textLength="42.0" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">☐ 3rd</text>
+<text x="495.6" y="139.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<rect x="92.4" y="144.0" width="403.2" height="18.0" fill="#e5e5e5"/>
+<text x="84.0" y="157.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="92.4" y="157.5" textLength="67.2" lengthAdjust="spacingAndGlyphs" fill="#000000" xml:space="preserve">☑ second</text>
+<text x="495.6" y="157.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="84.0" y="175.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="92.4" y="175.5" textLength="142.8" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">☐ by another hand</text>
+<text x="495.6" y="175.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="84.0" y="193.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="495.6" y="193.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="84.0" y="211.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="495.6" y="211.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="84.0" y="229.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="92.4" y="229.5" textLength="386.4" lengthAdjust="spacingAndGlyphs" fill="#7f7f7f" xml:space="preserve">space tick  a add  e edit  d delete  esc leave</text>
+<text x="495.6" y="229.5" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">│</text>
+<text x="84.0" y="247.5" textLength="117.6" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">╰─────────────</text>
+<text x="201.6" y="247.5" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold" xml:space="preserve">──────</text>
+<text x="252.0" y="247.5" textLength="252.0" lengthAdjust="spacingAndGlyphs" fill="#00ffff" font-weight="bold" xml:space="preserve">──────────────── TODO.md 1/3 ╯</text>
+</svg>
+closed: []
+$ ptyrc -s h manage ls (status 0)
+ID  KIND   STATE     SINCE      PID  NAME  ARGS
+ 1  child  exited 0     1s  1443004  note  --manifest {"frame":0,"granted":["files-write"],"id":"note","limits":{},"permissions":[{"name":"files"},{"name":"files-write"}],"version":"0.1.0"} --script /home/peon/git/perso/ptyrc/ptyrc2/plugins/store-apps/note/app.js {"all":false,"count":true,"cycle":10.0,"done":false,"files":[{"file":"f0","name":"TODO.md"}],"interactive":true,"merged":false,"open":false,"postit":false}
+$ ptyrc -s h shot --no-cursor (status 0)
+<svg xmlns="http://www.w3.org/2000/svg" width="588.0" height="360.0" viewBox="0 0 588.0 360.0" font-family="DejaVu Sans Mono, Menlo, Consolas, Liberation Mono, monospace" font-size="14">
+<rect width="100%" height="100%" fill="#000000"/>
+<text x="0.0" y="13.5" textLength="42.0" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">after</text>
+<text x="0.0" y="31.5" textLength="42.0" lengthAdjust="spacingAndGlyphs" fill="#e5e5e5" xml:space="preserve">after</text>
+</svg>
+at the end: '# List\n\n- [ ] 3rd\n- [x] second\n- [ ] by another hand\n' mode 0o640

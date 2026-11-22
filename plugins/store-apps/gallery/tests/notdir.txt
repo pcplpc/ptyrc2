@@ -1,0 +1,1 @@
+ptyrc: --dir: tests/pear.pic: not a directory; regular files and directories only

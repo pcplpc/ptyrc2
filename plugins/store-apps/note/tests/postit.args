@@ -1,0 +1,4 @@
+# test_box: -p -c at 24x3: the post-it border, the title on the top
+# edge, the corner folded; the bar, the count.
+--size 30x8 --for 3s --styles
+-- tests/TODO.md -p -c

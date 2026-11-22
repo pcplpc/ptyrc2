@@ -1,0 +1,49 @@
+--- 4000 ms
+
+
+   ┌──────────────────────────┐
+   │      ▀           ⠄⠂⡀     │
+   │   ▀   ⠐⠒   ⢀ ⠅           │
+   │   ▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀▀▀▀   │
+   │      ⢀           ⠠   ⠐   │
+   │   ▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀▀▀▀   │
+   │   ▀▀▀   ▀  ▀ ▀▀▀▀▀▀▀▀▀   │
+   │   ▀▀▀▀ ⢀▀ ▀   ▀⢀⢀⠂       │
+   │       ▀▀▀▀▀    ⠄         │
+   ╘══════════════════════════╛
+--- 4000 ms, styles
+
+
+   aaaaaaaaaaaaaaaaaaaaaaaaaaaa
+   abcbdddeeeeeeefddddgggggbcba
+   abcbhdddggggggfgggggggggbcba
+   abcbiiiijjjjjjjjjjjjjjjjbcba
+   abcbdddgggggggfddddgggggbcba
+   abcbkkkkkkkkkkfkkkkkkkkkbcba
+   abcbllllllmnnofppppqqqqpbcba
+   abcbrsrsntmnmnfnuttttttvbcba
+   abcbvvvvrsssmnfnnwwnnnnvbcba
+   aaaaaaaaaaaaaaaaaaaaaaaaaaaa
+a: fg=180
+b: bg=94
+c: bg=58
+d: bg=233
+e: fg=152 bg=233
+f: bg=95
+g: fg=247 bg=233
+h: fg=233 bg=235
+i: fg=235 bg=95
+j: fg=233 bg=95
+k: fg=233 bg=17
+l: fg=235 bg=234
+m: fg=234 bg=223
+n: bg=234
+o: fg=236 bg=143
+p: fg=17 bg=235
+q: fg=17 bg=234
+r: fg=95 bg=236
+s: fg=234 bg=95
+t: fg=247 bg=234
+u: fg=234 bg=222
+v: bg=236
+w: fg=247 bg=236

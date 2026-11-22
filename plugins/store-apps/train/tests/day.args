@@ -1,0 +1,2 @@
+# -a --speed 1440: a day a minute; the light and the season move.
+--size 44x16 --for 5s --at 3s,5s --clock 2026-11-22T11:00:00Z --zone Europe/Paris -- -a --speed 1440 --at 18:00

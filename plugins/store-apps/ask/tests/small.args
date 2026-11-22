@@ -1,0 +1,5 @@
+# The variants: 80x24 the largest (32x3); 30x9 the 24x3; 22x4 the line
+# of 18x1, the question alone; focused there, the field alone.
+--size 80x24 --for 9s --at 3s,6s,8.5s --resize 3.2s:30x9 --resize 6.2s:22x4
+--focus 8s:ask
+Name? --default you

@@ -1,0 +1,1 @@
+ptyrc: --place: "x": one of countryside, sea, mountain, city, random

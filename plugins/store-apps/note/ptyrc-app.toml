@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "note"
+version = "0.1.0"
+summary = "A file as a sticky note; -i: one to write on."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "widget"
+frame = "raw"
+random = []
+
+[permissions]
+files = "the files named"
+files-write = "a box ticked is written back to its file"
+
+[options]
+count = { type = "bool", default = false, short = "c", doc = "the boxes ticked: title and bar" }
+done = { type = "bool", default = false, short = "x", doc = "what is done dimmed" }
+open = { type = "bool", default = false, short = "o", doc = "what is done left out" }
+postit = { type = "bool", default = false, short = "p", doc = "a yellow ground, a folded corner" }
+all = { type = "bool", default = false, short = "a", doc = "-c -x -p" }
+interactive = { type = "bool", default = false, short = "i", doc = "ctrl+t twice: tick, add, edit, delete, move" }
+merged = { type = "bool", default = false, doc = "one widget, the notes in turn" }
+cycle = { type = "float", default = 10.0, doc = "turn of --merged, seconds [default: 10]" }
+
+[args]
+files = { type = "file", write = true, default = "TODO.md", min = 0, max = 16, doc = "the notes, a widget each [default: TODO.md]" }

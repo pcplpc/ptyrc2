@@ -1,0 +1,3 @@
+# test_print (4x2): the largest size that fits is hung.
+--size 12x7 --for 3s --at 2.5s
+-- --file tests/pear.pic

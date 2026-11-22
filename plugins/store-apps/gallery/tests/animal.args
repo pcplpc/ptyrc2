@@ -1,0 +1,3 @@
+# test_collection_shipped: --kind animal of every picture shipped.
+--size 60x20 --for 3s --at 2.5s
+--kind animal --candidates

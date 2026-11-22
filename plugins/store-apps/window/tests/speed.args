@@ -1,0 +1,2 @@
+# test_print: --speed 0 refused at the start (init: exit 2).
+--size 30x13 --for 1s -- --speed 0

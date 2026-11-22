@@ -1,0 +1,31 @@
+--- 2500 ms
+
+
+
+
+                      ╔═╤═╤═╤═╤═╤═╤═╤╗
+                      ║       ▄▟▘    ║
+                      ╟  ▄▟██▄▄██▙▄  ╢
+                      ║ ▟██████████▙ ║
+                      ╟ ████████████ ╢
+                      ║ ▜██████████▛ ║
+                      ╟  ▀▀▀▀▀▀▀▀▀▀  ╢
+                      ╚═╧═╧═ Pumpkin ╝
+--- 2500 ms, styles
+
+
+
+
+                      aaaaaaaaaaaaaaaa
+                      a       bbb    a
+                      a  ccddccddcc  a
+                      a dccddccddccd a
+                      a dccddccddccd a
+                      a dccddccddccd a
+                      a  ccddccddcc  a
+                      aaaaaaaeeeeeeeaa
+a: fg=178
+b: fg=34
+c: fg=208
+d: fg=202
+e: italic

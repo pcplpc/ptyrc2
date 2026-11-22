@@ -1,0 +1,5 @@
+# test_model (-o): the last row typed in place, a paste into it.
+--size 40x12 --for 2.5s --at 1.9s --styles
+--focus 1.5s:ask --key 1.6s:end --key 1.7s:n --paste 1.8s:ew
+--key 2s:enter
+-o Which? a b

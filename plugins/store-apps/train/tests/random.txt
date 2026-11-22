@@ -1,0 +1,70 @@
+--- 3000 ms
+
+
+
+    ╭──────────────────────────────────╮
+    │  ▀                             ▀ │
+    │⠒▀ ▀⠒⠢⠤⠤⢄⣀⣀⣀⣀        ⢀⣀⣀⣀⣀⠤⠤⠤⠒⠒▀ ▀│
+    │    ▀▀▀▀▀▀▀▀▀⠉⠉⠉⠉⠉⠉⠉⠉⠁▀           │
+    │▀▀ ▀▀     ▀▀▀     ▀            ▀ ▀│
+    │     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀   │
+    │             ▀▀▀▀▀▀▀▀▀            │
+    │▀▀ ▀▀▀▀▀▀▀                        │
+    │▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀│
+    ╘══════════════════════════════════╛
+--- 3000 ms, styles
+
+
+
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    abbcbbbbbbbbbbbbbbbbbbbbbbbbbbbbbcba
+    adefghhhhhhhhhhhbbbbbbddddddddddefea
+    aiifijjjjjjjjjkkkkkkkkklmmmmmmmmmfma
+    anofoopqqqqrsspppptuvvvvvvvvvvvvnfna
+    awwfwwxxxxxxxxyyyzABBBCDDDDDDDDEwfwa
+    aFFfGFFFFFFFFGHHHHHHHHHHHHHHHHHHHfFa
+    aIIfJJIIKKIIIIIIIIIIIIIIIIIIIIIIIfGa
+    aLMNMMOOOOPPPPMMMMPPPPOOOOOOOOOOONPa
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+a: fg=250
+b: bg=69
+c: fg=69 bg=238
+d: fg=235 bg=69
+e: fg=238 bg=69
+f: bg=238
+g: fg=238 bg=68
+h: fg=235 bg=68
+i: bg=74
+j: fg=74 bg=110
+k: fg=235 bg=74
+l: fg=75 bg=74
+m: bg=75
+n: fg=111 bg=144
+o: fg=110 bg=144
+p: bg=110
+q: bg=254
+r: fg=110 bg=223
+s: fg=110 bg=146
+t: bg=153
+u: fg=111 bg=110
+v: bg=111
+w: bg=138
+x: fg=144 bg=138
+y: fg=144 bg=137
+z: fg=152 bg=137
+A: fg=189 bg=137
+B: fg=153 bg=137
+C: fg=117 bg=137
+D: fg=117 bg=144
+E: fg=117 bg=153
+F: bg=137
+G: bg=180
+H: fg=131 bg=137
+I: fg=137 bg=180
+J: fg=144 bg=180
+K: fg=245 bg=180
+L: fg=179 bg=59
+M: fg=137 bg=244
+N: fg=238 bg=244
+O: fg=179 bg=244
+P: fg=179 bg=242

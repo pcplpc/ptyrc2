@@ -1,0 +1,4 @@
+# test_live: -a, a glass running; the end: the border `alert`, `done`,
+# an explosion of confetti on the widget; `--hold 4`: the app leaves.
+--size 80x24 --for 14s --at 2s,6.5s,8s,11s
+6s -a --hold 4

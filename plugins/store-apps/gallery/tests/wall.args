@@ -1,0 +1,4 @@
+# test_hall: -w, three pictures at once, staggered: a third of --every
+# apart, never twice the same.
+--size 120x40 --for 25s --at 3s,11s,21s
+-w --every 30

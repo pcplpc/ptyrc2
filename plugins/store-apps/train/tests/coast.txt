@@ -1,0 +1,69 @@
+--- 3000 ms
+
+
+
+    ╭──────────────────────────────────╮
+    │▀▀▀·▀▀▀▀▀▀▀▀▀·▀   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀│
+    │▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀│
+    │▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀│
+    │▀▀▀▀▀·▀▀▀▀··▀ ▀▀▀ ▀▀ ▀▀▀▀▀▀▀▀▀▀▀▀▀│
+    │▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀│
+    │▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀▀  ▀▀▀▀▀▀▀▀▀│
+    │▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀│
+    │                                  │
+    ╘══════════════════════════════════╛
+--- 3000 ms, styles
+
+
+
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    abbbcbbbbbbbbbdbeeebbbbbbbbbbbbbbbba
+    afffffffffffffffgggffffffffffffffffa
+    ahhhijklllhhhhhhmhhhhhhhhhijihhhhhha
+    annnnnonnnnpqnrsssrssrnntuuuuuuuuuua
+    avvvvvvvvvvvvvwxyxzxwwvvAvvvvvvvvvva
+    aBBBBCDDDEFFFGGHIJBHBBBBKKBBBBBEEEEa
+    aLLLLLLLLLMMMMMMMMMMMMMLLLLLLLLLMMMa
+    aNNNNNNNNNOOOOOOOOOOOOONNNNNNNNNOOOa
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+a: fg=250
+b: fg=#0f134a bg=#0f134d
+c: fg=#9799b1 bg=#0f134c
+d: fg=#6a73a4 bg=#0f134c
+e: bg=#f4f2dc
+f: fg=#0f1454 bg=#6a4030
+g: fg=#f4f2dc bg=#6a4030
+h: fg=#5a3528 bg=#0f1564
+i: fg=#5a3528 bg=#63596b
+j: fg=#5a3528 bg=#ffd678
+k: fg=#5a3528 bg=#817a80
+l: fg=#5a3528 bg=#3d4884
+m: fg=#5a3528 bg=#4a4648
+n: fg=#0f166c bg=#0f1775
+o: fg=#7d7c9f bg=#0f1670
+p: fg=#908da7 bg=#0f1670
+q: fg=#76759c bg=#0f1670
+r: bg=#2d3457
+s: fg=#2d3457 bg=#959497
+t: fg=#0f166c bg=#18192d
+u: fg=#0f166c bg=#203544
+v: fg=#0d1871 bg=#0d186a
+w: fg=#2d3457 bg=#0d186a
+x: fg=#2d3457 bg=#012d23
+y: fg=#2d3457 bg=#4a4648
+z: fg=#2d3457 bg=#012321
+A: fg=#ffd678 bg=#575f8a
+B: fg=#0d1764 bg=#0d165d
+C: fg=#27202e bg=#0d165d
+D: fg=#27202e bg=#51587e
+E: fg=#354037 bg=#3b4e3b
+F: fg=#2d3e47 bg=#3b4e3b
+G: fg=#575e89 bg=#182e68
+H: fg=#012321 bg=#0d165d
+I: bg=#4a4648
+J: fg=#2c2933 bg=#0d165d
+K: bg=#3b1824
+L: fg=#b29653 bg=#9e8666
+M: fg=#8f8142 bg=#666368
+N: bg=#9e8666
+O: bg=#666368

@@ -1,0 +1,1 @@
+ptyrc: files: tests/dir: not a regular file; regular files and directories only

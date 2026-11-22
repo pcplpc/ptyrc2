@@ -1,0 +1,31 @@
+--- 1900 ms
+
+
+
+    ╭────────────────────────────────────────╮
+    │Why?                                    │
+    │ab                                      │
+    │cd                                      │
+    │                                        │
+    │                                        │
+    │enter ok  alt+enter new line  esc later │
+    ╰─────────────────────────────────── ask ╯
+--- 1900 ms, styles
+
+
+
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbaaa
+    acccc                                    a
+    a                                        a
+    a  d                                     a
+    a                                        a
+    a                                        a
+    aeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee a
+    aaabbbbbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+a: fg=14 bold
+b: fg=15 bold
+c: bold
+d: inverse
+e: dim
+result: ab\ncd (status 0)
+ended: exit: 0

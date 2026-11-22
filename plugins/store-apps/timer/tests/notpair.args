@@ -1,0 +1,3 @@
+# test_bad_options (--pomodoro 25): not WORK/BREAK (init: exit 2).
+--size 20x7 --for 1s
+--pomodoro 25

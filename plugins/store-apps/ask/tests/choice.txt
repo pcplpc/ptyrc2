@@ -1,0 +1,59 @@
+--- 1200 ms
+
+
+
+
+                 ╭────────────────────────╮
+                 │Deploy?                 │
+                 │1 yes                   │
+                 │2 no                    │
+                 │3 later                 │
+                 │ctrl+t ctrl+t  to answer│
+                 ╰──────────── >>> deploy ╯
+--- 1200 ms, styles
+
+
+
+
+                 aaaaaaaaaaaaaaaaaaaaaaaaaa
+                 abbbbbbb                 a
+                 acc                      a
+                 acc                      a
+                 acc                      a
+                 acccccccccccccccccccccccca
+                 aaaaaaaaaaaaaadaaabbbbbbaa
+a: fg=14
+b: bold
+c: dim
+d: fg=15 bold
+--- 1800 ms
+
+
+
+                 ╭────────────────────────╮
+                 │Deploy?                 │
+                 │1 yes                   │
+                 │2 no                    │
+                 │3 later                 │
+                 │enter ok  esc later     │
+                 ╰──────────────── deploy ╯
+--- 1800 ms, styles
+
+
+
+                 aaaaaabbbbbbbbbbbbbbbbbbbb
+                 bccccccc                 b
+                 bdd                      b
+                 beeeeeeeeeeeeeeeeeeeeeeeeb
+                 bdd                      b
+                 bddddddddddddddddddd     b
+                 bbbbbbbbbbbbbbbbbbbbbbbbba
+a: fg=15 bold
+b: fg=14 bold
+c: bold
+d: dim
+e: inverse
+--- 2500 ms
+dropped at 1300 ms: key x: to the program, not grabbed
+result: no (status 0)
+ended: exit: 0

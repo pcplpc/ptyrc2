@@ -1,0 +1,4 @@
+# test_run_pomodoro, test_spin: work, then a break: the glass turns
+# over, the border rings (-r) a while; `break 1/2`.
+--size 60x16 --for 12s --at 4s,5.5s,6s,11.5s
+--pomodoro 0:05/0:03 --rounds 2 -g -r

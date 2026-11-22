@@ -1,0 +1,7 @@
+# test_a_line_typed_then_dismissed: a line from `--default an`, `n` `é`
+# typed; `esc` gives the keys back, the question stays; focused again,
+# `enter`: the result `anné`.
+--size 50x10 --for 3.5s --at 1.9s,2.3s
+--focus 1.5s:ask --key 1.6s:n --key 1.7s:é --key 2s:esc --key 2.1s:x
+--focus 2.5s:ask --key 3s:enter
+Name? --default an

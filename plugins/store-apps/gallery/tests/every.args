@@ -1,0 +1,4 @@
+# test_hall: one nail, two pictures: the next takes its place each
+# --every.
+--size 60x12 --for 4s --at 1.5s,2.5s,3.5s
+-- --dir tests/two --every 1

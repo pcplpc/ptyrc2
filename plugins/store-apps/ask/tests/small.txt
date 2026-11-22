@@ -1,0 +1,29 @@
+--- 3000 ms
+
+
+
+
+
+
+
+
+
+
+                       ╭────────────────────────────────╮
+                       │Name?                           │
+                       │you                             │
+                       │ctrl+t ctrl+t  to answer        │
+                       ╰─────────────────────── >>> ask ╯
+--- 6000 ms
+
+
+  ╭────────────────────────╮
+  │Name?                   │
+  │you                     │
+  │ctrl+t ctrl+t  to answer│
+  ╰─────────────── >>> ask ╯
+--- 8500 ms
+ ╭──────────────────╮
+ │you               │
+ ╰───────────── ask ╯
+note: the screen at 8500 ms has cells in inverse, not seen as text: --styles shows them

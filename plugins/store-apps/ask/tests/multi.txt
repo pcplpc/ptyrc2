@@ -1,0 +1,27 @@
+--- 1700 ms
+
+
+       ╭────────────────────────╮
+       │Which?                  │
+       │1 [x] a                 │
+       │2 [x] b                 │
+       │3 [ ] c                 │
+       │enter ok  esc later     │
+       ╰─────────────────── ask ╯
+--- 1700 ms, styles
+
+
+       aaaabbbbbbbbbbbbbbbbbbbbbb
+       acccccc                  b
+       addddddddddddddddddddddddb
+       bee                      b
+       bee                      a
+       beeeeeeeeeeeeeeeeeee     a
+       bbbbbbbbbbbbbbbbbbbbbbbbba
+a: fg=15 bold
+b: fg=14 bold
+c: bold
+d: inverse
+e: dim
+result: ["a","b"] (status 0)
+ended: exit: 0

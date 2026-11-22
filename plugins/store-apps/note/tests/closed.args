@@ -1,0 +1,6 @@
+# test_live_interactive_closed: ctrl+x closes the focused note; the app
+# ends with the last; nothing written.
+--size 80x24 --for 5s --at 1.5s,2.5s,3.5s
+--focus 2s:note --key 2.2s:ctrl+X
+--focus 3s:note-2 --key 3.2s:ctrl+X
+-- -i tests/a.md tests/b.md

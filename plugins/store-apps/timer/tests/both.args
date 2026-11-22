@@ -1,0 +1,3 @@
+# test_bad_options (5m --until 17:30): one of the three (init: exit 2).
+--size 20x7 --for 1s
+5m --until 17:30

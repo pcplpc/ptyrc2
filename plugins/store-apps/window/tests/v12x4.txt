@@ -1,0 +1,27 @@
+--- 4000 ms
+
+
+  ┌────────────┐
+  │            │
+  │▀▀▀▀▀  ▀▀▀▀▀│
+  │▀▀▀▀▀▀▀▀▀▀▀▀│
+  │▀▀▀▀▀▀▀▀▀▀▀▀│
+  ╘════════════╛
+--- 4000 ms, styles
+
+
+  aaaaaaaaaaaaaa
+  abbbbbbbbbbbba
+  accdddeedddcca
+  affffggghhhhha
+  aiiiiiiiiiiiia
+  aaaaaaaaaaaaaa
+a: fg=180
+b: bg=69
+c: fg=75 bg=111
+d: fg=74 bg=111
+e: bg=230
+f: fg=117 bg=107
+g: fg=153 bg=107
+h: fg=107 bg=71
+i: fg=71 bg=107

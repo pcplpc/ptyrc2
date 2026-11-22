@@ -1,0 +1,2 @@
+# test_print: --line coast --rgb (colours of 24 bits).
+--size 44x16 --for 3s --styles --clock 2026-11-22T11:00:00Z --zone Europe/Paris -- -a --at 22:10 --after 30 --line coast --rgb

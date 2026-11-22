@@ -1,0 +1,4 @@
+# test_reads (1s --modal): at the end the widget shown again as a
+# modal; nothing lowered.
+--size 40x8 --for 3s --at 0.5s,2s
+1s --modal

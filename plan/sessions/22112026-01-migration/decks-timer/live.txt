@@ -1,0 +1,101 @@
+# live.py temp/live-timer, 70x16 host pty, 2026-11-22: 3m --click, two host presses on the widget (paused 02:55 for 5 s, then 02:53); 5s -a --hold 3: alert border, done, confetti, exit 0.
+1 timer: running
+2 timer: running
+widgets: {"widgets": [{"asks": null, "border": "round", "focused": false, "frame": 0, "id": 1, "modal": false, "over": false, "owner": 3, "rect": [18, 8, 34, 7], "size": [32, 5], "sprite": 1, "state": "placed", "tag": "timer", "title": "timer", "variant": "32x5", "variants": [{"name": "5x1", "size": [5, 1]}, {"name": "12x1", "size": [12, 1]}, {"name": "20x2", "size": [20, 2]}, {"name": "17x3", "size": [17, 3]}, {"name": "17x6", "size": [17, 6]}, {"name": "32x5", "size": [32, 5]}, {"name": "32x8", "size": [32, 8]}]}]}
+$ ptyrc -s h shot --sprites --no-cursor --ansi (status 0)
+
+  some words of a page
+
+      and more words here, a line
+
+  short
+
+
+                  ╭────────────────────────────────╮
+                  │▄████▄ █████▄      ▄█████ ▄█████│
+                  │██  ██     ██  ██  ██     ██    │
+                  │██  ██ ▄████▀      ▀████▄ █████▄│
+                  │██  ██ ██      ██      ██ ██  ██│
+                  │▀████▀ ▀█████      █████▀ ▀████▀│
+                  ╰───────────────────────── timer ╯
+$ ptyrc -s h shot --sprites --no-cursor --ansi (status 0)
+
+  some words of a page
+
+      and more words here, a line
+
+  short
+
+
+                  ╭────────────────────────────────╮
+                  │▄████▄ █████▄      ▄█████ ▄█████│
+                  │██  ██     ██  ██  ██     ██    │
+                  │██  ██ ▄████▀      ▀████▄ █████▄│
+                  │██  ██ ██      ██      ██ ██  ██│
+                  │▀████▀ ▀█████      █████▀ ▀████▀│
+                  ╰───────────────────────── timer ╯
+$ ptyrc -s h shot --sprites --no-cursor --ansi (status 0)
+
+  some words of a page
+
+      and more words here, a line
+
+  short
+
+
+                  ╭────────────────────────────────╮
+                  │▄████▄ █████▄      ▄█████ ▄█████│
+                  │██  ██     ██  ██  ██     ██    │
+                  │██  ██ ▄████▀      ▀████▄ █████▄│
+                  │██  ██ ██      ██      ██ ██  ██│
+                  │▀████▀ ▀█████      █████▀ ▀████▀│
+                  ╰───────────────────────── timer ╯
+$ ptyrc -s h shot --sprites --no-cursor --ansi (status 0)
+
+  some words of a page
+
+      and more words here, a line
+
+  short
+
+
+                  ╭────────────────────────────────╮
+                  │▄████▄ █████▄      ▄█████ █████▄│
+                  │██  ██     ██  ██  ██         ██│
+                  │██  ██ ▄████▀      ▀████▄ ██████│
+                  │██  ██ ██      ██      ██     ██│
+                  │▀████▀ ▀█████      █████▀ █████▀│
+                  ╰───────────────────────── timer ╯
+$ ptyrc -s h manage ls (status 0)
+ID  KIND   STATE    SINCE      PID  NAME   ARGS
+ 1  child  running    12s  1387256  timer
+$ ptyrc -s h manage stop 1 (status 0)
+1 timer: exited 0
+$ ptyrc -s h shot --sprites --no-cursor --ansi (status 0)
+
+  some words of a page
+
+      and more words here, a line
+
+  short
+                                       ✦
+                         ✦          ✦   ✦
+                                        ·
+                      **┌───*─·❋─✦*──────*───┐
+                        │✦0·00 ❋   ✦o·e +0*02│  *
+                        │───────✦────────────❋   ✦     ·
+               ·  ❋     ❋────────**─── timer ❋       ·   ❋
+                 ·❋         * ·  · ✦✦❋✦     * *
+              *   ✦            ❋    ✦       *       ❋     *
+               *❋   *    ✦     * ·    ❋ ✦   *    ❋     ✦  · ·
+$ ptyrc -s h shot --sprites --no-cursor --ansi (status 0)
+
+  some words of a page
+
+      and more words here, a line
+
+  short
+$ ptyrc -s h manage ls (status 0)
+ID  KIND   STATE     SINCE      PID  NAME   ARGS
+ 1  child  exited 0    13s  1387256  timer
+ 2  child  exited 0     2s  1387323  timer

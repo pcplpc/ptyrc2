@@ -1,0 +1,41 @@
+$ ptyrc -s h app ptyrc/gallery --every 4 (status 0)
+1 gallery: running
+widgets: [{'tag': 'gallery', 'state': 'placed', 'variant': '24x8', 'rect': [27, 7, 26, 10], 'title': 'Harbour at dusk'}]
+$ ptyrc -s h shot --sprites --no-cursor (status 0)
+[svg: ╔═╤═╤═╤═╤═╤═╤═╤═╤═╤═╤═╤═╤╗ ║ · · · ║ ╟ · ╢ ║ ▟▌ ║ ╟ ▟█▌ ▄██▄ ▌ ╢ ║ ▟██▌ ██████ ▟▌ ║ ╟ ▜████▛ ~~~~~~~~~~~ ▜██▛ ╢ ║ ~~ ━━━━ ~~ ║ ╟ ~ ~~ ━━ ~ ~~ ╢ ╚═╧═╧═╧═ Harbour at dusk ╝]
+after --every 4: [{'tag': 'gallery', 'state': 'placed', 'variant': '11x7', 'rect': [33, 8, 13, 9], 'title': 'The owl'}]
+$ ptyrc -s h manage ls (status 0)
+ID  KIND   STATE    SINCE      PID  NAME     ARGS
+ 1  child  running     8s  1432358  gallery  --manifest {"frame":0,"granted":[],"id":"gallery","limits":{},"permissions":[{"name":"files"}],"version":"0.1.0"} --assets /home/peon/git/perso/ptyrc/ptyrc2/plugins/store-apps/gallery/pictures --script /home/peon/git/perso/ptyrc/ptyrc2/plugins/store-apps/gallery/app.js {"all":false,"candidates":false,"count":null,"dir":[],"every":"4","file":[],"hover":false,"kind":null,"label":false,"move":false,"wall":false}
+$ ptyrc -s h manage stop 1 (status 0)
+1 gallery: exited 0
+stopped: []
+$ ptyrc -s h app ptyrc/gallery --file /home/peon/git/perso/ptyrc/ptyrc2/temp/gallery-live/eyes.pic -o (status 0)
+2 gallery: running
+widgets: [{'tag': 'gallery', 'state': 'placed', 'variant': '20x3', 'rect': [29, 10, 22, 5], 'title': 'Eyes'}]
+$ ptyrc -s h shot --sprites --no-cursor --ansi (status 0)
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                             ╔═╤═╤═╤═╤═╤═╤═╤═╤═╤═╤╗                             
+                             ║                    ║                             
+                             ╟   (o)    (o)       ╢                             
+                             ║                    ║                             
+                             ╚═╧═╧═╧═╧═╧═╧═╧ Eyes ╝
+$ ptyrc -s h shot --sprites --no-cursor (status 0)
+[svg: ╔═╤═╤═╤═╤═╤═╤═╤═╤═╤═╤╗ ║ ║ ╟ ( &lt; ) ( &lt; ) ╢ ║ ║ ╚═╧ Eyes · anonymous ╝]
+hovered: [{'tag': 'gallery', 'state': 'placed', 'variant': '20x3', 'rect': [29, 10, 22, 5], 'title': 'Eyes · anonymous'}]
+$ ptyrc -s h shot --sprites --no-cursor (status 0)
+[svg: ╔═╤═╤═╤═╤═╤═╤═╤═╤═╤═╤╗ ║ ║ ╟ ( &gt; ) ( &gt; ) ╢ ║ ║ ╚═╧ Eyes · anonymous ╝]
+after the hover: [{'tag': 'gallery', 'state': 'placed', 'variant': '20x3', 'rect': [29, 10, 22, 5], 'title': 'Eyes'}]
+$ ptyrc -s h manage ls (status 0)
+ID  KIND   STATE     SINCE      PID  NAME     ARGS
+ 1  child  exited 0     9s  1432358  gallery  --manifest {"frame":0,"granted":[],"id":"gallery","limits":{},"permissions":[{"name":"files"}],"version":"0.1.0"} --assets /home/peon/git/perso/ptyrc/ptyrc2/plugins/store-apps/gallery/pictures --script /home/peon/git/perso/ptyrc/ptyrc2/plugins/store-apps/gallery/app.js {"all":false,"candidates":false,"count":null,"dir":[],"every":"4","file":[],"hover":false,"kind":null,"label":false,"move":false,"wall":false}
+ 2  child  running      7s  1432412  gallery  --manifest {"frame":0,"granted":[],"id":"gallery","limits":{},"permissions":[{"name":"files"}],"version":"0.1.0"} --assets /home/peon/git/perso/ptyrc/ptyrc2/plugins/store-apps/gallery/pictures --script /home/peon/git/perso/ptyrc/ptyrc2/plugins/store-apps/gallery/app.js {"all":false,"candidates":false,"count":null,"dir":[],"every":"10m","file":[{"file":"f0","name":"eyes.pic"}],"hover":true,"kind":null,"label":false,"move":false,"wall":false}

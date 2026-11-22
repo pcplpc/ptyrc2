@@ -1,0 +1,3 @@
+# test_bad_options (--rounds -1): refused by the manifest (min).
+--size 20x7 --for 1s
+--rounds -1

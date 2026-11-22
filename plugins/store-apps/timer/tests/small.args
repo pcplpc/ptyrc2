@@ -1,0 +1,4 @@
+# test_print, test_faces (20x2, 12x1, 5x1): the smaller faces, as the
+# screen shrinks; an hour and more is `H:MM:SS`, in 5 cells `1h24m`.
+--size 30x9 --for 9s --at 2s,5s,8s --resize 2.5s:18x7 --resize 5.5s:10x6
+1h45m

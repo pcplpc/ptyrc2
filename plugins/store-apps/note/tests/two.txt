@@ -1,0 +1,22 @@
+--- 3000 ms
+
+
+
+               ╭────────────────────────────────────────────────╮
+               │━━━━━━━━━━━━━━━━━╾────────────────────────── 2/5│
+               │Groceries                                       │
+               │                                                │
+               │☑ bread                                         │
+               │                                                │
+               │☐ milk, the whole one, from the shop at the     │
+               │  corner                                        │
+   ╭─────╮     │☑ eggs                                          │
+   │1/2  │     │☐ coffee                                        │
+   ╰ li… ╯     │  ☐ filters                                     │
+               │                                                │
+               │Later                                           │
+               │                                                │
+               │• call the plumber                              │
+               │quoted                                          │
+               │plain text                                      │
+               ╰─────────────────────────────────── TODO.md 2/5 ╯

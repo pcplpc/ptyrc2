@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "timer"
+version = "0.1.0"
+summary = "Countdown, pomodoro, an hourglass that empties on time."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "frame"
+frame = "raw"
+random = [["5m"], ["5m", "-a"]]
+
+[permissions]
+keys-grab = "at the end, a modal: it takes the keys"
+front-widget = "at the end, a modal: over the text"
+clock = "the time of day it ends at"
+
+[options]
+until = { type = "string", needs = ["clock"], doc = "count down to that time of the day, HH:MM" }
+pomodoro = { type = "string", doc = "work and break in turn, as 25/5" }
+rounds = { type = "int", default = 4, min = 0, doc = "work phases of a pomodoro; 0: no end" }
+glass = { type = "bool", default = false, short = "g", doc = "an hourglass" }
+colour = { type = "bool", default = false, short = "c", doc = "colours, by the time left" }
+ring = { type = "bool", default = false, short = "r", doc = "the border chases at the end, and a while at a new phase" }
+burst = { type = "bool", default = false, short = "b", doc = "confetti at the end of a phase" }
+all = { type = "bool", default = false, short = "a", doc = "-g -c -r -b" }
+modal = { type = "bool", default = false, needs = ["keys-grab", "front-widget"], doc = "at the end, a modal: over the text if it must" }
+click = { type = "bool", default = false, doc = "a click of the host mouse on the widget pauses, and goes on" }
+hold = { type = "float", doc = "seconds to stay after the end, then leave [default: stay]" }
+name = { type = "string", default = "timer", doc = "the title of the widget" }
+
+[args]
+duration = { type = "string", min = 0, max = 1, doc = "25m, 90s, 1h30m, 1:30, 25 (minutes) [default: 25m]" }

@@ -1,0 +1,5 @@
+# test_print, test_reads (--file): a file named, read (nothing lowered);
+# -a: it moves (hold 3 1: the second frame from 3 s), the plate names
+# the author; too narrow for it: cut by the driver.
+--size 40x12 --for 5s --at 1.2s,3.5s,4.2s --styles
+-- --file tests/pear.pic -a

@@ -1,0 +1,2 @@
+# test_hover, test_cat_hunts: the pointer on the window; the curtains go aside, the cat runs to it.
+--size 60x18 --for 7s --at 4s,5s,7s --pointer 3500:15,13 --pointer 4000:16,13 --pointer 4500:15,12 --styles --clock 2026-11-22T11:00:00Z --zone Europe/Paris -- -c -l --at 12:00

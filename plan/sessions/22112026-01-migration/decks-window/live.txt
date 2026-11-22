@@ -1,0 +1,88 @@
+1 window: running
+
+
+
+
+
+
+
+
+$ ptyrc -s h manage ls (status 0)
+ID  KIND   STATE    SINCE      PID  NAME    ARGS
+ 1  child  running     7s  1471882  window  --manifest {"frame":0,"granted":["clock"],"id":"window","limits":{},"permissions":[{"name":"clock"}],"version":"0.1.0"} --script /home/peon/git/perso/ptyrc/ptyrc2/plugins/store-apps/window/app.js {"all":true,"at":null,"cosy":false,"land":false,"lat":47.0,"passing":false,"place":null,"random":false,"rgb":false,"season":null,"seasons":false,"sky":false,"speed":1.0,"weather":null}
+$ ptyrc -s h shot --ansi --sprites --no-cursor (status 0)
+A kitchen, a kettle on.                                                         
+The window over the sink.                                                       
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                   ┌────────────────────────────────────────┐                   
+                   │       ▀                                │                   
+                   │            ·                ·          │                   
+                   │       · ▀ ⠄                            │                   
+                   │     · ▀   ▀    ·                       │                   
+                   │     ▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀▀▀     │                   
+                   │     ▀   ▀ ▀▀        ▀  ·   ·▀ ▀·       │                   
+                   │     ▀ ▀ ▀▀▀▀ ▀▀ ▀ ▀▀▀▀▀▀     ▀▀▀▀▀     │                   
+                   │      ▀▀▀     ▀▀▀▀ ▀    ▀  ▀▀▀▀         │                   
+                   │     ▀▀▀▀       ▀   ▀▀▀▀   ▀     ▀      │                   
+                   │      ▀▀▀      ▀     ▀▀     ▀ ▀▀▀▀      │                   
+                   │     ▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀▀▀▀▀▀▀ ▀▀  ▀▀▀      │                   
+                   │                             ▀▀ ▀ ▀     │                   
+                   ╘════════════════════════════════════════╛
+window at [(19, 6)] pointer to (24, 16)
+$ ptyrc -s h shot --ansi --sprites --no-cursor (status 0)
+A kitchen, a kettle on.                                                         
+The window over the sink.                                                       
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                   ┌────────────────────────────────────────┐                   
+                   │   ·▀                                   │                   
+                   │            ·                ·          │                   
+                   │       · ▀ ⠄                            │                   
+                   │     · ▀   ▀    ·                    ▀  │                   
+                   │ ▀▀▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀▀▀▀▀▀▀ │                   
+                   │     ▀   ▀ ▀▀        ▀  ·   ·▀ ▀·    ▀  │                   
+                   │  ▀▀▀▀ ▀ ▀▀▀▀ ▀▀ ▀ ▀▀▀▀▀▀     ▀▀▀▀▀ ▀▀▀ │                   
+                   │ ▀▀▀▀ ▀▀▀     ▀▀▀▀ ▀    ▀  ▀▀▀▀    ▀    │                   
+                   │ ▀▀▀▀▀▀▀▀       ▀   ▀▀▀▀   ▀      ▀     │                   
+                   │      ▀▀▀      ▀     ▀▀     ▀ ▀▀▀▀      │                   
+                   │ ▀▀▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀▀▀▀▀▀▀ ▀▀   ▀▀ ▀▀▀▀ │                   
+                   │ ▀ ▀▀▀▀▀                     ▀▀▀▀▀      │                   
+                   ╘════════════════════════════════════════╛
+$ ptyrc -s h shot --ansi --sprites --no-cursor (status 0)
+A kitchen, a kettle on.                                                         
+The window over the sink.                                                       
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                   ┌────────────────────────────────────────┐                   
+                   │                                        │                   
+                   │            ·                ·          │                   
+                   │       · ▀ ⠄                            │                   
+                   │     · ▀   ▀    ·                       │                   
+                   │     ▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀▀▀     │                   
+                   │     ▀   ▀ ▀▀        ▀  ·   ·▀ ▀·       │                   
+                   │     ▀ ▀ ▀▀▀▀ ▀▀ ▀ ▀▀▀▀▀▀     ▀▀▀▀▀     │                   
+                   │      ▀▀▀     ▀▀▀▀ ▀    ▀  ▀▀▀▀   ▀     │                   
+                   │     ▀▀▀▀       ▀   ▀▀▀▀   ▀     ▀      │                   
+                   │      ▀▀▀      ▀     ▀▀     ▀ ▀▀▀▀▀     │                   
+                   │     ▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀▀▀▀▀▀▀ ▀▀  ▀ ▀▀     │                   
+                   │                           ▀▀▀▀         │                   
+                   ╘════════════════════════════════════════╛
+$ ptyrc -s h text (status 0)
+A kitchen, a kettle on.
+The window over the sink.
+$ ptyrc -s h manage log 1 (status 0)
+ptyrc-box: profile: landlock ABI 9 (the kernel's: 10): files, renames across directories (refer), truncate, TCP bind and connect, ioctl on devices, abstract unix sockets, signals; every thread
+ptyrc-box: profile: seccomp, every thread: 41 calls allowed, 31 kill the process, the rest EPERM
+ptyrc-box: init done
+$ ptyrc -s h manage stop 1 (status 0)
+1 window: exited 0
+$ ptyrc -s h shot --ansi --sprites --no-cursor (status 0)
+A kitchen, a kettle on.                                                         
+The window over the sink.

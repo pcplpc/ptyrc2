@@ -1,0 +1,2 @@
+# test_print: --place x, refused by the manifest.
+--size 30x13 --for 1s -- --place x

@@ -1,0 +1,1 @@
+ptyrc: --file: tests/nowhere.pic: No such file or directory (os error 2)

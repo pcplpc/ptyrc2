@@ -1,0 +1,75 @@
+--- 1200 ms
+
+
+
+
+                ╔═╤═╤═╗
+                ║ ,   ║
+                ╟(o)  ╢
+                ║ "   ║
+                ╚ Pe… ╝
+--- 1200 ms, styles
+
+
+
+
+                aaaaaaa
+                a b   a
+                ac c  a
+                a d   a
+                aaeeeaa
+a: fg=178
+b: fg=70
+c: fg=220 bg=52
+d: fg=255 bold
+e: italic
+--- 3500 ms
+
+
+
+
+                ╔═╤═╤═╗
+                ║ ,   ║
+                ╟(-)  ╢
+                ║     ║
+                ╚ Pe… ╝
+--- 3500 ms, styles
+
+
+
+
+                aaaaaaa
+                a b   a
+                ac c  a
+                a d   a
+                aaeeeaa
+a: fg=178
+b: fg=70
+c: fg=220 bg=52
+d: fg=255 bold
+e: italic
+--- 4200 ms
+
+
+
+
+                ╔═╤═╤═╗
+                ║ ,   ║
+                ╟(o)  ╢
+                ║ "   ║
+                ╚ Pe… ╝
+--- 4200 ms, styles
+
+
+
+
+                aaaaaaa
+                a b   a
+                ac c  a
+                a d   a
+                aaeeeaa
+a: fg=178
+b: fg=70
+c: fg=220 bg=52
+d: fg=255 bold
+e: italic

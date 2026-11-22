@@ -1,0 +1,2 @@
+# test_random: -r, the launcher's seed: the place, the season, the time, the weather.
+--size 60x18 --for 2s --seed 11 --styles --clock 2026-11-22T11:00:00Z --zone Europe/Paris -- -a -r

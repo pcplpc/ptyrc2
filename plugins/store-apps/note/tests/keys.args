@@ -1,0 +1,13 @@
+# test_live_interactive: focused, the keys write the file: a box
+# ticked, one added, moved (K: no shift+up headless), edited by a paste, deleted; esc while a
+# line is typed: dropped, the focus gone.
+--size 60x14 --for 9s --at 1.5s,2.6s,3.6s,4.6s,5.6s,6.6s,7.6s,8.6s
+--focus 2s:note
+--key 2.5s:j --key 2.5s:space
+--key 3.5s:a --key 3.5s:t --key 3.5s:h --key 3.5s:i --key 3.5s:r --key 3.5s:d --key 3.5s:enter
+--key 4.5s:K
+--key 5.5s:e --key 5.5s:ctrl+U --paste 5.5s:3rd --key 5.5s:enter
+--key 6.5s:j --key 6.5s:d --key 6.5s:y
+--key 7.5s:a --key 7.5s:l --key 7.5s:o --key 7.5s:s --key 7.5s:t
+--key 8.5s:esc
+-- -i -c tests/list.md

@@ -1,0 +1,2 @@
+# test_app_border: --border round --prefer top-right.
+--size 80x24 --for 2s --border round --prefer top-right --clock 2026-11-22T11:00:00Z --zone Europe/Paris

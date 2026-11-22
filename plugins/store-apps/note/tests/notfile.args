@@ -1,0 +1,4 @@
+# A directory where a file is wanted (tests/dir): refused by the
+# launcher.
+--size 40x8 --for 1s
+-- tests/dir

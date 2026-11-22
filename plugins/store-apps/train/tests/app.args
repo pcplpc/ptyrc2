@@ -1,0 +1,2 @@
+# test_app: -a, 20 s into the trip, the largest variant, no title.
+--size 200x60 --for 3s --at 2500ms,3s --clock 2026-11-22T11:00:00Z --zone Europe/Paris -- -a --after 20

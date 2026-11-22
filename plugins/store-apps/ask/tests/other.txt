@@ -1,0 +1,27 @@
+--- 1900 ms
+
+
+       ╭────────────────────────╮
+       │Which?                  │
+       │1 a                     │
+       │2 b                     │
+       │3 new                   │
+       │enter ok  esc later     │
+       ╰─────────────────── ask ╯
+--- 1900 ms, styles
+
+
+       aabbbbbbaaaaaaaaaaaaaaaaaa
+       acccccc                  a
+       add                      a
+       add                      a
+       aee   e                  a
+       addddddddddddddddddd     a
+       aaaaaaaaaaaaaaaaaabbaaaaaa
+a: fg=14 bold
+b: fg=15 bold
+c: bold
+d: dim
+e: inverse
+result: new (status 0)
+ended: exit: 0

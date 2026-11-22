@@ -1,0 +1,6 @@
+# test_a_choice_answered: the widget `ask` placed, titled, asking (the
+# border runs); not focused, a key is the program's; focused, `down`
+# then `enter`: the result `no`, status 0, the widget gone.
+--size 60x14 --for 3s --at 1.2s,1.8s,2.5s --styles
+--key 1.3s:x --focus 1.5s:ask --key 1.7s:down --key 2s:enter
+--title deploy Deploy? yes no later

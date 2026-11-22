@@ -1,0 +1,5 @@
+# test_live (the faces), test_faces: the widget `timer` placed, titled,
+# in the largest face that fits: block digits, a bar, `of 01:30`; a
+# drawing as each second of the timer ends.
+--size 80x24 --for 3s --at 1s,3s
+90s

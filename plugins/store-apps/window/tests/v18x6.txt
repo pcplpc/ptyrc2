@@ -1,0 +1,37 @@
+--- 4000 ms
+
+
+  ┌──────────────────┐
+  │                  │
+  │▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀▀▀│
+  │      ▀▀▀ ▀▀      │
+  │▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀▀▀│
+  │                  │
+  │▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀▀▀│
+  ╘══════════════════╛
+--- 4000 ms, styles
+
+
+  aaaaaaaaaaaaaaaaaaaa
+  abbbbbbbbbcbbbbbbbba
+  adddeeeefgcfeeeeddda
+  ahhhhhhiijciihhhhhha
+  akkkkkklllcllllllkka
+  ammmmmmmmmcmmmmmmmma
+  annnnnnnnocooooooooa
+  aaaaaaaaaaaaaaaaaaaa
+a: fg=180
+b: bg=69
+c: bg=180
+d: fg=69 bg=75
+e: fg=69 bg=74
+f: fg=68 bg=74
+g: fg=68 bg=230
+h: bg=111
+i: fg=111 bg=110
+j: fg=230 bg=110
+k: fg=153 bg=107
+l: fg=107 bg=71
+m: bg=71
+n: fg=107 bg=70
+o: fg=71 bg=107

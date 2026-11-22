@@ -1,0 +1,42 @@
+--- 1000 ms
+
+
+        ╭────────────╮
+        │00:10 ━━━━━━│
+        ╰───── timer ╯
+--- 1000 ms, styles
+
+
+        aaaaaaaaaaaaaa
+        abbbbb bbbbbba
+        aaaaaaa     aa
+a: dim
+b: fg=10 bold
+--- 7000 ms
+
+
+        ╭────────────╮
+        │00:04 ━━╸───│
+        ╰───── timer ╯
+--- 7000 ms, styles
+
+
+        aaaaaaaaaaaaaa
+        abbbbb bbbaaaa
+        aaaaaaa     aa
+a: dim
+b: fg=11 bold
+--- 9000 ms
+
+
+        ╭────────────╮
+        │00:02 ━─────│
+        ╰───── timer ╯
+--- 9000 ms, styles
+
+
+        aaaaaaaaaaaaaa
+        abbbbb baaaaaa
+        aaaaaaa     aa
+a: dim
+b: fg=208 bold

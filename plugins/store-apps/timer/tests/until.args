@@ -1,0 +1,4 @@
+# test_until: --until HH:MM, the wall clock of the machine's zone: ten
+# seconds to 17:30 in Paris.
+--size 40x8 --for 2s --at 1.5s --clock 2026-11-13T16:29:50Z --zone Europe/Paris
+--until 17:30

@@ -1,0 +1,3 @@
+# test_live: a widget a file, the count in the title.
+--size 80x24 --for 3s
+-- -c tests/TODO.md tests/list.md

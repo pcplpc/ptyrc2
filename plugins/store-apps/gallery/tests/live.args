@@ -1,0 +1,4 @@
+# test_gallery_live, test_reads (--dir): the *.pic of a directory named;
+# -a: two pictures on three nails: two nails, each picture hung, named.
+--size 80x24 --for 4s --at 1.5s,3.5s
+-- --dir tests/two --every 1 -a

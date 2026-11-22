@@ -1,0 +1,14 @@
+--- 2600 ms
+
+
+
+     ╭────────────────────────────────────────────────╮
+     │List                                            │
+     │☐ first                                         │
+     │☑ second                                        │
+     │                                                │
+     │space tick  a add  e edit  d delete  esc leave  │
+     ╰─────────────────────────────────────── list.md ╯
+refused at 2500 ms: file.write (denied)
+note: the screen at 2600 ms has cells in inverse, not seen as text: --styles shows them
+refused: files-write, declared and answered no

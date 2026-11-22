@@ -1,0 +1,5 @@
+# files-write denied: a box ticked is not written, the note stands.
+--size 60x14 --for 3s --at 2.6s
+--deny files-write
+--focus 2s:note --key 2.5s:j --key 2.5s:space
+-- -i tests/list.md

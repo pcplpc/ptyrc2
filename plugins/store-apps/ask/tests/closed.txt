@@ -1,0 +1,12 @@
+--- 1700 ms
+
+
+       ╭────────────────────────╮
+       │Sure?                   │
+       │1 yes                   │
+       │2 no                    │
+       │enter ok  esc later     │
+       ╰─────────────────── ask ╯
+--- 2500 ms
+note: the screen at 1700 ms has cells in inverse, not seen as text: --styles shows them
+ended: exit: 1

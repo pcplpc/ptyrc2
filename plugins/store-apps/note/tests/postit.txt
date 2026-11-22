@@ -1,0 +1,21 @@
+--- 3000 ms
+
+
+  █ TODO.md 2/5 ███████████◣
+  █━━━━━━━━──────────── 2/5█
+  █☐ milk, the whole one,  █
+  █  from the shop at the …█
+  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+--- 3000 ms, styles
+
+
+  aabbbbbbbbbbbaaaaaaaaaaaaa
+  accccccccddddddddddddbbbba
+  acccccccccccccccccccccceea
+  acccccccccccccccccccccccca
+  aaaaaaaaaaaaaaaaaaaaaaaaaa
+a: fg=221
+b: fg=235 bg=221 bold
+c: fg=235 bg=221
+d: fg=136 bg=221
+e: bg=221

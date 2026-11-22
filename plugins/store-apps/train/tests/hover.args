@@ -1,0 +1,2 @@
+# The pointer on the glass: a breath of fog where it went, fading.
+--size 60x18 --for 4s --at 3s,4s --pointer 2500:20,8 --pointer 2700:22,8 --clock 2026-11-22T11:00:00Z --zone Europe/Paris -- --at 12:00

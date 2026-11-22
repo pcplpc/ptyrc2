@@ -1,0 +1,67 @@
+widget: [{'tag': 'ask', 'state': 'placed', 'asks': 'loud', 'focused': False, 'title': 'deploy'}]
+$ ptyrc -s h shot --sprites --no-cursor --ansi (status 0)
+before                                                                
+before                                                                
+                                                                      
+                                                                      
+                                                                      
+                                                                      
+                                                                      
+                      ╭────────────────────────╮                      
+                      │Deploy?                 │                      
+                      │1 yes                   │                      
+                      │2 no                    │                      
+                      │3 later                 │                      
+                      │ctrl+t ctrl+t  to answer│                      
+                      ╰──────────── >>> deploy ╯
+focused: [{'tag': 'ask', 'state': 'placed', 'asks': 'loud', 'focused': True, 'title': 'deploy'}]
+$ ptyrc -s h shot --sprites --no-cursor --ansi (status 0)
+before                                                                
+before                                                                
+                                                                      
+                                                                      
+                                                                      
+                                                                      
+                      ╭────────────────────────╮                      
+                      │Deploy?                 │                      
+                      │1 yes                   │                      
+                      │2 no                    │                      
+                      │3 later                 │                      
+                      │enter ok  esc later     │                      
+                      ╰──────────────── deploy ╯
+choice: status 0, stdout 'no\n', stderr ''
+$ ptyrc -s h shot --sprites --no-cursor --ansi (status 0)
+before                                                                
+before                                                                
+after                                                                 
+after
+widget: []
+multi, json True: status 0, stdout '["a","c"]\n', stderr ''
+multi, json False: status 0, stdout 'a\nc\n', stderr ''
+$ ptyrc -s h shot --sprites --no-cursor --ansi (status 0)
+before                                                                
+before                                                                
+after                                                                 
+after                                                                 
+                                                                      
+                                                                      
+                                                                      
+                  ╭────────────────────────────────╮                  
+                  │Name?                           │                  
+                  │anné                            │                  
+                  │enter ok  esc later  ^X close   │                  
+                  ╰─────────────────────────── ask ╯
+closed: status 1, stdout '', stderr ''
+$ ptyrc -s h shot --sprites --no-cursor --ansi (status 0)
+before                                                                
+before                                                                
+after                                                                 
+after                                                                 
+done                                                                  
+done
+$ ptyrc -s h manage ls (status 0)
+ID  KIND   STATE     SINCE      PID  NAME  ARGS
+ 1  child  exited 0    29s  1398403  ask   --manifest {"frame":0,"granted":[],"id":"ask","limits":{},"permissions":[],"version":"0.1.0"} --script /home/peon/git/perso/ptyrc/ptyrc2/plugins/store-apps/ask/app.js {"default":null,"multi":false,"other":false,"text":false,"timeout":null,"title":"deploy","words":["Deploy?","yes","no","later"]}
+ 2  child  exited 0    19s  1398492  ask   --manifest {"frame":0,"granted":[],"id":"ask","limits":{},"permissions":[],"version":"0.1.0"} --script /home/peon/git/perso/ptyrc/ptyrc2/plugins/store-apps/ask/app.js {"default":null,"multi":true,"other":false,"text":false,"timeout":null,"title":null,"words":["Which?","a","b","c"]}
+ 3  child  exited 0    10s  1398533  ask   --manifest {"frame":0,"granted":[],"id":"ask","limits":{},"permissions":[],"version":"0.1.0"} --script /home/peon/git/perso/ptyrc/ptyrc2/plugins/store-apps/ask/app.js {"default":null,"multi":true,"other":false,"text":false,"timeout":null,"title":null,"words":["Which?","a","b","c"]}
+ 4  child  exited 1     2s  1398590  ask   --manifest {"frame":0,"granted":[],"id":"ask","limits":{},"permissions":[],"version":"0.1.0"} --script /home/peon/git/perso/ptyrc/ptyrc2/plugins/store-apps/ask/app.js {"default":"an","multi":false,"other":false,"text":false,"timeout":null,"title":null,"words":["Name?"]}

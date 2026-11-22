@@ -16,6 +16,23 @@ The protocol: `sdk/template/PROTOCOL.md`. The script API:
 - `clock`: a deck; variants by size, the wall clock, a zone, a tick on
   the second; code shared as modules of the tree; an option refused in
   `init`.
+- `ask`: a deck that asks for the keyboard (`key`, `paste`, `ask:
+  {quiet: false}`), the answer to the caller (`result`, `exit`); the
+  twin's `ptyrc.ui` models in `ui.js`, on the SDK's `Field`, `Listing`.
+- `gallery`: a deck of several widgets, each declared again with other
+  sizes and title (`widget.options`, `deck.resize`); `hover`, `leave`;
+  assets (`pictures/`, also under `--unit`); files and directories
+  named (`file.*`), and their refusals by the launcher as cases.
+- `train`: a picture deck drawn 24 times a second from a pure
+  `scene`; family code of `_shared/js/` (`sky.js`, `strip.js`); the
+  twin's pixels to the bit, by hashes of its scenes (`twin.js`, made by
+  `plan/sessions/22112026-01-migration/decks-train/twin.py`); the wall
+  clock read once, at the start; an option of its own after `--`
+  (`--at`).
+- `note`: widgets that take keys, each a file named and rewritten
+  (`file.write` with `ifMtime`; an absent file made by the first
+  write); the files faked under `--unit` (`tests.js`, `Fake`); a case
+  writes in memory (`files: NAME written`).
 - `life`: Rust; a Braille canvas, a `Sight`, draws from the seed,
   permissions by option (`needs`), values refused by the manifest.
 
@@ -55,9 +72,13 @@ source.
   `NAME/lib/x.js`); a file of a tree named as one of `_shared/js/` is
   its copy, checked byte for byte as `LICENSE.txt` is. Its tests,
   `_shared/js/x.tests.js`, are not copied: the harness runs them once.
-  Tenants: `digits.js` (`clock`; `timer` next), `reef.js` (`fishes`,
-  `tank`), `arcade.js`, `twister.js` (`snake`, `bricks`;
-  `twister.js`: Python's `random.Random`, the twin's draws for a seed).
+  Tenants: `digits.js` (`clock`, `timer`), `reef.js` (`fishes`,
+  `tank`), `arcade.js`, `twister.js` (`snake`, `bricks`; `twister.js`
+  `gallery`, `train`, `window` too: Python's `random.Random`, the twin's draws for a seed),
+  `foot.js` (`ask`, `note`: the twin's `ui.foot`), `sky.js`,
+  `strip.js` (`train`, `window`: the twin's `_sky`, `_strip`, and
+  `window.Era`, `drawn`; `strip.js` needs `sky.js` beside it; colours
+  0xrrggbb, rounded half to even: the twin's pixels to the bit).
 - `_shared/rust/x.rs`: copied as `NAME/src/x.rs`, declared `mod x;`
   there; never `lib.rs`, `main.rs`. Its unit tests inside
   (`#[cfg(test)]`), run once by the harness, natively, with
@@ -108,10 +129,12 @@ those.
 The user's hands as the driver hears them: `--pointer MS:X,Y`,
 `--press MS:X,Y`, `--release MS:X,Y` (`--click`: both at once),
 `--key`, `--focus`, `--paste`, `--resize`; screen cells, so that a
-case names no sprite id. `--event` only for what no hand gives. An
-effect that follows the pointer asks the driver (`"pointer": true`,
-`"bomb": true` in its params, `sand`): no pad sprite, no `hover`,
-`mouse` relayed by the app.
+case names no sprite id. `--key` takes a character, `ctrl+A`..`ctrl+Z`
+and the named keys of `dev test --help`: no `alt+`; a paste is one
+line. `--event` only for what no hand gives. An effect that follows
+the pointer asks the driver (`"pointer": true`, `"bomb": true` in its
+params, `sand`): no pad sprite, no `hover`, `mouse` relayed by the
+app.
 
 A second run from the first one's storage: `ptyrc dev test .
 --storage-out tests/stored` once, the directory kept in the tree; the

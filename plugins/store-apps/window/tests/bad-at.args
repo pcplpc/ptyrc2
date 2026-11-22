@@ -1,0 +1,2 @@
+# test_print: --at not HH:MM refused at the start (init: exit 2).
+--size 30x13 --for 1s -- --at 25:00

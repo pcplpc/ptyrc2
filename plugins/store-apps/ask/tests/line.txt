@@ -1,0 +1,21 @@
+--- 1900 ms
+
+
+        ╭────────────────────────────────╮
+        │Name?                           │
+        │anné                            │
+        │enter ok  esc later  ^X close   │
+        ╰─────────────────────────── ask ╯
+--- 2300 ms
+
+
+
+        ╭────────────────────────────────╮
+        │Name?                           │
+        │anné                            │
+        │ctrl+t ctrl+t  to answer        │
+        ╰─────────────────────── >>> ask ╯
+dropped at 2100 ms: key x: to the program, not grabbed
+note: the screen at 1900 ms has cells in inverse, not seen as text: --styles shows them
+result: anné (status 0)
+ended: exit: 0

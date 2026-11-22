@@ -1,0 +1,7 @@
+# test_model (-t): several lines; ctrl+j a new line (headless has no alt+enter), then typed and
+# pasted; `enter`: the text, its lines parted by \n. A paste of several
+# lines: the unit tests (twin.js).
+--size 50x14 --for 2.5s --at 1.9s --styles
+--focus 1.5s:ask --key 1.6s:ctrl+j --key 1.7s:c --paste 1.8s:d
+--key 2s:enter
+-t Why? --default ab

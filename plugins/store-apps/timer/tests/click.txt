@@ -1,0 +1,101 @@
+--- 2000 ms
+
+
+     ╭─────────────────╮
+     │█▀█ █ █ ▄ █▀▀ █▀█│
+     │█ █ ▀▀█ ▄ ▀▀█ ▀▀█│
+     │▀▀▀   ▀   ▀▀▀ ▀▀▀│
+     │                 │
+     │━━━━━━━━━━━━━━━━━│
+     │    of 05:00     │
+     ╰────────── timer ╯
+--- 2000 ms, styles
+
+
+     aaaaaaaaaaaaaaaaaaa
+     abbb bbb c bbb bbba
+     abbb bbb c bbb bbba
+     abbb bbb c bbb bbba
+     a                 a
+     addddddddddddddddda
+     a    aaaaaaaa     a
+     aaaaaaaaaaaa     aa
+a: dim
+b: fg=7
+c: fg=8
+d: bold
+--- 4000 ms
+
+
+     ╭─────────────────╮
+     │█▀█ █ █ ▄ █▀▀ █▀█│
+     │█ █ ▀▀█ ▄ ▀▀█ █▀█│
+     │▀▀▀   ▀   ▀▀▀ ▀▀▀│
+     │                 │
+     │━━━━━━━━━━━━━━━━━│
+     │ paused of 05:00 │
+     ╰────────── timer ╯
+--- 4000 ms, styles
+
+
+     aaaaaaaaaaaaaaaaaaa
+     abbb bbb b bbb bbba
+     abbb bbb b bbb bbba
+     abbb bbb b bbb bbba
+     a                 a
+     accccccccccccccccca
+     a cccccc aaaaaaaa a
+     aaaaaaaaaaaa     aa
+a: dim
+b: fg=8
+c: bold
+--- 4200 ms
+
+
+     ╭─────────────────╮
+     │█▀█ █ █ ▄ █▀▀ █▀█│
+     │█ █ ▀▀█ ▄ ▀▀█ █▀█│
+     │▀▀▀   ▀   ▀▀▀ ▀▀▀│
+     │                 │
+     │━━━━━━━━━━━━━━━━━│
+     │ paused of 05:00 │
+     ╰────────── timer ╯
+--- 4200 ms, styles
+
+
+     aaaaaaaaaaaaaaaaaaa
+     abbb bbb b bbb bbba
+     abbb bbb b bbb bbba
+     abbb bbb b bbb bbba
+     a                 a
+     accccccccccccccccca
+     a cccccc aaaaaaaa a
+     aaaaaaaaaaaa     aa
+a: dim
+b: fg=7
+c: bold
+--- 7000 ms
+
+
+     ╭─────────────────╮
+     │█▀█ █ █ ▄ █▀▀ █▀▀│
+     │█ █ ▀▀█ ▄ ▀▀█ █▀█│
+     │▀▀▀   ▀   ▀▀▀ ▀▀▀│
+     │                 │
+     │━━━━━━━━━━━━━━━━━│
+     │    of 05:00     │
+     ╰────────── timer ╯
+--- 7000 ms, styles
+
+
+     aaaaaaaaaaaaaaaaaaa
+     abbb bbb b bbb bbba
+     abbb bbb b bbb bbba
+     abbb bbb b bbb bbba
+     a                 a
+     accccccccccccccccca
+     a    aaaaaaaa     a
+     aaaaaaaaaaaa     aa
+a: dim
+b: fg=7
+c: bold

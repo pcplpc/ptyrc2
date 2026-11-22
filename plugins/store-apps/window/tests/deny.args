@@ -1,0 +1,2 @@
+# --deny clock: the time since the start, 1970-01-01, its day the seed.
+--size 60x18 --for 4s --deny clock --clock 2026-11-22T11:00:00Z --zone Europe/Paris

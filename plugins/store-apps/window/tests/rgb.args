@@ -1,0 +1,2 @@
+# test_print: --place sea --weather fog --rgb (colours of 24 bits).
+--size 34x14 --for 4s --styles --clock 2026-11-22T11:00:00Z --zone Europe/Paris -- -a --at 22:10 --season winter --place sea --weather fog --rgb

@@ -1,0 +1,4 @@
+# test_reads (5m --click): nothing asked; a press on the widget pauses
+# (`paused`, the time blinks: dim on the odd half second), a second goes on.
+--size 30x12 --for 8s --at 2s,4s,4.2s,7s --styles --click 2.5s:20,5 --click 5s:20,5
+5m -- --click

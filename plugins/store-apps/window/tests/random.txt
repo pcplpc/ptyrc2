@@ -1,0 +1,78 @@
+--- 2000 ms
+
+
+         ┌────────────────────────────────────────┐
+         │                                        │
+         │                                        │
+         │                                        │
+         │     ▀▀▀▀▀▀▀▀                           │
+         │     ▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀▀▀     │
+         │     ▀  ▀▀  ▀ ▀          ▀ ▀            │
+         │     ▀▀▀▀▀▀▀▀ ▀▀▀▀▀ ▀▀▀▀   ▀ ▀▀▀▀▀▀     │
+         │     ▀▀▀▀ ▀       ▀▀▀▀▀▀   ▀ ▀▀▀▀▀▀     │
+         │         ▀▀▀          ▀▀   ▀ ▀▀▀▀▀▀     │
+         │               ▀   ▀   ▀ ▀ ▀ ▀▀ ▀ ▀     │
+         │     ▀ ▀           ▀ ▀   ▀ ▀            │
+         │       ▀ ▀     ▀ ▀       ▀  ▀▀          │
+         ╘════════════════════════════════════════╛
+--- 2000 ms, styles
+
+
+         aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+         abcdbdeeeeeeeefeeeeeeeeeeeefeeeeeeeedbdcba
+         abcdbdeeeeeeeefeeeeeeeeeeeefeeeeeeeedbdcba
+         abcdbdeeeeeeeefeeeeeeeeeeeefeeeeeeeedbdcba
+         abcdbdggggggggfeeeeeeeeeeeefeeeeeeeedbdcba
+         abcdbdhhhhhhhhhhhhhhhhhhhhiiiiiiiiiidbdcba
+         abcdbdjjjkklljfjmmmmmmmmmnofpnmmmmmmdbdcba
+         abcdbdqqrrrrrsftuuvvwxxxxnnfpnxxxxxxdbdcba
+         abcdbdyyyzABCnfnnnDEEFtGGnnfonGGGGGGdbdcba
+         abcdbdHHHHIIInfnnnDnnnnJKnnfpnKKKKKKdbdcba
+         abcdbdHHHDDDHnfnLLDnLLLDInpfonIIMNNIdbdcba
+         abcdbdOnpnnDHnfnnnDnLLPDHnofpnHHMMMHdbdcba
+         abcdbdDnonpDHnfnPPQnnnnDHnpfnuRRRRRRdbdcba
+         aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+a: fg=180
+b: bg=255
+c: bg=250
+d: bg=247
+e: bg=68
+f: bg=94
+g: fg=68 bg=110
+h: fg=110 bg=94
+i: fg=74 bg=94
+j: fg=110 bg=109
+k: fg=109 bg=146
+l: bg=109
+m: bg=110
+n: bg=240
+o: fg=240 bg=66
+p: fg=240 bg=60
+q: fg=249 bg=250
+r: fg=249 bg=181
+s: fg=249 bg=240
+t: fg=146 bg=240
+u: fg=187 bg=240
+v: fg=187 bg=188
+w: bg=146
+x: fg=110 bg=146
+y: fg=181 bg=246
+z: fg=216 bg=246
+A: bg=216
+B: fg=181 bg=216
+C: bg=181
+D: bg=102
+E: fg=102 bg=240
+F: fg=250 bg=240
+G: fg=146 bg=250
+H: bg=245
+I: fg=246 bg=245
+J: fg=250 bg=187
+K: fg=250 bg=251
+L: fg=60 bg=240
+M: bg=187
+N: fg=246 bg=187
+O: fg=245 bg=102
+P: fg=66 bg=240
+Q: fg=102 bg=244
+R: fg=245 bg=187

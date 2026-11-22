@@ -1,0 +1,3 @@
+# test_tone: -c, the colour by the time left: green, yellow, orange (208).
+--size 30x6 --for 10s --at 1s,7s,9s --styles
+10s -c

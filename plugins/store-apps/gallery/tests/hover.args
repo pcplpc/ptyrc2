@@ -1,0 +1,5 @@
+# test_slot_hover: under the pointer the eyes turn to it, the plate
+# names the author; the pointer still 1.5 s, the hover ends.
+--size 40x12 --for 4s --at 1.5s,2.2s,3.8s
+--pointer 1.2s:10,7 --pointer 2s:19,6
+-- --file tests/eyes.pic -o

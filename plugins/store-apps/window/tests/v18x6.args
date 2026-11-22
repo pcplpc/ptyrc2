@@ -1,0 +1,2 @@
+# test_print: every variant; the twin's --print 18x6 --at 12:00.
+--size 24x12 --for 4s --styles --clock 2026-11-22T11:00:00Z --zone Europe/Paris -- --at 12:00
