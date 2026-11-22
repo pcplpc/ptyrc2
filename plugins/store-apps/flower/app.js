@@ -142,11 +142,11 @@ export function paint(rows, c, head, dim = false) {
  * the view, cold (`.` in `classes`), not in `taken` (a set of `"x,y"`),
  * its neighbours left and right cold or out of the view: never in a gap
  * between two words. The nearest, rows counting double, ties at random;
- * null if none. */
-export function place(classes, word, s, taken, rnd) {
+ * null if none. `ok`: `goods(classes, taken)`, kept for the calls of a
+ * scan. */
+export function place(classes, word, s, taken, rnd, ok = null) {
   const [wx, wy, n] = word;
-  const h = classes.length;
-  const cold = (x, y) => !(x >= 0 && x < classes[y].length) || classes[y][x] === ".";
+  ok ??= goods(classes, taken);
   let best = null;
   for (let gap = GAP[0]; gap <= GAP[1]; gap++) {
     for (let rise = RISE[0]; rise <= RISE[1]; rise++) {
@@ -154,20 +154,13 @@ export function place(classes, word, s, taken, rnd) {
         for (const ry of [wy - rise, wy + rise]) {
           const x0 = rx - s.root;
           const y0 = ry - s.h + 1;
-          const fits = s.mask.every(([dx, dy]) => {
-            const x = x0 + dx;
-            const y = y0 + dy;
-            return (
-              y >= 0 &&
-              y < h &&
-              x >= 0 &&
-              x < classes[y].length &&
-              classes[y][x] === "." &&
-              !taken.has(`${x},${y}`) &&
-              cold(x - 1, y) &&
-              cold(x + 1, y)
-            );
-          });
+          let fits = true;
+          for (const m of s.mask) {
+            if (!ok(x0 + m[0], y0 + m[1])) {
+              fits = false;
+              break;
+            }
+          }
           if (!fits) continue;
           const key = [Math.hypot(gap, 2 * rise), rnd(), x0, y0];
           if (!best || key[0] < best[0] || (key[0] === best[0] && key[1] < best[1])) best = key;
@@ -176,6 +169,22 @@ export function place(classes, word, s, taken, rnd) {
     }
   }
   return best && [best[2], best[3]];
+}
+
+/** Whether a cell `(x, y)` may hold a cell of a flower (`place`): in
+ * the view, cold, not `taken`, its neighbours left and right cold or
+ * out of the view. Each cell worked out once. */
+export function goods(classes, taken) {
+  const h = classes.length;
+  const w = Math.max(0, ...classes.map((r) => r.length));
+  const known = new Int8Array(w * h); // 0: not yet; 1: good; 2: not
+  const cold = (x, y) => !(x >= 0 && x < classes[y].length) || classes[y][x] === ".";
+  return (x, y) => {
+    if (!(y >= 0 && y < h && x >= 0 && x < classes[y].length)) return false;
+    const i = y * w + x;
+    if (known[i] === 0) known[i] = classes[y][x] === "." && !taken.has(`${x},${y}`) && cold(x - 1, y) && cold(x + 1, y) ? 1 : 2;
+    return known[i] === 1;
+  };
 }
 
 /** The matches of `words` in `rows`, a shape: `[x, y, text]` in its
@@ -369,10 +378,11 @@ export class Garden {
     const failed = new Set();
     const all = Object.values(SHAPES);
     const bySize = [...all].sort((a, b) => a.h - b.h);
+    const ok = goods(classes, taken);
     for (const m of free) {
       // A random size; smaller ones where it does not fit.
       for (const s of [choice(rnd, all), ...bySize]) {
-        const at = place(classes, [m.x - ox, m.y - oy, m.len], s, taken, rnd);
+        const at = place(classes, [m.x - ox, m.y - oy, m.len], s, taken, rnd, ok);
         if (at) {
           this.plant(m, s, [at[0] + ox, at[1] + oy], now);
           return;
