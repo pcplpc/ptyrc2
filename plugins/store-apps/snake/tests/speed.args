@@ -1,0 +1,2 @@
+# main: --speed must be positive: refused in init, status 2.
+--size 20x4 --speed 0

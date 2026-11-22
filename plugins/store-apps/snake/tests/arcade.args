@@ -1,0 +1,3 @@
+# test_snake_arcade: -a, the snake, an apple, a beam announced, then
+# firing, the particles, the score.
+--size 40x8 --for 3200ms --at 800ms,3000ms,3200ms --screen tests/words.screen -a --speed 60

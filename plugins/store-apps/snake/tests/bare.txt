@@ -1,0 +1,13 @@
+--- 1000 ms
+                        @ooooo
+               ●
+words in the way
+
+   more words here
+--- 2000 ms
+                                 o@
+                          oooooooo
+words in the way
+
+   more words here                 ●
+lowered at 0 ms: frame.get, to the degree shape

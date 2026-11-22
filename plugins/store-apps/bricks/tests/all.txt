@@ -1,0 +1,64 @@
+--- 3000 ms
+                                        ▲ 0  ▼ 32  best 0 32
+  the words of a page               (━━━)
+
+      and more words here, a line        x2
+                                       ⟨=⟩⟦=⟧⟦=⟧⟦≡⟧
+                                        ▄▀⟦·⟧⟦=⟧⟨=⟩
+  short                                ▄
+
+
+
+
+                            (━━━)
+--- 3000 ms, styles
+                                        aaa  bbbbccccccccccc
+                                    aaaaa
+
+                                         dd
+                                       eeeffffffggg
+                                        hbiiijjjjjj
+                                       k
+
+
+
+
+                            bbbbb
+a: fg=51 bold
+b: fg=214 bold
+c: dim
+d: fg=252 bold
+e: fg=196 bold
+f: fg=208
+g: fg=255 bold
+h: fg=240 dim
+i: fg=226 dim
+j: fg=226
+k: fg=236 dim
+--- 6000 ms
+                                         ▲ 0  ▼ 0  best 0 42
+  the words of a page                                 (━.━)
+                                                       . .
+      and more words here, a line                       '▄
+                                             ⟦=⟧⟦≡⟧      ▄
+                                             ⟦=⟧⟨=⟩      ▀▄
+  short
+--- 6000 ms, styles
+                                         aaa  bbbccccccccccc
+                                                      aadaa
+                                                       e e
+                                                        fg
+                                             hhhiii      j
+                                             kkkkkk      ja
+a: fg=51 bold
+b: fg=214 bold
+c: dim
+d: fg=196 dim
+e: fg=231 dim
+f: fg=231
+g: fg=236 dim
+h: fg=208
+i: fg=255 bold
+j: fg=240 dim
+k: fg=226
+lowered at 0 ms: frame.get, to the degree shape

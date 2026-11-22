@@ -1,0 +1,15 @@
+--- 2000 ms
+                                                         ◆ 0
+  the words of a page                   ⟦=⟧⟦=⟧⟦=⟧⟦=⟧
+                                        ⟦=⟧⟦=⟧⟦=⟧⟦=⟧
+      and more words here, a line
+                                  ▄
+
+  short
+
+
+
+                                   (━━━)
+refused at 0 ms: input.grab (denied)
+lowered at 0 ms: frame.get, to the degree shape
+refused: keys-arrows, declared and answered no

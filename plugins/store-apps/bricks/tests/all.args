@@ -1,0 +1,3 @@
+# test_bricks_all: -a, two rackets, two scores and the best; kinds of
+# bricks, particles.
+--size 60x12 --for 6s --at 3s,6s --styles --screen tests/page.screen -a

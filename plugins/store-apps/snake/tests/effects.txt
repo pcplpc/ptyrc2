@@ -1,0 +1,65 @@
+--- 1500 ms
+          .      +         ◆ 16  best 16
+     ooooooooooooo
+wordsoin the way+ +
+   '@o             '
+●
+         .
+--- 1500 ms, styles
+          a      b         ccccddddddddd
+     eeffggghhiijj
+     k          l m
+   bck             b
+n
+         o
+a: fg=160 dim
+b: fg=160
+c: fg=10 bold
+d: dim
+e: fg=82
+f: fg=46
+g: fg=40
+h: fg=34
+i: fg=28
+j: fg=22
+k: fg=118
+l: fg=196
+m: fg=208
+n: fg=196 bold
+o: fg=196 dim
+--- 3000 ms
+                           ◆ 29  best 29
+                        .  .       +oo+
+words in the way   '''  '          *oo
+                   +'  .    '   '   oo
+                     'oooooOOooooooooo
+        .       ●         '+.' @oooooo
+--- 3000 ms, styles
+                           aaaabbbbbbbbb
+                        c  d       effe
+                   ghi  i          jff
+                   gk  l    g   g   mn
+                     ioooopqqprrrrmmmn
+        s       t         hkli auuuunn
+a: fg=10 bold
+b: dim
+c: fg=220 dim
+d: fg=231 dim
+e: fg=208
+f: fg=46
+g: fg=226
+h: fg=231
+i: fg=220
+j: fg=196 bold
+k: fg=214
+l: fg=226 dim
+m: fg=40
+n: fg=82
+o: fg=22
+p: fg=28
+q: fg=226 bold
+r: fg=34
+s: fg=208 dim
+t: fg=160
+u: fg=118
+lowered at 0 ms: frame.get, to the degree shape

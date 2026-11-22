@@ -1,0 +1,3 @@
+# test_bricks: groups of bricks between the words, a racket, a ball;
+# the score top right.
+--size 60x12 --for 4s --at 2s,4s --screen tests/page.screen

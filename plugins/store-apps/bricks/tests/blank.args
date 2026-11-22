@@ -1,0 +1,2 @@
+# shape answered no: a blank screen, it plays on the whole view.
+--size 60x12 --for 2s --screen tests/page.screen --deny shape

@@ -1,0 +1,3 @@
+# test_snake_over_its_particles: -e, the score and the best; the
+# particles under the snake.
+--size 40x6 --for 3s --at 1500ms,3s --styles --screen tests/word.screen -e --speed 60

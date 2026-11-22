@@ -56,7 +56,7 @@ source.
   its copy, checked byte for byte as `LICENSE.txt` is. Its tests,
   `_shared/js/x.tests.js`, are not copied: the harness runs them once.
   Tenants: `digits.js` (`clock`; `timer` next), `reef.js` (`fishes`,
-  `tank`), `arcade.js`, `twister.js` (`snake`; `bricks` next;
+  `tank`), `arcade.js`, `twister.js` (`snake`, `bricks`;
   `twister.js`: Python's `random.Random`, the twin's draws for a seed).
 - `_shared/rust/x.rs`: copied as `NAME/src/x.rs`, declared `mod x;`
   there; never `lib.rs`, `main.rs`. Its unit tests inside

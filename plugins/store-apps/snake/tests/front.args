@@ -1,0 +1,3 @@
+# test_snake_front: --front (the launcher's), drawn over the text: the
+# ghost seen as it goes through.
+--size 40x8 --for 1500ms --at 950ms,1100ms,1300ms --styles --screen tests/words.screen --screen 1s:tests/over.screen --front -x -l

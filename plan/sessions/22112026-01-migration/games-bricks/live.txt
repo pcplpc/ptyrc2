@@ -1,0 +1,146 @@
+1 bricks: running
+
+
+
+
+
+
+
+
+
+$ ptyrc -s h call session.info (status 0)
+{
+  "active_at": null,
+  "alt_screen": false,
+  "argv": [
+    "sh",
+    "-c",
+    "cat /home/peon/git/perso/ptyrc/ptyrc2/temp/live-bricks/w.txt; exec cat"
+  ],
+  "driver_pid": 1344631,
+  "exited": false,
+  "focus": null,
+  "grabbed": true,
+  "handoff": false,
+  "headless": false,
+  "host_colors": {
+    "bg": "#000000",
+    "fg": "#e5e5e5",
+    "from": {
+      "bg": "default",
+      "fg": "default"
+    }
+  },
+  "modes": {
+    "app_cursor": false,
+    "bracketed_paste": false,
+    "mouse": [],
+    "mouse_sgr": false
+  },
+  "pid": 1344632,
+  "protocol": 1,
+  "server": "ptyrc/2.0.0",
+  "session": "h",
+  "size": [
+    60,
+    10
+  ],
+  "title": ""
+}
+$ ptyrc -s h text (status 0)
+
+  the words of a page
+
+      and more words here, a line
+
+  short
+$ ptyrc -s h shot --sprites --no-cursor --ansi (status 0)
+                                           [0;2m←↑↓→  ctrl+t  [0;1;97m◆ 0[0m[0m
+  the words of a page                                       [0m
+                                      [0;38;5;33m⟦=⟧⟦=⟧⟦=⟧⟦=⟧[0m          [0m
+      and more words here, a line     [0;38;5;201m⟦=⟧⟦=⟧⟦=⟧⟦=⟧[0m          [0m
+                                                            [0m
+  short                       [0;1;97m▄[0m                             [0m
+                                                            [0m
+                                                            [0m
+                                                            [0m
+                           [0;1;97m(━━━)[0m                            [0m
+$ ptyrc -s h shot --sprites --no-cursor --ansi (status 0)
+                                          [0;2m←↑↓→  ctrl+t  [0;1;97m◆ 10[0m[0m
+  the words of a page                                       [0m
+                                      [0;38;5;33m⟦=⟧⟦=⟧⟦=⟧⟦=⟧[0m          [0m
+      and more words here, a line     [0;38;5;201m⟦=⟧⟦=⟧⟦=⟧⟦=⟧[0m          [0m
+           [0;38;5;201m⟦=⟧⟦=⟧⟦=⟧⟦=⟧⟦=⟧[0m                                  [0m
+  short    [0;38;5;196m⟦=⟧⟦=⟧⟦=⟧⟦=⟧[0m                                     [0m
+                                                            [0m
+                                                            [0m
+                           [0;1;97m▀[0m                                [0m
+                     [0;1;97m(━━━)[0m                                  [0m
+$ ptyrc -s h shot --sprites --no-cursor --ansi (status 0)
+                                          [0;2m←↑↓→  ctrl+t  [0;1;97m◆ 10[0m[0m
+  the words of a page                                       [0m
+                                      [0;38;5;33m⟦=⟧⟦=⟧⟦=⟧⟦=⟧[0m          [0m
+      and more words here, a line     [0;38;5;201m⟦=⟧⟦=⟧⟦=⟧⟦=⟧[0m          [0m
+           [0;38;5;201m⟦=⟧⟦=⟧⟦=⟧⟦=⟧⟦=⟧[0m                                  [0m
+  short    [0;38;5;196m⟦=⟧⟦=⟧⟦=⟧[0m                                        [0m
+                                                            [0m
+                                                            [0m
+                                                            [0m
+                    [0;1;97m▀(━━━)[0m                                  [0m
+$ ptyrc -s h text (status 0)
+
+  the words of a page
+
+      and more words here, a line
+
+  short
+$ ptyrc -s h manage ls (status 0)
+ID  KIND   STATE     SINCE      PID  NAME    ARGS
+ 1  child  exited 0     2s  1344685  bricks  --manifest {"frame":1,"granted":["shape","keys-arrows"],"id":"bricks","limits":{},"permissions":[{"name":"keys-arrows"},{"name":"shape"}],"version":"0.2.0"} --script /home/peon/git/perso/ptyrc/ptyrc2/plugins/store-apps/bricks/app.js {"all":false,"bonuses":false,"effects":false,"grab":true,"multiplayer":false,"rules":false,"speed":16.0}
+$ ptyrc -s h call session.info (status 0)
+{
+  "active_at": 1795309761750,
+  "alt_screen": false,
+  "argv": [
+    "sh",
+    "-c",
+    "cat /home/peon/git/perso/ptyrc/ptyrc2/temp/live-bricks/w.txt; exec cat"
+  ],
+  "driver_pid": 1344631,
+  "exited": false,
+  "focus": null,
+  "grabbed": false,
+  "handoff": false,
+  "headless": false,
+  "host_colors": {
+    "bg": "#000000",
+    "fg": "#e5e5e5",
+    "from": {
+      "bg": "default",
+      "fg": "default"
+    }
+  },
+  "modes": {
+    "app_cursor": false,
+    "bracketed_paste": false,
+    "mouse": [],
+    "mouse_sgr": false
+  },
+  "pid": 1344632,
+  "protocol": 1,
+  "server": "ptyrc/2.0.0",
+  "session": "h",
+  "size": [
+    60,
+    10
+  ],
+  "title": ""
+}
+$ ptyrc -s h text (status 0)
+
+  the words of a page
+
+      and more words here, a line
+
+  short
+^[[B

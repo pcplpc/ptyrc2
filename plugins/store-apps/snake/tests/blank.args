@@ -1,0 +1,2 @@
+# test_reads: shape answered no: a blank screen, it plays on the whole view.
+--size 40x8 --for 2s --screen tests/words.screen --speed 30 --deny shape

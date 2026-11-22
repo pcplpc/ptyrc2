@@ -1,0 +1,3 @@
+# test_snake_ghost: text written on it, it goes through the text, unseen
+# behind it, to the nearest safe cell (dim on the way: tests.js).
+--size 40x8 --for 1500ms --at 950ms,1100ms,1300ms --styles --screen tests/words.screen --screen 1s:tests/over.screen

@@ -1,0 +1,24 @@
+--- 2000 ms
+                                                         ◆ 0
+  the words of a page                   ⟦=⟧⟦=⟧⟦=⟧⟦=⟧
+                                        ⟦=⟧⟦=⟧⟦=⟧⟦=⟧
+      and more words here, a line
+                                  ▄
+
+  short
+
+
+
+                                   (━━━)
+--- 4000 ms
+                                                        ◆ 22
+  the words of a page                      ⟦=⟧⟦=⟧⟦=⟧
+                                           ⟦=⟧⟦=⟧⟦=⟧
+      and more words here, a line         ▄
+
+
+  short
+
+
+                                         (━━━)
+lowered at 0 ms: frame.get, to the degree shape

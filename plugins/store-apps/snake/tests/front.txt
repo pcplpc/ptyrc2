@@ -1,0 +1,43 @@
+--- 950 ms
+                              ●
+
+words in the way
+                 ooo@
+   more words here
+--- 950 ms, styles
+                              a
+
+
+                 bbbc
+a: fg=9
+b: fg=2
+c: fg=10 bold
+--- 1100 ms
+                              ●
+
+words in the way
+the text is writteooo@er the snake here
+   more words here
+--- 1100 ms, styles
+                              a
+
+
+                  bbbc
+a: fg=9
+b: fg=2
+c: fg=10 bold
+--- 1300 ms
+                              ●
+
+words in the way     oo@
+the text is written ooer the snake here
+   more words here
+--- 1300 ms, styles
+                              a
+
+                     bbc
+                     b
+a: fg=9
+b: fg=2
+c: fg=10 bold
+lowered at 0 ms: frame.get, to the degree shape

@@ -1,0 +1,27 @@
+--- 800 ms
+                           ◆ 11  best 11
+                       .    .   '
+words in the way         ..   +'   ' +
+                    ●   '  @oooooooooo +
+   more words here       '       .    ++
+
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+--- 3000 ms
+          + ooooooooooo@   ◆ 18  best 23
+           +o*         '
+words in theoway           +  ●
+            oooo       .  ''
+   more words here     '
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌+╌╌╌╌'╌╌╌╌╌╌╌╌╌╌╌
+                   .          .
+                     .
+--- 3200 ms
+         .    ooooooooooooo◆ 22  best 23
+               .            ' oo@
+words in the way              oo
+            '
+   more words here          . .
+*━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━*
+                       '      .
+      ●                 +
+lowered at 0 ms: frame.get, to the degree shape

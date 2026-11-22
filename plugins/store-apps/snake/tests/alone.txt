@@ -1,0 +1,9 @@
+--- 1000 ms
+                        @ooooo
+               ●
+words in the way
+
+   more words here
+refused at 0 ms: input.grab (denied)
+lowered at 0 ms: frame.get, to the degree shape
+refused: keys-arrows, declared and answered no

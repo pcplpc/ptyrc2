@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[app]
+id = "snake"
+version = "0.2.0"
+summary = "A snake that plays alone between the words."
+license = "GPL-3.0-or-later"
+api = 1
+script = "app.js"
+surface = "frame"
+frame = "largest"
+random = [[], ["-a"]]
+
+[permissions]
+shape = "the text is the wall; without it, a blank screen"
+keys-arrows = "with --grab: the arrows steer it, until ctrl+t"
+
+[options]
+speed = { type = "float", default = 12.0, doc = "moves per second, more than 0 [default: 12]" }
+effects = { type = "bool", default = false, short = "e", doc = "particles, golden apples, shades, the score" }
+enemies = { type = "bool", default = false, short = "x", doc = "foes that bite the tail off" }
+lasers = { type = "bool", default = false, short = "l", doc = "beams that burn what they cross" }
+all = { type = "bool", default = false, short = "a", doc = "-e -x -l" }
+grab = { type = "bool", default = false, needs = ["keys-arrows"], doc = "the arrows of the keyboard steer the snake, at half the speed; ctrl+t gives them back and ends" }

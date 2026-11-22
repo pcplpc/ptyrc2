@@ -1,0 +1,2 @@
+# test_snake: the snake and the apple, between the words.
+--size 40x8 --for 2s --at 1s,2s --screen tests/words.screen --speed 30

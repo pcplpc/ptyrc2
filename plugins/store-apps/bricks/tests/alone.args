@@ -1,0 +1,2 @@
+# --grab, keys-arrows answered no: it plays alone.
+--size 60x12 --for 2s --screen tests/page.screen --grab --deny keys-arrows

@@ -1,0 +1,3 @@
+# test_bricks_grab: --grab, the arrows move the racket, the keys by the
+# score; ctrl+t gives them back and ends.
+--size 60x12 --for 3s --at 1s,2s --screen tests/page.screen --grab --key 500:left --key 600:left --key 1200:up --key 2500:ctrl+t

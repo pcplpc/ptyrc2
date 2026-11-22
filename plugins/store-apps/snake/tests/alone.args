@@ -1,0 +1,2 @@
+# test_snake_grab: keys-arrows answered no: it plays alone, at the full speed.
+--size 40x8 --for 1s --screen tests/words.screen --grab --speed 30 --deny keys-arrows
