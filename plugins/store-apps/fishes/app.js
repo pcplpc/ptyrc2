@@ -97,6 +97,21 @@ function among(spots, cell) {
   return null;
 }
 
+/** The spots of `spots` out of the reach of `cursor` (`NEAR_MOVING`),
+ * a fish of `length` there; all of them when null. */
+export function beyond(spots, cursor, length = LENGTH) {
+  if (cursor === null) return spots;
+  const [cx, cy] = [cursor[0] - length / 2, cursor[1]];
+  const out = [];
+  for (const s of spots) {
+    // Far on one axis is out of reach: `reach` is no shorter.
+    const dx = s[0] - cx;
+    const dy = (s[1] - cy) * 2;
+    if (Math.abs(dx) >= NEAR_MOVING || Math.abs(dy) >= NEAR_MOVING || reach(s[0], s[1], cursor, length) >= NEAR_MOVING) out.push(s);
+  }
+  return out;
+}
+
 /** Where a shy fish heads, kept in `fish.home`; null for a bold one, or
  * when no spot is out of the cursor's reach. `spots`: `hideouts`. The
  * nearest spot first; `STAY` there, then one drawn at least two lengths
@@ -121,17 +136,24 @@ export function lure(fish, spots, cursor, dt, rnd) {
   }
   if (fish.home === null && safe.length) {
     // The nearest, a draw a spot to break the ties. A spot farther by
-    // its square than the best by more than rounding cannot win.
+    // its square, or its rows alone, than the best by more than
+    // rounding cannot win.
     const [fx, fy] = [fish.x, fish.y];
     let [best, near, square, tie] = [null, 0, Infinity, 0];
-    for (const s of safe) {
-      const dx = s[0] - fx;
-      const dy = s[1] - fy;
-      const d2 = dx * dx + dy * dy;
+    let most = Infinity;
+    for (let i = 0; i < safe.length; i++) {
       const r = rnd();
-      if (d2 > square * (1 + 1e-9)) continue;
+      const s = safe[i];
+      const dy = s[1] - fy;
+      if (dy * dy > most) continue;
+      const dx = s[0] - fx;
+      const d2 = dx * dx + dy * dy;
+      if (d2 > most) continue;
       const d = Math.hypot(dx, dy);
-      if (best === null || d < near || (d === near && r < tie)) [best, near, square, tie] = [s, d, d2, r];
+      if (best === null || d < near || (d === near && r < tie)) {
+        [best, near, square, tie] = [s, d, d2, r];
+        most = square * (1 + 1e-9);
+      }
     }
     fish.home = best;
     fish.stay = uniform(rnd, ...STAY);
@@ -288,10 +310,7 @@ export class Aquarium {
         if (fish.shy && !this.safe.has(n)) {
           // Looked for when the text or the cursor changed, not a fish a tick.
           if (!this.spots.has(n)) this.spots.set(n, hideouts(rows, box, n));
-          this.safe.set(
-            n,
-            this.spots.get(n).filter((s) => cursor === null || reach(s[0], s[1], cursor, n) >= NEAR_MOVING),
-          );
+          this.safe.set(n, beyond(this.spots.get(n), cursor, n));
         }
         lure(fish, this.safe.get(n) ?? [], null, dt, rnd);
         swim(fish, dt, box, ...menace(fish, cursor, moving, threats), rnd);
