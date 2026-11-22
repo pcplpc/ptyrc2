@@ -720,11 +720,20 @@ let named = null; // the title sent
 const seconds = () => Date.now() / 1000;
 
 /** The widget shown again: in `border` (`alert`), or as declared; a
- * modal with `modal`. */
+ * modal with `modal`. A modal denied (`keys-grab`, `front-widget`): not
+ * asked again, the widget shown as it is. */
 function shown(border = null, modal = false) {
   const { border: _b, modal: _m, ...rest } = widget.options;
   widget.options = { ...rest, ...(border ? { border } : {}), ...(modal ? { modal } : {}) };
-  deck.resize(widget, sizes);
+  try {
+    deck.resize(widget, sizes);
+  } catch (e) {
+    if (!modal || !(e instanceof PtyrcError) || e.code !== "denied") throw e;
+    log(`--modal: ${e.message}`);
+    o.modal = false;
+    shown(border);
+    return;
+  }
   named = null;
 }
 

@@ -1,0 +1,10 @@
+--- 2000 ms
+
+
+          ╭─────────────────╮
+          │█▀█ █▀█ ▄ █▀█ █▀█│
+          │█ █ █ █ ▄ █ █ █ █│
+          │▀▀▀ ▀▀▀   ▀▀▀ ▀▀▀│
+          ╰────────── timer ╯
+refused at 1010 ms: widget.show (denied)
+refused: keys-grab, declared and answered no

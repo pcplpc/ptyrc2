@@ -11,8 +11,8 @@ frame = "raw"
 random = [["5m"], ["5m", "-a"]]
 
 [permissions]
-keys-grab = "at the end, a modal: it takes the keys"
-front-widget = "at the end, a modal: over the text"
+keys-grab = "at the end, a modal; refused: the widget as it was"
+front-widget = "at the end, a modal over the text; refused: the widget as it was"
 clock = "the time of day it ends at"
 
 [options]
