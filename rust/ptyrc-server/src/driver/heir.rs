@@ -197,7 +197,7 @@ impl Driver {
         let mut call = |driver: &mut Driver, method: &str, params: Value| {
             let token = Token(driver.next_token);
             driver.next_token += 1;
-            hook!(driver, now, |ctx| engine
+            hook!(driver, engine, now, |ctx| engine
                 .handle(first, token, method, params, ctx))
         };
         let listed = match call(self, "draw.list", json!({})) {
@@ -220,7 +220,8 @@ impl Driver {
         }
         // Its widgets, by the same rule: each is told in `widgets`.
         for &conn in &conns {
-            hook!(self, now, |ctx| engine.move_widgets(conn, from, to, ctx));
+            hook!(self, engine, now, |ctx| engine
+                .move_widgets(conn, from, to, ctx));
         }
         let size = json!({"size": [self.info.cols, self.info.rows]});
         for conn in conns {

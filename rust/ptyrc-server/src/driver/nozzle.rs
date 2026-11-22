@@ -79,7 +79,7 @@ impl Driver {
             let token = Token(self.next_token);
             self.next_token += 1;
             let params = json!({"id": id, "effect": effect});
-            let reply = hook!(self, now, |ctx| engine.handle(
+            let reply = hook!(self, engine, now, |ctx| engine.handle(
                 conn,
                 token,
                 "draw.update",

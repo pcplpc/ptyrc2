@@ -4,7 +4,7 @@
 //! never refused, nothing told.
 
 use crate::lower::NOWHERE;
-use ptyrc_core::FrameId;
+use ptyrc_core::{FrameId, RAW};
 use serde_json::Value;
 
 /// `[app] surface` on its frame.
@@ -34,6 +34,16 @@ impl Surface {
         match self {
             Surface::Frame(frame) | Surface::Screen(frame) => Some(frame),
             Surface::Widget => None,
+        }
+    }
+
+    /// The frame its reads are of below `layout`: that its draws are
+    /// put on; the raw one when they go as named or nowhere.
+    pub fn read(self, screen_wide: bool) -> FrameId {
+        match self {
+            Surface::Frame(frame) => frame,
+            Surface::Screen(frame) if !screen_wide => frame,
+            Surface::Screen(_) | Surface::Widget => RAW,
         }
     }
 }
@@ -111,5 +121,10 @@ mod tests {
             Some(4)
         );
         assert_eq!(Surface::parse("pane", 4), None);
+        // Its reads: where its draws are put.
+        assert_eq!(Surface::Frame(5).read(true), 5);
+        assert_eq!(Surface::Screen(5).read(false), 5);
+        assert_eq!(Surface::Screen(5).read(true), RAW);
+        assert_eq!(Surface::Widget.read(false), RAW);
     }
 }

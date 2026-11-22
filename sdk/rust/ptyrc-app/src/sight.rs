@@ -300,8 +300,11 @@ impl Sight {
         }
         let pos = (at["pos"][0].as_i64(), at["pos"][1].as_i64());
         let own = !self.info.is_null() && at["frame"] == self.info["id"];
+        // In view cells: a cell of its frame less the origin, else by
+        // the rect.
         if let (true, (Some(x), Some(y))) = (own, pos) {
-            return Some((x, y));
+            let origin = |i: usize| self.info["origin"][i].as_i64().unwrap_or(0);
+            return Some((x - origin(0), y - origin(1)));
         }
         let r = self.rect?;
         Some((at["x"].as_i64()? - r[0], at["y"].as_i64()? - r[1]))
@@ -377,6 +380,29 @@ mod tests {
             }
         });
         asked
+    }
+
+    /// The cursor in view cells: of its frame scrolled, the frame cell
+    /// less the origin.
+    #[test]
+    fn the_cursor_in_view_cells() {
+        let _asked = serve("one\n", true);
+        let mut sight = Sight::new(Options {
+            cursor: true,
+            ..Options::default()
+        });
+        let scrolled = json!({"frame": 1, "origin": [0, 5], "rect": [0, 0, 6, 2]});
+        assert!(sight.event("text", &scrolled));
+        let at = json!({"x": 3, "y": 1, "visible": true, "frame": 1, "pos": [3, 6]});
+        assert!(sight.event("cursor", &at));
+        assert!(
+            sight.look() && sight.cursor == Some((3, 1)),
+            "{:?}",
+            sight.cursor
+        );
+        let at = json!({"x": 4, "y": 1, "visible": true, "frame": 9, "pos": [0, 0]});
+        assert!(sight.event("cursor", &at));
+        assert!(sight.look() && sight.cursor == Some((4, 1)));
     }
 
     /// The frame told at `init` is read from the first look.

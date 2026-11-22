@@ -104,16 +104,26 @@ impl Own {
         }
     }
 
-    /// The frame a draw of a store app is put on, whatever it named
-    /// (`ptyrc_rules::surface::clip`). None: as named.
-    fn clip(&self, method: &str, params: &Value) -> Option<u32> {
-        use ptyrc_rules::surface::{self, Surface as Of};
-        let of = match self.surface? {
+    fn of(&self) -> Option<ptyrc_rules::surface::Surface> {
+        use ptyrc_rules::surface::Surface as Of;
+        Some(match self.surface? {
             Surface::Widget => Of::Widget,
             Surface::Frame(frame) => Of::Frame(frame),
             Surface::Screen(frame) => Of::Screen(frame),
-        };
-        surface::clip(of, self.screen_wide, method, params)
+        })
+    }
+
+    /// The frame a draw of a store app is put on, whatever it named
+    /// (`ptyrc_rules::surface::clip`). None: as named.
+    fn clip(&self, method: &str, params: &Value) -> Option<u32> {
+        ptyrc_rules::surface::clip(self.of()?, self.screen_wide, method, params)
+    }
+
+    /// The frame it reads below `layout`, that of its draws
+    /// (`Surface::read`); `None`: the raw one.
+    pub fn read(&self) -> Option<u32> {
+        let frame = self.of()?.read(self.screen_wide);
+        (frame != ptyrc_core::RAW).then_some(frame)
     }
 }
 
@@ -259,8 +269,8 @@ impl Driver {
                 object.insert("layer".into(), json!(TOP_BAND - 1));
             }
         }
-        // Below `layout` one frame, the surface; below `shape` no name
-        // that the cursor or the heat resolves.
+        // Below `layout` one frame, the surface (`read`: its draws');
+        // below `shape` no name that the cursor or the heat resolves.
         let member = if method == "frame.at" {
             "name"
         } else {
@@ -269,9 +279,10 @@ impl Driver {
         if let Some(frame) = object.get_mut(member).filter(|f| !f.is_null()) {
             let of_shape = frame.as_str().is_some_and(|f| OF_SHAPE.contains(&f));
             if own.degree < Degree::Layout || (own.degree < Degree::Shape && of_shape) {
+                let read = own.read().filter(|_| own.degree < Degree::Layout);
                 *frame = match member {
                     "name" => json!("raw"),
-                    _ => json!(0),
+                    _ => json!(read.unwrap_or(0)),
                 };
             }
         }
@@ -422,6 +433,27 @@ impl Driver {
         (heard, heard && app.grants.holds(Permission::ClicksGrab))
     }
 
+    /// A report of the pointer to an app below `shape`, in its cells
+    /// (`lower::unscrolled`; below `layout`, `lower::on_surface`).
+    /// `None`: as it is.
+    fn pointer_told(
+        &self,
+        conn: ConnId,
+        topic: &str,
+        data: &Value,
+        engine: &dyn Engine,
+    ) -> Option<Value> {
+        let own = self.own(conn).filter(|own| own.degree < Degree::Shape)?;
+        let mut told = data.clone();
+        let origin = |f: u64| Some(engine.view_of(u32::try_from(f).ok()?)?.1);
+        ptyrc_rules::lower::unscrolled(&mut told, &origin);
+        if own.degree < Degree::Layout {
+            let view = own.read().and_then(|frame| engine.view_of(frame));
+            ptyrc_rules::lower::on_surface(&mut told, view.map_or([0, 0], |(at, _)| at));
+        }
+        Some(ptyrc_proto::envelope::event(topic, told))
+    }
+
     /// `topic` of a report on a sprite, or of a leave (no `owner`), to
     /// each listener that hears it; `also`: listeners that hear it
     /// whatever it is. True: taken from the program. The listeners of
@@ -431,12 +463,13 @@ impl Driver {
         topic: &str,
         data: Value,
         also: &BTreeSet<ConnId>,
+        engine: &dyn Engine,
     ) -> bool {
         let mut bare = data.clone();
         if let Some(object) = bare.as_object_mut() {
             HIT.iter().for_each(|m| drop(object.remove(*m)));
         }
-        let message = ptyrc_proto::envelope::event(topic, bare);
+        let message = ptyrc_proto::envelope::event(topic, bare.clone());
         let listeners: Vec<ConnId> = (self.conns.iter())
             .filter(|(_, c)| c.topics.contains(topic) && !c.paused)
             .map(|(id, _)| *id)
@@ -448,8 +481,9 @@ impl Driver {
             if hears || also.contains(&id) {
                 heard.insert(id);
                 taken |= hears && takes;
+                let told = self.pointer_told(id, topic, &bare, engine);
                 if let Some(conn) = self.conns.get_mut(&id) {
-                    conn.send(&message);
+                    conn.send(told.as_ref().unwrap_or(&message));
                 }
             }
         }

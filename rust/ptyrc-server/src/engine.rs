@@ -210,6 +210,12 @@ pub trait Engine {
         None
     }
 
+    /// The view of `frame`: the screen cell of its top-left, its
+    /// `origin`. `None`: no such frame.
+    fn view_of(&self, _frame: u32) -> Option<([u16; 2], [i64; 2])> {
+        None
+    }
+
     /// The default colours of the host: at start, then when the host
     /// tells others.
     fn on_host_colors(&mut self, _colors: ptyrc_core::scene::HostColors, _ctx: &mut Ctx) {}

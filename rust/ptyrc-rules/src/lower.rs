@@ -50,8 +50,16 @@ pub enum Cut {
 /// The plan of `method` for an app that holds `degree` and the words
 /// `held` (empty below `words`), the user having given `hand`. `Pass`
 /// for what the degree opens whole and for what the degrees do not
-/// rule.
-pub fn plan(method: &str, params: &Value, degree: Degree, held: &[String], hand: &Hand) -> Plan {
+/// rule. `surface`: the frame read below `layout`, whatever was named
+/// (`surface::Surface::read`).
+pub fn plan(
+    method: &str,
+    params: &Value,
+    degree: Degree,
+    held: &[String],
+    hand: &Hand,
+    surface: FrameId,
+) -> Plan {
     if degree >= Degree::Text {
         return Plan::Pass;
     }
@@ -69,6 +77,9 @@ pub fn plan(method: &str, params: &Value, degree: Degree, held: &[String], hand:
             let mut out = params.as_object().cloned().unwrap_or_default();
             if degree < Degree::Layout {
                 out.remove("frame");
+                if surface != RAW {
+                    out.insert("frame".into(), json!(surface));
+                }
             }
             let method = match method {
                 "screen.find" => "screen.find",
@@ -85,6 +96,8 @@ pub fn plan(method: &str, params: &Value, degree: Degree, held: &[String], hand:
     let frame = |out: &mut Map<String, Value>| {
         if degree >= Degree::Layout && has("frame") {
             out.insert("frame".into(), params["frame"].clone());
+        } else if degree < Degree::Layout && surface != RAW {
+            out.insert("frame".into(), json!(surface));
         }
     };
     let view = |words: Vec<String>| {
@@ -124,7 +137,9 @@ pub fn plan(method: &str, params: &Value, degree: Degree, held: &[String], hand:
                 .filter(|word| holds(held, word))
                 .map(|word| word.to_string())
                 .collect();
-            if shape && kept.len() == asked.len() {
+            // The user's words below `words`: asked again, not passed,
+            // since the gate lowers a shape with words there.
+            if shape && kept.len() == asked.len() && (asked.is_empty() || degree >= Degree::Words) {
                 return Plan::Pass;
             }
             Plan::Ask("screen.shape", view(kept), Cut::Lines { blank: !shape })
@@ -186,7 +201,9 @@ pub fn plan(method: &str, params: &Value, degree: Degree, held: &[String], hand:
             }
             Plan::Answer(out)
         }
-        "frame.list" if degree < Degree::Layout => Plan::Ask("frame.get", json!({}), Cut::Surface),
+        "frame.list" if degree < Degree::Layout => {
+            Plan::Ask("frame.get", only_frame(), Cut::Surface)
+        }
         "frame.list" => Plan::Ask("frame.list", json!({}), Cut::Frames),
         "frame.get" => Plan::Ask("frame.get", only_frame(), Cut::Frame),
         "frame.at" if degree < Degree::Layout => {
@@ -372,6 +389,130 @@ pub fn frame_info(info: &mut Value, degree: Degree) {
     }
 }
 
+/// Below `layout`, an answer read on the surface, its view at `at` on
+/// the screen, told as of frame 0 at the top-left: a frame info's `id`
+/// 0, its `rect` at 0, 0; a match's `frame` 0, a `frame` beside `x`,
+/// `y` 0; each `screen`, `rect`, those `x`, `y` less `at`.
+pub fn on_surface(answer: &mut Value, at: [u16; 2]) {
+    let less = |cell: Option<&mut Value>| {
+        let Some(cell) = cell else {
+            return;
+        };
+        for (i, by) in at.iter().enumerate() {
+            if let Some(v) = cell.get(i).and_then(Value::as_u64) {
+                cell[i] = json!(v.saturating_sub(u64::from(*by)));
+            }
+        }
+    };
+    let Some(object) = answer.as_object_mut() else {
+        return;
+    };
+    // Each object of `one`, and of the list `many`.
+    let mut each = |one: &str, many: &str, f: &mut dyn FnMut(&mut Map<String, Value>)| {
+        if let Some(item) = object.get_mut(one).and_then(Value::as_object_mut) {
+            f(item);
+        }
+        let items = object.get_mut(many).and_then(Value::as_array_mut);
+        for item in (items.into_iter().flatten()).filter_map(Value::as_object_mut) {
+            f(item);
+        }
+    };
+    each("frame", "frames", &mut |info| {
+        info.insert("id".into(), json!(0));
+        less(info.get_mut("rect"));
+    });
+    each("match", "matches", &mut |found| {
+        found.insert("frame".into(), json!(0));
+        less(found.get_mut("screen"));
+    });
+    each("", "sprites", &mut |sprite| less(sprite.get_mut("screen")));
+    less(object.get_mut("rect"));
+    // A screen cell (`screen.cursor`, `mouse`, `hover`), its frame's.
+    if object.contains_key("x") && object.contains_key("y") {
+        for (member, by) in [("x", at[0]), ("y", at[1])] {
+            if let Some(v) = object.get(member).and_then(Value::as_u64) {
+                object.insert(member.into(), json!(v.saturating_sub(u64::from(by))));
+            }
+        }
+        if object.get("frame").is_some_and(Value::is_u64) {
+            object.insert("frame".into(), json!(0));
+        }
+    }
+}
+
+/// Below `shape`, a frame is told unscrolled: its cells are those of
+/// the view. Of a request's `anchor` in frame cells (`at`, `space`
+/// `frame` or absent): put in view cells; a negative coordinate, off
+/// the view, in frame cells from `origin`, that of its frame.
+pub fn in_view(params: &mut Value, origin: [i64; 2]) {
+    let Some(anchor) = params.get_mut("anchor").and_then(Value::as_object_mut) else {
+        return;
+    };
+    let space = anchor.get("space").filter(|s| !s.is_null());
+    if space.is_some_and(|s| s != "frame") {
+        return;
+    }
+    let at = anchor.get("at").and_then(Value::as_array);
+    let Some([x, y]) = at.and_then(|at| <[Value; 2]>::try_from(at.clone()).ok()) else {
+        return;
+    };
+    let (Some(x), Some(y)) = (x.as_i64(), y.as_i64()) else {
+        return;
+    };
+    if x >= 0 && y >= 0 {
+        anchor.insert("space".into(), json!("view"));
+    } else {
+        anchor.insert("at".into(), json!([x + origin[0], y + origin[1]]));
+        anchor.insert("space".into(), json!("frame"));
+    }
+}
+
+/// Below `shape`, an answer or a pointer report told unscrolled: each
+/// cell of a frame (a match's `x`, `y`; `pos` beside `frame`) less the
+/// `origin` of that frame (`origin_of`), a cell of its view.
+pub fn unscrolled(answer: &mut Value, origin_of: &dyn Fn(u64) -> Option<[i64; 2]>) {
+    let Some(object) = answer.as_object_mut() else {
+        return;
+    };
+    let less = |cell: &mut Value, at: [i64; 2]| {
+        for (i, by) in at.iter().enumerate() {
+            if let Some(v) = cell.get(i).and_then(Value::as_i64) {
+                cell[i] = json!(v - by);
+            }
+        }
+    };
+    if let Some(origin) = object
+        .get("frame")
+        .and_then(Value::as_u64)
+        .and_then(origin_of)
+        && let Some(pos) = object.get_mut("pos").filter(|p| p.is_array())
+    {
+        less(pos, origin);
+    }
+    let mut found: Vec<&mut Value> = Vec::new();
+    for (member, item) in object.iter_mut() {
+        match (member.as_str(), item) {
+            ("match", item) => found.push(item),
+            ("matches", Value::Array(items)) => found.extend(items.iter_mut()),
+            _ => {}
+        }
+    }
+    for found in found.into_iter().filter_map(Value::as_object_mut) {
+        let Some(origin) = found
+            .get("frame")
+            .and_then(Value::as_u64)
+            .and_then(origin_of)
+        else {
+            continue;
+        };
+        for (member, by) in [("x", origin[0]), ("y", origin[1])] {
+            if let Some(v) = found.get(member).and_then(Value::as_i64) {
+                found.insert(member.into(), json!(v - by));
+            }
+        }
+    }
+}
+
 /// The data of an event of `topic` for an app that holds `degree`.
 pub fn event(topic: &str, mut data: Value, degree: Degree) -> Value {
     if topic == "frames" && degree < Degree::Text {
@@ -521,7 +662,7 @@ mod tests {
     }
 
     fn ask(method: &str, params: Value, degree: Degree) -> Plan {
-        plan(method, &params, degree, &words(), &Hand::default())
+        plan(method, &params, degree, &words(), &Hand::default(), RAW)
     }
 
     #[test]
@@ -662,7 +803,8 @@ mod tests {
             words: vec!["Rose".into()],
             patterns: vec![("TODO:".into(), false), (r"\d+ ms".into(), true)],
         };
-        let ask = |method: &str, params: Value, degree| plan(method, &params, degree, &[], &hand);
+        let ask =
+            |method: &str, params: Value, degree| plan(method, &params, degree, &[], &hand, RAW);
         let none = Plan::Answer(json!({"matches": []}));
         for degree in [Nothing, Layout, Shape, Words] {
             // Exactly the pattern given, `known` too: as under `text`.
@@ -704,7 +846,11 @@ mod tests {
         // Shown in the shape from `shape`; not at `none`.
         assert_eq!(
             ask("screen.shape", json!({"words": ["rose"]}), Shape),
-            Plan::Pass
+            Plan::Ask(
+                "screen.shape",
+                json!({"words": ["rose"]}),
+                Cut::Lines { blank: false }
+            )
         );
         assert_ne!(
             ask("screen.shape", json!({"words": ["fish"]}), Shape),
@@ -838,6 +984,119 @@ mod tests {
         assert_eq!(cut["frames"].as_array().unwrap().len(), 1);
         assert_eq!(cut["layout"], 0);
         assert_eq!(cut["degree"], "none");
+    }
+
+    /// Below `layout` on a pane: read there, told as frame 0 at the
+    /// top-left, the coordinates of its draws.
+    #[test]
+    fn below_layout_the_surface_is_read_and_told_as_frame_0() {
+        let hand = Hand {
+            words: vec!["fish".into()],
+            patterns: vec![("a b".into(), false)],
+        };
+        let on = |method: &str, params: Value, degree| plan(method, &params, degree, &[], &hand, 7);
+        for method in ["frame.get", "frame.list"] {
+            let Plan::Ask(_, asked, _) = on(method, json!({"frame": 0}), Nothing) else {
+                panic!("{method}");
+            };
+            assert_eq!(asked, json!({"frame": 7}), "{method}");
+        }
+        let Plan::Ask(_, asked, _) = on("screen.find", json!({"pattern": "fish"}), Nothing) else {
+            panic!("screen.find");
+        };
+        assert_eq!(asked["frame"], 7);
+        let Plan::Ask(_, asked, _) = on(
+            "screen.find",
+            json!({"pattern": "a b", "frame": 0}),
+            Nothing,
+        ) else {
+            panic!("the user's pattern");
+        };
+        assert_eq!(asked["frame"], 7);
+        // From `layout`: as named.
+        let Plan::Ask(_, asked, _) = on("frame.get", json!({"frame": 3}), Layout) else {
+            panic!("layout");
+        };
+        assert_eq!(asked, json!({"frame": 3}));
+
+        let mut found = json!({"matches": [{"frame": 7, "x": 2, "y": 1, "screen": [32, 21]},
+                                           {"frame": 7, "x": 2, "y": 90, "screen": null}]});
+        on_surface(&mut found, [30, 20]);
+        assert_eq!(
+            found["matches"][0],
+            json!({"frame": 0, "x": 2, "y": 1, "screen": [2, 1]})
+        );
+        assert_eq!(found["matches"][1]["screen"], Value::Null);
+        let mut got = json!({"frame": {"id": 7, "rect": [30, 20, 30, 10], "origin": [0, 0]}});
+        on_surface(&mut got, [30, 20]);
+        assert_eq!(got["frame"]["id"], 0);
+        assert_eq!(got["frame"]["rect"], json!([0, 0, 30, 10]));
+        let mut listed = json!({"frames": [{"id": 7, "rect": [30, 20, 30, 10]}], "layout": 0});
+        on_surface(&mut listed, [30, 20]);
+        assert_eq!(
+            listed["frames"][0],
+            json!({"id": 0, "rect": [0, 0, 30, 10]})
+        );
+        let mut read = json!({"lines": [], "size": [30, 10], "rect": [30, 20, 30, 10],
+                              "sprites": [{"screen": [31, 22]}]});
+        on_surface(&mut read, [30, 20]);
+        assert_eq!(read["rect"], json!([0, 0, 30, 10]));
+        assert_eq!(read["sprites"][0]["screen"], json!([1, 2]));
+    }
+
+    /// Below `shape`, told unscrolled: frame cells are view cells, in
+    /// what it draws, reads and hears.
+    #[test]
+    fn below_shape_a_frame_is_its_view() {
+        let put = |anchor: Value| {
+            let mut params = json!({"frame": 7, "anchor": anchor});
+            in_view(&mut params, [0, 21]);
+            params["anchor"].clone()
+        };
+        let view = json!({"at": [2, 3], "space": "view"});
+        assert_eq!(put(json!({"at": [2, 3], "space": "frame"})), view);
+        assert_eq!(put(json!({"at": [2, 3]})), view);
+        // Off the view: in frame cells, from its origin.
+        assert_eq!(
+            put(json!({"at": [-2, 3]})),
+            json!({"at": [-2, 24], "space": "frame"})
+        );
+        let hud = json!({"at": [-1, 0], "space": "view"});
+        assert_eq!(put(hud.clone()), hud);
+        assert_eq!(put(json!({"text": "x"})), json!({"text": "x"}));
+
+        let origin = |f: u64| (f == 7).then_some([0, 21]);
+        let mut at = json!({"frame": 7, "pos": [2, 24]});
+        unscrolled(&mut at, &origin);
+        assert_eq!(at, json!({"frame": 7, "pos": [2, 3]}));
+        let mut found = json!({"matches": [{"frame": 7, "x": 1, "y": 22, "screen": [1, 1]},
+                                           {"frame": 0, "x": 1, "y": 2, "screen": [1, 2]}]});
+        unscrolled(&mut found, &origin);
+        assert_eq!(
+            (
+                found["matches"][0]["x"].clone(),
+                found["matches"][0]["y"].clone()
+            ),
+            (json!(1), json!(1))
+        );
+        assert_eq!(found["matches"][1]["y"], 2);
+        // A report of the pointer below `layout`: of the surface at 30, 20.
+        let mut hover = json!({"sprite": 4, "at": [1, 0], "x": 33, "y": 23, "frame": 7,
+                               "pos": [3, 24], "mods": []});
+        unscrolled(&mut hover, &origin);
+        on_surface(&mut hover, [30, 20]);
+        assert_eq!(
+            hover,
+            json!({"sprite": 4, "at": [1, 0], "x": 3, "y": 3, "frame": 0, "pos": [3, 3],
+                   "mods": []})
+        );
+        let mut left = json!({"sprite": null, "at": null, "x": 33, "y": 23, "frame": null,
+                              "pos": null});
+        on_surface(&mut left, [30, 20]);
+        assert_eq!(
+            (left["x"].clone(), left["frame"].clone()),
+            (json!(3), Value::Null)
+        );
     }
 
     #[test]

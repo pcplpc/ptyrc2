@@ -1502,6 +1502,11 @@ impl Headless {
                 self.nowhere.get_or_insert(self.now);
             }
         }
+        // Below `shape`, told unscrolled: its frame cells, the view's
+        // (the one frame, raw: origin 0, 0).
+        if g.degree() < Degree::Shape && matches!(method, "draw.put" | "draw.update" | "draw.ext") {
+            lower::in_view(&mut placed, [0, 0]);
+        }
         let params = &placed;
         if let Err(why) = grants::judge(&g, grants::gate(method, params)) {
             if let Why::Lacks(p) = why {
@@ -1541,7 +1546,8 @@ impl Headless {
         }
         // The driver's cut (`ptyrc_rules::lower`); the lacks, the report's.
         let rules = g.rules();
-        let planned = lower::plan(method, params, degree, &rules.words, &rules.hand);
+        let read = (self.surface).map_or(RAW, |s| s.read(g.holds("screen-wide")));
+        let planned = lower::plan(method, params, degree, &rules.words, &rules.hand, read);
         self.lacks_of(method, params, &planned, &rules, degree);
         let lowered = matches!(grants::judge(&g, grants::gate(method, params)), Ok(Some(_)));
         let answer = match planned {
@@ -3635,6 +3641,21 @@ mod tests {
         assert_eq!(shown(&mut h, false).0, json!(""));
         assert!(h.screen()[3].starts_with("OTHER"));
     }
+    /// Below `shape`, as the driver: an anchor in frame cells put in
+    /// view cells; off the view, in frame cells.
+    #[test]
+    fn below_shape_frame_cells_are_the_views() {
+        let mut h = Headless::new((30, 10), 1);
+        h.set_grants(Some(Grants::new(&[] as &[&str], &[], &[] as &[&str])));
+        let put = |at: [i64; 2]| json!({"content": {"rows": ["@"]}, "anchor": {"at": at}});
+        h.call("draw.put", put([2, 3])).unwrap();
+        h.call("draw.put", put([-1, 3])).unwrap();
+        let list = h.call("draw.list", json!({})).unwrap();
+        let anchor = |i: usize| list["sprites"][i]["anchor"].clone();
+        assert_eq!(anchor(0), json!({"at": [2, 3], "space": "view"}));
+        assert_eq!(anchor(1), json!({"at": [-1, 3], "space": "frame"}));
+    }
+
     /// `[app] surface`, as the driver clips a store app's draws
     /// (`ptyrc_rules::surface`): a bare sprite of `widget` nowhere, its
     /// widgets shown; `frame`, `screen`: on the one frame.

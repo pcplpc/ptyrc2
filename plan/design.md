@@ -2070,9 +2070,10 @@ not by removing from the whole.
 | `screen.find`, `screen.wait` with `pattern` | `words` | a word held, literal: found whole, case ignored (`\bWORD\b`: `_` is of a word here, not in the shape) |
 | the same | else | no match; the wait answers at once, `matched` false (true with `gone`) |
 | `frame.list`, `frame.get` | `layout` and above | `key` and `support` null |
-| the same, `frame.at` | less than `layout` | one frame, the raw one, whatever was named: the surface; `frame` in every request above is ignored |
+| the same, `frame.at` | less than `layout` | one frame, whatever was named: the surface; `frame` in every request above is ignored |
 | a frame info | less than `shape` | idle, `origin` 0, 0, `extent` the view |
-| `frame` of any request, `frame.at {name}` | less than `layout`; less than `shape` | the surface (0; of a native app given a frame by the user, that frame: Move); `active`, `quietest`, `idle` (of the cursor, of the heat): `raw` |
+| a frame cell: `frame.at`, a match's `x`, `y`, `pos` of events `mouse`, `hover`; an anchor `{at}` of `space` `frame` (or none) of `draw.put`, `.update`, `.ext` | less than `shape` | told unscrolled: less the `origin` of its frame (a pending wait's: at its answer), a cell of the view (`lower::unscrolled`); the anchor put in `view` (`lower::in_view`; a negative coordinate: in `frame`, plus the origin at the request) |
+| `frame` of any request, `frame.at {name}` | less than `layout`; less than `shape` | the surface: the frame its draws are put on (`Surface::read`; raw for `widget`, `screen` with `screen-wide`; of a native app given a frame by the user, that frame: Move), told as frame 0 at the top-left: a frame info's `id` 0, each `rect`, `screen`, the `x`, `y` of `mouse`, `hover` less the corner of its view, their `frame` 0 (`lower::on_surface`); `frame.at` 0; `active`, `quietest`, `idle` (of the cursor, of the heat): `raw` |
 | `session.info`; `hello` | less than `text` | `protocol`, `server`, `size`, `headless`; `host_colors` from `shape` |
 | event `frames` | `layout` and above | the infos cut as above |
 

@@ -1132,6 +1132,293 @@ fn a_store_app_is_told_its_frame() {
     assert!(!log.contains(&format!("seen=[{right},")), "{log}");
 }
 
+/// Its frame read, the user's word found, a sprite put after it.
+const FINDER: &str = r#"
+import { call, log, period } from "ptyrc";
+export function init(args) {
+  const f = call("frame.get", {}).frame;
+  const m = call("screen.find", { pattern: args.word }).matches[0];
+  log("seen=" + JSON.stringify([f.id, f.rect, m.frame, m.x, m.y, m.screen]));
+  call("draw.put", { content: { rows: ["@"] }, anchor: { at: [m.x + 5, m.y], space: "frame" } });
+  log("drawn");
+  period(0);
+}
+export function tick(now) {}
+export function event(topic, data) {}
+"#;
+
+/// Below `layout`, on a pane: its reads and its draws of one frame,
+/// the pane's, told as frame 0 at the top-left.
+#[test]
+fn a_store_app_below_layout_reads_where_it_draws() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let sb = Sandbox::new("finder");
+    let manifest = "[app]\nid = \"finder\"\nversion = \"0.1.0\"\nsummary = \"Finds.\"\n\
+         license = \"GPL-3.0-or-later\"\napi = 1\nscript = \"app.js\"\n\
+         surface = \"frame\"\n\n[options]\n\
+         word = { type = \"word\", doc = \"a word\" }\n";
+    install(&sb, "finder", manifest.to_string(), FINDER);
+    let mut driver = sb.ptyrc();
+    driver
+        .env("PTYRC_BOX", runner())
+        .env("PTYRC_JS", &js)
+        .args(["run", "--name", "s", "--headless", "--size", "60x16"])
+        .args(["--", "sh", "-c", SPLIT])
+        .stdin(std::process::Stdio::null());
+    let _driver = common::Proc(driver.spawn().unwrap());
+    let socket = sb.socket("s");
+    wait_for(
+        || std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "socket",
+    );
+    let mut client = sb.client("s");
+    let mut right = Value::Null;
+    wait_for(
+        || {
+            let frames = client.call("frame.list", json!({})).unwrap();
+            let found = (frames["frames"].as_array().unwrap().iter())
+                .find(|f| f["kind"] == "pane" && f["rect"][0] == 30 && f["state"] == "stable")
+                .cloned();
+            found.map(|f| right = f["id"].clone()).is_some()
+        },
+        "the panes",
+    );
+    let started = client
+        .call(
+            "app.start",
+            json!({"store": "finder", "args": {"word": "right"}, "frame": right}),
+        )
+        .unwrap();
+    let id = started["app"]["id"].as_u64().unwrap();
+    wait_slow(|| log_of(&mut client, id).contains("drawn"), "drawn");
+    let log = log_of(&mut client, id);
+    assert!(log.contains("seen=[0,[0,0,30,16],0,0,0,[0,0]]"), "{log}");
+    let text = client
+        .call("screen.text", json!({"sprites": true}))
+        .unwrap();
+    assert!(
+        text["lines"][0].as_str().unwrap().ends_with("right@1"),
+        "{text}"
+    );
+}
+
+/// Its frame read, a cell of it asked, a sprite put in frame cells, a
+/// widget shown; the pointer on it logged.
+const UNSCROLLED: &str = r#"
+import { call, log, period } from "ptyrc";
+export function init(args) {
+  const f = call("frame.get", {}).frame;
+  const at = call("frame.at", { x: 2, y: 3 });
+  call("subscribe", { topics: ["hover"] });
+  const anchor = { at: [30, 3], space: "frame" };
+  call("draw.put", { content: { rows: ["@@"] }, persist: true, anchor });
+  call("widget.declare", { widgets: [{ tag: "w", size: [4, 1], content: { rows: ["hi"] } }] });
+  call("widget.show", { tag: "w" });
+  log("seen=" + JSON.stringify([f.id, f.rect, f.origin, at]));
+  log("drawn");
+  period(0);
+}
+export function tick(now) {}
+export function event(topic, data) {
+  if (topic === "hover" && data.sprite !== null)
+    log("hover=" + JSON.stringify([data.x, data.y, data.frame, data.pos, data.at]));
+}
+"#;
+
+/// Below `shape`, on a pane scrolled: told unscrolled, its frame cells
+/// are those of the view: its reads, its draws, the pointer agree.
+#[test]
+fn a_store_app_below_shape_draws_and_hears_in_view_cells() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let sb = Sandbox::new("unscrolled");
+    let manifest = wide_manifest("unscrolled", "frame", "");
+    install(&sb, "unscrolled", manifest, UNSCROLLED);
+    let env = |name: &str, value: String| format!("{name}={value}");
+    let at = |dir: &str| sb.dir.join(dir).display().to_string();
+    let vars = [
+        env("PTYRC_BOX", runner().display().to_string()),
+        env("PTYRC_JS", js.display().to_string()),
+        env("XDG_DATA_HOME", at("data")),
+        env("XDG_STATE_HOME", at("state")),
+        env("XDG_CACHE_HOME", at("cache")),
+    ];
+    let lines = "i=1; while [ $i -le 50 ]; do echo line $i; sleep 0.01; i=$((i+1)); done; \
+                 exec sleep 1000";
+    let mut argv: Vec<&str> = vec!["env"];
+    argv.extend(vars.iter().map(String::as_str));
+    argv.extend([BIN, "run", "--name", "s", "--", "sh", "-c", lines]);
+    let (mut host, _driver) = common::HostPty::spawn(&sb, &argv);
+    wait_for(|| sb.socket("s").exists(), "the session");
+    let mut client = sb.client("s");
+    let mut pane = Value::Null;
+    wait_for(
+        || {
+            host.pump();
+            let frames = client.call("frame.list", json!({})).unwrap();
+            let found = (frames["frames"].as_array().unwrap().iter())
+                .find(|f| {
+                    let lines = f["origin"][1].as_i64() == Some(27);
+                    f["kind"] == "pane" && f["state"] == "stable" && lines
+                })
+                .cloned();
+            found.map(|f| pane = f).is_some()
+        },
+        "the pane scrolled",
+    );
+    let started = client
+        .call(
+            "app.start",
+            json!({"store": "unscrolled", "frame": pane["id"]}),
+        )
+        .unwrap();
+    let id = started["app"]["id"].as_u64().unwrap();
+    wait_slow(
+        || {
+            host.pump();
+            log_of(&mut client, id).contains("drawn")
+        },
+        "drawn",
+    );
+    let log = log_of(&mut client, id);
+    assert!(
+        log.contains("seen=[0,[0,0,80,24],[0,0],{\"degree\":\"none\",\"frame\":0,\"pos\":[2,3]}]"),
+        "{log}"
+    );
+    // At the cell of the view it named.
+    let mut list = Value::Null;
+    wait_for(
+        || {
+            host.pump();
+            list = client.call("draw.list", json!({})).unwrap();
+            let placed = list["sprites"].as_array().unwrap().iter();
+            placed.filter(|s| !s["screen"].is_null()).count() == 2
+        },
+        "placed",
+    );
+    let sprite = (list["sprites"].as_array().unwrap().iter())
+        .find(|s| s["anchor"].get("at").is_some())
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(sprite["screen"], json!([30, 3]), "{list}");
+    // The pointer on its widget: in the same cells.
+    let widgets = client.call("widget.list", json!({})).unwrap();
+    let rect = widgets["widgets"][0]["rect"].clone();
+    let (x, y) = (rect[0].as_u64().unwrap() + 1, rect[1].as_u64().unwrap() + 1);
+    host.wait_seen("\x1b[?1003h");
+    host.type_in(format!("\x1b[<35;{};{}M", x + 1, y + 1).as_bytes());
+    wait_slow(
+        || {
+            host.pump();
+            log_of(&mut client, id).contains("hover=")
+        },
+        "heard",
+    );
+    let log = log_of(&mut client, id);
+    let heard = format!("hover=[{x},{y},0,[{x},{y}],[1,1]]");
+    assert!(log.contains(&heard), "{heard}: {log}");
+}
+
+/// A wait for the user's pattern in the frame told, its match logged.
+const WAITER: &str = r#"
+import { call, log, manifest, period } from "ptyrc";
+let pat = null;
+export function init(args) {
+  pat = args.pat;
+  period(50);
+}
+export function tick(now) {
+  period(0);
+  const frame = manifest()?.frame ?? 0;
+  log("waiting");
+  const r = call("screen.wait", { pattern: pat, frame, timeout_ms: 15000 });
+  log("matched=" + JSON.stringify(r.match));
+}
+"#;
+
+/// At `layout`, on a pane scrolled: a pending wait for the user's
+/// pattern is told unscrolled, as one answered at once.
+#[test]
+fn a_store_app_at_layout_waits_in_view_cells() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let sb = Sandbox::new("waiter");
+    let manifest = "[app]\nid = \"waiter\"\nversion = \"0.1.0\"\nsummary = \"Waits.\"\n\
+         license = \"GPL-3.0-or-later\"\napi = 1\nscript = \"app.js\"\n\
+         surface = \"frame\"\n\n[permissions]\nlayout = \"the frames\"\n\n[options]\n\
+         pat = { type = \"pattern\", doc = \"a pattern\" }\n";
+    install(&sb, "waiter", manifest.to_string(), WAITER);
+    let go = sb.dir.join("go");
+    let lines = format!(
+        "i=1; while [ $i -le 50 ]; do echo line $i; sleep 0.01; i=$((i+1)); done; \
+         while [ ! -e {} ]; do sleep 0.05; done; echo late mark; exec sleep 1000",
+        go.display()
+    );
+    // Headless: `layout` granted as declared.
+    let mut driver = sb.ptyrc();
+    driver
+        .env("PTYRC_BOX", runner())
+        .env("PTYRC_JS", &js)
+        .args(["run", "--name", "s", "--headless", "--size", "80x24"])
+        .args(["--", "sh", "-c", &lines])
+        .stdin(std::process::Stdio::null());
+    let _driver = common::Proc(driver.spawn().unwrap());
+    let socket = sb.socket("s");
+    wait_for(
+        || std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "socket",
+    );
+    let mut client = sb.client("s");
+    let mut pane = Value::Null;
+    wait_for(
+        || {
+            let frames = client.call("frame.list", json!({})).unwrap();
+            let found = (frames["frames"].as_array().unwrap().iter())
+                .find(|f| {
+                    let lines = f["origin"][1].as_i64() == Some(27);
+                    f["kind"] == "pane" && f["state"] == "stable" && lines
+                })
+                .cloned();
+            found.map(|f| pane = f).is_some()
+        },
+        "the pane scrolled",
+    );
+    let started = client
+        .call(
+            "app.start",
+            json!({"store": "waiter", "args": {"pat": "late mark"}, "frame": pane["id"]}),
+        )
+        .unwrap();
+    let id = started["app"]["id"].as_u64().unwrap();
+    wait_slow(|| log_of(&mut client, id).contains("waiting"), "waiting");
+    std::thread::sleep(Duration::from_millis(300));
+    std::fs::write(&go, "").unwrap();
+    wait_slow(|| log_of(&mut client, id).contains("matched="), "matched");
+    let log = log_of(&mut client, id);
+    let at = log
+        .split("matched=")
+        .nth(1)
+        .unwrap()
+        .lines()
+        .next()
+        .unwrap();
+    let found: Value = serde_json::from_str(at).unwrap();
+    // The row of the view: that of the screen, the pane its whole.
+    let y = found["y"].as_i64().unwrap();
+    assert!((0..24).contains(&y), "{log}");
+    assert_eq!(found["screen"], json!([0, y]), "{log}");
+}
+
 /// One sprite, one widget; it asks to move itself and another.
 const MOVED: &str = r#"
 import { call, log, period } from "ptyrc";

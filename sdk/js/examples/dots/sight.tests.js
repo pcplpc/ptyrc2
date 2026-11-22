@@ -70,6 +70,18 @@ export function test_sight_text_and_cursor() {
   assertEqual(sight.cursor, null);
 }
 
+export function test_sight_cursor_in_view_cells() {
+  // Its frame scrolled, the view at row 1: the frame cell less the origin.
+  const info = { ...FRAME, id: 3, rect: [0, 1, 6, 3], origin: [0, 5] };
+  const h = host({ info, cursor: { x: 3, y: 2, visible: true, frame: 3, pos: [3, 6] } });
+  const sight = new Sight({ call: h.call, cursor: true, frame: 3 });
+  sight.look();
+  assertEqual(sight.cursor, [3, 1]);
+  sight.event("cursor", { x: 4, y: 3, visible: true, frame: 9, pos: [0, 0] });
+  sight.look();
+  assertEqual(sight.cursor, [4, 2]);
+}
+
 export function test_sight_lowered() {
   // `shape` refused: blank rows of the size, no cursor.
   const h = host({ lines: ["", "", ""], degree: "none", cursor: { x: 0, y: 0, visible: false, frame: 0, pos: [0, 0] } });

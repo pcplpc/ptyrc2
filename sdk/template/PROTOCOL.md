@@ -23,7 +23,7 @@ its own widget, or its own sprite in front of the text.
 
 | name | opens | a no gives | colour |
 |---|---|---|---|
-| `layout` | `frame.list`, `frame.get`, `frame.at`; topic `frames` | one frame, the raw one | plain |
+| `layout` | `frame.list`, `frame.get`, `frame.at`; topic `frames` | one frame, its surface's, told as 0 | plain |
 | `shape` | where there is ink: `screen.shape`, `screen.cursor`, `screen.wait` without `pattern`, `frame.heat`, `frame.idle`; topics `screen`, `cursor`, `text`, `idle`, `colors` | a blank screen (below) | plain |
 | `words` | `shape`, and the words listed: `screen.shape {words}`, `screen.find` of a listed word | `shape` | plain, the words shown |
 | `text` | every cell: `screen.text`, `screen.cells`, `screen.find`, `screen.wait {pattern}`, `frame.text`, all of `session.info` | `words`, else `shape`, else blank | red |
@@ -65,7 +65,9 @@ Cut answers:
 | `frame.idle`, `screen.wait` without `pattern` | less than `shape` | `{"score":1,"idle":true,"free":1}`; matched at once |
 | `frame.heat` | less than `shape` | `9` and `.` everywhere |
 | `frame.text` | `shape`, `words`; less | each line as its shape; `{"lines":[],"y0":0}` |
-| `frame.list`, `frame.get`, `frame.at` | less than `layout` | the raw frame alone; `frame` of every request ignored |
+| `frame.list`, `frame.get`, `frame.at` | less than `layout` | its surface's frame alone, told as frame 0 at 0, 0; `frame` of every request ignored |
+| a frame's cells: `origin`, `frame.at`, a match's `x`, `y` (a pending wait's: at its answer), `pos` of `mouse`, `hover`; an anchor `at` in frame cells | less than `shape` | told unscrolled: `origin` 0, 0, each cell one of the view; the anchor put in view cells (a negative coordinate: off the view, in frame cells) |
+| `x`, `y`, `frame` of `mouse`, `hover` | less than `layout` | less the corner of its surface's view; `frame` 0 |
 | `session.info` | less than `text` | `protocol`, `server`, `size`, `headless`; `host_colors` from `shape` |
 
 ## Methods
@@ -403,7 +405,10 @@ the limits granted alone; `frame`: the id of the frame its surface is
 on at the start (that of `--frame`, else `[app] frame`, else `active`;
 `move` names the next). Live: that id with a degree held (`layout`
 or above); below `layout` 0, and the `frame` of every request is
-ignored (the surface's).
+ignored: reads and draws are of the frame its draws are put on (raw
+for `widget`, `screen` with `screen-wide`), told as frame 0 at the
+top-left of the screen (`frame.get`: `id` 0, `rect` at 0, 0; a
+match's `screen` from there).
 Headless: 0, the one frame, raw; a live id is seen only under `ptyrc
 dev run`. A `Sight` reads it by default (Rust: `manifest()`).
 

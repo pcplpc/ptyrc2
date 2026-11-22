@@ -217,6 +217,10 @@ impl Clock {
     }
 }
 
+/// Below `layout`, the frame an app reads and the corner of its view on
+/// the screen (`Driver::read_view`).
+type ReadView = (u32, [u16; 2]);
+
 struct Driver {
     cfg: Config,
     info: SessionInfo,
@@ -264,7 +268,7 @@ struct Driver {
     topics: HashSet<String>,
     pending: HashMap<Token, (ConnId, Value)>,
     /// The pending requests whose answer is cut to a degree.
-    cuts: HashMap<Token, (Cut, Degree)>,
+    cuts: HashMap<Token, (Cut, Degree, Option<ReadView>)>,
     /// Messages to send once the request being answered is.
     after: Vec<(ConnId, Value)>,
     next_conn: u64,
@@ -471,9 +475,27 @@ pub fn replay(
     result.and(Ok(status)).map_err(RunError::from)
 }
 
-/// Run an engine hook with a `Ctx`, then apply what it asked for.
+/// The engine of a hook, borrowed or boxed (`hook!`).
+pub(crate) trait AsEngine {
+    fn engine(&self) -> &dyn Engine;
+}
+
+impl AsEngine for dyn Engine + '_ {
+    fn engine(&self) -> &dyn Engine {
+        self
+    }
+}
+
+impl AsEngine for Box<dyn Engine> {
+    fn engine(&self) -> &dyn Engine {
+        &**self
+    }
+}
+
+/// Run an engine hook with a `Ctx`, then apply what it asked for (the
+/// engine read for the answers left pending).
 macro_rules! hook {
-    ($driver:expr, $now:expr, |$ctx:ident| $body:expr) => {{
+    ($driver:expr, $engine:ident, $now:expr, |$ctx:ident| $body:expr) => {{
         let mut fx = Effects::default();
         let value = {
             let mut $ctx = Ctx {
@@ -485,7 +507,7 @@ macro_rules! hook {
             let $ctx = &mut $ctx;
             $body
         };
-        $driver.apply(fx);
+        $driver.apply(fx, $crate::driver::AsEngine::engine(&*$engine));
         value
     }};
 }
@@ -748,9 +770,9 @@ impl Driver {
         self.colors = Self::tape_colors(&self.cfg, &header);
         self.grab = None;
         (self.partial, self.pasting, self.drop_release) = (None, false, false);
-        hook!(self, Duration::ZERO, |ctx| engine.on_start(ctx));
+        hook!(self, engine, Duration::ZERO, |ctx| engine.on_start(ctx));
         let colors = self.colors.colors;
-        hook!(self, Duration::ZERO, |ctx| engine
+        hook!(self, engine, Duration::ZERO, |ctx| engine
             .on_host_colors(colors, ctx));
         self.emit("size", json!({"size": [header.size.0, header.size.1]}));
         self.repaint = true;
@@ -774,7 +796,8 @@ impl Driver {
                 Step::Feed(Record::Output(burst)) => {
                     let now = self.now();
                     let mut out = Vec::with_capacity(burst.len() + 256);
-                    hook!(self, now, |ctx| engine.on_burst(&burst, now, &mut out, ctx));
+                    hook!(self, engine, now, |ctx| engine
+                        .on_burst(&burst, now, &mut out, ctx));
                 }
                 Step::Feed(Record::Input(bytes)) => self.paged(&bytes, engine),
                 Step::Feed(Record::Resize(cols, rows)) => self.resize(engine, cols, rows)?,
@@ -819,9 +842,10 @@ impl Driver {
 
     /// The loop. Returns the exit status of the app.
     fn serve(&mut self, engine: &mut Box<dyn Engine>) -> io::Result<i32> {
-        hook!(self, self.now(), |ctx| engine.on_start(ctx));
+        hook!(self, engine, self.now(), |ctx| engine.on_start(ctx));
         let colors = self.colors.colors;
-        hook!(self, self.now(), |ctx| engine.on_host_colors(colors, ctx));
+        hook!(self, engine, self.now(), |ctx| engine
+            .on_host_colors(colors, ctx));
         self.ask_host_colors()?;
         self.start_apps(engine.as_mut());
         loop {
@@ -836,7 +860,7 @@ impl Driver {
             if self.repaint || wake.is_some_and(|w| w <= now) {
                 self.repaint = false;
                 let mut out = Vec::new();
-                hook!(self, now, |ctx| engine.on_tick(now, &mut out, ctx));
+                hook!(self, engine, now, |ctx| engine.on_tick(now, &mut out, ctx));
                 self.host.write(&out)?;
                 self.follow_panes(engine);
             }
@@ -909,7 +933,7 @@ impl Driver {
             };
             let ready = self.wait(timeout)?;
             if self.player.as_ref().is_some_and(Player::paused) {
-                hook!(self, self.now(), |ctx| engine.on_stall(ctx));
+                hook!(self, engine, self.now(), |ctx| engine.on_stall(ctx));
             }
 
             if ready.signal {
@@ -1095,7 +1119,8 @@ impl Driver {
             recorder.output(now, &burst);
         }
         let mut out = Vec::with_capacity(burst.len() + 256);
-        hook!(self, now, |ctx| engine.on_burst(&burst, now, &mut out, ctx));
+        hook!(self, engine, now, |ctx| engine
+            .on_burst(&burst, now, &mut out, ctx));
         if burst.windows(3).any(|w| w == b"\x1b[?") {
             // The app may have set the mouse of the host: ours again.
             out.extend_from_slice(self.host_mouse.sequence());
@@ -1177,13 +1202,13 @@ impl Driver {
             Some(mut data) => {
                 self.hovered = Some(data["sprite"].clone());
                 data["mods"] = json!(report.mods());
-                self.emit_pointer("hover", data, &BTreeSet::new());
+                self.emit_pointer("hover", data, &BTreeSet::new(), engine);
             }
             None if self.hovered.take().is_some() => {
                 let data = json!({"sprite": null, "at": null, "x": report.x, "y": report.y,
                                   "frame": null, "pos": null, "mods": report.mods()});
                 let heard = std::mem::take(&mut self.hover_heard);
-                self.emit_pointer("hover", data, &heard);
+                self.emit_pointer("hover", data, &heard, engine);
             }
             None => {}
         }
@@ -1261,7 +1286,7 @@ impl Driver {
                     data["button"] = json!(report.button());
                     data["action"] = json!(report.action());
                     data["mods"] = json!(report.mods());
-                    if !self.emit_pointer("mouse", data, &BTreeSet::new()) {
+                    if !self.emit_pointer("mouse", data, &BTreeSet::new(), engine) {
                         out.extend(app(report).unwrap_or_default());
                     }
                 }
@@ -1325,7 +1350,7 @@ impl Driver {
                     // The manager up and no widget focused: the pair ends it.
                     let now = self.now();
                     let menu = engine.focus().is_none() && self.manager_runs();
-                    let focused = !menu && hook!(self, now, |ctx| engine.focus_next(ctx));
+                    let focused = !menu && hook!(self, engine, now, |ctx| engine.focus_next(ctx));
                     if !focused && !self.hotkey_pressed() {
                         let _ = self.host.write(b"\x07");
                     }
@@ -1452,8 +1477,8 @@ impl Driver {
                     if sorted.released || sorted.closed {
                         let now = self.now();
                         match sorted.closed {
-                            true => hook!(self, now, |ctx| engine.focus_close(ctx)),
-                            false => hook!(self, now, |ctx| engine.focus_escape(ctx)),
+                            true => hook!(self, engine, now, |ctx| engine.focus_close(ctx)),
+                            false => hook!(self, engine, now, |ctx| engine.focus_escape(ctx)),
                         }
                         self.drop_release = sorted.forward.is_empty();
                     }
@@ -1471,7 +1496,7 @@ impl Driver {
         if bytes.is_empty() {
             return;
         }
-        let forward = hook!(self, self.now(), |ctx| {
+        let forward = hook!(self, engine, self.now(), |ctx| {
             if ctx.has_subscribers("input") {
                 ctx.emit("input", json!({"bytes": keys::base64_encode(bytes)}));
             }
@@ -1500,7 +1525,7 @@ impl Driver {
         if let Some(recorder) = &mut self.recorder {
             recorder.host_colors(now, colors);
         }
-        hook!(self, now, |ctx| {
+        hook!(self, engine, now, |ctx| {
             engine.on_host_colors(colors, ctx);
             ctx.emit("colors", data);
             ctx.request_repaint();
@@ -1648,7 +1673,7 @@ impl Driver {
         }
         self.show_ask(engine);
         let mut out = Vec::new();
-        hook!(self, now, |ctx| {
+        hook!(self, engine, now, |ctx| {
             engine.on_resize(cols, rows, now, &mut out, ctx);
             ctx.emit("size", json!({"size": [cols, rows]}));
         });
@@ -1692,7 +1717,7 @@ impl Driver {
             let paused = conn.paused;
             self.conns.insert(id, conn);
             if paused {
-                hook!(self, now, |ctx| engine.hide_owner(id, true, ctx));
+                hook!(self, engine, now, |ctx| engine.hide_owner(id, true, ctx));
             }
         }
     }
@@ -1822,6 +1847,17 @@ impl Driver {
             if let Err(e) = self.own_limits(conn, own, method, &params, engine, now) {
                 return Some(Err(e));
             }
+            // Below `shape`, told unscrolled: its frame cells, the view's.
+            if own.degree < Degree::Shape
+                && matches!(method, "draw.put" | "draw.update" | "draw.ext")
+            {
+                let frame = params.get("frame").and_then(Value::as_u64);
+                let frame = (frame.and_then(|f| u32::try_from(f).ok())).or(own.frame());
+                let origin = engine.view_of(frame.unwrap_or(ptyrc_core::RAW));
+                lower::in_view(&mut params, origin.map_or([0, 0], |(_, origin)| origin));
+            }
+            // Below `layout`: its reads of its surface, told as frame 0.
+            let view = self.read_view(conn, own, engine);
             // What it may be pointed at by default: a widget, a sprite in
             // front (the host mouse is asked for it).
             let front = params
@@ -1830,10 +1866,17 @@ impl Driver {
                 .is_some_and(|l| l > 0);
             let pointable = method == "widget.show"
                 || (front && matches!(method, "draw.put" | "draw.ext" | "draw.update"));
-            let answer = self.cut_answer(conn, method, params, engine, in_batch);
+            let answer = self.cut_answer(conn, method, params, engine, in_batch, view);
             let answer = answer.map(|answer| {
                 let mut answer = answer.map_err(lower::scrub)?;
                 self.own_answer(conn, own, method, &mut answer);
+                if own.degree < Degree::Shape {
+                    let origin = |f: u64| Some(engine.view_of(u32::try_from(f).ok()?)?.1);
+                    lower::unscrolled(&mut answer, &origin);
+                }
+                if let Some((_, at)) = view {
+                    lower::on_surface(&mut answer, at);
+                }
                 Ok(answer)
             });
             if pointable && matches!(answer, Some(Ok(_))) && self.pointable.insert(conn) {
@@ -1842,10 +1885,11 @@ impl Driver {
             }
             return answer;
         }
-        self.cut_answer(conn, method, params, engine, in_batch)
+        self.cut_answer(conn, method, params, engine, in_batch, None)
     }
 
-    /// `answer`, cut to the degree of an app below `text`.
+    /// `answer`, cut to the degree of an app below `text`; `view`: the
+    /// frame it reads below `layout` and the corner of its view.
     fn cut_answer(
         &mut self,
         conn: ConnId,
@@ -1853,13 +1897,15 @@ impl Driver {
         params: Value,
         engine: &mut dyn Engine,
         in_batch: bool,
+        view: Option<ReadView>,
     ) -> Option<Result<Value, RpcError>> {
         let lower = matches!(self.verdict(conn, method, &params), Verdict::Lower(_));
         // An app below `text`: its answers cut to its degree.
         let Some((degree, words, hand)) = self.cut_of(conn) else {
             return self.answer(conn, method, params, engine, in_batch);
         };
-        let answer = match lower::plan(method, &params, degree, &words, &hand) {
+        let read = view.map_or(ptyrc_core::RAW, |(frame, _)| frame);
+        let answer = match lower::plan(method, &params, degree, &words, &hand, read) {
             // Fail closed: lowered by the table, not planned.
             Plan::Pass if lower => Some(Err(grants::denied(method, Why::Unlisted))),
             Plan::Pass => self.answer(conn, method, params, engine, in_batch),
@@ -1872,7 +1918,8 @@ impl Driver {
                     Some(answer) => Some(answer.map(|value| cut.apply(value, degree))),
                     None => {
                         // Pending: cut when the engine completes it.
-                        self.cuts.insert(Token(self.next_token - 1), (cut, degree));
+                        self.cuts
+                            .insert(Token(self.next_token - 1), (cut, degree, view));
                         None
                     }
                 }
@@ -1946,7 +1993,7 @@ impl Driver {
                 let token = Token(self.next_token);
                 self.next_token += 1;
                 let now = self.now();
-                match hook!(self, now, |ctx| engine
+                match hook!(self, engine, now, |ctx| engine
                     .handle(conn, token, method, params, ctx))
                 {
                     Reply::Ok(value) => Ok(value),
@@ -2272,11 +2319,24 @@ impl Driver {
         frame: Value,
         engine: &mut dyn Engine,
     ) -> Result<u32, RpcError> {
+        let found = self.frame_info(conn, frame, engine)?;
+        (found["id"].as_u64())
+            .and_then(|id| u32::try_from(id).ok())
+            .ok_or_else(|| RpcError::new(ErrorCode::Internal, "frame.get: no id"))
+    }
+
+    /// The info of `frame`, as `frame.get` tells it to the user.
+    fn frame_info(
+        &mut self,
+        conn: ConnId,
+        frame: Value,
+        engine: &mut dyn Engine,
+    ) -> Result<Value, RpcError> {
         let token = Token(self.next_token);
         self.next_token += 1;
         let now = self.now();
         let asked = json!({"frame": frame});
-        let found = hook!(self, now, |ctx| engine.handle(
+        let found = hook!(self, engine, now, |ctx| engine.handle(
             conn,
             token,
             "frame.get",
@@ -2284,12 +2344,24 @@ impl Driver {
             ctx
         ));
         match found {
-            Reply::Ok(found) => (found["frame"]["id"].as_u64())
-                .and_then(|id| u32::try_from(id).ok())
-                .ok_or_else(|| RpcError::new(ErrorCode::Internal, "frame.get: no id")),
+            Reply::Ok(mut found) => Ok(found["frame"].take()),
             Reply::Err(error) => Err(error),
             Reply::Pending => Err(RpcError::new(ErrorCode::Internal, "frame.get")),
         }
+    }
+
+    /// Below `layout`, the frame its reads are of and the corner of its
+    /// view on the screen; `None`: the raw one, or its frame gone.
+    fn read_view(
+        &mut self,
+        conn: ConnId,
+        own: &own::Own,
+        engine: &mut dyn Engine,
+    ) -> Option<ReadView> {
+        let frame = own.read().filter(|_| own.degree < Degree::Layout)?;
+        let info = self.frame_info(conn, json!(frame), engine).ok()?;
+        let corner = |i: usize| info["rect"][i].as_u64().and_then(|v| u16::try_from(v).ok());
+        Some((frame, [corner(0)?, corner(1)?]))
     }
 
     /// Topic `apps`: the entries that changed, those that left.
@@ -2678,7 +2750,7 @@ impl Driver {
             // A focus lost by the pause is told before the silence.
             conn.paused = false;
             let topics: Vec<String> = conn.topics.iter().cloned().collect();
-            hook!(self, now, |ctx| engine.hide_owner(id, paused, ctx));
+            hook!(self, engine, now, |ctx| engine.hide_owner(id, paused, ctx));
             if let Some(conn) = self.conns.get_mut(&id) {
                 conn.paused = paused;
             }
@@ -3074,7 +3146,7 @@ impl Driver {
     }
 
     /// Apply what an engine hook asked for.
-    fn apply(&mut self, fx: Effects) {
+    fn apply(&mut self, fx: Effects, engine: &dyn Engine) {
         self.pty_queue.extend(fx.pty_input);
         self.repaint |= fx.repaint;
         for (topic, data) in fx.events {
@@ -3087,8 +3159,24 @@ impl Driver {
             let cut = self.cuts.remove(&token);
             if let Some((conn, id)) = self.pending.remove(&token) {
                 let result = match cut {
-                    Some((cut, degree)) => result
-                        .map(|value| cut.apply(value, degree))
+                    Some((cut, degree, view)) => result
+                        .map(|value| {
+                            let mut value = cut.apply(value, degree);
+                            if degree < Degree::Shape {
+                                // Its frame's origin now; below `layout`,
+                                // the frame it reads alone.
+                                let origin = |f: u64| {
+                                    let f = u32::try_from(f).ok()?;
+                                    view.is_none_or(|(read, _)| read == f).then_some(())?;
+                                    Some(engine.view_of(f)?.1)
+                                };
+                                lower::unscrolled(&mut value, &origin);
+                            }
+                            if let Some((_, at)) = view {
+                                lower::on_surface(&mut value, at);
+                            }
+                            value
+                        })
                         .map_err(lower::scrub),
                     None => result,
                 };
@@ -3186,7 +3274,8 @@ impl Driver {
                 .retain(|token, _| self.pending.contains_key(token));
             self.refresh_topics();
             self.sync_host_mouse(engine);
-            hook!(self, self.now(), |ctx| engine.on_disconnect(id, ctx));
+            hook!(self, engine, self.now(), |ctx| engine
+                .on_disconnect(id, ctx));
         }
     }
 
@@ -3204,7 +3293,8 @@ impl Driver {
         if self.host_mouse != mouse::HostMouse::Off {
             out.extend_from_slice(mouse::HOST_OFF);
         }
-        hook!(self, self.now(), |ctx| engine.on_exit(&mut out, ctx));
+        hook!(self, engine, self.now(), |ctx| engine
+            .on_exit(&mut out, ctx));
         let _ = self.host.write(&out);
         self.emit("exit", json!({"status": status}));
         let pending: Vec<(ConnId, Value)> = self.pending.drain().map(|(_, v)| v).collect();

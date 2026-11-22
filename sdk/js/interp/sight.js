@@ -158,11 +158,13 @@ export class Sight {
   #cursor() {
     const at = this.#at;
     if (!at || !at.visible || this.degree === "none") return null;
-    let p;
-    if (this.info && at.frame === this.info.id && Array.isArray(at.pos)) p = at.pos;
-    else if (this.rect) p = [at.x - this.rect[0], at.y - this.rect[1]];
-    else return null;
-    return [p[0], p[1]];
+    // In view cells: a cell of its frame less the origin, else by the rect.
+    if (this.info && at.frame === this.info.id && Array.isArray(at.pos)) {
+      const [ox, oy] = Array.isArray(this.info.origin) ? this.info.origin : [0, 0];
+      return [at.pos[0] - ox, at.pos[1] - oy];
+    }
+    if (!this.rect) return null;
+    return [at.x - this.rect[0], at.y - this.rect[1]];
   }
 
   ink(x, y) {
