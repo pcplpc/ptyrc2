@@ -375,9 +375,11 @@ memory-mib = 128
 - `word`: 3 to 32 letters or digits, else refused at the start. Found
   by `screen.find` and `screen.wait` whatever the degree, shown in
   `screen.shape` from `shape`; not counted in the 32 of `words`.
-- `pattern`: 1 to 256 bytes, 16 a run. `screen.find`, `screen.wait`
-  with exactly that pattern (and its `regex`) are answered as under
-  `text`, `known` too; any other pattern as before.
+- `pattern`: 1 to 256 bytes, 16 a run; with `regex`, a regular
+  expression `screen.find` compiles; else refused at the start.
+  `screen.find`, `screen.wait` with exactly that pattern (and its
+  `regex`) are answered as under `text`, `known` too; any other
+  pattern as before.
 - `file`, `dir`: require `files` in `[permissions]`; `write = true`
   (a file only) requires `files-write`. The guest gets `{"file":
   "f0", "name": "TODO.md"}`, never a path; reading is granted by the

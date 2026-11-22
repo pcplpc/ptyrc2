@@ -64,7 +64,7 @@ the driver.
   `app.start`.
 - `resolve(manifest, args, files) -> Resolved { init, needs, words,
   patterns, files }`: each value of its type and rule (a `word` by
-  the rule of `words`, a `pattern` 1 to 256 bytes, 16 a run, a number
+  the rule of `words`, a `pattern` 1 to 256 bytes, 16 a run, compiled when `regex`, a number
   within `min`, `max`), each handle given once and of its kind; the defaults filled in; `needs`
   of what was given (`files` for a default file, `files-write` for a
   file to write). `Resolved::asked(manifest)`: the permissions

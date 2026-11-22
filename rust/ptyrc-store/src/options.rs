@@ -733,10 +733,19 @@ fn item(o: &AppOption, v: &Value) -> std::result::Result<Value, String> {
         }
         OptionType::Pattern => {
             let s = v.as_str().ok_or_else(wanted)?;
-            match !s.is_empty() && s.len() <= MAX_PATTERN && !s.contains('\0') {
-                true => Ok(v.clone()),
-                false => Err(format!("a pattern of 1 to {MAX_PATTERN} bytes")),
+            if s.is_empty() || s.len() > MAX_PATTERN || s.contains('\0') {
+                return Err(format!("a pattern of 1 to {MAX_PATTERN} bytes"));
             }
+            // Compiled as the driver compiles it (`screen.find`).
+            if o.regex
+                && let Err(e) = regex::Regex::new(s)
+            {
+                let why = e.to_string();
+                let why = why.lines().last().unwrap_or_default();
+                let why = why.strip_prefix("error: ").unwrap_or(why);
+                return Err(format!("{s:?}: not a regular expression: {why}"));
+            }
+            Ok(v.clone())
         }
         _ => Err(wanted()),
     }
@@ -1704,11 +1713,20 @@ mod tests {
             json!({"word": "no way"}),
             json!({"mark": "x"}),
             json!({"mark": [""]}),
+            json!({"mark": ["("]}),
             json!({"season": "winter"}),
             json!([1]),
         ] {
             assert!(resolve(&m, Some(&bad), &[]).is_err(), "{bad}");
         }
+        let why = resolve(&m, Some(&json!({"mark": ["a", "(b"]})), &[]).unwrap_err();
+        assert!(
+            why.to_string()
+                .contains("\"(b\": not a regular expression: unclosed group"),
+            "{why}"
+        );
+        let literal = manifest("[options]\nfind = { type = \"pattern\", doc = \"d\" }\n");
+        assert!(resolve(&literal, Some(&json!({"find": "("})), &[]).is_ok());
         let many: Vec<String> = (0..17).map(|i| format!("p{i}")).collect();
         assert!(resolve(&m, Some(&json!({"mark": many})), &[]).is_err());
         // A bool true by default asks what it needs.
