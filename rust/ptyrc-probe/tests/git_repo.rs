@@ -22,7 +22,7 @@ struct Base {
 fn base(name: &str) -> Base {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
         .join("probe-git")
-        .join(name);
+        .join(format!("{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let dir = dir.canonicalize().unwrap();
@@ -49,10 +49,34 @@ fn script(path: &Path, body: &str) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
+/// Variables that point `git` at a repository other than the one found
+/// from its directory.
+const REPO_VARS: [&str; 7] = [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_NAMESPACE",
+];
+
+/// `git` in `cwd`, unable to reach a repository above
+/// `CARGO_TARGET_TMPDIR`: a fixture not yet a repository (a concurrent
+/// run removed it) fails instead of writing the tree's own `.git`.
+fn isolated(cwd: &Path) -> Command {
+    let mut c = Command::new("git");
+    c.current_dir(cwd)
+        .env("GIT_CEILING_DIRECTORIES", env!("CARGO_TARGET_TMPDIR"));
+    for v in REPO_VARS {
+        c.env_remove(v);
+    }
+    c
+}
+
 fn sh(cwd: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
+    let out = isolated(cwd)
         .args(args)
-        .current_dir(cwd)
         .env("GIT_AUTHOR_NAME", "t")
         .env("GIT_AUTHOR_EMAIL", "t@t")
         .env("GIT_COMMITTER_NAME", "t")
@@ -71,9 +95,8 @@ fn sh(cwd: &Path, args: &[&str]) -> String {
 
 /// Git as a user runs it, its success not asked.
 fn plain(cwd: &Path, args: &[&str]) {
-    let _ = Command::new("git")
+    let _ = isolated(cwd)
         .args(args)
-        .current_dir(cwd)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .stdin(std::process::Stdio::null())
@@ -654,4 +677,39 @@ fn output_bounded() {
     let fails = b.dir.join("fails");
     script(&fails, "printf 'x\\n'\nexit 1\n");
     assert_eq!(Git::new(&fails, &b.dir).run(Cmd::Locate), None);
+}
+
+/// `git` in a fixture directory, its environment as cargo gives it,
+/// finds no repository: `.cargo/config.toml` sets the ceiling.
+#[test]
+fn tree_out_of_reach() {
+    let b = base("reach");
+    let out = Command::new("git")
+        .args(["rev-parse", "--absolute-git-dir"])
+        .current_dir(&b.dir)
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "a fixture reaches {}",
+        String::from_utf8_lossy(&out.stdout).trim()
+    );
+}
+
+/// The tree's own `.git/config` names no fixture.
+#[test]
+fn tree_config_clean() {
+    let config = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.git/config");
+    let Ok(text) = std::fs::read_to_string(&config) else {
+        return;
+    };
+    let tmp = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .canonicalize()
+        .unwrap();
+    assert!(
+        !text.contains(tmp.to_str().unwrap()),
+        "{} names {}",
+        config.display(),
+        tmp.display()
+    );
 }

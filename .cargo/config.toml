@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[env]
+# `git` started under `target/` (test fixtures) stops there: a fixture
+# that is not a repository fails instead of reaching this tree's `.git`.
+GIT_CEILING_DIRECTORIES = { value = "target", relative = true }
