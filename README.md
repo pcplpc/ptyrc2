@@ -2,17 +2,17 @@
 
 # `ptyrc2` - the pty remote controller
 
-Wrap your favorite tools in a terminal driver, which accepts client apps that
-add confetti to what you see:
+Wrap your favorite tools in a terminal driver, which accepts clients that can
+customize what you see:
 
 ![main-demo](doc/main.gif)
+
+This can drive anything that works in a terminal, like
+[selenium](https://www.selenium.dev/) can drive anything a browser can do.
 
 This started as [`ptyrc`](https://github.com/pcplpc/ptyrc), a wrapper around
 [`pty`](https://docs.python.org/3/library/pty.html) made by hand with love.
 Now rebuild with the machine.
-
-The driver understands panes, scrollable surfaces, sprites, widgets, layers,
-transparency, and a work-in-progress plugin system.
 
 See [`GALLERY.md`](GALLERY.md) for more examples.
 

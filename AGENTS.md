@@ -50,3 +50,10 @@ Exact and minimal. Plain, sober, precise; no filler.
   never `git add -A`, never `git stash`, never commit `Cargo.lock`,
   `uv.lock` or the root files, never rewrite history. Retry if the
   index is locked.
+- This tree's `.git/` is the owner's: no `git config`, `git remote`,
+  hook or ref change on it but by commit. A test that runs `git` works
+  in its own repository under `CARGO_TARGET_TMPDIR`, a directory per
+  process, `GIT_DIR` and kin removed; `.cargo/config.toml` sets
+  `GIT_CEILING_DIRECTORIES` so `git` under `target/` never reaches this
+  tree. `tree_out_of_reach` and `tree_config_clean`
+  (`rust/ptyrc-probe/tests/git_repo.rs`) fail otherwise.
