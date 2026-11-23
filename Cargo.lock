@@ -940,6 +940,7 @@ name = "ptyrc-store"
 version = "2.0.0"
 dependencies = [
  "landlock",
+ "regex",
  "rustix",
  "serde",
  "serde_json",
