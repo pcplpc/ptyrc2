@@ -20,4 +20,4 @@ title = { type = "string", doc = "on the border [default: ask]" }
 timeout = { type = "float", doc = "give up after this many seconds [default: never]" }
 
 [args]
-words = { type = "string", min = 1, doc = "the question, then the options; none: a line is typed" }
+words = { type = "string", min = 1, doc = "the question, then the options, 15 at most; none: a line is typed" }

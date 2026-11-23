@@ -361,7 +361,9 @@ The model: `life`. Beside the lines above:
 Beside what the steps above state (`needs`, `keys-arrows`, `--seed`):
 
 - `ask`: no `--json`; `ptyrc --json app ask` prints the value as JSON;
-  without it a string as it is, a list a line each.
+  without it a string as it is, a list a line each. 15 options at
+  most: the launcher's 16 values of an `[args]` entry, the question
+  first (`ask/tests/many`).
 - `fishes --tank` is an app of its own, `tank`; the reef in `_shared`.
 - `marks` draws on its frame alone: `surface = "frame"`, no
   `screen-wide`; its frame the focused pane (`frame = "active"`). `timer -b`: `surface = "frame"`.
