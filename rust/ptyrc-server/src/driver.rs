@@ -285,6 +285,9 @@ struct Driver {
     hovered: Option<Value>,
     /// Who heard the last `hover`: told of the leave.
     hover_heard: BTreeSet<ConnId>,
+    /// The corner on the screen of each widget sprite, from its last
+    /// report with `at`: a release or a drag off it is told in its cells.
+    corners: HashMap<u64, [i64; 2]>,
     /// A press went to this sprite: so do the moves and the release.
     mouse_held: Option<Value>,
     /// A replay: makes the engine again when the tape is rewound.
@@ -638,6 +641,7 @@ impl Driver {
             host_mouse: mouse::HostMouse::Off,
             hovered: None,
             hover_heard: BTreeSet::new(),
+            corners: HashMap::new(),
             mouse_held: None,
             factory: None,
             handoff: false,
@@ -716,6 +720,7 @@ impl Driver {
             host_mouse: mouse::HostMouse::Off,
             hovered: None,
             hover_heard: BTreeSet::new(),
+            corners: HashMap::new(),
             mouse_held: None,
             factory: None,
             handoff: false,
@@ -2812,12 +2817,13 @@ impl Driver {
                     .cloned(),
             );
         }
-        // A surface on a frame follows its pane: the driver hears `frames`.
+        // A surface on a frame, widgets on a pane, follow their pane: the
+        // driver hears `frames`.
         let follows = (apps.iter().flat_map(|apps| apps.iter())).any(|app| {
             matches!(
                 heir::surface(app),
                 Some(Surface::Frame(_) | Surface::Screen(_))
-            )
+            ) || matches!(heir::surface(app), Some(Surface::Widget(f)) if f != 0)
         });
         if follows {
             heard.insert("frames".to_string());
@@ -3194,16 +3200,14 @@ impl Driver {
 
     /// A `widgets` event to a narrowed app (Its own): its own widget
     /// alone, `frame` 0 below `layout`, as `move` and `frame.get` tell
-    /// it. `None`: not narrowed, told as it is; `Some(None)`: not told.
+    /// it; of `surface = "widget"`, in its own cells. `None`: not narrowed, told as it is; `Some(None)`: not told.
     fn widget_to(&self, conn: ConnId, data: &Value) -> Option<Option<Value>> {
         let own = self.own(conn)?;
         let owner = data.get("owner").and_then(Value::as_u64);
         let mine = owner.is_some_and(|o| own.conns.contains(&ConnId(o)));
         Some(mine.then(|| {
             let mut told = data.clone();
-            if own.degree < Degree::Layout && !told["frame"].is_null() {
-                told["frame"] = json!(0);
-            }
+            own::told_widget(&own, &mut told);
             told
         }))
     }

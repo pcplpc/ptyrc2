@@ -643,6 +643,128 @@ fn a_store_app_follows_its_pane() {
     );
 }
 
+/// Three panes, bars at columns 25 and 45, the left the largest; a
+/// line typed: two, the left two merged.
+const MERGE_LARGEST: &str = r#"printf '\033[2J\033[H'
+i=1
+while [ $i -le 16 ]; do
+  printf '\033[%d;1Hleft\033[%d;26H│\033[%d;27Hmid\033[%d;46H│\033[%d;47Hright' $i $i $i $i $i
+  i=$((i+1))
+done
+read x
+printf '\033[2J\033[H'
+i=1
+while [ $i -le 16 ]; do
+  printf '\033[%d;1Hwide\033[%d;46H│\033[%d;47Hright' $i $i $i
+  i=$((i+1))
+done
+exec sleep 1000
+"#;
+
+/// A widget, shown without a frame; what it is told of it, logged.
+const PLACED: &str = r#"
+import { call, log, period } from "ptyrc";
+export function init(args) {
+  call("subscribe", { topics: ["move", "size", "widgets"] });
+  call("widget.declare", { widgets: [{ tag: "w", size: [6, 2], content: { rows: ["fishes", "fishes"] } }] });
+  call("widget.show", { tag: "w", frame: "raw" });
+  period(500);
+}
+export function tick(now) {
+  const w = call("widget.list", {}).widgets[0];
+  if (w.sprite == null) return;
+  const f = call("frame.list", {}).frames;
+  const d = call("draw.list", {}).sprites;
+  log("seen=" + JSON.stringify({ frame: w.frame, rect: w.rect, frames: f.map(i => [i.id, i.rect]), sprites: d.length }));
+}
+export function event(topic, data) {
+  if (topic !== "widgets") log(topic + "=" + JSON.stringify(data));
+}
+"#;
+
+/// `surface = "widget"`, `[app] frame = "largest"`, below `layout`: its
+/// widget on the largest pane, and after it, its heir; told nothing of
+/// the layout: one frame, the screen; its widget at 0, 0; no `move`.
+#[test]
+fn a_widget_is_placed_on_its_frame_told_nothing_of_it() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let sb = Sandbox::new("placed");
+    let manifest =
+        wide_manifest("placed", "widget", "").replace("surface", "frame = \"largest\"\nsurface");
+    install(&sb, "placed", manifest, PLACED);
+    let mut driver = sb.ptyrc();
+    driver
+        .env("PTYRC_BOX", runner())
+        .env("PTYRC_JS", &js)
+        .args(["run", "--name", "s", "--headless", "--size", "60x16"])
+        .args(["--", "sh", "-c", MERGE_LARGEST])
+        .stdin(std::process::Stdio::null());
+    let _driver = common::Proc(driver.spawn().unwrap());
+    let socket = sb.socket("s");
+    wait_for(
+        || std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "socket",
+    );
+    let mut client = sb.client("s");
+    let pane = |client: &mut Client, x: u64| {
+        let frames = client.call("frame.list", json!({})).unwrap();
+        (frames["frames"].as_array().unwrap().iter())
+            .find(|f| f["kind"] == "pane" && f["rect"][0] == x && f["state"] == "stable")
+            .map(|f| f["id"].as_u64().unwrap())
+    };
+    wait_for(|| pane(&mut client, 0).is_some(), "the panes");
+    let left = pane(&mut client, 0).expect("the left pane, the largest");
+    let started = client
+        .call("app.start", json!({"store": "placed"}))
+        .unwrap();
+    let id = started["app"]["id"].as_u64().unwrap();
+    let placed = |client: &mut Client| {
+        let list = client.call("widget.list", json!({})).unwrap();
+        (list["widgets"].as_array().unwrap().iter())
+            .find(|w| w["tag"] == "w" && !w["sprite"].is_null())
+            .map(|w| (w["frame"].clone(), w["rect"][0].as_u64().unwrap()))
+    };
+    let mut on = None;
+    wait_slow(
+        || {
+            on = placed(&mut client);
+            on.is_some()
+        },
+        "placed",
+    );
+    let (frame, x) = on.unwrap();
+    assert_eq!(frame, json!(left));
+    assert!(x < 25, "{x}");
+    let seen = "seen={\"frame\":0,\"rect\":[0,0,8,4],\"frames\":[[0,[0,0,60,16]]],\"sprites\":0}";
+    wait_slow(|| log_of(&mut client, id).contains(seen), "told");
+
+    // The left two merged: the wide pane, its heir; nothing told.
+    client.call("input.send", json!({"text": "\n"})).unwrap();
+    let mut heir = 0;
+    wait_for(
+        || {
+            pane(&mut client, 0)
+                .filter(|p| *p != left)
+                .map(|p| heir = p)
+                .is_some()
+        },
+        "the wide pane",
+    );
+    wait_for(
+        || placed(&mut client).is_some_and(|(f, _)| f == json!(heir)),
+        "on its heir",
+    );
+    std::thread::sleep(Duration::from_millis(1200));
+    let log = log_of(&mut client, id);
+    assert!(log.contains(seen), "{log}");
+    assert!(!log.contains("move=") && !log.contains("size="), "{log}");
+    assert!(!log.contains("exit:"), "{log}");
+}
+
 const BOMBS: &str = r#"
 import { call, log, period } from "ptyrc";
 export function init(args) {

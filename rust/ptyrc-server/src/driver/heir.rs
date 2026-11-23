@@ -86,7 +86,9 @@ impl Driver {
         let surfaces: Vec<(u64, u32)> = (self.apps.iter())
             .flat_map(|apps| apps.iter())
             .filter_map(|app| match surface(app)? {
-                Surface::Frame(frame) | Surface::Screen(frame) if frame != 0 => {
+                Surface::Frame(frame) | Surface::Screen(frame) | Surface::Widget(frame)
+                    if frame != 0 =>
+                {
                     Some((app.id, frame))
                 }
                 _ => None,
@@ -145,12 +147,14 @@ impl Driver {
     }
 
     /// The frame of `app`'s surface when `move_surface` moves it: a
-    /// surface on a frame, or a blind app (all it names on frame 0).
+    /// surface on a frame, that of its widgets, or a blind app (all it
+    /// names on frame 0).
     pub(super) fn surface_frame(&self, app: u64) -> Option<u32> {
         let entry = self.apps.as_ref()?.get(app)?;
         match surface(entry) {
-            Some(Surface::Frame(frame) | Surface::Screen(frame)) => Some(frame),
-            Some(Surface::Widget) => None,
+            Some(Surface::Frame(frame) | Surface::Screen(frame) | Surface::Widget(frame)) => {
+                Some(frame)
+            }
             // Its frame so far: the one all it names is put on.
             None if blind(entry) => Some(0),
             None => None,
@@ -178,7 +182,8 @@ impl Driver {
 
     /// The surface of `app` from frame `from` to `to`: its sprites
     /// there, or shown nowhere, and its widgets there go along; it is
-    /// told.
+    /// told. Of `surface = "widget"`: its widgets alone; below `layout`,
+    /// nothing told but its widgets in `widgets`, in their own cells.
     fn rehome(&mut self, app: u64, from: u32, to: u32, engine: &mut dyn Engine) {
         let Some(apps) = self.apps.as_mut() else {
             return;
@@ -189,6 +194,8 @@ impl Driver {
         let (Some(surface), conns) = (surface(entry), entry.conns.clone()) else {
             return;
         };
+        let widget = matches!(surface, Surface::Widget(_));
+        let quiet = widget && entry.grants.degree() < Degree::Layout;
         apps.set_surface(app, surface.moved(to));
         let now = self.now();
         let Some(&first) = conns.iter().next() else {
@@ -200,8 +207,8 @@ impl Driver {
             hook!(driver, engine, now, |ctx| engine
                 .handle(first, token, method, params, ctx))
         };
-        let listed = match call(self, "draw.list", json!({})) {
-            Reply::Ok(list) => list["sprites"].as_array().cloned().unwrap_or_default(),
+        let listed = match (!widget).then(|| call(self, "draw.list", json!({}))) {
+            Some(Reply::Ok(list)) => list["sprites"].as_array().cloned().unwrap_or_default(),
             _ => Vec::new(),
         };
         let mine =
@@ -224,7 +231,7 @@ impl Driver {
                 .move_widgets(conn, from, to, ctx));
         }
         let size = json!({"size": [self.info.cols, self.info.rows]});
-        for conn in conns {
+        for conn in conns.into_iter().filter(|_| !quiet) {
             let topics = self.conns.get(&conn).map(|c| c.topics.clone());
             let topics = topics.unwrap_or_default();
             if topics.contains("move") {

@@ -437,6 +437,44 @@ pub fn on_surface(answer: &mut Value, at: [u16; 2]) {
         if object.get("frame").is_some_and(Value::is_u64) {
             object.insert("frame".into(), json!(0));
         }
+        // `pos`: the cell of frame 0, that is `x`, `y`.
+        if object.get("pos").is_some_and(Value::is_array) {
+            let pos = json!([object["x"], object["y"]]);
+            object.insert("pos".into(), pos);
+        }
+    }
+}
+
+/// Below `layout`, a widget of `surface = "widget"` is told in its own
+/// cells, wherever it is placed: of a widget info, `rect` at 0, 0.
+pub fn own_widget(info: &mut Value) {
+    if let Some(rect) = info.get_mut("rect").and_then(Value::as_array_mut)
+        && rect.len() == 4
+    {
+        rect[0] = json!(0);
+        rect[1] = json!(0);
+    }
+}
+
+/// Below `layout`, a pointer report on a widget of `surface =
+/// "widget"` whose outer box has its corner at `corner` on the screen:
+/// `x`, `y` less `corner` (negative off it, left or up), `pos` the
+/// same, `frame` 0.
+pub fn on_widget(report: &mut Value, corner: [i64; 2]) {
+    let Some(object) = report.as_object_mut() else {
+        return;
+    };
+    for (member, by) in [("x", corner[0]), ("y", corner[1])] {
+        if let Some(v) = object.get(member).and_then(Value::as_i64) {
+            object.insert(member.into(), json!(v - by));
+        }
+    }
+    if object.contains_key("pos") {
+        let pos = json!([object["x"], object["y"]]);
+        object.insert("pos".into(), pos);
+    }
+    if object.get("frame").is_some_and(|f| !f.is_null()) {
+        object.insert("frame".into(), json!(0));
     }
 }
 
@@ -1096,6 +1134,35 @@ mod tests {
         assert_eq!(
             (left["x"].clone(), left["frame"].clone()),
             (json!(3), Value::Null)
+        );
+        // Over another pane: `pos` of frame 0 still, not of that pane.
+        let mut other = json!({"x": 50, "y": 21, "frame": 9, "pos": [2, 1]});
+        on_surface(&mut other, [30, 20]);
+        assert_eq!(other, json!({"x": 20, "y": 1, "frame": 0, "pos": [20, 1]}));
+    }
+
+    #[test]
+    fn a_widget_of_surface_widget_is_told_in_its_own_cells() {
+        let mut info = json!({"id": 1, "frame": 7, "rect": [41, 3, 22, 8], "size": [20, 6]});
+        own_widget(&mut info);
+        assert_eq!(info["rect"], json!([0, 0, 22, 8]));
+        let mut hidden = json!({"rect": null});
+        own_widget(&mut hidden);
+        assert_eq!(hidden["rect"], Value::Null);
+        // Its corner at 41, 3: on it, and dragged off it to the left.
+        let mut on = json!({"sprite": 4, "at": [2, 1], "x": 43, "y": 4, "frame": 7,
+                            "pos": [12, 4]});
+        on_widget(&mut on, [41, 3]);
+        assert_eq!(
+            on,
+            json!({"sprite": 4, "at": [2, 1], "x": 2, "y": 1, "frame": 0, "pos": [2, 1]})
+        );
+        let mut off = json!({"sprite": 4, "at": null, "x": 39, "y": 4, "frame": 2,
+                             "pos": [39, 4]});
+        on_widget(&mut off, [41, 3]);
+        assert_eq!(
+            (off["x"].clone(), off["pos"].clone()),
+            (json!(-2), json!([-2, 1]))
         );
     }
 

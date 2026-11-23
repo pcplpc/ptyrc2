@@ -353,6 +353,8 @@ pub struct Headless {
     /// The press on a sprite, its event and whether it is heard without
     /// `clicks`, until its release.
     mouse_held: Option<(Value, bool)>,
+    /// The corner of each widget sprite, from the last report on it.
+    corners: BTreeMap<u64, [i64; 2]>,
     /// The effects told the pointer (`nozzle`).
     nozzles: Nozzles,
     /// `app.list`: the app's name and origin.
@@ -457,6 +459,7 @@ impl Headless {
             escapes: BTreeMap::new(),
             hovered: None,
             mouse_held: None,
+            corners: BTreeMap::new(),
             nozzles: Nozzles::default(),
             name: "app".into(),
             store: None,
@@ -671,7 +674,7 @@ impl Headless {
     /// The app's sprite at a cell, as the driver hit-tests it
     /// (`screen::sprite_at`): the topmost, no effect; and whether it
     /// is heard without `pointer`/`clicks`: a widget, or in front.
-    fn sprite_at(&self, x: u16, y: u16) -> Option<(Value, bool)> {
+    fn sprite_at(&mut self, x: u16, y: u16) -> Option<(Value, bool)> {
         let (cx, cy) = (i64::from(x), i64::from(y));
         let sprites = self.scene.list();
         let (hit, [sx, sy]) = sprites.iter().rev().find_map(|s| {
@@ -682,6 +685,9 @@ impl Headless {
         })?;
         let at = self.frames.at(x, y);
         let widget = self.widgets.list().iter().any(|w| w.sprite == Some(hit.id));
+        if widget {
+            self.corners.insert(hit.id, [sx, sy]);
+        }
         let data = json!({
             "sprite": hit.id, "at": [cx - sx, cy - sy], "x": x, "y": y,
             "frame": at.map(|(id, _)| id), "pos": at.map(|(_, pos)| [pos.x, pos.y]),
@@ -799,10 +805,32 @@ impl Headless {
         }
     }
 
-    fn emit(&mut self, topic: &str, data: Value) {
+    fn emit(&mut self, topic: &str, mut data: Value) {
+        if self.widget_cells() {
+            match topic {
+                "widgets" => lower::own_widget(&mut data),
+                "hover" | "mouse" => {
+                    let corner = data["sprite"].as_u64().and_then(|s| self.corners.get(&s));
+                    if let Some(corner) = corner {
+                        lower::on_widget(&mut data, *corner);
+                    }
+                }
+                _ => {}
+            }
+        }
         if self.topics.contains(topic) && !self.silent.contains(topic) {
             self.pending.push((topic.to_owned(), data));
         }
+    }
+
+    /// Below `layout`, of `surface = "widget"`: its widgets told in
+    /// their own cells, as the driver tells them.
+    fn widget_cells(&self) -> bool {
+        matches!(self.surface, Some(Surface::Widget(_)))
+            && self
+                .grants
+                .as_ref()
+                .is_some_and(|g| g.degree() < Degree::Layout)
     }
 
     /// The events to deliver, in order.
@@ -1467,7 +1495,26 @@ impl Headless {
         // The pointer told to an effect: the driver's flags.
         let mut params = params.clone();
         let flags = nozzle::take_flags(method, &mut params);
-        let (answer, degree) = self.checked_as(method, &params);
+        let (mut answer, degree) = self.checked_as(method, &params);
+        if let (true, Ok(answer)) = (self.widget_cells(), &mut answer) {
+            match method {
+                "widget.show" | "widget.ask" => lower::own_widget(&mut answer["widget"]),
+                "widget.list" => {
+                    let items = answer["widgets"].as_array_mut().into_iter().flatten();
+                    items.for_each(lower::own_widget);
+                }
+                // Its bare sprites alone: its widgets are `widget.list`'s.
+                "draw.list" => {
+                    let shown: Vec<Value> = (self.widgets.list().iter())
+                        .filter_map(|w| w.sprite.map(|id| json!(id)))
+                        .collect();
+                    if let Some(items) = answer["sprites"].as_array_mut() {
+                        items.retain(|item| !shown.contains(&item["id"]));
+                    }
+                }
+                _ => {}
+            }
+        }
         if let (Some(flags), Ok(answer)) = (flags, &answer) {
             let id = (params.get("id").and_then(Value::as_u64))
                 .or_else(|| answer.get("id").and_then(Value::as_u64));
@@ -1494,7 +1541,13 @@ impl Headless {
         self.own_layer(&g, method, &mut placed);
         // Its surface: clipped, never refused (`ptyrc_rules::surface`).
         if let Some(s) = self.surface
-            && let Some(frame) = surface::clip(s, g.holds("screen-wide"), method, &placed)
+            && let Some(frame) = surface::clip(
+                s,
+                g.holds("screen-wide"),
+                g.degree() >= Degree::Layout,
+                method,
+                &placed,
+            )
             && let Some(object) = placed.as_object_mut()
         {
             object.insert("frame".into(), json!(frame));
@@ -3684,7 +3737,7 @@ mod tests {
             let frame = list["sprites"][0]["frame"].clone();
             (h.screen().join("|"), frame, id, h)
         };
-        let (screen, frame, _, h) = run(Some(Surface::Widget), &[]);
+        let (screen, frame, _, h) = run(Some(Surface::Widget(RAW)), &[]);
         assert!(
             !screen.contains("BARE") && screen.contains("WIDG"),
             "{screen}"
@@ -3703,12 +3756,61 @@ mod tests {
             assert_eq!(h.nowhere, None);
         }
         // An update naming a frame: clipped too.
-        let (_, _, id, mut h) = run(Some(Surface::Widget), &[]);
+        let (_, _, id, mut h) = run(Some(Surface::Widget(RAW)), &[]);
         h.nowhere = None;
         h.call("draw.update", json!({"id": id, "frame": "raw"}))
             .unwrap();
         assert_eq!(h.nowhere, Some(1500));
         let (screen, ..) = run(None, &[]);
         assert!(screen.contains("BARE"), "{screen}");
+    }
+
+    /// Below `layout`, a widget of `surface = "widget"` is told in its
+    /// own cells, as the driver tells it: `rect` at 0, 0; a report on it
+    /// less its corner; not in `draw.list`. With `layout`: screen cells.
+    #[test]
+    fn a_widget_of_surface_widget_is_told_in_its_own_cells() {
+        let run = |held: &[&str]| {
+            let mut h = Headless::new((30, 10), 1);
+            h.set_grants(Some(Grants::new(held, &[], &[] as &[&str])));
+            h.surface = Some(Surface::Widget(RAW));
+            h.call("subscribe", json!({"topics": ["hover", "widgets"]}))
+                .unwrap();
+            let w = json!({"widgets": [{"tag": "w", "name": "small", "size": [4, 1],
+                                         "content": {"rows": ["WIDG"]}}]});
+            h.call("widget.declare", w).unwrap();
+            h.call("widget.show", json!({"tag": "w"})).unwrap();
+            for t in [0, 500, 1500] {
+                h.set_now(t);
+                h.settle();
+            }
+            let rows = h.screen();
+            let y = rows.iter().position(|r| r.contains("WIDG")).unwrap();
+            let x = rows[y][..rows[y].find("WIDG").unwrap()].chars().count();
+            h.take_events();
+            h.hover(x as u16 + 1, y as u16);
+            let events = h.take_events();
+            let list = h.call("widget.list", json!({})).unwrap();
+            let sprites = h.call("draw.list", json!({})).unwrap();
+            (events, list, sprites, [x as i64, y as i64])
+        };
+        let (events, list, sprites, [x, y]) = run(&[]);
+        let rect = &list["widgets"][0]["rect"];
+        assert_eq!((rect[0].clone(), rect[1].clone()), (json!(0), json!(0)));
+        let hover = &events.iter().find(|(t, _)| t == "hover").unwrap().1;
+        // The outer box has a border: the text at 1, 1 of it.
+        assert_eq!(
+            (hover["x"].clone(), hover["y"].clone(), hover["pos"].clone()),
+            (json!(2), json!(1), json!([2, 1]))
+        );
+        assert_eq!(sprites["sprites"], json!([]));
+        let (events, list, sprites, _) = run(&["layout"]);
+        assert_eq!(list["widgets"][0]["rect"][0], json!(x - 1));
+        let hover = &events.iter().find(|(t, _)| t == "hover").unwrap().1;
+        assert_eq!(
+            (hover["x"].clone(), hover["y"].clone()),
+            (json!(x + 1), json!(y))
+        );
+        assert_eq!(sprites["sprites"].as_array().map(Vec::len), Some(1));
     }
 }

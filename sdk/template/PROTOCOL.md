@@ -67,7 +67,8 @@ Cut answers:
 | `frame.text` | `shape`, `words`; less | each line as its shape; `{"lines":[],"y0":0}` |
 | `frame.list`, `frame.get`, `frame.at` | less than `layout` | its surface's frame alone, told as frame 0 at 0, 0; `frame` of every request ignored |
 | a frame's cells: `origin`, `frame.at`, a match's `x`, `y` (a pending wait's: at its answer), `pos` of `mouse`, `hover`; an anchor `at` in frame cells | less than `shape` | told unscrolled: `origin` 0, 0, each cell one of the view; the anchor put in view cells (a negative coordinate: off the view, in frame cells) |
-| `x`, `y`, `frame` of `mouse`, `hover` | less than `layout` | less the corner of its surface's view; `frame` 0 |
+| `x`, `y`, `frame`, `pos` of `mouse`, `hover` | less than `layout` | less the corner of its surface's view; `frame` 0; `pos` the same as `x`, `y` |
+| its widgets, `surface = "widget"` | less than `layout` | in their own cells, wherever placed: a widget info's `rect` at 0, 0; `x`, `y`, `pos` of a report on it less its corner (negative off it); not in `draw.list` |
 | `session.info` | less than `text` | `protocol`, `server`, `size`, `headless`; `host_colors` from `shape` |
 
 ## Methods
@@ -173,7 +174,7 @@ Host functions (`clock.*`, `storage.*`, `app.result`, `file.*`,
 | `size` | `{"size":[c,r]}` | — |
 | `draw` | `{"removed":[id],"frame","rows":[from,to]\|null}`: its sprites removed by the driver | — |
 | `widgets` | widget info of its own, when it changes; `frame` 0 below `layout` | — |
-| `move` | `{"frame":id}`: the user moved the app, or its frame left the screen and a pane took its place (its sprites moved along; `size` follows); 0 below `layout` | — |
+| `move` | `{"frame":id}`: the user moved the app, or its frame left the screen and a pane took its place (its sprites moved along; `size` follows); 0 below `layout`; not told to `surface = "widget"` below `layout` | — |
 | `exit` | `{"status"}`: the program ended | — |
 | `frames` | frame infos | `layout` |
 | `screen` | `{"rows":[y]}`: screen rows changed | `shape` |
@@ -394,10 +395,12 @@ memory-mib = 128
   N`; absent, from `/dev/urandom`: an app keeps no seed option of its
   own).
 - `surface`, where its sprites and widgets are clipped, never refused
-  (nothing in the answers tells it): `widget`, its widgets alone, a
-  bare sprite (a canvas) put but never shown; `frame`, the view of the
-  frame it starts on, which it follows (`move`); `screen`, anywhere,
-  with `screen-wide` declared and held (amber), else as `frame`.
+  (nothing in the answers tells it): `widget`, its widgets alone,
+  placed on the frame it starts on, which they follow (a `frame`
+  named by `widget.show` taken with `layout` alone), a bare sprite (a
+  canvas) put but never shown; `frame`, the view of the frame it
+  starts on, which it follows (`move`); `screen`, anywhere, with
+  `screen-wide` declared and held (amber), else as `frame`.
   Headless, one pane: the three draw alike but `widget`.
 - `--help` is made from the manifest; `ptyrc dev check` checks it.
   A `summary`, a reason or a `doc` that starts with `TODO`: a note of
@@ -412,7 +415,10 @@ or above); below `layout` 0, and the `frame` of every request is
 ignored: reads and draws are of the frame its draws are put on (raw
 for `widget`, `screen` with `screen-wide`), told as frame 0 at the
 top-left of the screen (`frame.get`: `id` 0, `rect` at 0, 0; a
-match's `screen` from there).
+match's `screen` from there). A widget of `widget` is placed on the
+frame it starts on all the same, and told in its own cells (Cut
+answers): nothing it reads tells that frame but the size of its
+widget, which the room there chose.
 Headless: 0, the one frame, raw; a live id is seen only under `ptyrc
 dev run`. A `Sight` reads it by default (Rust: `manifest()`).
 

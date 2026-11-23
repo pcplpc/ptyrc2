@@ -10,8 +10,9 @@ use serde_json::Value;
 /// `[app] surface` on its frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Surface {
-    /// Its widgets alone: a bare sprite is shown nowhere.
-    Widget,
+    /// Its widgets alone, placed on that frame: a bare sprite is shown
+    /// nowhere.
+    Widget(FrameId),
     /// Clipped to that frame.
     Frame(FrameId),
     /// Anywhere with `screen-wide`; else as `Frame`.
@@ -22,7 +23,7 @@ impl Surface {
     /// The manifest's word on `frame`; `None`: not a surface.
     pub fn parse(name: &str, frame: FrameId) -> Option<Surface> {
         match name {
-            "widget" => Some(Surface::Widget),
+            "widget" => Some(Surface::Widget(frame)),
             "frame" => Some(Surface::Frame(frame)),
             "screen" => Some(Surface::Screen(frame)),
             _ => None,
@@ -33,7 +34,7 @@ impl Surface {
     pub fn frame(self) -> Option<FrameId> {
         match self {
             Surface::Frame(frame) | Surface::Screen(frame) => Some(frame),
-            Surface::Widget => None,
+            Surface::Widget(_) => None,
         }
     }
 
@@ -43,7 +44,7 @@ impl Surface {
         match self {
             Surface::Frame(frame) => frame,
             Surface::Screen(frame) if !screen_wide => frame,
-            Surface::Screen(_) | Surface::Widget => RAW,
+            Surface::Screen(_) | Surface::Widget(_) => RAW,
         }
     }
 }
@@ -51,9 +52,16 @@ impl Surface {
 /// The frame a request of a store app is put on, whatever it named:
 /// a new draw (`draw.put`, `draw.ext` without `id`), an update naming
 /// a frame, a `widget.show`. `Widget`: a bare sprite on [`NOWHERE`], a
-/// widget as named; `Frame`: its frame; `Screen`: as named with
-/// `screen-wide`, else its frame. `None`: as named.
-pub fn clip(surface: Surface, screen_wide: bool, method: &str, params: &Value) -> Option<FrameId> {
+/// widget on its frame, as named with `layout`; `Frame`: its frame;
+/// `Screen`: as named with `screen-wide`, else its frame. `None`: as
+/// named.
+pub fn clip(
+    surface: Surface,
+    screen_wide: bool,
+    layout: bool,
+    method: &str,
+    params: &Value,
+) -> Option<FrameId> {
     let widget = match method {
         "draw.put" => false,
         "draw.ext" if params.get("id").is_none() => false,
@@ -62,12 +70,17 @@ pub fn clip(surface: Surface, screen_wide: bool, method: &str, params: &Value) -
         _ => return None,
     };
     match surface {
-        Surface::Widget if widget => None,
-        Surface::Widget => Some(NOWHERE),
+        Surface::Widget(_) if widget && layout && named(params) => None,
+        Surface::Widget(frame) if widget => Some(frame),
+        Surface::Widget(_) => Some(NOWHERE),
         Surface::Frame(frame) => Some(frame),
         Surface::Screen(_) if screen_wide => None,
         Surface::Screen(frame) => Some(frame),
     }
+}
+
+fn named(params: &Value) -> bool {
+    params.get("frame").is_some_and(|f| !f.is_null())
 }
 
 #[cfg(test)]
@@ -78,13 +91,25 @@ mod tests {
     #[test]
     fn each_surface_clips_as_the_driver() {
         let put = json!({"frame": 3});
-        let clip = |s, wide, m: &str, p: &Value| clip(s, wide, m, p);
+        let clip = |s, wide, m: &str, p: &Value| clip(s, wide, false, m, p);
         assert_eq!(
-            clip(Surface::Widget, false, "draw.put", &put),
+            clip(Surface::Widget(4), false, "draw.put", &put),
             Some(NOWHERE)
         );
-        assert_eq!(clip(Surface::Widget, true, "draw.put", &put), Some(NOWHERE));
-        assert_eq!(clip(Surface::Widget, false, "widget.show", &put), None);
+        assert_eq!(
+            clip(Surface::Widget(4), true, "draw.put", &put),
+            Some(NOWHERE)
+        );
+        // A widget on its frame; as named with `layout`, else on its frame.
+        assert_eq!(
+            clip(Surface::Widget(4), false, "widget.show", &put),
+            Some(4)
+        );
+        let show =
+            |layout, p: &Value| super::clip(Surface::Widget(4), false, layout, "widget.show", p);
+        assert_eq!(show(true, &put), None);
+        assert_eq!(show(true, &json!({})), Some(4));
+        assert_eq!(show(true, &json!({"frame": null})), Some(4));
         assert_eq!(clip(Surface::Frame(5), false, "draw.put", &put), Some(5));
         assert_eq!(
             clip(Surface::Frame(5), false, "widget.show", &json!({})),
@@ -95,12 +120,12 @@ mod tests {
         // An update naming no frame stays where it is; `draw.ext` of a
         // sprite, the same.
         assert_eq!(
-            clip(Surface::Widget, false, "draw.update", &json!({"id": 1})),
+            clip(Surface::Widget(4), false, "draw.update", &json!({"id": 1})),
             None
         );
         let named = json!({"id": 1, "frame": 0});
         assert_eq!(
-            clip(Surface::Widget, false, "draw.update", &named),
+            clip(Surface::Widget(4), false, "draw.update", &named),
             Some(NOWHERE)
         );
         assert_eq!(clip(Surface::Frame(2), false, "draw.ext", &named), Some(2));
@@ -125,6 +150,6 @@ mod tests {
         assert_eq!(Surface::Frame(5).read(true), 5);
         assert_eq!(Surface::Screen(5).read(false), 5);
         assert_eq!(Surface::Screen(5).read(true), RAW);
-        assert_eq!(Surface::Widget.read(false), RAW);
+        assert_eq!(Surface::Widget(4).read(false), RAW);
     }
 }

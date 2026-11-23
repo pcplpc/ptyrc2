@@ -33,8 +33,9 @@ impl Identity {
 /// it was started on or moved to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Surface {
-    /// Its widgets alone: a bare sprite is shown nowhere.
-    Widget,
+    /// Its widgets alone, placed on that frame: a bare sprite is shown
+    /// nowhere.
+    Widget(u32),
     /// Clipped to that frame.
     Frame(u32),
     /// Anywhere with `screen-wide`; else as `Frame`.
@@ -46,7 +47,7 @@ impl Surface {
     pub fn of(surface: ptyrc_store::manifest::Surface, frame: u32) -> Surface {
         use ptyrc_store::manifest::Surface as Of;
         match surface {
-            Of::Widget => Surface::Widget,
+            Of::Widget => Surface::Widget(frame),
             Of::Frame => Surface::Frame(frame),
             Of::Screen => Surface::Screen(frame),
         }
@@ -55,7 +56,7 @@ impl Surface {
     /// Moved to `frame` (`app.move`).
     pub fn moved(self, frame: u32) -> Surface {
         match self {
-            Surface::Widget => Surface::Widget,
+            Surface::Widget(_) => Surface::Widget(frame),
             Surface::Frame(_) => Surface::Frame(frame),
             Surface::Screen(_) => Surface::Screen(frame),
         }

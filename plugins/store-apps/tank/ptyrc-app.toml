@@ -12,8 +12,8 @@ random = [[], ["-a"]]
 
 # It reads nothing: the driver places the widget. Hover on its own
 # widget, the default profile, calls the fishes to the pointer.
-# `frame`: the twin's; without `layout` a widget is placed on the raw
-# frame (PROTOCOL.md, Manifest).
+# `frame`: the twin's; its widget is placed on the largest pane,
+# told in its own cells (PROTOCOL.md, Manifest).
 
 [options]
 count = { type = "int", default = 8, doc = "fishes, as many as the water holds at most [default: 8]" }

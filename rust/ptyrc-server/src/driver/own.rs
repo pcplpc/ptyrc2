@@ -100,14 +100,20 @@ impl Own {
     pub fn frame(&self) -> Option<u32> {
         match self.surface? {
             Surface::Frame(frame) | Surface::Screen(frame) => Some(frame),
-            Surface::Widget => None,
+            Surface::Widget(_) => None,
         }
+    }
+
+    /// Below `layout`, of `surface = "widget"`: its widgets are told in
+    /// their own cells (`lower::own_widget`, `lower::on_widget`).
+    pub fn widget_cells(&self) -> bool {
+        self.degree < Degree::Layout && matches!(self.surface, Some(Surface::Widget(_)))
     }
 
     fn of(&self) -> Option<ptyrc_rules::surface::Surface> {
         use ptyrc_rules::surface::Surface as Of;
         Some(match self.surface? {
-            Surface::Widget => Of::Widget,
+            Surface::Widget(frame) => Of::Widget(frame),
             Surface::Frame(frame) => Of::Frame(frame),
             Surface::Screen(frame) => Of::Screen(frame),
         })
@@ -116,7 +122,8 @@ impl Own {
     /// The frame a draw of a store app is put on, whatever it named
     /// (`ptyrc_rules::surface::clip`). None: as named.
     fn clip(&self, method: &str, params: &Value) -> Option<u32> {
-        ptyrc_rules::surface::clip(self.of()?, self.screen_wide, method, params)
+        let layout = self.degree >= Degree::Layout;
+        ptyrc_rules::surface::clip(self.of()?, self.screen_wide, layout, method, params)
     }
 
     /// The frame it reads below `layout`, that of its draws
@@ -364,15 +371,22 @@ impl Driver {
                 }
                 return;
             }
+            "widget.show" | "widget.ask" => {
+                if let Some(info) = answer.get_mut("widget") {
+                    told_widget(own, info);
+                }
+                return;
+            }
             _ => return,
         };
         if let Some(Value::Array(items)) = answer.get_mut(member) {
             items.retain(|item| keep(item));
-            if method == "widget.list" && own.degree < Degree::Layout {
-                // Below `layout`, its one frame: 0, as `widgets` tells it.
-                (items.iter_mut())
-                    .filter(|item| !item["frame"].is_null())
-                    .for_each(|item| item["frame"] = json!(0));
+            if method == "widget.list" {
+                items.iter_mut().for_each(|item| told_widget(own, item));
+            }
+            if method == "draw.list" && own.widget_cells() {
+                // Its bare sprites alone: its widgets are `widget.list`'s.
+                items.retain(|item| item["frame"] == json!(crate::rpc::NOWHERE));
             }
             if method == "draw.list" {
                 let cut = self.cut_of(conn);
@@ -383,6 +397,17 @@ impl Driver {
                     .for_each(|item| landing(item, cut, surface));
             }
         }
+    }
+}
+
+/// A widget info of its own, as told to it: below `layout`, `frame` 0;
+/// of `surface = "widget"`, in its own cells (`lower::own_widget`).
+pub(super) fn told_widget(own: &Own, info: &mut Value) {
+    if own.degree < Degree::Layout && !info["frame"].is_null() {
+        info["frame"] = json!(0);
+    }
+    if own.widget_cells() {
+        ptyrc_rules::lower::own_widget(info);
     }
 }
 
@@ -434,17 +459,27 @@ impl Driver {
     }
 
     /// A report of the pointer to an app below `shape`, in its cells
-    /// (`lower::unscrolled`; below `layout`, `lower::on_surface`).
+    /// (`lower::unscrolled`; below `layout`, `lower::on_surface`; on its
+    /// widget of `surface = "widget"`, `lower::on_widget`).
     /// `None`: as it is.
     fn pointer_told(
         &self,
         conn: ConnId,
         topic: &str,
         data: &Value,
+        own_widget: bool,
         engine: &dyn Engine,
     ) -> Option<Value> {
         let own = self.own(conn).filter(|own| own.degree < Degree::Shape)?;
         let mut told = data.clone();
+        if own.widget_cells() && own_widget {
+            // Its widget, wherever placed: in its own cells.
+            let corner = data["sprite"].as_u64().and_then(|s| self.corners.get(&s));
+            if let Some(corner) = corner {
+                ptyrc_rules::lower::on_widget(&mut told, *corner);
+                return Some(ptyrc_proto::envelope::event(topic, told));
+            }
+        }
         let origin = |f: u64| Some(engine.view_of(u32::try_from(f).ok()?)?.1);
         ptyrc_rules::lower::unscrolled(&mut told, &origin);
         if own.degree < Degree::Layout {
@@ -470,6 +505,22 @@ impl Driver {
             HIT.iter().for_each(|m| drop(object.remove(*m)));
         }
         let message = ptyrc_proto::envelope::event(topic, bare.clone());
+        // A widget's corner, from a report on it.
+        let widget = data.get("widget") == Some(&Value::Bool(true));
+        if let (true, Some(sprite), Some([ax, ay]), Some(x), Some(y)) = (
+            widget,
+            data["sprite"].as_u64(),
+            data["at"].as_array().map(|a| [a.first(), a.get(1)]),
+            data["x"].as_i64(),
+            data["y"].as_i64(),
+        ) && let (Some(ax), Some(ay)) = (ax.and_then(Value::as_i64), ay.and_then(Value::as_i64))
+        {
+            if self.corners.len() >= 256 {
+                self.corners.clear();
+            }
+            self.corners.insert(sprite, [x - ax, y - ay]);
+        }
+        let owner = data.get("owner").and_then(Value::as_u64);
         let listeners: Vec<ConnId> = (self.conns.iter())
             .filter(|(_, c)| c.topics.contains(topic) && !c.paused)
             .map(|(id, _)| *id)
@@ -481,7 +532,9 @@ impl Driver {
             if hears || also.contains(&id) {
                 heard.insert(id);
                 taken |= hears && takes;
-                let told = self.pointer_told(id, topic, &bare, engine);
+                let mine = (owner.zip(self.own(id)))
+                    .is_some_and(|(o, own)| widget && own.conns.contains(&ConnId(o)));
+                let told = self.pointer_told(id, topic, &bare, mine, engine);
                 if let Some(conn) = self.conns.get_mut(&id) {
                     conn.send(told.as_ref().unwrap_or(&message));
                 }

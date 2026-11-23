@@ -266,7 +266,9 @@ driver).
      `Manifest::frame`): `--frame`, else `[app] frame`, else `active`,
      as the driver resolves it; 0 below `layout`, and headless. A
      `Sight` reads it unless one is named; `move` names the next. No
-     frame option of the app's own.
+     frame option of the app's own. `surface = "widget"`: its widgets
+     are placed there, below `layout` too, and told in their own
+     cells (`PROTOCOL.md`, Cut answers).
    - `subscribe` adds topics, never removes one: a `Sight`, a `Deck`
      and the app subscribe side by side; the app gets each event once
      and passes it on.
