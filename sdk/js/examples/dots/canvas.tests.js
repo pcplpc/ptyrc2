@@ -29,6 +29,40 @@ export function test_colours() {
   assertThrows(() => mix(14, RED, 0.5), TypeError);
 }
 
+// `xterm` as a loop over the 240: the reference.
+function xtermLoop(c) {
+  const [r, g, b] = channels(c);
+  const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+  let best = Infinity;
+  let n = 0;
+  for (let i = 16; i < 256; i++) {
+    const [x, y, z] = channels(palette(i));
+    const lost = Math.max(0, chroma - (Math.max(x, y, z) - Math.min(x, y, z)));
+    const far = 3 * (x - r) ** 2 + 4 * (y - g) ** 2 + 2 * (z - b) ** 2 + 2 * lost ** 2;
+    if (far < best) (best = far), (n = i);
+  }
+  return n;
+}
+
+export function test_xterm_sampled() {
+  // About the levels of the cube and the greys, and the midpoints
+  // between them (the ties); then colours at random, each twice (kept).
+  const near = new Set();
+  for (const l of [0, 47, 48, 95, 115, 116, 135, 155, 175, 195, 215, 235, 255, 8, 13, 238, 243, 250]) {
+    for (let d = -2; d <= 2; d++) if (l + d >= 0 && l + d < 256) near.add(l + d);
+  }
+  const values = [...near];
+  for (const r of values) for (const g of values) for (const b of values) if ((r * 7 + g * 3 + b) % 61 === 0) assertEqual(xterm(rgb(r, g, b)), xtermLoop(rgb(r, g, b)), [r, g, b]);
+  let s = 1;
+  for (let n = 0; n < 1500; n++) {
+    s = (Math.imul(s, 1103515245) + 12345) >>> 0;
+    const c = rgb((s >>> 8) & 255, (s >>> 16) & 255, s >>> 24);
+    const want = xtermLoop(c);
+    assertEqual(xterm(c), want, hex(c));
+    assertEqual(xterm(c), want, hex(c));
+  }
+}
+
 export function test_named() {
   assertEqual([named("black"), named("white"), named("cyan")], [0, 7, 6]);
   assertEqual([named("bright-black"), named("bright-yellow"), named("bright-magenta"), named("bright-cyan")], [8, 11, 13, 14]);

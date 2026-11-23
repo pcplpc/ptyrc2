@@ -51,31 +51,84 @@ export function palette(n) {
   return TAG | paletteValue(n);
 }
 
-const FIXED = Array.from({ length: 240 }, (_, i) => paletteValue(16 + i));
-const NEAREST = new Map();
+// The index of the level of the cube nearest each of 0..255.
+const LEVEL = Uint8Array.from({ length: 256 }, (_, v) => (v < 48 ? 0 : v < 116 ? 1 : Math.min(5, Math.floor((v - 76) / 40) + 1)));
 
-function nearest(v) {
-  let n = NEAREST.get(v);
-  if (n !== undefined) return n;
+// The weighed distance of (r, g, b) of chroma `c` to (x, y, z). Eyes
+// weigh green most, blue least; a dark colour keeps its hue rather than
+// turn grey: the chroma the palette colour lacks is counted.
+function far(r, g, b, c, x, y, z) {
+  const lost = c - (x > y ? (x > z ? x : z) : y > z ? y : z) + (x < y ? (x < z ? x : z) : y < z ? y : z);
+  return 3 * (x - r) * (x - r) + 4 * (y - g) * (y - g) + 2 * (z - b) * (z - b) + (lost > 0 ? 2 * lost * lost : 0);
+}
+
+// The nearest of the 240 to 0xrrggbb by `far`, the lowest index of
+// equals: as a loop over the 240, for each of the 2^24. The greys: the
+// nearest of 8 + 10i to (3r + 4g + 2b) / 9, a tie to the lower. The
+// cube: a bound (the nearest level each channel, or the grey), then in
+// index order the levels whose partial sum is within it.
+function closest(v) {
   const r = v >> 16;
   const g = (v >> 8) & 255;
   const b = v & 255;
-  const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+  const c = (r > g ? (r > b ? r : b) : g > b ? g : b) - (r < g ? (r < b ? r : b) : g < b ? g : b);
+  let t = Math.floor((6 * r + 8 * g + 4 * b - 55) / 180);
+  t = t < 0 ? 0 : t > 23 ? 23 : t;
+  const grey = far(r, g, b, c, 8 + 10 * t, 8 + 10 * t, 8 + 10 * t);
+  let i = LEVEL[r];
+  let j = LEVEL[g];
+  let k = LEVEL[b];
+  let bound = far(r, g, b, c, CUBE[i], CUBE[j], CUBE[k]);
+  if (grey < bound) bound = grey;
+  while (i > 0 && 3 * (CUBE[i - 1] - r) * (CUBE[i - 1] - r) <= bound) i--;
+  while (j > 0 && 4 * (CUBE[j - 1] - g) * (CUBE[j - 1] - g) <= bound) j--;
+  while (k > 0 && 2 * (CUBE[k - 1] - b) * (CUBE[k - 1] - b) <= bound) k--;
   let best = Infinity;
-  for (let i = 0; i < 240; i++) {
-    const p = FIXED[i];
-    const x = p >> 16;
-    const y = (p >> 8) & 255;
-    const z = p & 255;
-    // Eyes weigh green most, blue least; a dark colour keeps its hue
-    // rather than turn grey.
-    const lost = Math.max(0, chroma - (Math.max(x, y, z) - Math.min(x, y, z)));
-    const far = 3 * (x - r) ** 2 + 4 * (y - g) ** 2 + 2 * (z - b) ** 2 + 2 * lost ** 2;
-    if (far < best) (best = far), (n = 16 + i);
+  let n = 0;
+  for (; i < 6; i++) {
+    const x = CUBE[i];
+    const fr = 3 * (x - r) * (x - r);
+    if (fr > bound) {
+      if (x > r) break;
+      continue;
+    }
+    for (let jj = j; jj < 6; jj++) {
+      const y = CUBE[jj];
+      const fg = fr + 4 * (y - g) * (y - g);
+      if (fg > bound) {
+        if (y > g) break;
+        continue;
+      }
+      const top = x > y ? x : y;
+      const low = x < y ? x : y;
+      for (let kk = k; kk < 6; kk++) {
+        const z = CUBE[kk];
+        const fb = fg + 2 * (z - b) * (z - b);
+        if (fb > bound) {
+          if (z > b) break;
+          continue;
+        }
+        const lost = c - (top > z ? top : z) + (low < z ? low : z);
+        const f = lost > 0 ? fb + 2 * lost * lost : fb;
+        if (f < best) {
+          best = f;
+          n = 16 + 36 * i + 6 * jj + kk;
+          if (f < bound) bound = f;
+        }
+      }
+    }
   }
-  if (NEAREST.size >= 4096) NEAREST.clear();
-  NEAREST.set(v, n);
-  return n;
+  return grey < best ? 232 + t : n;
+}
+
+// `closest`, kept: 4096 colours, one a slot (a Map is slower).
+const KEYS = new Int32Array(4096).fill(-1);
+const KEPT = new Uint8Array(4096);
+
+function nearest(v) {
+  const h = Math.imul(v, 0x9e3779b1) >>> 20;
+  if (KEYS[h] !== v) (KEYS[h] = v), (KEPT[h] = closest(v));
+  return KEPT[h];
 }
 
 export function xterm(c) {

@@ -202,6 +202,9 @@ Measured 2026-11-20, a 200x60 canvas, 30 Hz, a headless run, release
   dot). The same cells by `bits` (`fill(255)`), `rows`, `text`,
   `present`: 2.1 to 2.8 ms. `examples/dots`, a curve of 600 segments
   and the text spared: 12.6 ms.
+- `xterm` (and `rows` of a `Half`), a release runner, 2026-11-23: 3.4
+  µs a new colour, 0.34 µs one of the 4096 last kept (a loop over the
+  240 before: 142 and 1.6 µs).
 - A start: 0.18 to 0.20 s the first time in a process (Cranelift
   compiles the module), 1.1 ms after it. A runner is one process an
   app: each app pays the first.
