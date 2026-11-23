@@ -3,9 +3,8 @@
 // the bit, through train's scenes: train/twin.js.
 
 import { assert, assertEqual, assertThrows } from "ptyrc";
-import { xterm } from "ptyrc/canvas";
 import { at, rgb, SEASONS } from "./sky.js";
-import { Fields, GROUND, GROUNDS, Half, KINDS, LAMP, Layer, Pointer, SNOW, Strip, clouds, fog, heavens, index, lights, noise, paint, rain, snow, stars, water, wave } from "./strip.js";
+import { Fields, GROUND, GROUNDS, Half, KINDS, LAMP, Layer, Pointer, SNOW, Strip, clouds, fog, heavens, lights, noise, paint, rain, snow, stars, water, wave } from "./strip.js";
 
 const NOON = at(Date.UTC(2026, 5, 21, 12));
 const NIGHT = at(Date.UTC(2026, 5, 21, 0));
@@ -352,21 +351,4 @@ export function test_strip_paint_remembers() {
   assertEqual(GROUNDS.map.size, others.length);
   for (let seed = 0; seed < GROUNDS.size + 5; seed++) paint(new Half(4, 2), new Layer(new Strip(seed), 0.0, 3, 2), NOON);
   assertEqual(GROUNDS.map.size, GROUNDS.size);
-}
-
-export function test_strip_index() {
-  // The SDK's colour of the 256: about the levels of the cube and the
-  // greys, at random, and each pixel of a sky from noon to night.
-  const seen = new Set();
-  const levels = [0, 95, 135, 175, 215, 255, 8, 48, 98, 148, 198, 238];
-  const near = [];
-  for (const l of levels) for (let d = -1; d <= 1; d++) if (l + d >= 0 && l + d < 256) near.push(l + d);
-  for (const r of near) for (const g of near) for (const b of near) if ((r + g + b) % 7 === 0) seen.add(rgb(r, g, b));
-  for (let n = 0; n < 3000; n++) seen.add(Math.trunc(noise(17, n) * 0x1000000));
-  for (let m = 0; m < 300; m += 30) {
-    const half = new Half(26, 8);
-    heavens(half, at(Date.UTC(2000, 0, 1, 14, m)), 10);
-    for (const row of half.px) for (const c of row) seen.add(c);
-  }
-  for (const c of seen) assertEqual(index(c), xterm(0x03000000 | c), c.toString(16));
 }

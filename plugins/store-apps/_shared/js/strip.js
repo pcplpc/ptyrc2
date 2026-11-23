@@ -23,7 +23,7 @@
 // Colours are given for full daylight; `Sky.shade` lights and hazes
 // them. At night what is pale keeps a glow (`NIGHT`).
 
-import { Braille } from "ptyrc/canvas";
+import { Braille, xterm } from "ptyrc/canvas";
 import { mix, mod, rgb, rnd } from "./sky.js";
 
 export const KINDS = ["hills", "mountains", "plain", "dunes", "city", "mesas", "flat"];
@@ -268,55 +268,9 @@ export function hexa(c) {
   return s;
 }
 
-const CUBE = [0, 95, 135, 175, 215, 255];
-
-/** The SDK's `xterm` search, pruned: a level of the cube whose partial
- * distance reaches the best is skipped (the terms left are not
- * negative); order and ties kept. The same answer for each of the 2^24
- * colours (checked against the SDK's loop). At dusk nearly every pixel
- * is a new colour: the SDK's loop of 240 was most of a draw. */
-function nearest(c) {
-  const r = c >> 16;
-  const g = (c >> 8) & 255;
-  const b = c & 255;
-  const chroma = Math.max(r, g, b) - Math.min(r, g, b);
-  let best = Infinity;
-  let n = 16;
-  for (let i = 0; i < 6; i++) {
-    const x = CUBE[i];
-    const fr = 3 * (x - r) ** 2;
-    if (fr >= best) continue;
-    for (let j = 0; j < 6; j++) {
-      const y = CUBE[j];
-      const fg = fr + 4 * (y - g) ** 2;
-      if (fg >= best) continue;
-      for (let k = 0; k < 6; k++) {
-        const z = CUBE[k];
-        const lost = Math.max(0, chroma - (Math.max(x, y, z) - Math.min(x, y, z)));
-        const far = fg + 2 * (z - b) ** 2 + 2 * lost ** 2;
-        if (far < best) (best = far), (n = 16 + 36 * i + 6 * j + k);
-      }
-    }
-  }
-  const grey = 2 * chroma ** 2;
-  for (let i = 0; i < 24; i++) {
-    const v = 8 + 10 * i;
-    const far = 3 * (v - r) ** 2 + 4 * (v - g) ** 2 + 2 * (v - b) ** 2 + grey;
-    if (far < best) (best = far), (n = 232 + i);
-  }
-  return n;
-}
-
-const INDEX = new Map();
-/** `xterm(c)` of `c` (0xrrggbb), kept. */
-export function index(c) {
-  let n = INDEX.get(c);
-  if (n === undefined) {
-    if (INDEX.size >= 1 << 14) INDEX.clear();
-    INDEX.set(c, (n = nearest(c)));
-  }
-  return n;
-}
+const TAG = 0x03000000;
+/** `xterm(c)` of `c` (0xrrggbb). */
+export const index = (c) => xterm(TAG | c);
 
 /** `w` by `2h` pixels in `w` by `h` cells, glyphs over them. */
 export class Half {
