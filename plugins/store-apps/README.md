@@ -276,6 +276,8 @@ driver).
      `hover`, `mouse` with `canvas.sprite()` (Rust: `Canvas::sprite()`):
      `null` (`None`) before the first `present`; a new id once the
      driver removed it and `present` put it again.
+   - Dense integer keys (a cell's index, an id counted from 0): an
+     array or a typed array, faster than a `Map` or a `Set`.
 6. The tests: each test of the twin carried over, as a unit test or a
    case; one that cannot be carried yet is named in your report with
    the gap that blocks it. A test of `--print` carries as the cases of
@@ -362,7 +364,7 @@ Beside what the steps above state (`needs`, `keys-arrows`, `--seed`):
   without it a string as it is, a list a line each.
 - `fishes --tank` is an app of its own, `tank`; the reef in `_shared`.
 - `marks` draws on its frame alone: `surface = "frame"`, no
-  `screen-wide`. `timer -b`: `surface = "frame"`.
+  `screen-wide`; its frame the focused pane (`frame = "active"`). `timer -b`: `surface = "frame"`.
 - Test hooks dropped and kept as `migration-plan.md` (c) lists:
   dropped `--speed`, `--at` of fire, globe, timer; `--speed` of
   gallery, pace; `--colour` of gallery, `--file` of minimap, `--seed`

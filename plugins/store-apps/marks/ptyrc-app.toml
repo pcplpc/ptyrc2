@@ -7,11 +7,13 @@ license = "GPL-3.0-or-later"
 api = 1
 script = "app.js"
 surface = "frame"
-frame = "raw"
+frame = "active"
 random = []
 
 # The patterns given are the user's: `screen.find` of each is answered
 # as under `text`, remembered rows too; the app reads no other text.
+# `frame`: the focused pane, the cursor's; its matches and remembered
+# rows are those of that pane (`--frame raw`: the whole screen).
 
 [permissions]
 shape = "when the text changes, to find the patterns again"
