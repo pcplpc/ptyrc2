@@ -314,8 +314,8 @@ export class Deck {
     if (w && w.options.leave && w.options.leave(w) !== false) this.draw(w);
   }
 
-  // The widget with `handler` under the screen cell of `data`, and the
-  // cell of its inner box.
+  // The widget with `handler` under the cell of `data` (told in the cells
+  // of its `rect`), and the cell of its inner box.
   #under(data, handler) {
     let found = null;
     for (const w of this.widgets) {

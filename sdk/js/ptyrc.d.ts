@@ -471,7 +471,7 @@ declare module "ptyrc/deck" {
     readonly variant: string | null;
     /** Inner size of the variant shown. */
     readonly size: [number, number] | null;
-    /** Outer rectangle, screen cells. */
+    /** Outer rectangle, in the cells `hover`, `mouse` are told in: the screen's; below `layout`, `surface = "widget"`, its own (at 0, 0). */
     readonly rect: [number, number, number, number] | null;
     readonly placed: boolean;
     /** A modal over the text, for want of room. */
