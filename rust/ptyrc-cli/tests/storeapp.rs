@@ -765,6 +765,165 @@ fn a_widget_is_placed_on_its_frame_told_nothing_of_it() {
     assert!(!log.contains("exit:"), "{log}");
 }
 
+/// A widget; every `hover` and `mouse` report logged, in the cells told.
+const HEARS: &str = r#"
+import { call, log, period } from "ptyrc";
+export function init(args) {
+  call("subscribe", { topics: ["hover", "mouse"] });
+  call("widget.declare", { widgets: [{ tag: "w", size: [4, 1], content: { rows: ["fish"] } }] });
+  call("widget.show", { tag: "w" });
+  period(0);
+}
+export function tick(now) {}
+export function event(topic, data) {
+  if (data.sprite !== null)
+    log(topic + "=" + JSON.stringify([data.sprite, data.action ?? null, data.x, data.y, data.frame, data.pos]));
+}
+"#;
+
+/// `surface = "widget"` below `layout`, `pointer` and `clicks` held: a
+/// hover and a click on another's sprite, left of its widget, are told
+/// in its widget's cells, negative; its widget moved to another pane,
+/// in the new cells, nothing else told.
+#[test]
+fn a_widget_app_hears_off_its_widget_in_its_widgets_cells() {
+    let js = Path::new(env!("CARGO_MANIFEST_DIR")).join(JS);
+    if !js.is_file() {
+        eprintln!("SKIPPED: no interpreter module");
+        return;
+    }
+    let sb = Sandbox::new("hears");
+    let held = "pointer = \"the pointer\"\nclicks = \"the clicks\"";
+    let origin = install(&sb, "hears", wide_manifest("hears", "widget", held), HEARS);
+    let config = sb.config().join("ptyrc");
+    std::fs::create_dir_all(&config).unwrap();
+    let allowed = format!("[app.\"{origin}\"]\nallow = [\"pointer\", \"clicks\"]\n");
+    std::fs::write(config.join("permissions.toml"), allowed).unwrap();
+    let env = |name: &str, path: &Path| format!("{name}={}", path.display());
+    let vars = [
+        env("PTYRC_BOX", &runner()),
+        env("PTYRC_JS", &js),
+        env("XDG_DATA_HOME", &sb.dir.join("data")),
+        env("XDG_STATE_HOME", &sb.dir.join("state")),
+        env("XDG_CACHE_HOME", &sb.dir.join("cache")),
+    ];
+    let mut argv: Vec<&str> = vec!["env"];
+    argv.extend(vars.iter().map(String::as_str));
+    let split = SPLIT.replace("-le 16", "-le 24");
+    argv.extend([BIN, "run", "--name", "s", "--", "sh", "-c", &split]);
+    let (mut host, _driver) = common::HostPty::spawn(&sb, &argv);
+    wait_for(|| sb.socket("s").exists(), "the session");
+    let mut client = sb.client("s");
+    let pane = |client: &mut Client, x: u64| {
+        let frames = client.call("frame.list", json!({})).unwrap();
+        (frames["frames"].as_array().unwrap().iter())
+            .find(|f| f["kind"] == "pane" && f["rect"][0] == x && f["state"] == "stable")
+            .map(|f| f["id"].as_u64().unwrap())
+    };
+    let (mut left, mut right) = (0, 0);
+    wait_for(
+        || {
+            host.pump();
+            let found = (pane(&mut client, 0), pane(&mut client, 30));
+            (found.0.zip(found.1))
+                .map(|(l, r)| (left, right) = (l, r))
+                .is_some()
+        },
+        "the panes",
+    );
+    // Another's sprite, at the left edge, row 20.
+    let other = client
+        .call(
+            "draw.put",
+            json!({"content": {"rows": ["@@@@"]}, "frame": "raw",
+                   "anchor": {"at": [0, 20], "space": "view"}}),
+        )
+        .unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    let started = client
+        .call("app.start", json!({"store": "hears", "frame": left}))
+        .unwrap();
+    let id = started["app"]["id"].as_u64().unwrap();
+    // Its widget's frame and screen corner, as the user sees them.
+    let corner = |client: &mut Client| {
+        let list = client.call("widget.list", json!({})).unwrap();
+        (list["widgets"].as_array().unwrap().iter())
+            .find(|w| w["tag"] == "w" && !w["sprite"].is_null())
+            .map(|w| {
+                let r = &w["rect"];
+                (
+                    w["frame"].as_u64().unwrap(),
+                    r[0].as_i64().unwrap(),
+                    r[1].as_i64().unwrap(),
+                )
+            })
+    };
+    let mut on = None;
+    wait_slow(
+        || {
+            host.pump();
+            on = corner(&mut client);
+            on.is_some_and(|(f, ..)| f == left)
+        },
+        "placed on the left",
+    );
+    let (_, cx, cy) = on.unwrap();
+    assert!(cx > 0, "{cx}");
+    host.wait_seen("\x1b[?1003h");
+    let heard = |host: &mut common::HostPty, client: &mut Client, line: &str| {
+        wait_slow(
+            || {
+                host.pump();
+                log_of(client, id).contains(line)
+            },
+            line,
+        );
+    };
+    let told = |topic: &str, action: &str, x: i64, y: i64| {
+        format!("{topic}=[{other},{action},{x},{y},0,[{x},{y}]]")
+    };
+    // A hover, then a click, on the other sprite: left of its widget.
+    host.type_in(b"\x1b[<35;1;21M");
+    heard(&mut host, &mut client, &told("hover", "null", -cx, 20 - cy));
+    host.type_in(b"\x1b[<0;2;21M\x1b[<0;2;21m");
+    heard(
+        &mut host,
+        &mut client,
+        &told("mouse", "\"press\"", 1 - cx, 20 - cy),
+    );
+    heard(
+        &mut host,
+        &mut client,
+        &told("mouse", "\"release\"", 1 - cx, 20 - cy),
+    );
+
+    // Moved to the right pane: told nothing; the next report in the new
+    // cells.
+    client
+        .call("app.move", json!({"app": id, "frame": right}))
+        .unwrap();
+    wait_slow(
+        || {
+            host.pump();
+            on = corner(&mut client);
+            on.is_some_and(|(f, ..)| f == right)
+        },
+        "moved to the right",
+    );
+    let (_, nx, ny) = on.unwrap();
+    assert!(nx >= 30, "{nx}");
+    host.type_in(b"\x1b[<35;3;21M");
+    heard(
+        &mut host,
+        &mut client,
+        &told("hover", "null", 2 - nx, 20 - ny),
+    );
+    let log = log_of(&mut client, id);
+    let screen = format!("[{other},null,0,20,");
+    assert!(!log.contains(&screen) && !log.contains("exit:"), "{log}");
+}
+
 const BOMBS: &str = r#"
 import { call, log, period } from "ptyrc";
 export function init(args) {

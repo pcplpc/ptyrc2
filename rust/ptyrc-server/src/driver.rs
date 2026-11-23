@@ -285,9 +285,6 @@ struct Driver {
     hovered: Option<Value>,
     /// Who heard the last `hover`: told of the leave.
     hover_heard: BTreeSet<ConnId>,
-    /// The corner on the screen of each widget sprite, from its last
-    /// report with `at`: a release or a drag off it is told in its cells.
-    corners: HashMap<u64, [i64; 2]>,
     /// A press went to this sprite: so do the moves and the release.
     mouse_held: Option<Value>,
     /// A replay: makes the engine again when the tape is rewound.
@@ -641,7 +638,6 @@ impl Driver {
             host_mouse: mouse::HostMouse::Off,
             hovered: None,
             hover_heard: BTreeSet::new(),
-            corners: HashMap::new(),
             mouse_held: None,
             factory: None,
             handoff: false,
@@ -720,7 +716,6 @@ impl Driver {
             host_mouse: mouse::HostMouse::Off,
             hovered: None,
             hover_heard: BTreeSet::new(),
-            corners: HashMap::new(),
             mouse_held: None,
             factory: None,
             handoff: false,

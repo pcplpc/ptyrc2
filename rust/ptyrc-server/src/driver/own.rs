@@ -458,32 +458,36 @@ impl Driver {
         (heard, heard && app.grants.holds(Permission::ClicksGrab))
     }
 
-    /// A report of the pointer to an app below `shape`, in its cells
-    /// (`lower::unscrolled`; below `layout`, `lower::on_surface`; on its
-    /// widget of `surface = "widget"`, `lower::on_widget`).
-    /// `None`: as it is.
+    /// A report of the pointer to an app, as told to it: below `shape`,
+    /// in its cells (`lower::unscrolled`; below `layout`,
+    /// `lower::on_surface`; of `surface = "widget"`, `lower::in_widget`,
+    /// on its widget or elsewhere). `own`: the report names a widget of
+    /// its own. `None`: not told (of `surface = "widget"`, no widget
+    /// placed).
     fn pointer_told(
         &self,
         conn: ConnId,
         topic: &str,
         data: &Value,
-        own_widget: bool,
+        own: bool,
         engine: &dyn Engine,
     ) -> Option<Value> {
-        let own = self.own(conn).filter(|own| own.degree < Degree::Shape)?;
+        let Some(app) = self.own(conn).filter(|app| app.degree < Degree::Shape) else {
+            return Some(ptyrc_proto::envelope::event(topic, data.clone()));
+        };
         let mut told = data.clone();
-        if own.widget_cells() && own_widget {
-            // Its widget, wherever placed: in its own cells.
-            let corner = data["sprite"].as_u64().and_then(|s| self.corners.get(&s));
-            if let Some(corner) = corner {
-                ptyrc_rules::lower::on_widget(&mut told, *corner);
-                return Some(ptyrc_proto::envelope::event(topic, told));
-            }
+        if app.widget_cells() {
+            let placed: Vec<(u64, [i64; 2])> = (engine.placed_widgets().into_iter())
+                .filter(|(owner, ..)| app.conns.contains(&ConnId(*owner)))
+                .map(|(_, sprite, corner)| (sprite, corner))
+                .collect();
+            return ptyrc_rules::lower::in_widget(&mut told, own, &placed)
+                .then(|| ptyrc_proto::envelope::event(topic, told));
         }
         let origin = |f: u64| Some(engine.view_of(u32::try_from(f).ok()?)?.1);
         ptyrc_rules::lower::unscrolled(&mut told, &origin);
-        if own.degree < Degree::Layout {
-            let view = own.read().and_then(|frame| engine.view_of(frame));
+        if app.degree < Degree::Layout {
+            let view = app.read().and_then(|frame| engine.view_of(frame));
             ptyrc_rules::lower::on_surface(&mut told, view.map_or([0, 0], |(at, _)| at));
         }
         Some(ptyrc_proto::envelope::event(topic, told))
@@ -491,7 +495,7 @@ impl Driver {
 
     /// `topic` of a report on a sprite, or of a leave (no `owner`), to
     /// each listener that hears it; `also`: listeners that hear it
-    /// whatever it is. True: taken from the program. The listeners of
+    /// whatever it is. True: taken from the program. The listeners told
     /// a `hover` are kept, for the leave.
     pub(super) fn emit_pointer(
         &mut self,
@@ -504,22 +508,7 @@ impl Driver {
         if let Some(object) = bare.as_object_mut() {
             HIT.iter().for_each(|m| drop(object.remove(*m)));
         }
-        let message = ptyrc_proto::envelope::event(topic, bare.clone());
-        // A widget's corner, from a report on it.
         let widget = data.get("widget") == Some(&Value::Bool(true));
-        if let (true, Some(sprite), Some([ax, ay]), Some(x), Some(y)) = (
-            widget,
-            data["sprite"].as_u64(),
-            data["at"].as_array().map(|a| [a.first(), a.get(1)]),
-            data["x"].as_i64(),
-            data["y"].as_i64(),
-        ) && let (Some(ax), Some(ay)) = (ax.and_then(Value::as_i64), ay.and_then(Value::as_i64))
-        {
-            if self.corners.len() >= 256 {
-                self.corners.clear();
-            }
-            self.corners.insert(sprite, [x - ax, y - ay]);
-        }
         let owner = data.get("owner").and_then(Value::as_u64);
         let listeners: Vec<ConnId> = (self.conns.iter())
             .filter(|(_, c)| c.topics.contains(topic) && !c.paused)
@@ -529,15 +518,18 @@ impl Driver {
         let mut heard = BTreeSet::new();
         for id in listeners {
             let (hears, takes) = self.pointer_heard(id, topic, &data);
-            if hears || also.contains(&id) {
-                heard.insert(id);
-                taken |= hears && takes;
-                let mine = (owner.zip(self.own(id)))
-                    .is_some_and(|(o, own)| widget && own.conns.contains(&ConnId(o)));
-                let told = self.pointer_told(id, topic, &bare, mine, engine);
-                if let Some(conn) = self.conns.get_mut(&id) {
-                    conn.send(told.as_ref().unwrap_or(&message));
-                }
+            if !hears && !also.contains(&id) {
+                continue;
+            }
+            let own = (owner.zip(self.own(id)))
+                .is_some_and(|(o, app)| widget && app.conns.contains(&ConnId(o)));
+            let Some(told) = self.pointer_told(id, topic, &bare, own, engine) else {
+                continue;
+            };
+            heard.insert(id);
+            taken |= hears && takes;
+            if let Some(conn) = self.conns.get_mut(&id) {
+                conn.send(&told);
             }
         }
         if topic == "hover" {

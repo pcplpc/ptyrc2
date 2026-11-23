@@ -456,10 +456,10 @@ pub fn own_widget(info: &mut Value) {
     }
 }
 
-/// Below `layout`, a pointer report on a widget of `surface =
-/// "widget"` whose outer box has its corner at `corner` on the screen:
-/// `x`, `y` less `corner` (negative off it, left or up), `pos` the
-/// same, `frame` 0.
+/// Below `layout`, a pointer report to an app of `surface = "widget"`,
+/// in the cells of one of its widgets, whose outer box has its corner
+/// at `corner` on the screen: `x`, `y` less `corner` (negative left of
+/// it or above), `pos` the same, `frame` 0.
 pub fn on_widget(report: &mut Value, corner: [i64; 2]) {
     let Some(object) = report.as_object_mut() else {
         return;
@@ -473,9 +473,32 @@ pub fn on_widget(report: &mut Value, corner: [i64; 2]) {
         let pos = json!([object["x"], object["y"]]);
         object.insert("pos".into(), pos);
     }
-    if object.get("frame").is_some_and(|f| !f.is_null()) {
+    if object.contains_key("frame") {
         object.insert("frame".into(), json!(0));
     }
+}
+
+/// Below `layout`, every `hover` and `mouse` report to an app of
+/// `surface = "widget"`, on its widget or elsewhere, by
+/// [`on_widget`]. `placed`: the sprite and the screen corner of each
+/// of its widgets placed, in the order of `widget.list`. `own`: the
+/// report names a widget sprite of its own (a release or a drag off it
+/// included): that widget's corner; else (another's sprite, its own
+/// behind the text, a leave) the first's. False: that widget, or every
+/// one, not placed; not told.
+pub fn in_widget(report: &mut Value, own: bool, placed: &[(u64, [i64; 2])]) -> bool {
+    let corner = match own {
+        true => {
+            let sprite = report["sprite"].as_u64();
+            (placed.iter()).find(|(s, _)| Some(*s) == sprite)
+        }
+        false => placed.first(),
+    };
+    let Some(&(_, corner)) = corner else {
+        return false;
+    };
+    on_widget(report, corner);
+    true
 }
 
 /// Below `shape`, a frame is told unscrolled: its cells are those of
@@ -1164,6 +1187,47 @@ mod tests {
             (off["x"].clone(), off["pos"].clone()),
             (json!(-2), json!([-2, 1]))
         );
+    }
+
+    #[test]
+    fn every_pointer_report_to_a_widget_app_is_in_its_widgets_cells() {
+        // Two widgets placed, corners 41, 3 and 2, 10.
+        let placed = [(4, [41, 3]), (9, [2, 10])];
+        let told = |mut report: Value, own: bool, placed: &[(u64, [i64; 2])]| {
+            in_widget(&mut report, own, placed).then_some(report)
+        };
+        // On its second widget: that one's corner.
+        let on = json!({"sprite": 9, "at": [1, 1], "x": 3, "y": 11, "frame": 2, "pos": [3, 1]});
+        assert_eq!(
+            told(on, true, &placed),
+            Some(json!({"sprite": 9, "at": [1, 1], "x": 1, "y": 1, "frame": 0, "pos": [1, 1]}))
+        );
+        // Elsewhere, on another app's sprite left of and above it: the
+        // first's corner, negative; `at` of that sprite as it is.
+        let other = json!({"sprite": 12, "at": [0, 0], "x": 30, "y": 1, "frame": 5,
+                           "pos": [30, 1], "mods": []});
+        assert_eq!(
+            told(other.clone(), false, &placed),
+            Some(
+                json!({"sprite": 12, "at": [0, 0], "x": -11, "y": -2, "frame": 0,
+                        "pos": [-11, -2], "mods": []})
+            )
+        );
+        // A leave: no frame there; told in its cells all the same.
+        let leave = json!({"sprite": null, "at": null, "x": 50, "y": 3, "frame": null,
+                           "pos": null, "mods": []});
+        assert_eq!(
+            told(leave, false, &placed),
+            Some(
+                json!({"sprite": null, "at": null, "x": 9, "y": 0, "frame": 0,
+                        "pos": [9, 0], "mods": []})
+            )
+        );
+        // Not placed: no corner, not told; its own widget gone mid-drag,
+        // the same, though another is placed.
+        assert_eq!(told(other, false, &[]), None);
+        let held = json!({"sprite": 4, "at": null, "x": 1, "y": 1, "frame": null, "pos": null});
+        assert_eq!(told(held, true, &placed[1..]), None);
     }
 
     #[test]

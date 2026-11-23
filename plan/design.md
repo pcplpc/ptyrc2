@@ -2007,9 +2007,11 @@ the pop-up, `app.start {store}`.
     as `frame`. `widget`: a widget on its frame, as named with `layout`;
     a bare sprite on `rpc::NOWHERE`, a frame id no frame has: put,
     listed, never shown. Below `layout` its widgets are told in their
-    own cells (`lower::own_widget`, `lower::on_widget`: `rect` at 0, 0;
-    a report on one less its corner; not in `draw.list`); its widgets
-    moved to an heir, nothing told but `widgets`.
+    own cells (`lower::own_widget`, `lower::in_widget`: `rect` at 0, 0;
+    every `hover`, `mouse`, on one or elsewhere, a leave too, less the
+    corner of the one named, else of its first placed, `frame` 0; none
+    placed, not told; not in `draw.list`); its widgets moved to an heir
+    or by `app.move`, nothing told but `widgets`.
     Clipped, never refused; nothing in the answers tells it. Its frame
     gone (a new layout): the pane that took its place, if one did
     (`driver/heir.rs`, the rule of `_cli.heir`: a usable pane of the
@@ -2078,7 +2080,7 @@ not by removing from the whole.
 | the same, `frame.at` | less than `layout` | one frame, whatever was named: the surface; `frame` in every request above is ignored |
 | a frame info | less than `shape` | idle, `origin` 0, 0, `extent` the view |
 | a frame cell: `frame.at`, a match's `x`, `y`, `pos` of events `mouse`, `hover`; an anchor `{at}` of `space` `frame` (or none) of `draw.put`, `.update`, `.ext` | less than `shape` | told unscrolled: less the `origin` of its frame (a pending wait's: at its answer), a cell of the view (`lower::unscrolled`); the anchor put in `view` (`lower::in_view`; a negative coordinate: in `frame`, plus the origin at the request) |
-| `frame` of any request, `frame.at {name}` | less than `layout`; less than `shape` | the surface: the frame its draws are put on (`Surface::read`; raw for `widget`, `screen` with `screen-wide`; of a native app given a frame by the user, that frame: Move), told as frame 0 at the top-left: a frame info's `id` 0, each `rect`, `screen`, the `x`, `y` of `mouse`, `hover` less the corner of its view, their `frame` 0, `pos` as `x`, `y` (`lower::on_surface`); its widgets of `widget`, wherever placed: in their own cells; `frame.at` 0; `active`, `quietest`, `idle` (of the cursor, of the heat): `raw` |
+| `frame` of any request, `frame.at {name}` | less than `layout`; less than `shape` | the surface: the frame its draws are put on (`Surface::read`; raw for `widget`, `screen` with `screen-wide`; of a native app given a frame by the user, that frame: Move), told as frame 0 at the top-left: a frame info's `id` 0, each `rect`, `screen`, the `x`, `y` of `mouse`, `hover` less the corner of its view, their `frame` 0, `pos` as `x`, `y` (`lower::on_surface`); its widgets of `widget`, wherever placed, and every `mouse`, `hover` it hears: in their own cells (`lower::in_widget`); `frame.at` 0; `active`, `quietest`, `idle` (of the cursor, of the heat): `raw` |
 | `session.info`; `hello` | less than `text` | `protocol`, `server`, `size`, `headless`; `host_colors` from `shape` |
 | event `frames` | `layout` and above | the infos cut as above |
 

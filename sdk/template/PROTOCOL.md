@@ -68,7 +68,8 @@ Cut answers:
 | `frame.list`, `frame.get`, `frame.at` | less than `layout` | its surface's frame alone, told as frame 0 at 0, 0; `frame` of every request ignored |
 | a frame's cells: `origin`, `frame.at`, a match's `x`, `y` (a pending wait's: at its answer), `pos` of `mouse`, `hover`; an anchor `at` in frame cells | less than `shape` | told unscrolled: `origin` 0, 0, each cell one of the view; the anchor put in view cells (a negative coordinate: off the view, in frame cells) |
 | `x`, `y`, `frame`, `pos` of `mouse`, `hover` | less than `layout` | less the corner of its surface's view; `frame` 0; `pos` the same as `x`, `y` |
-| its widgets, `surface = "widget"` | less than `layout` | in their own cells, wherever placed: a widget info's `rect` at 0, 0; `x`, `y`, `pos` of a report on it less its corner (negative off it); not in `draw.list` |
+| its widgets, `surface = "widget"` | less than `layout` | in their own cells, wherever placed: a widget info's `rect` at 0, 0; not in `draw.list` |
+| `x`, `y`, `pos`, `frame` of `mouse`, `hover`, `surface = "widget"` | less than `layout` | every report, on its widget or elsewhere (`pointer`, `clicks`), a leave too: `x`, `y` less the corner of its widget (the one under it, pressed, or else its first placed), negative left of it or above; `pos` the same; `frame` 0. None placed: not told |
 | `session.info` | less than `text` | `protocol`, `server`, `size`, `headless`; `host_colors` from `shape` |
 
 ## Methods
@@ -186,7 +187,8 @@ Host functions (`clock.*`, `storage.*`, `app.result`, `file.*`,
 | `mouse` | `{"sprite","button","action","mods","at","x","y","frame","pos"}` (below) | — on its own widget or sprite in front; elsewhere `clicks` |
 | `hover` | `{"sprite","at","x","y","frame","pos","mods"}` (below); `sprite` null: left | — on its own widget or sprite in front; elsewhere `pointer` |
 
-- `mouse`, `hover`: `x`, `y` the screen cell; `at` `[x, y]` the cell of
+- `mouse`, `hover`: `x`, `y` the screen cell (below `layout`, cut:
+  Cut answers); `at` `[x, y]` the cell of
   the sprite under it (a widget's sprite is its outer box: the border
   is row and column 0; the inner box starts at `rect` plus the border's
   width), null when none; `frame`, `pos` the frame there and the cell
@@ -418,7 +420,12 @@ top-left of the screen (`frame.get`: `id` 0, `rect` at 0, 0; a
 match's `screen` from there). A widget of `widget` is placed on the
 frame it starts on all the same, and told in its own cells (Cut
 answers): nothing it reads tells that frame but the size of its
-widget, which the room there chose.
+widget, which the room there chose. Its widget moved (by the user,
+or to the pane that took its frame's place): nothing told; the next
+report is in the new cells. Not closed:
+with `pointer` or `clicks`, the extremes of the cells it hears bound
+the screen around its widget, and a jump in them when the widget
+moves tells the move.
 Headless: 0, the one frame, raw; a live id is seen only under `ptyrc
 dev run`. A `Sight` reads it by default (Rust: `manifest()`).
 

@@ -180,7 +180,8 @@ those.
 The user's hands as the driver hears them: `--pointer MS:X,Y`,
 `--press MS:X,Y`, `--release MS:X,Y` (`--click`: both at once),
 `--key`, `--focus`, `--paste`, `--resize`; screen cells, so that a
-case names no sprite id. `--key` takes a character, `ctrl+A`..`ctrl+Z`
+case names no sprite id (the app hears them as the driver tells them:
+below `layout`, cut). `--key` takes a character, `ctrl+A`..`ctrl+Z`
 and the named keys of `dev test --help`: no `alt+`; a paste is one
 line. `--event` only for what no hand gives. An effect that follows
 the pointer asks the driver (`"pointer": true`, `"bomb": true` in its
@@ -269,7 +270,9 @@ driver).
      `Sight` reads it unless one is named; `move` names the next. No
      frame option of the app's own. `surface = "widget"`: its widgets
      are placed there, below `layout` too, and told in their own
-     cells (`PROTOCOL.md`, Cut answers).
+     cells, and so is every `hover`, `mouse` it hears, off its widget
+     too (negative left of it or above); none placed, none told
+     (`PROTOCOL.md`, Cut answers).
    - `subscribe` adds topics, never removes one: a `Sight`, a `Deck`
      and the app subscribe side by side; the app gets each event once
      and passes it on.

@@ -861,6 +861,15 @@ impl Engine for ScreenEngine {
         }))
     }
 
+    fn placed_widgets(&self) -> Vec<(u64, u64, [i64; 2])> {
+        (self.widgets.list().into_iter())
+            .filter_map(|w| {
+                let [x, y, ..] = w.rect?;
+                Some((w.owner, w.sprite?, [i64::from(x), i64::from(y)]))
+            })
+            .collect()
+    }
+
     fn view_of(&self, frame: u32) -> Option<([u16; 2], [i64; 2])> {
         let info = self.frames.info(frame)?;
         Some(([info.rect.x, info.rect.y], [info.origin.x, info.origin.y]))

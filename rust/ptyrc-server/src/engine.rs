@@ -204,6 +204,12 @@ pub trait Engine {
         None
     }
 
+    /// The widgets placed, in the order of `widget.list`: owner, sprite,
+    /// the screen corner of the outer box.
+    fn placed_widgets(&self) -> Vec<(u64, u64, [i64; 2])> {
+        Vec::new()
+    }
+
     /// The cell of the canvas of `sprite` at this screen cell, when it
     /// is shown there, in the view of its frame.
     fn canvas_at(&self, _sprite: u64, _x: u16, _y: u16) -> Option<[i64; 2]> {

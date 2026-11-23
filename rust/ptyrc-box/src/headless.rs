@@ -353,8 +353,6 @@ pub struct Headless {
     /// The press on a sprite, its event and whether it is heard without
     /// `clicks`, until its release.
     mouse_held: Option<(Value, bool)>,
-    /// The corner of each widget sprite, from the last report on it.
-    corners: BTreeMap<u64, [i64; 2]>,
     /// The effects told the pointer (`nozzle`).
     nozzles: Nozzles,
     /// `app.list`: the app's name and origin.
@@ -459,7 +457,6 @@ impl Headless {
             escapes: BTreeMap::new(),
             hovered: None,
             mouse_held: None,
-            corners: BTreeMap::new(),
             nozzles: Nozzles::default(),
             name: "app".into(),
             store: None,
@@ -674,7 +671,7 @@ impl Headless {
     /// The app's sprite at a cell, as the driver hit-tests it
     /// (`screen::sprite_at`): the topmost, no effect; and whether it
     /// is heard without `pointer`/`clicks`: a widget, or in front.
-    fn sprite_at(&mut self, x: u16, y: u16) -> Option<(Value, bool)> {
+    fn sprite_at(&self, x: u16, y: u16) -> Option<(Value, bool)> {
         let (cx, cy) = (i64::from(x), i64::from(y));
         let sprites = self.scene.list();
         let (hit, [sx, sy]) = sprites.iter().rev().find_map(|s| {
@@ -685,13 +682,12 @@ impl Headless {
         })?;
         let at = self.frames.at(x, y);
         let widget = self.widgets.list().iter().any(|w| w.sprite == Some(hit.id));
-        if widget {
-            self.corners.insert(hit.id, [sx, sy]);
-        }
         let data = json!({
             "sprite": hit.id, "at": [cx - sx, cy - sy], "x": x, "y": y,
             "frame": at.map(|(id, _)| id), "pos": at.map(|(_, pos)| [pos.x, pos.y]),
             "mods": [],
+            // For `emit` alone, not told: as the driver's `widget`.
+            "widget": widget,
         });
         Some((data, widget || hit.layer > 0))
     }
@@ -806,13 +802,29 @@ impl Headless {
     }
 
     fn emit(&mut self, topic: &str, mut data: Value) {
+        let widget = match topic {
+            "hover" | "mouse" => (data.as_object_mut()).and_then(|o| o.remove("widget")),
+            _ => None,
+        };
         if self.widget_cells() {
             match topic {
                 "widgets" => lower::own_widget(&mut data),
                 "hover" | "mouse" => {
-                    let corner = data["sprite"].as_u64().and_then(|s| self.corners.get(&s));
-                    if let Some(corner) = corner {
-                        lower::on_widget(&mut data, *corner);
+                    // On its widget or elsewhere, in its widget's cells;
+                    // none placed, not told (`lower::in_widget`).
+                    let placed: Vec<(u64, [i64; 2])> = (self.widgets.list().iter())
+                        .filter_map(|w| {
+                            let [x, y, ..] = w.rect?;
+                            Some((w.sprite?, [i64::from(x), i64::from(y)]))
+                        })
+                        .collect();
+                    let own = widget == Some(Value::Bool(true));
+                    if !lower::in_widget(&mut data, own, &placed) {
+                        if self.topics.contains(topic) && !self.silent.contains(topic) {
+                            let why = format!("{topic}: no widget of its own placed");
+                            self.dropped.push((self.now, why));
+                        }
+                        return;
                     }
                 }
                 _ => {}
@@ -3812,5 +3824,77 @@ mod tests {
             (json!(x + 1), json!(y))
         );
         assert_eq!(sprites["sprites"].as_array().map(Vec::len), Some(1));
+    }
+
+    /// Below `layout`, `surface = "widget"`, `pointer` and `clicks`
+    /// held: off its widget too, a report is in its widget's cells
+    /// (negative left of it); its widget hidden, none is told.
+    #[test]
+    fn a_widget_app_hears_off_its_widget_in_its_widgets_cells() {
+        let mut h = Headless::new((30, 10), 1);
+        let held = ["pointer", "clicks"];
+        h.set_grants(Some(Grants::new(&held, &[], &[] as &[&str])));
+        h.surface = Some(Surface::Widget(RAW));
+        h.call("subscribe", json!({"topics": ["hover", "mouse"]}))
+            .unwrap();
+        let w = json!({"widgets": [{"tag": "w", "name": "small", "size": [4, 1],
+                                     "content": {"rows": ["WIDG"]}}]});
+        h.call("widget.declare", w).unwrap();
+        h.call("widget.show", json!({"tag": "w"})).unwrap();
+        for t in [0, 500, 1500] {
+            h.set_now(t);
+            h.settle();
+        }
+        let rows = h.screen();
+        let y = rows.iter().position(|r| r.contains("WIDG")).unwrap();
+        let x = rows[y][..rows[y].find("WIDG").unwrap()].chars().count();
+        let (x, y) = (x as u16, y as u16);
+        // Its corner: the border's, one up and left of the text.
+        let (cx, cy) = (i64::from(x) - 1, i64::from(y) - 1);
+        assert!(cx > 0, "{rows:?}");
+        let cells = |e: &Value| {
+            (
+                e["x"].clone(),
+                e["y"].clone(),
+                e["pos"].clone(),
+                e["frame"].clone(),
+            )
+        };
+        h.take_events();
+        h.hover(x, y);
+        h.hover(0, y);
+        let events = h.take_events();
+        assert_eq!(events.len(), 2, "{events:?}");
+        // The leave, left of it.
+        assert_eq!(events[1].1["sprite"], Value::Null);
+        assert_eq!(
+            cells(&events[1].1),
+            (json!(-cx), json!(1), json!([-cx, 1]), json!(0))
+        );
+        assert!(events.iter().all(|(_, e)| e.get("widget").is_none()));
+        // Pressed on it, released left of it.
+        assert_eq!(h.button(true, x, y), None);
+        assert_eq!(h.button(false, 0, 0), None);
+        let events = h.take_events();
+        assert_eq!(
+            (events[0].1["action"].clone(), cells(&events[0].1)),
+            (
+                json!("press"),
+                (json!(1), json!(1), json!([1, 1]), json!(0))
+            )
+        );
+        assert_eq!(
+            cells(&events[1].1),
+            (json!(-cx), json!(-cy), json!([-cx, -cy]), json!(0))
+        );
+        // Its widget hidden mid-press: no corner, the release not told.
+        h.button(true, x, y);
+        h.take_events();
+        let id = h.call("widget.list", json!({})).unwrap()["widgets"][0]["id"].clone();
+        h.call("widget.hide", json!({"id": id})).unwrap();
+        h.button(false, 0, 0);
+        assert_eq!(h.take_events(), Vec::new());
+        let last = &h.dropped.last().unwrap().1;
+        assert_eq!(last, "mouse: no widget of its own placed");
     }
 }
