@@ -7,7 +7,7 @@ JavaScript interpreter that is itself a guest of ABI 1
 | | |
 |---|---|
 | `ptyrc.d.ts` | the API, typed: the whole of it. An app is written from this file |
-| `interp/` | the interpreter guest (`ptyrc-js.wasm`): QuickJS-ng and `ptyrc.c` (the natives, the loader), the modules `"ptyrc"` (`prelude.js`), `"ptyrc/deck"` (`deck.js`), `"ptyrc/canvas"` (`canvas.js`), `"ptyrc/sight"` (`sight.js`), `build.sh`, `NOTICES` |
+| `interp/` | the interpreter guest (`ptyrc-js.wasm`): QuickJS-ng and `ptyrc.c` (the natives, the loader), the modules `"ptyrc"` (`prelude.js`), `"ptyrc/deck"` (`deck.js`), `"ptyrc/canvas"` (`canvas.js`), `"ptyrc/sight"` (`sight.js`), `build.sh`, `quickjs-map-hash.patch`, `NOTICES` |
 | `examples/clockface/` | a deck of widgets: two sizes, a canvas, a key and a click of its widget, unit tests (the deck on a host of its own); the model of a deck app |
 | `examples/dots/` | a curve in Braille over the frame, kept a cell from the text by a `Sight`, `shape` denied; the unit tests of `"ptyrc/canvas"` and `"ptyrc/sight"` |
 | `examples/confetti/` | paper falling behind the text, `rate` 1 to 200 by the manifest; no test of its own (`rust/ptyrc-cli/tests/storeapp.rs`) |
@@ -23,7 +23,7 @@ sdk/js/interp/build.sh
 ```
 
 Needs `clang` and `wasm-ld` (LLVM 19 or later), `curl`, `tar`,
-`sha256sum`. Three inputs, pinned by their SHA-256 in the script,
+`sha256sum`, `patch`. Three inputs, pinned by their SHA-256 in the script,
 fetched into `sdk/js/interp/target/cache/` when absent (122 MB, the
 sysroot most of it), never committed: QuickJS-ng 0.18.0, the
 wasi-sysroot and `libclang_rt.builtins` of wasi-sdk 34.
@@ -43,7 +43,8 @@ PTYRC_JS=.../ptyrc-js.wasm ptyrc-box --script examples/confetti/app.js '{"rate":
 
 ## The interpreter
 
-QuickJS-ng 0.18.0 (MIT), compiled with wasi-libc (MIT, its parts
+QuickJS-ng 0.18.0 (MIT), patched (`interp/quickjs-map-hash.patch`:
+the hash of a `Map` or `Set` key), compiled with wasi-libc (MIT, its parts
 musl, cloudlibc, dlmalloc) for `wasm32-wasip1`, linked as a reactor.
 `interp/NOTICES`: the texts.
 
@@ -205,6 +206,8 @@ Measured 2026-11-20, a 200x60 canvas, 30 Hz, a headless run, release
 - `xterm` (and `rows` of a `Half`), a release runner, 2026-11-23: 3.4
   µs a new colour, 0.34 µs one of the 4096 last kept (a loop over the
   240 before: 142 and 1.6 µs).
+- Dense integer keys: an array or a typed array, faster than a `Map`
+  or a `Set`.
 - A start: 0.18 to 0.20 s the first time in a process (Cranelift
   compiles the module), 1.1 ms after it. A runner is one process an
   app: each app pays the first.

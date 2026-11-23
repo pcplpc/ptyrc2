@@ -1,0 +1,45 @@
+SPDX-License-Identifier: MIT
+QuickJS-ng 0.18.0, map_hash_key: the hash of a number key and of an
+object or symbol key mixed by the finalizer of MurmurHash3. Applied by
+build.sh; see NOTICES.
+
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -53442,7 +53442,18 @@
+     return safe_const(map_normalize_key(ctx, unsafe_unconst(key)));
+ }
+ 
+-/* XXX: better hash ? */
++/* The finalizer of MurmurHash3: each bit of x moves the low bits, the
++   bucket being h & (hash_size - 1). */
++static inline uint32_t map_hash_mix(uint64_t x)
++{
++    x ^= x >> 33;
++    x *= UINT64_C(0xff51afd7ed558ccd);
++    x ^= x >> 33;
++    x *= UINT64_C(0xc4ceb9fe1a85ec53);
++    x ^= x >> 33;
++    return (uint32_t)x;
++}
++
+ static uint32_t map_hash_key(JSContext *ctx, JSValueConst key)
+ {
+     uint32_t tag = JS_VALUE_GET_NORM_TAG(key);
+@@ -53463,7 +53474,7 @@
+         break;
+     case JS_TAG_OBJECT:
+     case JS_TAG_SYMBOL:
+-        h = (uintptr_t)JS_VALUE_GET_PTR(key) * 3163;
++        h = map_hash_mix((uintptr_t)JS_VALUE_GET_PTR(key));
+         break;
+     case JS_TAG_INT:
+         d = JS_VALUE_GET_INT(key);
+@@ -53482,7 +53493,7 @@
+             d = NAN;
+     hash_float64:
+         u.d = d;
+-        h = (u.u32[0] ^ u.u32[1]) * 3163;
++        h = map_hash_mix(u.u64);
+         tag = JS_TAG_FLOAT64;
+         break;
+     default:

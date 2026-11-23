@@ -787,6 +787,56 @@ fn unit_tests_under_the_limits_of_an_event() {
     );
 }
 
+/// `Set.has` on 2000 keys: the integers 0..1999 and objects, each at most
+/// 5 times the time of keys spread over the float's bits
+/// (`sdk/js/interp/quickjs-map-hash.patch`; without it the integers take
+/// 28 times). The best of 3.
+#[test]
+fn map_keys_small_integers_and_objects_spread() {
+    let Some(wasm) = interpreter() else { return };
+    let keys = [
+        ("spread", "(i) => (i + 1) * 2654435761.25"),
+        ("small", "(i) => i"),
+        ("object", "() => ({})"),
+    ];
+    let time = |make: &str| {
+        let tests = format!(
+            "import {{ assertEqual }} from 'ptyrc';
+             export function test_has() {{
+               const keys = Array.from({{ length: 2000 }}, (_, i) => ({make})(i));
+               const set = new Set(keys);
+               let n = 0;
+               for (let r = 0; r < 30; r++) for (const k of keys) if (set.has(k)) n++;
+               assertEqual(n, 60000);
+             }}"
+        );
+        let o = options(&[("tests.js", &tests)], json!({}));
+        let start = Instant::now();
+        let limits = Limits {
+            hard: Duration::from_secs(30),
+            init: Duration::from_secs(30),
+            ..Limits::default()
+        };
+        let (lines, status) = script::unit(wasm, &o.args, limits);
+        assert_eq!(status, 0, "{lines:#?}");
+        start.elapsed()
+    };
+    time("(i) => i");
+    let mut best = [Duration::MAX; 3];
+    for _ in 0..3 {
+        for (b, (_, make)) in best.iter_mut().zip(keys) {
+            *b = (*b).min(time(make));
+        }
+        if best[1] < best[0] * 5 && best[2] < best[0] * 5 {
+            return;
+        }
+    }
+    panic!(
+        "{:?}",
+        keys.iter().map(|k| k.0).zip(best).collect::<Vec<_>>()
+    );
+}
+
 #[test]
 fn text_bytes_and_base64() {
     let tests = r##"

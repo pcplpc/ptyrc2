@@ -3,7 +3,7 @@
 #
 # The script interpreter: QuickJS-ng built to a guest of ABI 1.
 # Needs clang and wasm-ld (LLVM 19 or later: `#embed`), curl, tar,
-# sha256sum. The three inputs are fetched into target/cache/ when
+# sha256sum, patch. The three inputs are fetched into target/cache/ when
 # absent and checked against the hashes below.
 #
 #   sdk/js/interp/build.sh        ->  sdk/js/interp/target/ptyrc-js.wasm
@@ -48,6 +48,16 @@ fetch "$RT" "$RT_URL" "$RT_SHA"
 Q=$CACHE/quickjs-ng-0.18.0
 ROOT=$CACHE/wasi-sysroot-34.0
 BUILTINS=$CACHE/libclang_rt-34.0/wasm32-unknown-wasip1/libclang_rt.builtins.a
+# The local patch (NOTICES): applied once; refused loudly if it does not
+# apply.
+PATCH=$PWD/quickjs-map-hash.patch
+if ! patch -s -f -p1 -R --dry-run -d "$Q" < "$PATCH" >/dev/null 2>&1; then
+  patch -s -f -p1 -N --dry-run -d "$Q" < "$PATCH" >/dev/null 2>&1 || {
+    echo "build.sh: $PATCH: does not apply to $Q" >&2
+    exit 1
+  }
+  patch -s -f -p1 -N --no-backup-if-mismatch -d "$Q" < "$PATCH"
+fi
 CF="--target=wasm32-wasip1 --sysroot=$ROOT -O2 -DNDEBUG -D_GNU_SOURCE -fno-exceptions -I$Q"
 
 pids=

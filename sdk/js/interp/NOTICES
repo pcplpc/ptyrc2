@@ -2,7 +2,12 @@ Notices of what is linked into ptyrc-js.wasm, the script interpreter
 (sdk/js/interp/build.sh). The interpreter as a whole: GPL-3.0-or-later.
 
 - QuickJS-ng 0.18.0 (quickjs.c, libregexp.c, libunicode.c, dtoa.c):
-  MIT.
+  MIT. Changed by quickjs-map-hash.patch, applied by build.sh: in
+  map_hash_key, the hash of a number key (its float64 bits) and of an
+  object or symbol key (its pointer) is the finalizer of MurmurHash3,
+  not a product by 3163; the bucket is the hash's low bits, which the
+  product left zero for the integers below 2^21 and for aligned
+  pointers. Iteration order unchanged.
 - wasi-libc, of wasi-sdk 34 (commit 2e6fb9d8ee0c): taken under MIT,
   one of its three licences; with the parts derived from musl (MIT),
   cloudlibc (BSD-2-Clause) and dlmalloc (CC0).
