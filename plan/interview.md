@@ -313,3 +313,20 @@ Answers to the questions of
 - Branches: `backup-before-identity` (its tree that of `5f062f7`) and
   the merged `fork/*` removed here; `origin` unreachable from the
   session, its branches left.
+
+## After the migration (2026-11-23)
+
+Answers to the questions of
+`plan/handsoff/20261122T051242Z-next-steps.md`.
+
+- The Python twins: kept for now; `ptyrc app NAME` still starts the
+  twin. Asked again later.
+- `[app] frame` of a widget without `layout`: the driver places it on
+  the frame named (`tank`: `largest`) and tells the app nothing of
+  the layout. For every app; PROTOCOL.md to follow.
+- `marks`: the focused pane by default (`frame = "active"`), not the
+  raw frame, not every pane.
+- `ask`: 15 options at most, the launcher's 16 values an `[args]`
+  entry kept; said in its help.
+- A write capped at 1 MiB: kept. `pace` trims its oldest counts
+  before the cap, so its save is never refused.
