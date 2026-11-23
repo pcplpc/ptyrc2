@@ -7,8 +7,6 @@
 //! `Default`, `Palette(0..16)`, which the terminal sets) panics.
 
 use crate::{Canvas, Cell, Color, Run};
-use std::cell::RefCell;
-use std::collections::HashMap;
 
 // ---- colours ----
 
@@ -94,36 +92,85 @@ pub fn named(name: &str) -> Option<u8> {
         .map(|i| i as u8 + bright)
 }
 
-thread_local! {
-    static NEAREST: RefCell<HashMap<u32, u8>> = RefCell::new(HashMap::new());
+/// The index of the level of the cube nearest `v`.
+fn level(v: i32) -> usize {
+    match v {
+        ..48 => 0,
+        48..116 => 1,
+        _ => (((v - 76) / 40 + 1) as usize).min(5),
+    }
 }
 
+/// The weighed distance of `(r, g, b)` of chroma `c` to `(x, y, z)`.
+/// Eyes weigh green most, blue least; a dark colour keeps its hue
+/// rather than turn grey: the chroma the palette colour lacks is
+/// counted.
+fn far((r, g, b): (i32, i32, i32), c: i32, (x, y, z): (i32, i32, i32)) -> i32 {
+    let lost = (c - (x.max(y).max(z) - x.min(y).min(z))).max(0);
+    3 * (x - r).pow(2) + 4 * (y - g).pow(2) + 2 * (z - b).pow(2) + 2 * lost.pow(2)
+}
+
+/// The nearest of the 240 to `0xrrggbb` by `far`, the lowest index of
+/// equals: as a loop over the 240, for each of the 2^24 (and as the
+/// script's). The greys: the nearest of `8 + 10i` to `(3r + 4g + 2b) /
+/// 9`, a tie to the lower. The cube: a bound (the nearest level each
+/// channel, or the grey), then in index order the levels whose partial
+/// sum is within it.
 fn nearest(v: u32) -> u8 {
-    if let Some(n) = NEAREST.with(|m| m.borrow().get(&v).copied()) {
-        return n;
+    const L: [i32; 6] = [0, 95, 135, 175, 215, 255];
+    let p = ((v >> 16) as i32, (v >> 8 & 255) as i32, (v & 255) as i32);
+    let (r, g, b) = p;
+    let c = r.max(g).max(b) - r.min(g).min(b);
+    let t = (6 * r + 8 * g + 4 * b - 55).div_euclid(180).clamp(0, 23);
+    let w = 8 + 10 * t;
+    let grey = far(p, c, (w, w, w));
+    let (mut i, mut j, mut k) = (level(r), level(g), level(b));
+    let mut bound = far(p, c, (L[i], L[j], L[k])).min(grey);
+    while i > 0 && 3 * (L[i - 1] - r).pow(2) <= bound {
+        i -= 1;
     }
-    let (r, g, b) = ((v >> 16) as i64, (v >> 8 & 255) as i64, (v & 255) as i64);
-    let chroma = r.max(g).max(b) - r.min(g).min(b);
-    let (mut best, mut n) = (i64::MAX, 16u8);
-    for i in 16..=255u8 {
-        let p = palette_value(i);
-        let (x, y, z) = ((p >> 16) as i64, (p >> 8 & 255) as i64, (p & 255) as i64);
-        // Eyes weigh green most, blue least; a dark colour keeps its hue
-        // rather than turn grey.
-        let lost = (chroma - (x.max(y).max(z) - x.min(y).min(z))).max(0);
-        let far = 3 * (x - r).pow(2) + 4 * (y - g).pow(2) + 2 * (z - b).pow(2) + 2 * lost.pow(2);
-        if far < best {
-            (best, n) = (far, i);
+    while j > 0 && 4 * (L[j - 1] - g).pow(2) <= bound {
+        j -= 1;
+    }
+    while k > 0 && 2 * (L[k - 1] - b).pow(2) <= bound {
+        k -= 1;
+    }
+    let (mut best, mut n) = (i32::MAX, 0usize);
+    for (i, &x) in L.iter().enumerate().skip(i) {
+        let fr = 3 * (x - r).pow(2);
+        if fr > bound {
+            if x > r {
+                break;
+            }
+            continue;
+        }
+        for (j, &y) in L.iter().enumerate().skip(j) {
+            let fg = fr + 4 * (y - g).pow(2);
+            if fg > bound {
+                if y > g {
+                    break;
+                }
+                continue;
+            }
+            let (top, low) = (x.max(y), x.min(y));
+            for (k, &z) in L.iter().enumerate().skip(k) {
+                let fb = fg + 2 * (z - b).pow(2);
+                if fb > bound {
+                    if z > b {
+                        break;
+                    }
+                    continue;
+                }
+                let lost = (c - top.max(z) + low.min(z)).max(0);
+                let f = fb + 2 * lost.pow(2);
+                if f < best {
+                    (best, n) = (f, 16 + 36 * i + 6 * j + k);
+                    bound = bound.min(f);
+                }
+            }
         }
     }
-    NEAREST.with(|m| {
-        let mut m = m.borrow_mut();
-        if m.len() >= 4096 {
-            m.clear();
-        }
-        m.insert(v, n);
-    });
-    n
+    if grey < best { 232 + t as u8 } else { n as u8 }
 }
 
 /// The nearest of the 240 fixed colours of the 256, `16..=255`:
@@ -567,6 +614,54 @@ impl Half {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `nearest` as a loop over the 240: the reference.
+    fn nearest_loop(v: u32) -> u8 {
+        let (r, g, b) = ((v >> 16) as i32, (v >> 8 & 255) as i32, (v & 255) as i32);
+        let c = r.max(g).max(b) - r.min(g).min(b);
+        let (mut best, mut n) = (i32::MAX, 16u8);
+        for i in 16..=255u8 {
+            let p = palette_value(i);
+            let f = far(
+                (r, g, b),
+                c,
+                ((p >> 16) as i32, (p >> 8 & 255) as i32, (p & 255) as i32),
+            );
+            if f < best {
+                (best, n) = (f, i);
+            }
+        }
+        n
+    }
+
+    /// About the levels and the greys, their midpoints (the ties), as
+    /// the script's test; and a colour in 997.
+    #[test]
+    fn xterm_sampled() {
+        let mut near: Vec<u32> = Vec::new();
+        for l in [
+            0, 47, 48, 95, 115, 116, 135, 155, 175, 195, 215, 235, 255, 8, 13, 238, 243, 250,
+        ] {
+            for d in -2..=2i32 {
+                if (0..256).contains(&(l + d)) && !near.contains(&((l + d) as u32)) {
+                    near.push((l + d) as u32);
+                }
+            }
+        }
+        for &r in &near {
+            for &g in &near {
+                for &b in &near {
+                    let v = r << 16 | g << 8 | b;
+                    if (r * 7 + g * 3 + b) % 61 == 0 {
+                        assert_eq!(nearest(v), nearest_loop(v), "{v:06x}");
+                    }
+                }
+            }
+        }
+        for v in (0..1u32 << 24).step_by(997) {
+            assert_eq!(nearest(v), nearest_loop(v), "{v:06x}");
+        }
+    }
 
     /// `test_canvas.py::test_braille`.
     #[test]
