@@ -336,3 +336,7 @@ Answers to the questions of
   test in the SDK suite fails if lookups on small integer keys are
   far slower than on spread ones. The guide says arrays beat
   `Map`/`Set` for dense integer keys.
+- A widget app below `layout`: its cells are its widget's, on the
+  raw frame too. The reports it hears through `pointer` and `clicks`
+  are told in those cells as well; that such an app can infer its
+  widget's place over time is said in PROTOCOL.md, not closed.
