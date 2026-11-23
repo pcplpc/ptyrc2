@@ -330,3 +330,9 @@ Answers to the questions of
   entry kept; said in its help.
 - A write capped at 1 MiB: kept. `pace` trims its oldest counts
   before the cap, so its save is never refused.
+- The interpreter's `Map`/`Set` hash (quickjs-ng 0.18.0,
+  `map_hash_key`: integers below 2^21 share a few buckets): patched
+  locally by `build.sh`, listed in `NOTICES`; no report upstream. A
+  test in the SDK suite fails if lookups on small integer keys are
+  far slower than on spread ones. The guide says arrays beat
+  `Map`/`Set` for dense integer keys.
