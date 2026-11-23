@@ -15,7 +15,8 @@
 // a word (`wordy`), are not counted. The counts are kept in the storage
 // (`words.0` to `words.15`, a part of the words each: `part`), the
 // parts changed written within a second of a change, and at the end.
-// The faces: `pace.js`.
+// A part over `MOST` loses its words typed longest ago, those shown
+// kept (`Board.dump`): a save is never refused. The faces: `pace.js`.
 
 import { PtyrcError, call, exit, file, log, now as clock, period, storage, asset } from "ptyrc";
 import { Deck } from "ptyrc/deck";
@@ -74,7 +75,8 @@ export function stopWords(o, host = { asset, file }) {
 }
 
 const KEY = "words";
-const MOST = 60 * 1024; // a part; 16 of them under the 1 MiB of the storage
+/** A part at most; 16 of them under the 1 MiB of the storage. */
+export const MOST = 60 * 1024;
 const SAVE_MS = 1000;
 const IDLE_MS = 30000;
 
@@ -107,7 +109,8 @@ function shown() {
 function save() {
   if (!kept || !board.dirty) return;
   try {
-    for (const p of board.touched) storage.set(`${KEY}.${p}`, board.dump(p, MOST));
+    const spare = new Set(board.top(o.look.top).map(([w]) => w));
+    for (const p of [...board.touched]) storage.set(`${KEY}.${p}`, board.dump(p, MOST, spare));
     board.touched.clear();
     board.dirty = false;
   } catch (e) {

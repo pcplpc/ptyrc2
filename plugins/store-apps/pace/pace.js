@@ -352,16 +352,29 @@ export class Board {
   }
 
   /** The counts as JSON, `{"words": {word: [count, last]}}`: of the
-   * part `p` (0 to `PARTS - 1`), or all; of more than `most` bytes, the
-   * words typed least left out. */
-  dump(p = null, most = Infinity) {
-    const all = p === null ? [...this.words] : [...this.parts[p]].map((w) => [w, this.words.get(w)]);
-    let keep = all;
-    for (;;) {
-      const text = JSON.stringify({ words: Object.fromEntries(keep) });
-      if (text.length * 3 <= most || !keep.length) return text;
-      keep = ranked(keep === all ? [...all] : keep, keep.length >> 1);
+   * part `p` (0 to `PARTS - 1`), or all. Over `most` bytes (3 a code
+   * unit at most), the words typed longest ago are dropped from the
+   * board until it fits, those of `spare` kept: the counts shown stay
+   * whole, and what is shown is what is kept. */
+  dump(p = null, most = Infinity, spare = new Set()) {
+    const of = () => (p === null ? [...this.words] : [...this.parts[p]].map((w) => [w, this.words.get(w)]));
+    const text = JSON.stringify({ words: Object.fromEntries(of()) });
+    if (text.length * 3 <= most) return text;
+    const old = of()
+      .filter(([w]) => !spare.has(w))
+      .sort(([a, [ca, la]], [b, [cb, lb]]) => la - lb || ca - cb || (a < b ? -1 : a > b ? 1 : 0));
+    // An entry is `"word":[count,last]` and a comma.
+    let over = text.length - Math.floor(most / 3);
+    for (const [w, entry] of old) {
+      if (over <= 0) break;
+      over -= JSON.stringify(w).length + JSON.stringify(entry).length + 2;
+      this.words.delete(w);
+      this.parts[part(w)].delete(w);
+      this.touched.add(part(w));
     }
+    this.version++;
+    this.kept = null;
+    return JSON.stringify({ words: Object.fromEntries(of()) });
   }
 }
 

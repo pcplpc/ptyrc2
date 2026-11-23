@@ -3,7 +3,7 @@
 // hashes (`twin.js`).
 
 import { PtyrcError, asset, assert, assertEqual, cells } from "ptyrc";
-import { options, stopWords, utf8 } from "./app.js";
+import { MOST, options, stopWords, utf8 } from "./app.js";
 import {
   Board,
   Meter,
@@ -255,6 +255,53 @@ export function test_board() {
   for (let i = 0; i < 40; i++) board.add(`word${"abcdefghij"[i % 10]}${"klmnoprstu"[(i / 10) | 0]}`);
   const cut = JSON.parse(board.dump(null, 300)).words;
   assert(Object.keys(cut).length < 43 && "hourglass" in cut, JSON.stringify(cut));
+}
+
+export function test_kept_under_the_cap() {
+  // A store near the cap: 7000 words of 60 ideographs (180 bytes), the
+  // parts over a value's 60 KiB. Saved, each part fits, the whole under
+  // the 1 MiB of the storage; the words typed longest ago are gone from
+  // the board too, those shown kept whole.
+  const words = {};
+  let x = 1;
+  const han = () => {
+    x = (Math.imul(x, 1103515245) + 12345) >>> 0;
+    return String.fromCodePoint(0x4e00 + ((x >>> 8) % 20000));
+  };
+  for (let i = 0; i < 7000; i++) {
+    const word = Array.from({ length: 60 }, han).join("");
+    words[word] = [1 + (i % 7), 1e9 + i];
+  }
+  words.ancient = [5000, 1];
+  const board = new Board(4, STOP);
+  board.load(JSON.stringify({ words }));
+  const spare = new Set(board.top(10).map(([w]) => w));
+  assert(spare.has("ancient"));
+  const parts = Array.from({ length: PARTS }, () => []);
+  for (const [w, entry] of Object.entries(words)) parts[part(w)].push([w, entry]);
+  let used = 0;
+  let kept = 0;
+  for (let p = 0; p < PARTS; p++) {
+    const value = board.dump(p, MOST, spare);
+    const size = bytes(value).length;
+    // Cut to its bound: within an entry of it.
+    assert(size <= MOST && value.length * 3 > MOST - 600, `${p}: ${size}`);
+    used += size;
+    const lasts = Object.values(JSON.parse(value).words).map(([, l]) => l);
+    kept += lasts.length;
+    // The oldest go first: what is left is the newest of its part.
+    const dropped = parts[p].filter(([w]) => !board.words.has(w));
+    const least = Math.min(...lasts.filter((l) => l > 1));
+    assert(dropped.length > 0 && dropped.every(([, [, l]]) => l < least), `${p}`);
+  }
+  assert(used <= 1024 * 1024 && used > 800 * 1024, `${used}`);
+  assertEqual(board.words.size, kept);
+  assertEqual(board.top(1), [["ancient", 5000, 1]]);
+  // Under the cap, nothing goes.
+  const small = new Board(4, STOP);
+  small.load(JSON.stringify({ words: { sand: [2, 5], dune: [1, 1] } }));
+  small.dump(part("dune"), MOST);
+  assertEqual(small.words.size, 2);
 }
 
 export function test_stop_words() {

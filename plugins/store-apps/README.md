@@ -65,7 +65,8 @@ The protocol: `sdk/template/PROTOCOL.md`. The script API:
   (`needs`); words shipped as an asset, more in a named file
   (`--stop`); the counts in `storage.*`, written within a second of a
   change and at `stop` (headless: the end of `--for`), read back by a
-  second run (`--storage tests/stored`); the twin's faces by hashes
+  second run (`--storage tests/stored`), the words typed longest ago
+  dropped before the cap (`test_kept_under_the_cap`); the twin's faces by hashes
   (`twin.js`, made by
   `plan/sessions/22112026-01-migration/keys-pace/twin.py`).
 - `git`: a probe (`probe.git`): the answer, not the means; asked each
