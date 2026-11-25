@@ -70,6 +70,7 @@ answers 304.
     "entry": "script",
     "permissions": [{"name": "keys", "why": "...", "words": []}],
     "size": 5120,
+    "vetted": false,
     "wasm": null
   }]
 }]}
@@ -125,7 +126,8 @@ Both answer 201 (200 when that revision was listed already):
 
 An archive: gzip, then ustar; 8 MiB packed, 8 MiB and 512 entries
 unpacked; regular files and directories only; relative paths, no `..`,
-no `.git`, no control character; `ptyrc-app.toml` at the root, 64 KiB,
+no `.git`, no control character; every file text (UTF-8, no NUL
+byte); `ptyrc-app.toml` at the root, 64 KiB,
 valid TOML with `[app] id` (a lower-case letter, then lower-case letters, digits,
 `-`; 64 at most), `version`, `summary`, `license`
 (`GPL-3.0-or-later`), `entry`. Never unpacked to disk by the server.
@@ -166,14 +168,25 @@ token: `server.py tier NAME REV TIER`.
 `POST /v1/yank`, `{"name": ..., "rev": REV|null, "yanked": true}`: the
 owner's token, or an `approved` maintainer's. `rev` null: the app.
 
-## Modules
+## Vetting
 
-`builder.py`, a process apart from the server: for each `tar` version
-whose `entry` is `rust` and that has no module, the archive is unpacked
-in a new directory and built in a container without network
-(`ptyrc dev build DIR --out FILE`); the module goes to
-`<tier>/<rev>.wasm`, its sha256 to the index. A build that fails is
-noted and not tried again.
+`builder.py`, a process apart from the server: each `tar` version not
+yet vetted is unpacked in a new directory and vetted in a container
+without network, `ptyrc dev vet DIR --out FILE`:
+
+- the full check of `ptyrc dev check`;
+- no file the app does not use (`ptyrc dev vet`, what is used);
+- a Rust app builds: the module goes to `<tier>/<rev>.wasm`, its sha256
+  to the index (`wasm`).
+
+Status 0: the version is marked vetted (`vetted` true in the index).
+Status 1, the app's fault: the version is evicted, its row and its
+archive removed, the app with its last version; the revision and the
+reason are kept, and a push of the same archive answers 400 with that
+reason. Any other end (no engine, no image, the builder's timeout) is
+noted, and nothing is removed.
+
+Only `untested` versions are vetted; a version is vetted once.
 
 A client with `rustc` builds from the archive itself. One without may
 take the module: it checks its sha256 against the index and that every
