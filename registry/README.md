@@ -62,9 +62,24 @@ self-contained page from it. Commit `index.json` for clients to read it
 Both are plain scripts, run locally; `PTYRC` names the binary. Who may
 say `tested`, and whether tiers are signed, is to be decided.
 
-## Users
+## The registry server
 
-No registry is configured by default.
+A second kind of registry, an HTTP server (`registry/API.md`) people
+push to: no git, no account. Its tiers are the same, a word on a
+revision.
+
+- Users: nothing to configure; without `store.toml` the default is
+  `store.ptyrc.top`. `ptyrc store add NAME`, or `HOST/NAME`. Another:
+  `ptyrc store registry add NAME https://HOST --api`.
+- Authors: `ptyrc dev check`, then `ptyrc dev push`: the tree packed
+  and sent; it prints `ptyrc store add HOST/NAME`. The revision is the
+  sha256 of the archive. `ptyrc dev push --git`: the commit at HEAD,
+  pushed to its repository first; the app keeps its git origin.
+- The token: the first push of a name answers it, kept in
+  `<config>/ptyrc/tokens.toml` (0600); every later push wants it. On
+  another machine: `--token TOKEN`. Lost: reset on the server.
+
+## Users of a git registry
 
 ```
 ptyrc store registry add main https://example.org/ptyrc-store

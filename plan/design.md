@@ -2403,10 +2403,12 @@ ptyrc manage [ls | start | stop | pause | resume | restart | forget |
 ptyrc tmux attach [-t SESSION] [-L NAME | -S PATH] [--app APP]...
 ptyrc tmux detach [-t SESSION] [-L NAME | -S PATH]
 ptyrc tmux restart [-t SESSION] [-L NAME | -S PATH] [--app APP]...
-ptyrc store add ORIGIN[@REF] [--latest] [--force] [--yes]
+ptyrc store add ORIGIN[@REF]|NAME [--latest] [--force] [--yes]
+      [--prebuilt]
 ptyrc store rm ID|ORIGIN [--purge] ; update [ID|ORIGIN...] [--latest]
-      [--force] [--yes] ; ls ; show ID|ORIGIN ; search WORD ; sync ;
-      registry ls | add NAME URL|DIR [--path] | rm NAME
+      [--force] [--yes] [--prebuilt] ; ls ; show ID|ORIGIN|NAME ;
+      search WORD ; sync ; registry ls | add NAME URL|DIR [--path |
+      --api] | rm NAME
                                   store apps (store-model.md, Install)
 ptyrc dev new NAME [--rust] ; dev check [DIR] ; dev entry [DIR]
       [--remote NAME] ; dev test [DIR] [--size CxR] [--for T] [--at T,...]
@@ -2414,7 +2416,10 @@ ptyrc dev new NAME [--rust] ; dev check [DIR] ; dev entry [DIR]
       [--event T:TOPIC:JSON]... [--NAME VALUE...] ; dev test [DIR]
       --unit [FILE] ; dev test [DIR] --cases [NAME...] [--bless] ;
       dev probe git [DIR] | system [--parts P,...] ; dev run [DIR]
-      [--NAME VALUE...]           an app's author (store-model.md, Tools)
+      [--NAME VALUE...] ; dev push [DIR] [--git [--remote NAME]]
+      [--registry NAME] [--description TEXT] [--token TOKEN]
+      [--show-token] [--dry-run] ; dev build [DIR] --out FILE [--force]
+                                  an app's author (store-model.md, Tools)
 ptyrc dev index DIR [--out F] [--html F] ; dev registry-check BASE HEAD
       --author NAME [--maintainers F] [--repo DIR]
                                   a registry's CI (store-model.md, Registry)
@@ -2464,6 +2469,27 @@ params as an app gives them (`--parts`, `--log N`, `--top N`): a
 fixture for `dev test --probe git=FILE.json` (`system=`). git: the
 repository holding DIR, `days` in UTC; system: a second sample a
 second after the first.
+
+A registry server (`registry/API.md`): `[[registry]] name, api =
+"https://HOST"` in `<config>/ptyrc/store.toml`; no `store.toml`: the
+default, `ptyrc` at `https://store.ptyrc.top` (`PTYRC_NO_DEFAULT_REGISTRY`
+set: none). Its index is written to `<cache>/ptyrc/registry/NAME/` as
+pointers; fetched again when a minute old. An app pushed as an archive
+has the origin `HOST/NAME` (`NAME` its `[app] id`), its revision the
+sha256 of the archive; `store add NAME`: the first registry server that
+lists it. A Rust app is built here; without `rustc`, or with
+`--prebuilt`, the module the server lists for that revision (its
+sha256, imports of `ptyrc` only). HTTP by the system `curl`.
+
+`ptyrc dev push [DIR]` (`dev/push.rs`): `dev check`'s checks and no
+`TODO`, then the tree packed (`.tar.gz`, one byte string a tree) and
+`POST /v1/push/tar`; `--git`: HEAD of the repository holding DIR,
+clean and on its remote, `POST /v1/push/git`. To `--registry`, else the
+first `api` of `store.toml`. The first push of a name answers its token,
+written to `<config>/ptyrc/tokens.toml` (`["HOST"] NAME = "TOKEN"`,
+0600); a later push sends it. Prints `ptyrc store add ID`. `ptyrc dev
+build [DIR] --out FILE`: the store's build, the work in a new directory
+of `TMPDIR`; a script app: status 2.
 
 The SDKs speak the protocol and nothing else: an SDK function is a
 `call`, a canvas, or pure. Each tier has the same names: `"ptyrc"`

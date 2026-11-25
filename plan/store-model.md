@@ -349,6 +349,10 @@ ptyrc dev run [DIR] [--NAME VALUE...]
                                 app stopped (`stop`), then the end;
                                 told the frame the driver would give
 ptyrc dev entry [DIR]           the file to add to the registry
+ptyrc dev push [DIR] [--git]    to a registry server: the tree packed,
+                                or (--git) HEAD of its repository;
+                                prints `ptyrc store add ID`
+ptyrc dev build [DIR] --out F   the module, as the store builds it
 ```
 
 - Errors carry the hint, as the protocol does: what was refused, the
@@ -921,8 +925,10 @@ wait` (`ptyrc app --wait` the default: the result printed); `[args]`
 
 ```
 ptyrc store add ORIGIN[@REF] [--latest] [--force]
+ptyrc store add NAME | HOST/NAME [--prebuilt]   an app of a registry server
 ptyrc store rm ID|ORIGIN [--purge]      --purge: its storage, its grants
 ptyrc store update [ID|ORIGIN...]
+ptyrc store registry add NAME URL --api   a registry server
 ptyrc store ls                          origin, id, version, commit, tier
 ptyrc store search WORD ; ptyrc store show ID|ORIGIN
 ptyrc app ID|ORIGIN [OPTION...]         start it (a native name first)
@@ -972,6 +978,7 @@ Where things are:
 | `<cache>/ptyrc/registry/`, `<cache>/ptyrc/git/` | the registry, the fetches |
 | `<config>/ptyrc/permissions.toml` | the grants |
 | `<config>/ptyrc/store.toml` | the registries, in order |
+| `<config>/ptyrc/tokens.toml` | the tokens of the names pushed |
 
 All 0700/0600, written by `ptyrc` and the driver alone.
 
@@ -1028,6 +1035,27 @@ whether tiers are signed.
 `dev index` (`index.json`, `--html` the page), `dev registry-check`
 (the pull request's check), `store sync`, `search`, `show`. Not done:
 the hosting, a CI file, the tape played on the page.
+
+[as built] A second way, a registry server (`registry/API.md`;
+`temp/registry-server/` for now): people push to it, no git, no
+account. `ptyrc dev push` checks the tree, packs it (`.tar.gz`, one
+byte string a tree) and sends it; the app's origin is `HOST/NAME`,
+`NAME` its `[app] id`, its revision the sha256 of the archive. The
+first push of a name answers a token, kept in `tokens.toml`; a later
+push wants it. `dev push --git` lists a commit of a git origin there
+instead, the source read from its repository at install. The tiers
+are a word on a revision either way. `store.toml` names one with
+`api = "https://HOST"`; without `store.toml`, the default,
+`store.ptyrc.top` (never fetched and unreachable: no obstacle to a git
+origin). Its index is written as pointers, fetched again when a minute
+old; HTTP through the system `curl`. A Rust app is built from the
+archive on the user's machine. **[decided]** by the owner 2026-11-25,
+departing from "What travels is source, never a module" in this one
+case: without `rustc`, or with `--prebuilt`, the module the registry
+built from that archive (`ptyrc dev build` in a container without
+network) is taken: its sha256 the index's, every import of `ptyrc`; it
+runs in the sandbox under the manifest's grants. That it is that
+source's build is the registry's word.
 
 ## Migration
 
