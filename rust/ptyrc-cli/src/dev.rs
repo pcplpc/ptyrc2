@@ -6,6 +6,7 @@ mod app;
 pub mod cases;
 mod new;
 mod probe;
+mod push;
 mod registry;
 
 use crate::store::io_text;
@@ -167,6 +168,23 @@ pub enum Dev {
         /// only one]
         #[arg(long, value_name = "NAME")]
         remote: Option<String>,
+    },
+    /// Publish the app at DIR to a registry server, no git, no account:
+    /// checked, packed, pushed; then `ptyrc store add HOST/NAME` installs
+    /// it. The first push of a name answers its token, kept in
+    /// tokens.toml
+    Push(push::PushArgs),
+    /// Build the Rust app at DIR as the store does; the module to FILE.
+    /// A script app: status 2
+    Build {
+        /// The app's directory [default: .]
+        dir: Option<PathBuf>,
+        /// The module written
+        #[arg(long, value_name = "FILE")]
+        out: PathBuf,
+        /// Built where the build has no OS profile, as `store add --force`
+        #[arg(long)]
+        force: bool,
     },
     /// Print what the driver's probe answers now, as JSON: a fixture for
     /// `dev test --probe git=FILE.json` (or system=). git: the
@@ -368,6 +386,8 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
             is_dir(&dir)?;
             app::run(common, &dir, &args)
         }
+        Dev::Push(args) => push::push(args),
+        Dev::Build { dir, out, force } => push::build_out(&here(dir), &out, force),
         Dev::Entry { dir, remote } => entry(&dir.unwrap_or_else(|| ".".into()), remote),
         Dev::Probe {
             what,
@@ -535,6 +555,11 @@ fn check(dir: &Path) -> Result<ExitCode, Fail> {
 /// `git -C dir ARGS`, its stdout trimmed; the user's own repository and
 /// configuration.
 fn git(dir: &Path, args: &[&str]) -> Result<String, Fail> {
+    Ok(git_raw(dir, args)?.trim().to_string())
+}
+
+/// `git -C dir ARGS`, its stdout as it is.
+fn git_raw(dir: &Path, args: &[&str]) -> Result<String, Fail> {
     let out = Command::new("git")
         .arg("-C")
         .arg(dir)
@@ -555,7 +580,7 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, Fail> {
             hint: Some(format!("{} in a git repository", dir.display())),
         });
     }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    String::from_utf8(out.stdout).map_err(|_| Fail::from(format!("git {}: not UTF-8", args[0])))
 }
 
 /// A remote URL as the https URL of the origin: `https://`, `http://`,
@@ -588,7 +613,22 @@ pub fn https_url(url: &str) -> Option<String> {
     Some(format!("https://{}/{path}", host.to_ascii_lowercase()))
 }
 
-fn entry(dir: &Path, remote: Option<String>) -> Result<ExitCode, Fail> {
+/// The app at `dir` as its repository names it.
+pub(crate) struct GitApp {
+    /// The remote that names the origin.
+    remote: String,
+    /// The pointer file of HEAD, `untested`, and its path in a registry.
+    pointer: Pointer,
+    body: String,
+    rel: String,
+    commit: String,
+    /// The manifest's path in the repository.
+    manifest: String,
+}
+
+/// The origin from the git remote (`remote`, else `origin`, else the
+/// only one), the head commit, the manifest's path.
+fn git_app(dir: &Path, remote: Option<String>) -> Result<GitApp, Fail> {
     is_dir(dir)?;
     if !dir.join(MANIFEST).is_file() {
         return Err(Fail {
@@ -648,11 +688,28 @@ fn entry(dir: &Path, remote: Option<String>) -> Result<ExitCode, Fail> {
     );
     let pointer = Pointer::parse("entry", &body)?;
     let rel = pointer.origin()?.registry_path().expect("an https origin");
-    let dirty = git(
+    Ok(GitApp {
+        remote: name,
+        pointer,
+        body,
+        rel,
+        commit,
+        manifest,
+    })
+}
+
+/// The uncommitted changes under `dir`, tracked files only.
+fn dirty(dir: &Path) -> Result<bool, Fail> {
+    let out = git(
         dir,
         &["status", "--porcelain", "--untracked-files=no", "--", "."],
     )?;
-    if !dirty.is_empty() {
+    Ok(!out.is_empty())
+}
+
+fn entry(dir: &Path, remote: Option<String>) -> Result<ExitCode, Fail> {
+    let GitApp { body, rel, .. } = git_app(dir, remote)?;
+    if dirty(dir)? {
         eprintln!(
             "ptyrc: uncommitted changes in {}: the entry names HEAD",
             dir.display()
