@@ -377,3 +377,60 @@ fn other_tools() {
         assert!(c.dirs.iter().any(|n| n.path == "assets"));
     }
 }
+
+/// Text only; the files used; a view of those alone, packed and checked.
+#[test]
+fn text_only_and_used() {
+    use ptyrc_store::tree::{text_only, unused, used};
+    let dir = app_dir(
+        &tmp("tar-used"),
+        &[
+            (
+                "app.js",
+                b"import { a } from \"./lib/a.js\";\nexport function init(args) {}\n",
+            ),
+            (
+                "lib/a.js",
+                b"import { b } from '../b.mjs'; export const a = 1;\n",
+            ),
+            ("b.mjs", b"export const b = `./nowhere.js`;\n"),
+            ("tests.js", b"import \"./help.js\";\n"),
+            ("help.js", b"\n"),
+            ("tests/one.args", b"--size 10x2\n"),
+            ("tests/one.txt", b"\n"),
+            ("README.md", b"# x\n"),
+            ("old.js", b"export const old = 1;\n"),
+            ("notes/a.md", b"words\n"),
+            ("vendor/ptyrc-app/src/lib.rs", b"// not ptyrc's own\n"),
+        ],
+    );
+    let t = DirTree::new(&dir);
+    let c = check(&t).unwrap();
+    assert!(text_only(&t, &c).is_empty());
+    assert_eq!(
+        unused(&t, &c, None).unwrap(),
+        ["notes/a.md", "old.js", "vendor/ptyrc-app/src/lib.rs"]
+    );
+    let keep = used(&t, &c, None).unwrap();
+    assert!(keep.contains(&"b.mjs".to_string()) && keep.contains(&"help.js".to_string()));
+    let mut all = keep.clone();
+    all.push("assets".into());
+    let view = ptyrc_store::Subset::new(&t, all);
+    let vc = check(&view).unwrap();
+    let names: Vec<&str> = vc.files.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(names, keep);
+    assert!(!vc.dirs.iter().any(|d| d.path == "notes"));
+    let parsed = TarTree::parse(&pack(&view, &vc).unwrap()).unwrap();
+    assert_eq!(check(&parsed).unwrap().files.len(), keep.len());
+    std::fs::write(dir.join("logo.png"), b"\x89PNG\0").unwrap();
+    std::fs::write(dir.join("latin.txt"), b"caf\xe9\n").unwrap();
+    let c = check(&t).unwrap();
+    let bad: Vec<String> = text_only(&t, &c).into_iter().map(|e| e.message).collect();
+    assert_eq!(
+        bad,
+        [
+            "latin.txt: not text (UTF-8, no NUL byte)",
+            "logo.png: not text (UTF-8, no NUL byte)"
+        ]
+    );
+}

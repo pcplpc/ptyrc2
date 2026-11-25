@@ -4,10 +4,11 @@
 //! no other crate, no build script, no macro crate.
 //!
 //! In a fresh work directory: `app/`, the tree (less `vendor/ptyrc-app/`);
-//! `ptyrc-app/`, the sources shipped with ptyrc; `out/`, `tmp/`. Two
+//! `ptyrc-app/`, the sources shipped with ptyrc; `out/`, `tmp/`. Three
 //! runs of the toolchain's own `rustc` (not the rustup proxy), the
-//! environment cleared: `ptyrc-app` as an rlib, then the app as a
-//! `cdylib`, `--extern ptyrc_app`. Each under the profile (Linux,
+//! environment cleared: `ptyrc-app` as an rlib; the app as a `cdylib`,
+//! `--extern ptyrc_app`, its dependency information beside; that
+//! information alone under `--test`. Each under the profile (Linux,
 //! Landlock): read and execute the sysroot and the system's libraries;
 //! read the two sources; write `out/`, `tmp/`; no TCP, no abstract
 //! socket, no signal out. Bounds: the time of both runs, the address
@@ -80,6 +81,11 @@ fn err(message: impl Into<String>) -> Error {
     Error::new(ErrorKind::Build, message)
 }
 
+/// The builder's fault, not the app's.
+fn tool_err(message: impl Into<String>) -> Error {
+    Error::new(ErrorKind::Toolchain, message)
+}
+
 /// How to get the toolchain.
 const GET: &str = "rustc and its target: https://rustup.rs, then rustup target add \
                    wasm32-unknown-unknown (or the rust and rust-wasm packages of the system)";
@@ -87,7 +93,7 @@ const GET: &str = "rustc and its target: https://rustup.rs, then rustup target a
 /// Bounds of one build (plan, Rust).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Bounds {
-    /// Both runs of `rustc`, together.
+    /// The runs of `rustc`, together.
     pub time: Duration,
     /// Address space of each process.
     pub memory: u64,
@@ -131,6 +137,9 @@ pub struct Built {
     pub rustc: String,
     /// What `rustc` said of the app (warnings).
     pub messages: String,
+    /// The files of the tree `rustc` read for the module, or would for
+    /// `--test` (`mod`, `include_str!`, ...), by [`dep_info`]; sorted.
+    pub sources: Vec<String>,
 }
 
 /// The toolchain found.
@@ -158,11 +167,11 @@ impl Toolchain {
                 cmd.env_clear();
             }
             let out = cmd.output().map_err(|e| {
-                err(format!("{}: {e}", program.display())).with_hint(format!("install {GET}"))
+                tool_err(format!("{}: {e}", program.display())).with_hint(format!("install {GET}"))
             })?;
             if !out.status.success() {
                 let text = String::from_utf8_lossy(&out.stderr);
-                return Err(err(format!(
+                return Err(tool_err(format!(
                     "{} {}: {}",
                     program.display(),
                     args.join(" "),
@@ -187,7 +196,7 @@ impl Toolchain {
             .join("lib")
             .is_dir()
         {
-            return Err(err(format!(
+            return Err(tool_err(format!(
                 "rustc {release} ({}): no standard library for {TARGET}",
                 sysroot.display()
             ))
@@ -233,7 +242,7 @@ pub fn build(
         && let (Some(w), Some(have)) = (version(want), toolchain.version())
         && have < w
     {
-        return Err(err(format!(
+        return Err(tool_err(format!(
             "[app] rustc = {want:?}: rustc {} is older",
             toolchain.release
         ))
@@ -318,7 +327,8 @@ pub fn build(
                 toolchain.release
             ),
         };
-        return Err(failed("ptyrc-app", &rlib, options).with_hint(hint));
+        let e = failed("ptyrc-app", &rlib, options);
+        return Err(tool_err(e.message).with_hint(hint));
     }
     let made = run(
         &app,
@@ -335,8 +345,10 @@ pub fn build(
             "ptyrc_app=../out/libptyrc_app.rlib",
             "-L",
             "dependency=../out",
-            "-o",
-            "../out/app.wasm",
+            "--out-dir",
+            "../out",
+            "--emit",
+            "link=../out/app.wasm,dep-info=../out/app.d",
         ]
         .iter()
         .map(OsString::from)
@@ -348,6 +360,45 @@ pub fn build(
             "the errors of rustc above, paths from the app's root; dev check, dev test the same",
         ));
     }
+    // The files of the tests too (`--test`: `#[cfg(test)]`, `#[test]`):
+    // the dependency information alone, whatever the outcome (written
+    // before name resolution).
+    run(
+        &app,
+        [
+            "--test",
+            "--crate-name",
+            "app",
+            "--cap-lints",
+            "allow",
+            "--extern",
+            "ptyrc_app=../out/libptyrc_app.rlib",
+            "-L",
+            "dependency=../out",
+            "--out-dir",
+            "../out",
+            "--emit",
+            "dep-info=../out/test.d",
+        ]
+        .iter()
+        .map(OsString::from)
+        .chain([OsString::from(entry)])
+        .collect(),
+    )?;
+    let mut read: Vec<String> = Vec::new();
+    for d in ["app.d", "test.d"] {
+        let text = std::fs::read_to_string(out.join(d)).unwrap_or_default();
+        read.extend(dep_info(&text).into_iter().filter_map(|p| {
+            let p = match Path::new(&p).strip_prefix(&app) {
+                Ok(rel) => rel.to_str()?.to_string(),
+                Err(_) => p,
+            };
+            let p = p.strip_prefix("./").unwrap_or(&p).to_string();
+            checked.files.iter().any(|f| f.path == p).then_some(p)
+        }));
+    }
+    read.sort();
+    read.dedup();
     let module = out.join("app.wasm");
     let size = std::fs::metadata(&module)
         .map_err(|e| Error::io(module.display(), e))?
@@ -373,7 +424,41 @@ pub fn build(
         missing: made.missing,
         rustc: toolchain.release.clone(),
         messages: made.stderr,
+        sources: read,
     })
+}
+
+/// The prerequisites of the first rule of a dependency file of `rustc`
+/// (`--emit dep-info`): `TARGET: A B\ C` gives `A`, `B C`.
+pub fn dep_info(text: &str) -> Vec<String> {
+    let Some(line) = text
+        .lines()
+        .find(|l| !l.starts_with('#') && l.contains(": "))
+    else {
+        return Vec::new();
+    };
+    let rest = &line[line.find(": ").map_or(line.len(), |i| i + 2)..];
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut chars = rest.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if chars.peek() == Some(&' ') => {
+                cur.push(' ');
+                chars.next();
+            }
+            ' ' => {
+                if !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+            }
+            c => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
 }
 
 /// The sources of `vendor/ptyrc-app/` (the copy a template keeps for
@@ -433,7 +518,7 @@ pub fn lock(path: &Path) -> Result<std::fs::File> {
 fn fresh(work: &Path) -> Result<()> {
     if work.exists() {
         if !work.join(MARK).is_file() {
-            return Err(err(format!(
+            return Err(tool_err(format!(
                 "{}: exists, and not made by a build",
                 work.display()
             ))
@@ -526,7 +611,7 @@ fn confined(
                 Ok(lines) => (lines, None),
                 Err(why) if options.unconfined => (Vec::new(), Some(why)),
                 Err(why) => {
-                    return Err(err(format!("no OS profile for the build: {why}"))
+                    return Err(tool_err(format!("no OS profile for the build: {why}"))
                         .with_hint("--force builds it without one: its sources may then read any file of yours into the module"));
                 }
             };
@@ -541,7 +626,7 @@ fn confined(
                 .stderr(Stdio::piped())
                 .process_group(0)
                 .spawn()
-                .map_err(|e| err(format!("{}: {e}", rustc.display())).with_hint(GET))?;
+                .map_err(|e| tool_err(format!("{}: {e}", rustc.display())).with_hint(GET))?;
             let pid = rustix::process::Pid::from_child(&child);
             limits(pid, &options.bounds);
             let mut pipe = child.stderr.take();
@@ -564,10 +649,10 @@ fn confined(
                             pid,
                             rustix::process::Signal::KILL,
                         );
-                        break child.wait().map_err(|e| err(format!("rustc: {e}")))?;
+                        break child.wait().map_err(|e| tool_err(format!("rustc: {e}")))?;
                     }
                     Ok(None) => std::thread::sleep(Duration::from_millis(10)),
-                    Err(e) => return Err(err(format!("rustc: {e}"))),
+                    Err(e) => return Err(tool_err(format!("rustc: {e}"))),
                 }
             };
             // A linker left behind, if any: the group ends with rustc.
@@ -582,7 +667,7 @@ fn confined(
             })
         })
         .join()
-        .unwrap_or_else(|_| Err(err("the build: a thread panicked")))
+        .unwrap_or_else(|_| Err(tool_err("the build: a thread panicked")))
     })
 }
 
@@ -842,6 +927,14 @@ mod tests {
         );
         assert!(ran.unwrap().status.success());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dep_info_read() {
+        let d =
+            "out/app.d: src/lib.rs src/a\\ b.rs ../x.rs\n\napp.wasm: src/lib.rs\n\nsrc/lib.rs:\n";
+        assert_eq!(dep_info(d), ["src/lib.rs", "src/a b.rs", "../x.rs"]);
+        assert!(dep_info("").is_empty());
     }
 
     #[test]

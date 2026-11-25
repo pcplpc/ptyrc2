@@ -33,4 +33,4 @@ pub use options::{FileGiven, FileKind, Launch, Launcher, OptionType, Resolved};
 pub use origin::{Origin, Reference, Remote};
 pub use registry::{Pick, Pointer, Registries, Registry, Tier, Version, Want, choose};
 pub use tar::{TarTree, sha256_hex};
-pub use tree::{Checked, DirTree, Kind, Node, Tree, check, check_all};
+pub use tree::{Checked, DirTree, Kind, Node, Subset, Tree, check, check_all};

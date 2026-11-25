@@ -157,12 +157,7 @@ pub fn check_all(tree: &dyn Tree) -> std::result::Result<Checked, Vec<Error>> {
             }
         },
     };
-    let licence = files.iter().find(|n| {
-        !n.path.contains('/')
-            && LICENSE_FILES
-                .iter()
-                .any(|l| l.eq_ignore_ascii_case(&n.path))
-    });
+    let licence = licence_file(&files);
     let gpl = |text: &[u8]| {
         let t = String::from_utf8_lossy(text);
         t.contains("GNU GENERAL PUBLIC LICENSE") && t.contains("Version 3")
@@ -224,6 +219,220 @@ pub fn check_all(tree: &dyn Tree) -> std::result::Result<Checked, Vec<Error>> {
             size,
         }),
         _ => Err(bad),
+    }
+}
+
+/// The licence text the check reads: the first file of [`LICENSE_FILES`]
+/// at the root, in the order of paths.
+fn licence_file(files: &[Node]) -> Option<&Node> {
+    files.iter().find(|n| {
+        !n.path.contains('/')
+            && LICENSE_FILES
+                .iter()
+                .any(|l| l.eq_ignore_ascii_case(&n.path))
+    })
+}
+
+/// Every file that is not text: valid UTF-8, no NUL byte. A registry
+/// server's archive holds text only; a git tree and a shipped app are
+/// not bound by it.
+pub fn text_only(tree: &dyn Tree, checked: &Checked) -> Vec<Error> {
+    let mut bad = Vec::new();
+    for f in &checked.files {
+        match tree.read(f) {
+            Ok(b) if std::str::from_utf8(&b).is_ok() && !b.contains(&0) => {}
+            Ok(_) => bad.push(tree_err(
+                format!("{}: not text (UTF-8, no NUL byte)", f.path),
+                "source and text only: no image, no binary",
+            )),
+            Err(e) => bad.push(e),
+        }
+    }
+    bad
+}
+
+/// Files at the app root counted used: documentation, the tooling of
+/// `ptyrc dev new`, cargo's lock.
+pub const KEPT: &[&str] = &[
+    "README.md",
+    "README",
+    "AGENTS.md",
+    ".gitignore",
+    "test.sh",
+    "PROTOCOL.md",
+    "ptyrc.d.ts",
+    "Cargo.lock",
+];
+
+/// The files of a checked tree the app uses, sorted: the manifest; the
+/// licence text the check reads; [`KEPT`]; under `[app] assets`; the
+/// tape; under `tests/`; `vendor/ptyrc-app/` when it is ptyrc's own
+/// ([`crate::build::vendored_differs`] empty). A script app: the entry,
+/// `tests.js` and every `*.tests.js`, and each script these name,
+/// transitively, by a quoted relative path (`"./x.js"`, `'../y.mjs'`).
+/// A Rust app: `Cargo.toml`; `built`, the files `rustc` read
+/// ([`crate::build::Built::sources`]); without it, every file under the
+/// entry's directory (every `.rs` when the entry is at the root).
+pub fn used(tree: &dyn Tree, checked: &Checked, built: Option<&[String]>) -> Result<Vec<String>> {
+    use std::collections::BTreeSet;
+    let files = &checked.files;
+    let has = |p: &str| files.iter().any(|f| f.path == p);
+    let mut out: BTreeSet<String> = BTreeSet::new();
+    out.insert(MANIFEST.to_string());
+    if let Some(l) = licence_file(files) {
+        out.insert(l.path.clone());
+    }
+    out.extend(KEPT.iter().filter(|k| has(k)).map(|k| k.to_string()));
+    let app = &checked.manifest.app;
+    let under = |dir: &str| {
+        let d = format!("{}/", dir.trim_end_matches('/'));
+        (files.iter())
+            .filter(move |f| f.path.starts_with(&d))
+            .map(|f| f.path.clone())
+    };
+    if let Some(a) = &app.assets {
+        out.extend(under(a));
+    }
+    if let Some(t) = &app.tape {
+        out.insert(t.clone());
+    }
+    out.extend(under("tests"));
+    if crate::build::vendored_differs(tree, checked).is_empty() {
+        out.extend(under(crate::build::VENDORED));
+    }
+    match &app.entry {
+        Entry::Script(main) => {
+            let mut queue: Vec<String> = vec![main.clone()];
+            queue.extend(
+                (files.iter())
+                    .map(|f| &f.path)
+                    .filter(|p| {
+                        let name = p.rsplit('/').next().unwrap_or(p);
+                        name == "tests.js" || name.ends_with(".tests.js")
+                    })
+                    .cloned(),
+            );
+            let mut seen = BTreeSet::new();
+            while let Some(p) = queue.pop() {
+                if !seen.insert(p.clone()) {
+                    continue;
+                }
+                let Some(node) = files.iter().find(|f| f.path == p) else {
+                    continue;
+                };
+                let text = tree.read(node)?;
+                let base = p.rsplit_once('/').map_or("", |(d, _)| d);
+                for name in named_scripts(&String::from_utf8_lossy(&text), base) {
+                    if has(&name) {
+                        queue.push(name);
+                    }
+                }
+            }
+            out.extend(seen.into_iter().filter(|p| has(p)));
+        }
+        Entry::Rust(entry) => {
+            if has("Cargo.toml") {
+                out.insert("Cargo.toml".into());
+            }
+            match built {
+                Some(read) => out.extend(read.iter().filter(|p| has(p)).cloned()),
+                None => match entry.rsplit_once('/') {
+                    Some((dir, _)) => out.extend(under(dir)),
+                    None => out.extend(
+                        (files.iter())
+                            .filter(|f| f.path.ends_with(".rs"))
+                            .map(|f| f.path.clone()),
+                    ),
+                },
+            }
+        }
+    }
+    Ok(out.into_iter().collect())
+}
+
+/// The files of a checked tree [`used`] leaves out, sorted.
+pub fn unused(tree: &dyn Tree, checked: &Checked, built: Option<&[String]>) -> Result<Vec<String>> {
+    let used = used(tree, checked, built)?;
+    Ok((checked.files.iter())
+        .filter(|f| used.binary_search(&f.path).is_err())
+        .map(|f| f.path.clone())
+        .collect())
+}
+
+/// The scripts a text names by a quoted path starting `./` or `../`,
+/// resolved from the directory `base`; those outside the tree dropped.
+fn named_scripts(text: &str, base: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let b = text.as_bytes();
+    for (i, &q) in b.iter().enumerate() {
+        if !matches!(q, b'"' | b'\'' | b'`') {
+            continue;
+        }
+        let rest = &text[i + 1..];
+        if !(rest.starts_with("./") || rest.starts_with("../")) {
+            continue;
+        }
+        let Some(end) = rest.find([q as char, '\n']) else {
+            continue;
+        };
+        let spec = &rest[..end];
+        if !(spec.ends_with(".js") || spec.ends_with(".mjs")) {
+            continue;
+        }
+        let mut parts: Vec<&str> = base.split('/').filter(|p| !p.is_empty()).collect();
+        let mut inside = true;
+        for c in spec.split('/') {
+            match c {
+                "." | "" => {}
+                ".." => inside &= parts.pop().is_some(),
+                c => parts.push(c),
+            }
+        }
+        if inside {
+            out.push(parts.join("/"));
+        }
+    }
+    out
+}
+
+/// A view of a tree: the files named, the directories named or holding
+/// one; nothing else.
+pub struct Subset<'a> {
+    tree: &'a dyn Tree,
+    keep: std::collections::BTreeSet<String>,
+}
+
+impl<'a> Subset<'a> {
+    pub fn new(tree: &'a dyn Tree, keep: impl IntoIterator<Item = String>) -> Subset<'a> {
+        Subset {
+            tree,
+            keep: keep.into_iter().collect(),
+        }
+    }
+}
+
+impl Tree for Subset<'_> {
+    fn nodes(&self) -> Result<Vec<Node>> {
+        let mut nodes = self.tree.nodes()?;
+        nodes.retain(|n| match n.kind {
+            Kind::File => self.keep.contains(&n.path),
+            Kind::Dir => {
+                let d = format!("{}/", n.path);
+                self.keep.contains(&n.path) || self.keep.iter().any(|k| k.starts_with(&d))
+            }
+            _ => false,
+        });
+        Ok(nodes)
+    }
+
+    fn read(&self, node: &Node) -> Result<Vec<u8>> {
+        if !self.keep.contains(&node.path) {
+            return Err(tree_err(
+                format!("{}: not a file of the view", node.path),
+                "a file of the tree",
+            ));
+        }
+        self.tree.read(node)
     }
 }
 

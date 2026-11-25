@@ -20,9 +20,13 @@ pub enum ErrorKind {
     Registry,
     /// Planned, not built.
     Unsupported,
-    /// The build of a Rust app: the toolchain, the rule, the sources,
-    /// `rustc`, the module.
+    /// The build of a Rust app, the app's part: the rule, the sources,
+    /// `rustc` on them, the module.
     Build,
+    /// The build of a Rust app, the builder's part: no `rustc`, no
+    /// target, too old, no OS profile, ptyrc's own `ptyrc-app` not
+    /// built, `rustc` not run.
+    Toolchain,
     /// The file system.
     Io,
     /// A command line, or `args` of `app.start`, against a manifest.

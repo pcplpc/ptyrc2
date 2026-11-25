@@ -3,7 +3,7 @@
 Store apps without the engine: the manifest, the origin, the fetch, the
 tree check, the build of a Rust app, the install, the registry, its
 index, page and review; a registry server (`registry/API.md`): its
-archive, HTTP by `curl`, push, tokens. Plan: `plan/store-model.md`. Not here: the
+archive, HTTP by `curl` or `python3`, push, tokens. Plan: `plan/store-model.md`. Not here: the
 runner, the CLI (`ptyrc store`, `ptyrc dev` in `ptyrc-cli`), the
 grants.
 
@@ -121,6 +121,38 @@ let checked = check(&tree)?;                         // or DirTree::new(dir)
   the manifest is skipped without it. `check` is its first.
 - `DirTree` skips, at its root, `.git` and a directory holding
   `CACHEDIR.TAG` (cargo's `target/`).
+- `tree::text_only(tree, checked) -> Vec<Error>`: each file that is
+  not valid UTF-8 or holds a NUL byte, hint "source and text only: no
+  image, no binary". A registry server's archive (`ptyrc dev push`,
+  `dev vet`); not part of `check`: a git tree, a shipped app are not
+  bound by it.
+- `Subset::new(tree, keep)`, a `Tree`: the files of `keep`, the
+  directories of `keep` or holding one of its files; nothing else.
+
+### Used files
+
+`tree::used(tree, checked, built) -> Vec<String>`, sorted;
+`tree::unused` the other files of `checked`. `ptyrc dev push` packs the
+used files only; `ptyrc dev vet` refuses an unused one. Used:
+
+- `ptyrc-app.toml`; the licence text `check` reads (the first of
+  `LICENSE_FILES` at the root);
+- at the root, `KEPT`: `README.md`, `README`, `AGENTS.md`,
+  `.gitignore`, `test.sh`, `PROTOCOL.md`, `ptyrc.d.ts`, `Cargo.lock`;
+- every file under `[app] assets`; the `tape`;
+- every file under `tests/` (the cases of `ptyrc dev test --cases` and
+  what they name);
+- every file under `vendor/ptyrc-app/` when `build::vendored_differs`
+  is empty;
+- a script app: the entry, `tests.js` and each `*.tests.js` (the unit
+  tests), and every `.js` or `.mjs` these name by a quoted path that
+  starts with `./` or `../` (resolved from the naming file),
+  transitively;
+- a Rust app: `Cargo.toml`; `built` (`Built::sources`): the files
+  `rustc` read for the module, or for `--test` (`mod`, `include_str!`,
+  `#[cfg(test)]` included); `built` absent (no `rustc`): every file
+  under the entry's directory (every `.rs` of the tree for an entry at
+  the root).
 
 ## Build
 
@@ -137,7 +169,7 @@ install::install_built(&dirs, &origin, &tree, &checked, Some(&built.wasm), ...)?
 - `Toolchain::find`: `PTYRC_RUSTC` or `rustc` on `PATH`, asked its
   sysroot from `/`; then `<sysroot>/bin/rustc`, not the rustup proxy.
   No `rustc`, or no standard library for `wasm32-unknown-unknown`:
-  `ErrorKind::Build`, the hint says how to get them.
+  `ErrorKind::Toolchain`, the hint says how to get them.
 - `build::sources(tree, checked) -> Vec<Error>`: the rule (`RULE`,
   named in each hint). Refused: `build.rs`; in `Cargo.toml` a
   dependency other than `ptyrc-app` (`[dev-dependencies]` stay the
@@ -148,12 +180,15 @@ install::install_built(&dirs, &origin, &tree, &checked, Some(&built.wasm), ...)?
   `#[path]` but with a literal path inside the tree; one of these macros
   named other than as called. `vendor/ptyrc-app/` is not read.
 - `build::build(tree, checked, work, toolchain, options) -> Built {
-  wasm, profile, missing, rustc, messages }`: `sources` first; the
+  wasm, profile, missing, rustc, messages, sources }`: `sources` first; the
   manifest's `rustc` against the toolchain; in `work` (made, or emptied
   if it holds `.ptyrc-build`): the tree but `vendor/ptyrc-app/`, and
   `PTYRC_APP`, the sources of `sdk/rust/ptyrc-app` embedded in this
   crate. `ptyrc-app` as an rlib, then the app as a `cdylib` with
-  `--extern ptyrc_app`; `--edition 2024`, `-C opt-level=s`, `panic=abort`,
+  `--extern ptyrc_app` and `--emit dep-info`, then the app's
+  dependency information alone under `--test`, its outcome ignored;
+  `Built::sources`: the files of the tree both name (`build::dep_info`
+  parses one); `--edition 2024`, `-C opt-level=s`, `panic=abort`,
   `codegen-units=1`, `lto`, `strip=symbols`; the environment cleared;
   paths in messages from the app's root. One build at a time in `work`:
   the caller's. `build::lock(path)`: an exclusive lock on `PATH.lock`
@@ -170,6 +205,13 @@ install::install_built(&dirs, &origin, &tree, &checked, Some(&built.wasm), ...)?
   else refused (the runner refuses it too).
 - `build::vendored_differs`: the files of `vendor/ptyrc-app/` that are
   not `PTYRC_APP` (`ptyrc dev check` says so).
+- The kind tells whose fault: `ErrorKind::Build`, the app's (the rule,
+  `rustc` on the app, a bound of the build, the module's size or
+  imports); `ErrorKind::Toolchain`, the builder's (no `rustc` or
+  target, older than `[app] rustc`, no profile, `rustc` not spawned,
+  ptyrc's own `ptyrc-app` not built, a work directory not ours);
+  `ErrorKind::Io`, the file system. `ptyrc dev vet` maps them to 1, 3,
+  3.
 
 ## Install
 
@@ -252,20 +294,31 @@ The store apps of ptyrc itself (`plugins/store-apps/README.md`).
 
 ## HTTP
 
-`http`: the only module that speaks HTTP, by `curl` from `PATH`. The
-environment cleared but `PATH`, `SSL_CERT_FILE`, `SSL_CERT_DIR` (no
-`HOME`: no `.curlrc`, `.netrc`; no proxy); `-q` first; `--proto` and
-`--proto-redir` `=https` (`=http` for a loopback base); no redirect;
-connect 15 s, all 300 s; `--max-filesize` and our own bound on stdout,
-curl killed past it. URL, headers, token: curl's configuration on stdin,
-never `argv`; a body: a 0600 file in a 0700 directory of `TMPDIR`,
-removed after.
+`http`: the only module that speaks HTTP, by `curl` from `PATH`, else
+`python3`; `PTYRC_HTTP=curl` or `PTYRC_HTTP=python` forces one. Both:
+the environment cleared but `PATH`, `SSL_CERT_FILE`, `SSL_CERT_DIR` and
+`LC_ALL=C` (no `HOME`, no proxy); `https` only (`http` for a loopback
+base); no redirect; connect 15 s, all 300 s; our own bound on stdout,
+the child killed past it. URL, headers, token on stdin, never `argv`.
+
+- `curl`: `-q` first; `--proto` and `--proto-redir` `=https` or
+  `=http`; `--max-filesize`; stdin is its configuration; a body: a 0600
+  file in a 0700 directory of `TMPDIR`, removed after.
+- `python3 -I -S -c http::PYTHON`: the standard library only,
+  `http.client` (no proxy, no redirect followed) and `ssl`'s default
+  context (certificate and host name verified); the scheme checked
+  against the one allowed; `SIGALRM` at 300 s. Stdin: a JSON line
+  (`url`, `scheme`, `method`, `headers`, `length`, `cap`, `connect`,
+  `total`), then the body. Stdout: `STATUS ETAG\n` (`ETAG` a JSON
+  string or `null`), then at most `cap + 1` bytes of body.
+- Neither on `PATH`: `ErrorKind::Fetch`, "neither curl nor python3 on
+  PATH", hint "install curl, or python3".
 
 - `http::get(base, path, cap) -> Response { status, body, etag }`;
   `http::post(base, path_and_query, body, content_type, token, cap)`.
   `path` already encoded (`http::encode`: all but `A-Za-z0-9-._~` as
   `%XX`). A 3xx: refused; 4xx, 5xx: the server's `{"error", "hint"}`
-  as message and hint, `ErrorKind::Fetch`. No `curl`: `Fetch`, a hint.
+  as message and hint, `ErrorKind::Fetch`.
 - `http::is_token`: printable ASCII, no `"` or `\`, 512 bytes at most.
 
 ## Hosted
