@@ -2419,6 +2419,7 @@ ptyrc dev new NAME [--rust] ; dev check [DIR] ; dev entry [DIR]
       [--NAME VALUE...] ; dev push [DIR] [--git [--remote NAME]]
       [--registry NAME] [--description TEXT] [--token TOKEN]
       [--show-token] [--dry-run] ; dev build [DIR] --out FILE [--force]
+      ; dev vet [DIR] [--out FILE] [--force]
                                   an app's author (store-model.md, Tools)
 ptyrc dev index DIR [--out F] [--html F] ; dev registry-check BASE HEAD
       --author NAME [--maintainers F] [--repo DIR]
@@ -2479,17 +2480,26 @@ has the origin `HOST/NAME` (`NAME` its `[app] id`), its revision the
 sha256 of the archive; `store add NAME`: the first registry server that
 lists it. A Rust app is built here; without `rustc`, or with
 `--prebuilt`, the module the server lists for that revision (its
-sha256, imports of `ptyrc` only). HTTP by the system `curl`.
+sha256, imports of `ptyrc` only). HTTP by the system `curl`, else
+`python3` (its standard library; `PTYRC_HTTP=curl|python` forces one).
 
 `ptyrc dev push [DIR]` (`dev/push.rs`): `dev check`'s checks and no
-`TODO`, then the tree packed (`.tar.gz`, one byte string a tree) and
+`TODO`, every file text (UTF-8, no NUL), a Rust app built when `rustc`
+is there; then the files the app uses (`tree::used`; the others said,
+`left out: ...`) packed (`.tar.gz`, one byte string a tree) and
 `POST /v1/push/tar`; `--git`: HEAD of the repository holding DIR,
 clean and on its remote, `POST /v1/push/git`. To `--registry`, else the
 first `api` of `store.toml`. The first push of a name answers its token,
 written to `<config>/ptyrc/tokens.toml` (`["HOST"] NAME = "TOKEN"`,
 0600); a later push sends it. Prints `ptyrc store add ID`. `ptyrc dev
 build [DIR] --out FILE`: the store's build, the work in a new directory
-of `TMPDIR`; a script app: status 2.
+of `TMPDIR`; a script app: status 2. `ptyrc dev vet [DIR] [--out FILE]`
+(`dev/vet.rs`), what a registry's builder runs on an archive: the
+checks of `dev check`, text only, no unused file, a Rust app built (the
+module to FILE, required). Status 0 valid; 1 the app's fault (the
+archive evicted), a line a problem; 2 usage; 3 not vetted here (no
+`rustc` or target, no profile without `--force`, an I/O error). No
+`HOME`.
 
 The SDKs speak the protocol and nothing else: an SDK function is a
 `call`, a canvas, or pure. Each tier has the same names: `"ptyrc"`

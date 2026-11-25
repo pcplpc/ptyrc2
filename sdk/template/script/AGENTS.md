@@ -90,7 +90,9 @@ ptyrc dev push             publish: others then run `ptyrc store add HOST/NAME`,
 ```
 
 To publish: `ptyrc dev check`, then `ptyrc dev push`. No git, no
-account; the first push keeps the name's token in tokens.toml.
+account; the first push keeps the name's token in tokens.toml. The
+archive holds text only, and the files the app uses: the others are
+left out, named; `ptyrc dev vet` is the registry's verdict.
 
 A case: `tests/NAME.args`, words split on white space, `#` to the end
 of a line a comment, no quoting (JSON without spaces); a new one:

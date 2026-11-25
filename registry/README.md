@@ -71,9 +71,15 @@ revision.
 - Users: nothing to configure; without `store.toml` the default is
   `store.ptyrc.top`. `ptyrc store add NAME`, or `HOST/NAME`. Another:
   `ptyrc store registry add NAME https://HOST --api`.
-- Authors: `ptyrc dev check`, then `ptyrc dev push`: the tree packed
-  and sent; it prints `ptyrc store add HOST/NAME`. The revision is the
-  sha256 of the archive. `ptyrc dev push --git`: the commit at HEAD,
+- Authors: `ptyrc dev check`, then `ptyrc dev push`: the files the app
+  uses packed and sent (`left out: ...` names the others); it prints
+  `ptyrc store add HOST/NAME`. The revision is the sha256 of the
+  archive.
+- An archive holds text only (UTF-8, no NUL byte: no image, no binary)
+  and the files the app uses (`ptyrc-store` README, Used files). The
+  builder runs `ptyrc dev vet` on it; status 1 (a problem of the
+  check, a file not text or not used, a Rust app that does not build):
+  evicted. `ptyrc dev vet DIR --out FILE` says the same beforehand. `ptyrc dev push --git`: the commit at HEAD,
   pushed to its repository first; the app keeps its git origin.
 - The token: the first push of a name answers it, kept in
   `<config>/ptyrc/tokens.toml` (0600); every later push wants it. On

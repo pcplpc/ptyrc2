@@ -349,10 +349,14 @@ ptyrc dev run [DIR] [--NAME VALUE...]
                                 app stopped (`stop`), then the end;
                                 told the frame the driver would give
 ptyrc dev entry [DIR]           the file to add to the registry
-ptyrc dev push [DIR] [--git]    to a registry server: the tree packed,
-                                or (--git) HEAD of its repository;
+ptyrc dev push [DIR] [--git]    to a registry server: the files the
+                                app uses packed (text only), or
+                                (--git) HEAD of its repository;
                                 prints `ptyrc store add ID`
 ptyrc dev build [DIR] --out F   the module, as the store builds it
+ptyrc dev vet [DIR] [--out F]   a registry's builder on an archive:
+                                0 valid, 1 the app's fault, 3 not
+                                vetted here
 ```
 
 - Errors carry the hint, as the protocol does: what was refused, the
@@ -1038,8 +1042,9 @@ the hosting, a CI file, the tape played on the page.
 
 [as built] A second way, a registry server (`registry/API.md`;
 `temp/registry-server/` for now): people push to it, no git, no
-account. `ptyrc dev push` checks the tree, packs it (`.tar.gz`, one
-byte string a tree) and sends it; the app's origin is `HOST/NAME`,
+account. `ptyrc dev push` checks the tree, packs the files the app
+uses (`ptyrc-store` README, Used files; text only; `.tar.gz`, one byte
+string a tree) and sends it; the app's origin is `HOST/NAME`,
 `NAME` its `[app] id`, its revision the sha256 of the archive. The
 first push of a name answers a token, kept in `tokens.toml`; a later
 push wants it. `dev push --git` lists a commit of a git origin there
@@ -1048,11 +1053,11 @@ are a word on a revision either way. `store.toml` names one with
 `api = "https://HOST"`; without `store.toml`, the default,
 `store.ptyrc.top` (never fetched and unreachable: no obstacle to a git
 origin). Its index is written as pointers, fetched again when a minute
-old; HTTP through the system `curl`. A Rust app is built from the
+old; HTTP through the system `curl`, else `python3`. A Rust app is built from the
 archive on the user's machine. **[decided]** by the owner 2026-11-25,
 departing from "What travels is source, never a module" in this one
 case: without `rustc`, or with `--prebuilt`, the module the registry
-built from that archive (`ptyrc dev build` in a container without
+built from that archive (`ptyrc dev vet` in a container without
 network) is taken: its sha256 the index's, every import of `ptyrc`; it
 runs in the sandbox under the manifest's grants. That it is that
 source's build is the registry's word.
