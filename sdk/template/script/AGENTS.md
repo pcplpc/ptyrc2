@@ -86,7 +86,11 @@ ptyrc dev test --unit [FILE]   the test_* exports of tests.js (or FILE): ok/FAIL
 ptyrc dev test . --size 80x24 --for 3s --at 0,1s,3s [--screen F | --tape F] [--seed N] [--NAME VALUE]
 ptyrc dev test . --deny shape --key 500:up --event 1s:TOPIC:JSON    a no, a key, an event
 ptyrc dev run [--NAME VALUE]   in a live session (ptyrc run -- $SHELL), restarted on save
+ptyrc dev push             publish: others then run `ptyrc store add HOST/NAME`, as it prints
 ```
+
+To publish: `ptyrc dev check`, then `ptyrc dev push`. No git, no
+account; the first push keeps the name's token in tokens.toml.
 
 A case: `tests/NAME.args`, words split on white space, `#` to the end
 of a line a comment, no quoting (JSON without spaces); a new one:
