@@ -8,6 +8,7 @@ mod new;
 mod probe;
 mod push;
 mod registry;
+mod vet;
 
 use crate::store::io_text;
 use crate::{Common, Fail};
@@ -170,9 +171,10 @@ pub enum Dev {
         remote: Option<String>,
     },
     /// Publish the app at DIR to a registry server, no git, no account:
-    /// checked, packed, pushed; then `ptyrc store add HOST/NAME` installs
-    /// it. The first push of a name answers its token, kept in
-    /// tokens.toml
+    /// checked, text only, a Rust app built (when rustc is there), the
+    /// files the app uses packed (`left out: ...` names the others),
+    /// pushed; then `ptyrc store add HOST/NAME` installs it. The first
+    /// push of a name answers its token, kept in tokens.toml
     Push(push::PushArgs),
     /// Build the Rust app at DIR as the store does; the module to FILE.
     /// A script app: status 2
@@ -183,6 +185,21 @@ pub enum Dev {
         #[arg(long, value_name = "FILE")]
         out: PathBuf,
         /// Built where the build has no OS profile, as `store add --force`
+        #[arg(long)]
+        force: bool,
+    },
+    /// What a registry server's builder runs on an archive: the check of
+    /// dev check, text only, no file the app does not use, a Rust app
+    /// built (the module to FILE). Status 0: valid; 1: the app's fault,
+    /// a line each on stderr; 2: usage; 3: not vetted here (no rustc or
+    /// its target, no OS profile without --force, an I/O error)
+    Vet {
+        /// The app's directory [default: .]
+        dir: Option<PathBuf>,
+        /// A Rust app's module, written by a rename; required for one
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
+        /// Built where the build has no OS profile, as dev build --force
         #[arg(long)]
         force: bool,
     },
@@ -388,6 +405,7 @@ pub fn dev(common: &Common, verb: Dev) -> Result<ExitCode, Fail> {
         }
         Dev::Push(args) => push::push(args),
         Dev::Build { dir, out, force } => push::build_out(&here(dir), &out, force),
+        Dev::Vet { dir, out, force } => vet::vet(&here(dir), out.as_deref(), force),
         Dev::Entry { dir, remote } => entry(&dir.unwrap_or_else(|| ".".into()), remote),
         Dev::Probe {
             what,
@@ -441,6 +459,42 @@ fn is_dir(dir: &Path) -> Result<(), Fail> {
     }
 }
 
+/// `[app] random`: each draw read as `ptyrc app` reads it; a problem
+/// each that does not. The bare draw (`random` absent: `[[]]`) that
+/// does not read is never drawn (the menu skips it): a note.
+fn draws(ok: &ptyrc_store::Checked, dir: &Path) -> (Vec<ptyrc_store::Error>, Vec<String>) {
+    let mut problems = Vec::new();
+    let mut notes = Vec::new();
+    let bare = ok.manifest.app.random == [Vec::<String>::new()];
+    for draw in &ok.manifest.app.random {
+        let read = ptyrc_store::options::read(&ok.manifest, draw, dir).and_then(|l| {
+            let l = l.unwrap_or_default();
+            let args = serde_json::Value::Object(l.args);
+            ptyrc_store::options::resolve(&ok.manifest, Some(&args), &l.files).map(drop)
+        });
+        let Err(e) = read else { continue };
+        if bare {
+            notes.push(format!(
+                "[app] random: the bare draw (random absent: [[]]) is not a command \
+                 line ({}): never drawn; random = [] says so, or draws that read",
+                e.message
+            ));
+        } else {
+            let message = format!("[app] random: {draw:?}: {}", e.message);
+            problems.push(ptyrc_store::Error {
+                message,
+                hint: Some(e.hint.unwrap_or_else(|| {
+                    "each draw: words of the app's options, as ptyrc app takes them; \
+                     random = [] never drawn"
+                        .into()
+                })),
+                ..e
+            });
+        }
+    }
+    (problems, notes)
+}
+
 fn check(dir: &Path) -> Result<ExitCode, Fail> {
     is_dir(dir)?;
     let problems = match check_all(&DirTree::new(dir)) {
@@ -452,40 +506,13 @@ fn check(dir: &Path) -> Result<ExitCode, Fail> {
                 true => build::sources(&tree, &ok),
                 false => Vec::new(),
             };
-            // `[app] random`: each draw read as `ptyrc app` reads it. The
-            // bare draw (`random` absent: `[[]]`) that does not read is
-            // never drawn (the menu skips it): a note.
             let todos = ptyrc_store::manifest::todos(&ok.manifest);
             let mut notes: Vec<String> = (todos.iter())
                 .map(|t| format!("{t}: starts with TODO; the install refuses it"))
                 .collect();
-            let bare = ok.manifest.app.random == [Vec::<String>::new()];
-            for draw in &ok.manifest.app.random {
-                let read = ptyrc_store::options::read(&ok.manifest, draw, dir).and_then(|l| {
-                    let l = l.unwrap_or_default();
-                    let args = serde_json::Value::Object(l.args);
-                    ptyrc_store::options::resolve(&ok.manifest, Some(&args), &l.files).map(drop)
-                });
-                let Err(e) = read else { continue };
-                if bare {
-                    notes.push(format!(
-                        "[app] random: the bare draw (random absent: [[]]) is not a command \
-                         line ({}): never drawn; random = [] says so, or draws that read",
-                        e.message
-                    ));
-                } else {
-                    let message = format!("[app] random: {draw:?}: {}", e.message);
-                    problems.push(ptyrc_store::Error {
-                        message,
-                        hint: Some(e.hint.unwrap_or_else(|| {
-                            "each draw: words of the app's options, as ptyrc app takes them; \
-                             random = [] never drawn"
-                                .into()
-                        })),
-                        ..e
-                    });
-                }
-            }
+            let (bad, said) = draws(&ok, dir);
+            problems.extend(bad);
+            notes.extend(said);
             let mut built = None;
             if rust && problems.is_empty() {
                 match app::build_checked(dir, &tree, &ok) {

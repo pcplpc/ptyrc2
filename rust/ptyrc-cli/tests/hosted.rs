@@ -981,3 +981,126 @@ fn push_git() {
     assert!(show.stdout.contains("kind         git"), "{}", show.stdout);
     assert!(show.stdout.contains(&commit), "{}", show.stdout);
 }
+
+/// The archive of `rev` the stub keeps, unpacked at `dir`.
+fn unpack(stub: &Stub, rev: &str, dir: &Path) -> Vec<String> {
+    let bytes = stub.with(|s| s.blobs[&format!("{rev}.tar.gz")].clone());
+    let t = TarTree::parse(&bytes).unwrap();
+    let mut names = Vec::new();
+    for n in ptyrc_store::Tree::nodes(&t).unwrap() {
+        if n.kind == ptyrc_store::Kind::File {
+            let p = dir.join(&n.path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, ptyrc_store::Tree::read(&t, &n).unwrap()).unwrap();
+            names.push(n.path);
+        }
+    }
+    names.sort();
+    names
+}
+
+/// `dev push`: the files the app does not use left out, said; the
+/// archive stored passes `dev vet`. A binary file: refused.
+#[test]
+fn push_leaves_out_unused() {
+    if !curl() {
+        return;
+    }
+    let stub = Stub::new();
+    let r = Root::new("unused");
+    r.add_registry(&stub);
+    let app = r.dir.join("sand");
+    script_app(&app, "sand", "0.1.0");
+    write_files(
+        &app,
+        &[
+            ("notes.bin", "plain text, named oddly\n".into()),
+            ("old.js", "export const x = 1;\n".into()),
+            ("README.md", "# sand\n".into()),
+        ],
+    );
+    let dry = r.ptyrc(&["dev", "push", app.to_str().unwrap(), "--dry-run"]);
+    assert!(
+        dry.ok().stdout.contains("left out: notes.bin, old.js\n"),
+        "{}",
+        dry.stdout
+    );
+    let out = r.ptyrc(&["dev", "push", app.to_str().unwrap()]);
+    assert!(out.ok().stdout.contains("left out: notes.bin, old.js\n"));
+    let rev = stub.with(|s| {
+        let a = s.apps.iter().find(|a| a.name == "sand").unwrap();
+        a.versions.last().unwrap().rev.clone()
+    });
+    let got = r.dir.join("got-sand");
+    assert_eq!(
+        unpack(&stub, &rev, &got),
+        ["LICENSE", "README.md", "app.js", "ptyrc-app.toml"]
+    );
+    r.ptyrc(&["dev", "vet", got.to_str().unwrap()]).ok();
+    std::fs::write(app.join("logo.png"), b"\x89PNG\r\n\x1a\n\0\0").unwrap();
+    r.ptyrc(&["dev", "push", app.to_str().unwrap(), "--dry-run"])
+        .fails(1, "logo.png: not text", "no image, no binary");
+    if !has_rustc() {
+        return;
+    }
+    let crab = r.dir.join("confetti");
+    rust_app(&crab);
+    write_files(
+        &crab,
+        &[
+            ("notes.bin", "plain text\n".into()),
+            ("src/old.rs", "pub fn old() {}\n".into()),
+        ],
+    );
+    let out = r.ptyrc(&["dev", "push", crab.to_str().unwrap()]);
+    assert!(
+        out.ok()
+            .stdout
+            .contains("left out: notes.bin, src/old.rs\n"),
+        "{}",
+        out.stdout
+    );
+    let rev = stub.with(|s| {
+        let a = s.apps.iter().find(|a| a.name == "confetti").unwrap();
+        a.versions.last().unwrap().rev.clone()
+    });
+    let got = r.dir.join("got-confetti");
+    assert_eq!(
+        unpack(&stub, &rev, &got),
+        ["Cargo.toml", "LICENSE", "ptyrc-app.toml", "src/lib.rs"]
+    );
+    let wasm = r.dir.join("confetti.wasm");
+    let vet = ["dev", "vet", got.to_str().unwrap(), "--out"];
+    r.ptyrc(&[&vet[..], &[wasm.to_str().unwrap(), "--force"]].concat())
+        .ok();
+    assert!(std::fs::read(&wasm).unwrap().starts_with(b"\0asm"));
+}
+
+/// `PTYRC_HTTP` chooses the transport; with neither `curl` nor
+/// `python3` on PATH, said.
+#[test]
+fn http_transports() {
+    let stub = Stub::new();
+    let mut r = Root::new("transport");
+    r.add_registry(&stub);
+    let app = r.dir.join("sand");
+    script_app(&app, "sand", "0.1.0");
+    let path = app.to_str().unwrap();
+    let python = Command::new("python3").arg("--version").output();
+    if python.is_ok_and(|o| o.status.success()) {
+        let mut p = Root {
+            dir: r.dir.clone(),
+            env: vec![("PTYRC_HTTP".into(), "python".into())],
+        };
+        p.ptyrc(&["dev", "push", path]).ok();
+        p.set("PTYRC_HTTP", "ftp");
+        p.ptyrc(&["dev", "push", path])
+            .fails(5, "PTYRC_HTTP=\"ftp\"", "PTYRC_HTTP=curl");
+    }
+    r.set("PATH", r.dir.join("empty").to_str().unwrap());
+    r.ptyrc(&["dev", "push", path]).fails(
+        5,
+        "neither curl nor python3 on PATH",
+        "install curl, or python3",
+    );
+}

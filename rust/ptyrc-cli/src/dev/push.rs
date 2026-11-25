@@ -11,8 +11,8 @@ use ptyrc_store::push::{self, Pushed};
 use ptyrc_store::registry::Registry;
 use ptyrc_store::sync::{self, Synced};
 use ptyrc_store::{
-    Checked, DirTree, Dirs, Entry, ErrorKind, Origin, Registries, build, check_all, sha256_hex,
-    tar, tokens,
+    Checked, DirTree, Dirs, Entry, ErrorKind, Origin, Registries, Subset, build, check_all,
+    sha256_hex, tar, tokens, tree,
 };
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -45,13 +45,14 @@ pub struct PushArgs {
     /// Print the token the registry answers to a first push
     #[arg(long)]
     show_token: bool,
-    /// Check and pack, print the revision and the size; send nothing
+    /// Check, build and pack, print what is left out, the revision and
+    /// the size; send nothing
     #[arg(long)]
     dry_run: bool,
 }
 
 /// Every problem of `errors` on stderr, then the count; status 1.
-fn report(dir: &Path, errors: &[ptyrc_store::Error]) -> ExitCode {
+pub(super) fn report(dir: &Path, errors: &[ptyrc_store::Error]) -> ExitCode {
     for e in errors {
         eprintln!("ptyrc: {}", e.message);
         if let Some(h) = &e.hint {
@@ -175,8 +176,14 @@ pub fn push(args: PushArgs) -> Result<ExitCode, Fail> {
     if args.git {
         return push_git(&args, &dir, &ok, description, &dirs, target);
     }
-    let tree = DirTree::new(&dir);
-    let archive = tar::pack(&tree, &ok)?;
+    let (packed, left) = match pack_used(&dir, &ok) {
+        Ok(p) => p,
+        Err(status) => return Ok(status),
+    };
+    if !left.is_empty() {
+        println!("left out: {}", left.join(", "));
+    }
+    let archive = packed;
     let rev = sha256_hex(&archive);
     let host = target.and_then(Registry::api_host);
     let id = match &host {
@@ -215,6 +222,40 @@ pub fn push(args: PushArgs) -> Result<ExitCode, Fail> {
     );
     println!("others install it: ptyrc store add {id}");
     Ok(ExitCode::SUCCESS)
+}
+
+/// The archive of the files the app uses ([`tree::used`]), and those
+/// left out. Text only. A Rust app: built when `rustc` is there (what
+/// it read is what is used); else every file under the entry's
+/// directory, said. The subset packed passes the check.
+fn pack_used(dir: &Path, ok: &Checked) -> Result<(Vec<u8>, Vec<String>), ExitCode> {
+    let tree = DirTree::new(dir);
+    let fail = |e: ptyrc_store::Error| report(dir, &[e]);
+    let bad = tree::text_only(&tree, ok);
+    if !bad.is_empty() {
+        return Err(report(dir, &bad));
+    }
+    let mut read = None;
+    if matches!(ok.manifest.app.entry, Entry::Rust(_)) {
+        match build::Toolchain::find() {
+            Ok(t) => read = Some(build_temp(dir, ok, &t, true).map_err(fail)?.sources),
+            Err(e) => eprintln!(
+                "ptyrc: note: not built ({}): every file under the entry's directory packed; \
+                 the registry builds it and refuses a file it does not read",
+                e.message
+            ),
+        }
+    }
+    let mut keep = tree::used(&tree, ok, read.as_deref()).map_err(fail)?;
+    let left: Vec<String> = (ok.files.iter())
+        .filter(|f| keep.binary_search(&f.path).is_err())
+        .map(|f| f.path.clone())
+        .collect();
+    keep.extend(ok.manifest.app.assets.clone());
+    let view = Subset::new(&tree, keep);
+    let packed = check_all(&view).map_err(|v| report(dir, &v))?;
+    let archive = tar::pack(&view, &packed).map_err(fail)?;
+    Ok((archive, left))
 }
 
 fn short(rev: &str) -> &str {
@@ -339,27 +380,15 @@ fn push_git(
     Ok(ExitCode::SUCCESS)
 }
 
-/// `ptyrc dev build DIR --out FILE`: the store's build, in a new
-/// directory of the system's temporary one; the module written by a
-/// rename.
-pub fn build_out(dir: &Path, out: &Path, force: bool) -> Result<ExitCode, Fail> {
-    is_dir(dir)?;
-    let ok = match checked(dir, false) {
-        Ok(c) => c,
-        Err(status) => return Ok(status),
-    };
-    if matches!(ok.manifest.app.entry, Entry::Script(_)) {
-        return Err(Fail::usage(
-            format!("{}: a script app: nothing to build", ok.manifest.app.id),
-            "a Rust app: `rust = ...` in [app]",
-        ));
-    }
-    let toolchain = build::Toolchain::find()?;
-    let io = |p: &Path, e: std::io::Error| Fail {
-        status: 5,
-        message: format!("{}: {}", p.display(), io_text(&e)),
-        hint: Some("a writable TMPDIR for the build, and the directory of --out".into()),
-    };
+/// The store's build of the checked tree at `dir`, in a new 0700
+/// directory of the system's temporary one, removed after; `rustc`'s
+/// messages and the profile said on stderr.
+pub(super) fn build_temp(
+    dir: &Path,
+    ok: &Checked,
+    toolchain: &build::Toolchain,
+    force: bool,
+) -> ptyrc_store::Result<build::Built> {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.subsec_nanos());
@@ -369,7 +398,13 @@ pub fn build_out(dir: &Path, out: &Path, force: bool) -> Result<ExitCode, Fail> 
         std::fs::DirBuilder::new()
             .mode(0o700)
             .create(&base)
-            .map_err(|e| io(&base, e))?;
+            .map_err(|e| {
+                ptyrc_store::Error::new(
+                    ErrorKind::Io,
+                    format!("{}: {}", base.display(), io_text(&e)),
+                )
+                .with_hint("a writable TMPDIR for the build")
+            })?;
     }
     let options = build::Options {
         unconfined: force,
@@ -381,9 +416,9 @@ pub fn build_out(dir: &Path, out: &Path, force: bool) -> Result<ExitCode, Fail> 
     );
     let built = build::build(
         &DirTree::new(dir),
-        &ok,
+        ok,
         &base.join("work"),
-        &toolchain,
+        toolchain,
         &options,
     );
     let _ = std::fs::remove_dir_all(&base);
@@ -398,20 +433,49 @@ pub fn build_out(dir: &Path, out: &Path, force: bool) -> Result<ExitCode, Fail> 
             built.profile.join("; ")
         ),
     }
+    Ok(built)
+}
+
+/// `bytes` to `out` by a rename of a file beside it.
+pub(super) fn write_out(out: &Path, bytes: &[u8]) -> ptyrc_store::Result<()> {
     let name = out.file_name().ok_or_else(|| {
-        Fail::usage(
+        ptyrc_store::Error::new(
+            ErrorKind::Usage,
             format!("--out {}: not a file name", out.display()),
-            "--out FILE",
         )
+        .with_hint("--out FILE")
     })?;
+    let io = |e: std::io::Error| {
+        ptyrc_store::Error::new(ErrorKind::Io, format!("{}: {}", out.display(), io_text(&e)))
+            .with_hint("a writable directory for --out")
+    };
     let mut next = name.to_os_string();
     next.push(format!(".new-{}", std::process::id()));
     let next = out.with_file_name(next);
-    std::fs::write(&next, &built.wasm).map_err(|e| io(out, e))?;
+    std::fs::write(&next, bytes).map_err(io)?;
     std::fs::rename(&next, out).map_err(|e| {
         let _ = std::fs::remove_file(&next);
-        io(out, e)
-    })?;
+        io(e)
+    })
+}
+
+/// `ptyrc dev build DIR --out FILE`: [`build_temp`], the module written
+/// by [`write_out`].
+pub fn build_out(dir: &Path, out: &Path, force: bool) -> Result<ExitCode, Fail> {
+    is_dir(dir)?;
+    let ok = match checked(dir, false) {
+        Ok(c) => c,
+        Err(status) => return Ok(status),
+    };
+    if matches!(ok.manifest.app.entry, Entry::Script(_)) {
+        return Err(Fail::usage(
+            format!("{}: a script app: nothing to build", ok.manifest.app.id),
+            "a Rust app: `rust = ...` in [app]",
+        ));
+    }
+    let toolchain = build::Toolchain::find()?;
+    let built = build_temp(dir, &ok, &toolchain, force)?;
+    write_out(out, &built.wasm)?;
     eprintln!("ptyrc: wrote {}, {} bytes", out.display(), built.wasm.len());
     Ok(ExitCode::SUCCESS)
 }
