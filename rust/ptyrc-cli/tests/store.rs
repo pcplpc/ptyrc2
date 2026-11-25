@@ -98,6 +98,8 @@ impl Root {
             ("PTYRC_STORE_APPS", s(&self.dir.join("shipped"))),
             ("PTYRC_TEST_GIT_ROOT", s(&self.dir.join("hosts"))),
             ("GIT_CONFIG_GLOBAL", "/dev/null".into()),
+            // Never the public registry.
+            ("PTYRC_NO_DEFAULT_REGISTRY", "1".into()),
             ("GIT_CONFIG_NOSYSTEM", "1".into()),
         ]
         .into_iter()

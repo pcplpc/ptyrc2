@@ -215,7 +215,14 @@ fn registries_in_order() {
     assert!(e.message.contains("speaks for"), "{e}");
 
     // Loaded from <config>/ptyrc/store.toml; absent: none.
-    assert!(Registries::load(&dirs).unwrap().list.is_empty());
+    // No store.toml: the default registry server, unless turned off.
+    let none = Registries::load(&dirs).unwrap();
+    let want = Registries::defaults(&dirs, ptyrc_store::registry::default_api()).unwrap();
+    assert_eq!(none, want);
+    if std::env::var_os(ptyrc_store::registry::NO_DEFAULT).is_none() {
+        assert_eq!(none.list[0].name, "ptyrc");
+        assert_eq!(none.list[0].api.as_deref(), Some("https://store.ptyrc.top"));
+    }
     std::fs::create_dir_all(dirs.store().parent().unwrap()).unwrap();
     std::fs::write(dirs.store(), &store).unwrap();
     assert_eq!(Registries::load(&dirs).unwrap(), regs);

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The identity of an app: where its source is. `host/owner/repo[#path]`,
 //! `https://host/owner/repo[.git][#path]`, or `local:/abs/dir[#path]`
-//! (dev and tests); each `[@REF]` in a spec.
+//! (dev and tests); each `[@REF]` in a spec. Hosted on a registry server:
+//! `host/NAME`, `https://host/NAME`; `http://` for a loopback host only.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -18,6 +19,8 @@ pub struct Origin {
     /// The app's directory inside the repository.
     sub: Option<String>,
     local: bool,
+    /// `host/NAME`: an archive on a registry server; `path` is NAME.
+    hosted: bool,
 }
 
 /// What to fetch.
@@ -31,19 +34,58 @@ pub enum Reference {
     Commit(String),
 }
 
-/// Where `git` fetches from.
+/// Where the source is fetched from: by `git`, or from a registry server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Remote {
     Https(String),
     Local(PathBuf),
+    /// The base URL of a registry server: `https://host`, or
+    /// `http://host` for a loopback host.
+    Registry(String),
 }
 
 /// Bound on the identity, bytes; its directory name stays below 255.
 const MAX_ID: usize = 200;
 
 fn origin_err(spec: &str, why: impl fmt::Display) -> Error {
-    Error::new(ErrorKind::Origin, format!("origin {spec:?}: {why}"))
-        .with_hint("host/owner/repo[#path][@REF], or https://host/owner/repo[#path][@REF]")
+    Error::new(ErrorKind::Origin, format!("origin {spec:?}: {why}")).with_hint(
+        "host/owner/repo[#path][@REF], https://host/owner/repo[#path][@REF], or host/NAME[@REV]",
+    )
+}
+
+/// `127.0.0.1[:port]` or `localhost[:port]`.
+pub(crate) fn is_loopback(host: &str) -> bool {
+    let name = host.split_once(':').map_or(host, |(n, _)| n);
+    name == "127.0.0.1" || name == "localhost"
+}
+
+/// The base URL of a registry server for `host`.
+pub(crate) fn base_of(host: &str) -> String {
+    match is_loopback(host) {
+        true => format!("http://{host}"),
+        false => format!("https://{host}"),
+    }
+}
+
+/// The host of a base URL: `https://HOST`, or `http://HOST` for a
+/// loopback host; nothing after the host.
+pub fn parse_base(base: &str) -> Result<String> {
+    let bad = || {
+        Error::new(
+            ErrorKind::Registry,
+            format!("registry {base:?}: not a base URL"),
+        )
+        .with_hint("https://host, nothing after the host; http:// for 127.0.0.1 or localhost")
+    };
+    let (http, rest) = match (base.strip_prefix("https://"), base.strip_prefix("http://")) {
+        (Some(r), _) => (false, r),
+        (None, Some(r)) => (true, r),
+        _ => return Err(bad()),
+    };
+    if !is_host(rest) || (http && !is_loopback(rest)) {
+        return Err(bad());
+    }
+    Ok(rest.to_string())
 }
 
 impl Origin {
@@ -85,14 +127,16 @@ impl Origin {
         if let Some(dir) = main.strip_prefix("local:") {
             return Origin::local(Path::new(dir), sub.as_deref());
         }
-        let rest = if let Some(r) = main.strip_prefix("https://") {
-            r
-        } else if main.contains("://") || main.contains(':') {
+        let (http, rest) = if let Some(r) = main.strip_prefix("https://") {
+            (false, r)
+        } else if let Some(r) = main.strip_prefix("http://") {
+            (true, r)
+        } else if main.contains("://") {
             return Err(origin_err(spec, "https only").with_hint(
                 "https://host/owner/repo, or host/owner/repo; no ssh, http, git, file",
             ));
         } else {
-            main
+            (false, main)
         };
         if rest.contains(['?', '@', '%']) {
             return Err(origin_err(spec, "a query, a user or an escape"));
@@ -104,6 +148,13 @@ impl Origin {
             return Err(origin_err(spec, format!("host {host:?}")));
         }
         let mut segs: Vec<&str> = parts.collect();
+        if http && !(segs.len() == 1 && is_loopback(&host)) {
+            return Err(origin_err(spec, "https only")
+                .with_hint("http:// for an app of a registry on 127.0.0.1 or localhost alone"));
+        }
+        if segs.len() == 1 {
+            return Origin::hosted(spec, &host, segs[0], sub.is_some());
+        }
         if let Some(last) = segs.last_mut() {
             *last = last.strip_suffix(".git").unwrap_or(last);
         }
@@ -118,6 +169,29 @@ impl Origin {
             path: segs.join("/"),
             sub,
             local: false,
+            hosted: false,
+        })
+    }
+
+    fn hosted(spec: &str, host: &str, name: &str, sub: bool) -> Result<Origin> {
+        if sub {
+            return Err(origin_err(spec, "no #path for an app of a registry"));
+        }
+        if !host.contains('.') && !is_loopback(host) {
+            return Err(origin_err(spec, format!("host {host:?}: not a domain")));
+        }
+        if !crate::manifest::is_name(name, 64) {
+            return Err(origin_err(
+                spec,
+                format!("{name:?}: lower-case letters, digits and `-`, a letter first, 64 at most"),
+            ));
+        }
+        Origin::finish(Origin {
+            host: host.to_string(),
+            path: name.to_string(),
+            sub: None,
+            local: false,
+            hosted: true,
         })
     }
 
@@ -144,6 +218,7 @@ impl Origin {
             path: path.to_string(),
             sub: sub.map(str::to_string),
             local: true,
+            hosted: false,
         })
     }
 
@@ -174,6 +249,21 @@ impl Origin {
         self.local
     }
 
+    /// An app of a registry server: `host/NAME`.
+    pub fn is_hosted(&self) -> bool {
+        self.hosted
+    }
+
+    /// NAME of a hosted origin.
+    pub fn name(&self) -> Option<&str> {
+        self.hosted.then_some(self.path.as_str())
+    }
+
+    /// `host[:port]`; empty for a local origin.
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
     /// The app's directory inside the repository.
     pub fn sub(&self) -> Option<&str> {
         self.sub.as_deref()
@@ -183,6 +273,8 @@ impl Origin {
     pub fn remote(&self) -> Remote {
         if self.local {
             Remote::Local(PathBuf::from(&self.path))
+        } else if self.hosted {
+            Remote::Registry(base_of(&self.host))
         } else {
             Remote::Https(format!("https://{}/{}", self.host, self.path))
         }
@@ -203,7 +295,8 @@ impl Origin {
     }
 
     /// The pointer file in a registry:
-    /// `apps/<host>/<owner>/<repo>[/<path>].toml`. None for a local origin.
+    /// `apps/<host>/<owner>/<repo>[/<path>].toml`, `apps/<host>/<NAME>.toml`;
+    /// `:` as `_`. None for a local origin.
     pub fn registry_path(&self) -> Option<String> {
         if self.local {
             return None;

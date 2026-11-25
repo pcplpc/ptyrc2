@@ -56,6 +56,12 @@ pub struct IndexApp {
     pub permissions: Vec<IndexPermission>,
     #[serde(default)]
     pub versions: Vec<IndexVersion>,
+    /// A registry server's: `tar` or `git`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// A registry server's: what the pusher said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -84,6 +90,15 @@ pub struct IndexVersion {
     /// Why the manifest could not be read.
     #[serde(default)]
     pub error: Option<String>,
+    /// A registry server's: `script` or `rust`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry: Option<String>,
+    /// A registry server's: the sha256 of the module it built.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wasm: Option<String>,
+    /// A registry server's: the archive's size, bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
 }
 
 /// Fetches `commit` of `origin` into `<cache>/ptyrc/git/` and checks its
@@ -132,6 +147,8 @@ fn entry(dirs: &Dirs, p: &Pointer, remote: &dyn Fn(&Origin) -> Remote) -> Result
         tier: None,
         permissions: Vec::new(),
         versions: Vec::new(),
+        kind: None,
+        description: None,
     };
     let pick = choose(
         Some(p),
@@ -159,6 +176,9 @@ fn entry(dirs: &Dirs, p: &Pointer, remote: &dyn Fn(&Origin) -> Remote) -> Result
             yanked: v.yanked,
             version: None,
             error: None,
+            entry: None,
+            wasm: None,
+            size: None,
         };
         match read {
             Ok(c) => {

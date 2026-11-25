@@ -2,7 +2,8 @@
 
 Store apps without the engine: the manifest, the origin, the fetch, the
 tree check, the build of a Rust app, the install, the registry, its
-index, page and review. Plan: `plan/store-model.md`. Not here: the
+index, page and review; a registry server (`registry/API.md`): its
+archive, HTTP by `curl`, push, tokens. Plan: `plan/store-model.md`. Not here: the
 runner, the CLI (`ptyrc store`, `ptyrc dev` in `ptyrc-cli`), the
 grants.
 
@@ -80,10 +81,19 @@ the driver.
 - `Origin::parse_spec("host/owner/repo#path@REF")` -> `(Origin,
   Option<Reference>)`; `Origin::parse` without `@REF`. Forms:
   `host/owner/repo`, `https://host/owner/repo[.git]`,
-  `local:/abs/dir` (dev, tests); `#path` the app's directory.
-- `id()`: the normalised identity; `dir_name()`: it as one file name;
-  `remote()`: `Remote::Https | Remote::Local`; `sub()`;
-  `registry_path()`.
+  `local:/abs/dir` (dev, tests); `#path` the app's directory. Hosted (an
+  app of a registry server): `host/NAME`, `https://host/NAME`, NAME by
+  the rule of `[app] id`, no `#path`; `http://` only for `127.0.0.1` or
+  `localhost` (a port allowed). A hosted host holds a `.` or is
+  loopback: `ptyrc/NAME` stays refused. `host:port/...` is accepted
+  bare, so every `id()` parses again.
+- `id()`: the normalised identity (`host/NAME` for hosted, loopback
+  too); `dir_name()`: it as one file name; `remote()`: `Remote::Https |
+  Local | Registry(base)` (`https://host`, `http://host` for loopback);
+  `sub()`; `host()`; `is_hosted()`, `name()`; `registry_path()`
+  (`apps/<host>/<NAME>.toml` for hosted; `:` as `_`).
+- `origin::parse_base(base) -> host`: `https://HOST`, or `http://` and a
+  loopback HOST; nothing after the host.
 - `Reference::Head | Name(ref) | Commit(hex)`; `Reference::parse`.
 
 ## Fetch and check
@@ -220,21 +230,92 @@ The store apps of ptyrc itself (`plugins/store-apps/README.md`).
   nothing fetched. Under `build::lock` of the cache: a second caller
   waits, then takes the first one's build.
 
+## Archive
+
+`tar`: a hosted app's source, gzip over ustar, in memory.
+
+- `tar::pack(tree, checked) -> Vec<u8>`: the checked files and
+  directories, sorted; files 0644, directories 0755 (name with `/`),
+  uid/gid 0, no user or group name, mtime 0; ustar, `prefix` for a long
+  path (refused past `prefix` 155 + `name` 100); gzip of mtime 0, no
+  name, OS 255. One tree, one byte string.
+- `TarTree::parse(bytes) -> TarTree`, a `Tree`: inflated to
+  `MAX_INFLATED` (16 MiB) at most, never more held; magic `ustar\0` `00`
+  or `ustar  \0`; types `0`, `\0`, `5` only (a link, a device, a fifo,
+  pax `x`/`g`, GNU `L`/`K`/`S`: the archive refused); checksums
+  verified; sizes octal (no base-256); a leading `./` dropped, `./`
+  itself skipped; paths by the rule of `check`; no path twice, no file
+  as a directory; `MAX_ENTRIES` (1024); ends at a zero block or EOF,
+  only zeros after. Parent directories implied are listed. `check` it
+  then, as a git tree.
+- `sha256_hex(bytes)`.
+
+## HTTP
+
+`http`: the only module that speaks HTTP, by `curl` from `PATH`. The
+environment cleared but `PATH`, `SSL_CERT_FILE`, `SSL_CERT_DIR` (no
+`HOME`: no `.curlrc`, `.netrc`; no proxy); `-q` first; `--proto` and
+`--proto-redir` `=https` (`=http` for a loopback base); no redirect;
+connect 15 s, all 300 s; `--max-filesize` and our own bound on stdout,
+curl killed past it. URL, headers, token: curl's configuration on stdin,
+never `argv`; a body: a 0600 file in a 0700 directory of `TMPDIR`,
+removed after.
+
+- `http::get(base, path, cap) -> Response { status, body, etag }`;
+  `http::post(base, path_and_query, body, content_type, token, cap)`.
+  `path` already encoded (`http::encode`: all but `A-Za-z0-9-._~` as
+  `%XX`). A 3xx: refused; 4xx, 5xx: the server's `{"error", "hint"}`
+  as message and hint, `ErrorKind::Fetch`. No `curl`: `Fetch`, a hint.
+- `http::is_token`: printable ASCII, no `"` or `\`, 512 bytes at most.
+
+## Hosted
+
+- `hosted::fetch_archive(base, rev) -> TarTree`: `GET
+  /v1/blob/<rev>.tar.gz`, `MAX_ARCHIVE` (8 MiB), its sha256 `rev`.
+- `hosted::fetch_module(base, rev, sha256) -> Vec<u8>`: `GET
+  /v1/blob/<rev>.wasm`, `BOUNDS.module`, its sha256 the index's, every
+  import of `ptyrc`.
+- `hosted::pick(origin, pointer, want)`: `choose`; no pointer: refused
+  (`ptyrc store sync`).
+- `hosted::resolve_name(registries, NAME) -> Option<Origin>`: the
+  hosted origin of the first registry server, its copy present, that
+  lists NAME.
+- `push::push_tar(base, archive, description, token) -> Pushed { name,
+  kind, rev, tier, token, created }`: `POST /v1/push/tar`; `rev` must be
+  the archive's sha256, `name` an id. `push::push_git(base, origin,
+  commit, manifest_text, manifest_path, description, token)`: `POST
+  /v1/push/git`, an https git origin, a 40-hex commit; `name` must be
+  the origin's id. `created`: 201.
+- `tokens::get(dirs, host, name)`, `tokens::set(dirs, host, name,
+  token)`: `Dirs::tokens()`, `<config>/ptyrc/tokens.toml`, 0600, by a
+  rename; `["host"] name = "token"`, a git app's name its origin id.
+
 ## Registry
 
 - `Pointer::parse(name, src)`: `origin`, `manifest`, `yanked`,
   `[[version]] { commit, tier, by, date, yanked }`; `Pointer::origin()`.
 - `Registries::load(dirs)` from `store.toml` (`[[registry]] name, url |
-  path`): `url` https or the absolute path of a git repository, fetched
-  to `<cache>/ptyrc/registry/<name>/`; `path` a directory read as it is.
-  None by default. `add(dirs, name, source, path)`, `to_toml`, `save`.
+  path | api`): `url` https or the absolute path of a git repository,
+  fetched to `<cache>/ptyrc/registry/<name>/`; `path` a directory read
+  as it is; `api` a registry server (`parse_base`), its index written to
+  `<cache>/ptyrc/registry/<name>/`. No `store.toml`:
+  `registry::default_api()`: `DEFAULT_API` (`ptyrc`,
+  `https://store.ptyrc.top`), none when `PTYRC_NO_DEFAULT_REGISTRY` is
+  set (tests); debug builds: `PTYRC_TEST_DEFAULT_REGISTRY` its URL in
+  place; by `Registries::defaults`. An empty `store.toml`: none. `add(dirs,
+  name, source, path)`, `add_api(dirs, name, base)`, `to_toml`, `save`.
 - `lookup(origin)`: the first that lists it; a registry absent here is
   an error. `lookup_present(origin) -> Present { found, absent }`: absent
   ones passed over, those before `found` named.
-- `Registry::pointers()`: every pointer under `apps/`; `remote()`.
+- `Registry { name, dir, url, api }`; `pointers()`: every pointer
+  under `apps/`; `remote()` (`Remote::Registry` for `api`);
+  `max_age()`: `MAX_AGE_API` for `api`, else `MAX_AGE`; `api_host()`.
 - `choose(Option<&Pointer>, &Want { reference, latest, force }) -> Pick
   { reference, tier }`; after fetching a name or `HEAD`,
-  `registry::tier_of(pointer, commit, force)`.
+  `registry::tier_of(pointer, commit, force)`. A hosted pointer has no
+  head: `HEAD`, `--latest` or nothing listed of a tier give
+  `registry::latest(pointer)`, the last version not yanked (`--force`:
+  the last); none, or `@NAME`: refused.
 - `Tier::Untested < Tested < Approved < Shipped`; `shipped` in a
   pointer: refused.
 
@@ -250,15 +331,27 @@ Fetched { commit } | Stale { error, since } | Missing { error }`: a
 failure keeps the old copy. `sync::stamp`: when, and which commit.
 `now` is an argument; `MAX_AGE` a day. The caller holds the store lock.
 
+An `api` registry: `GET /v1/index.json` (`MAX_INDEX`), `format` 1 only,
+unknown fields ignored, written in the same layout: per app a pointer at
+its `registry_path()`, and an `index.json` of `Index`. `tar`: origin
+`<base>/NAME`, the registry's own host (a `url` that says otherwise:
+left out), `rev` 64 hex. `git`: `url` and `manifest_path`, whose origin
+id must be `name`, `rev` 40 hex. `rev` -> `commit`, `tier`, `by`,
+`date`, `yanked`; `shipped`, an odd field: the version left out; an app
+that does not parse or agree: left out. Text cleaned of control
+characters and bounded. `Fetched { commit }`: the sha256 of the index.
+`MAX_AGE_API` 60 s.
+
 ## Index and page
 
 - `index::build(dirs, registry, remote) -> Index`: each pointer, each
   listed commit fetched and checked (`fetch_checked`); the fields of the
   version `choose` picks: `id`, `summary`, `version`, `license`,
   `surface`, `tape`, `commit`, `tier`, `permissions { name, why, colour,
-  words }`; each version's `version` or `error`. `Index::{to_json,
-  parse, load, get}`; `FORMAT` 1. Read for display only, never for
-  trust.
+  words }`; each version's `version` or `error`. From a registry server,
+  also `kind`, `description`, and per version `entry`, `wasm`, `size`
+  (absent otherwise, not written). `Index::{to_json, parse, load, get}`;
+  `FORMAT` 1. Read for display only, never for trust.
 - `page::render(index, title)`: one HTML file, inline style, no script,
   no external resource, a CSP of `default-src 'none'`. Every text
   escaped (`page::escape`).
@@ -284,8 +377,9 @@ maintainer's. `Repo::commit(rev)` resolves BASE and HEAD.
    day old; `lookup_present(&origin)`: an absent registry before the
    one found wants `@REF` or `--latest`.
 3. `choose`.
-4. `Repo::open`, `fetch`, `tree`, `check`, `tier_of`; `untested`: ask
-   the user.
+4. `Repo::open`, `fetch`, `tree` (hosted: `hosted::pick`,
+   `fetch_archive`), `check`, `tier_of`; `untested`: ask the user.
 5. A Rust app: `build::build` in `<cache>/ptyrc/build/<origin>/`,
-   removed after.
+   removed after; hosted, without `rustc` or `--prebuilt`:
+   `hosted::fetch_module` of the `wasm` the index lists.
 6. `install::install_built(..., date)`, `install::prune`.

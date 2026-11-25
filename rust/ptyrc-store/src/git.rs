@@ -185,6 +185,12 @@ impl Repo {
                 }
                 ("file", format!("file://{s}"))
             }
+            Remote::Registry(b) => {
+                return Err(
+                    fetch_err(format!("{b}: a registry server, not a repository"))
+                        .with_hint("an app of a registry is fetched with hosted::fetch_archive"),
+                );
+            }
         };
         let src = match want {
             Reference::Head => "HEAD".to_string(),

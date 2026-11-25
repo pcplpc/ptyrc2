@@ -6,10 +6,12 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 regex.workspace = true
 rustix = { version = "1", features = ["process"] }
 serde.workspace = true
 serde_json.workspace = true
+sha2 = "0.10"
 toml = { version = "1", default-features = false, features = ["std", "parse", "serde", "display"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

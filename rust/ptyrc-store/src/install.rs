@@ -115,6 +115,11 @@ impl Dirs {
         self.config.join("ptyrc/permissions.toml")
     }
 
+    /// `<config>/ptyrc/tokens.toml`: the tokens of pushed names.
+    pub fn tokens(&self) -> PathBuf {
+        self.config.join("ptyrc/tokens.toml")
+    }
+
     /// `<config>/ptyrc/store.toml`: the registries, in order.
     pub fn store(&self) -> PathBuf {
         self.config.join("ptyrc/store.toml")

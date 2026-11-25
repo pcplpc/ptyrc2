@@ -454,6 +454,8 @@ fn store(home: &Path, args: &[&str]) -> Output {
     c.args(args)
         .env("PTYRC_STORE_APPS", root().join("plugins/store-apps"))
         .env("HOME", home)
+        // Never the public registry.
+        .env("PTYRC_NO_DEFAULT_REGISTRY", "1")
         .stdin(Stdio::null());
     for (var, dir) in [
         ("XDG_DATA_HOME", "data"),

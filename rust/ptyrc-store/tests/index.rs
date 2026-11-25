@@ -178,6 +178,7 @@ fn registry_dir(root: &Path, versions: &[(&str, &str)]) -> ptyrc_store::Registry
         name: "r".into(),
         dir,
         url: None,
+        api: None,
     }
 }
 
@@ -271,7 +272,12 @@ fn page_escapes() {
                 yanked: false,
                 version: None,
                 error: Some(evil.into()),
+                entry: None,
+                wasm: None,
+                size: None,
             }],
+            kind: None,
+            description: Some(evil.into()),
         }],
     };
     let html = page::render(&ix, evil);

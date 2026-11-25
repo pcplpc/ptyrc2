@@ -98,6 +98,7 @@ fn build_index(
         name: "index".into(),
         dir: dir.to_path_buf(),
         url: None,
+        api: None,
     };
     let ix = index::build(&dirs, &reg, &remote_of)?;
     for a in &ix.apps {

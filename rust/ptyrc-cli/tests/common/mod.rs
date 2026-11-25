@@ -41,6 +41,8 @@ impl Sandbox {
         command
             .env("XDG_RUNTIME_DIR", &self.dir)
             .env("XDG_CONFIG_HOME", self.config())
+            // Never the public registry.
+            .env("PTYRC_NO_DEFAULT_REGISTRY", "1")
             .env("XDG_DATA_HOME", self.dir.join("data"))
             .env("XDG_STATE_HOME", self.dir.join("state"))
             .env("XDG_CACHE_HOME", self.dir.join("cache"))
@@ -101,6 +103,8 @@ impl Sandbox {
                 "PTYRC_STORE_APPS".to_string(),
                 self.dir.join("shipped").to_string_lossy().into_owned(),
             ),
+            // Never the public registry.
+            ("PTYRC_NO_DEFAULT_REGISTRY".to_string(), "1".to_string()),
             ("PS1".to_string(), "$ ".to_string()),
             ("ENV".to_string(), String::new()),
         ]

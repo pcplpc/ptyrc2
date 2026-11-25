@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Registries: pointer files, `store.toml`, the choice of a version. See
-//! `plan/store-model.md`, "Registry".
+//! `plan/store-model.md`, "Registry". A registry is a git repository
+//! (`url`), a directory (`path`), or a registry server (`api`, see
+//! `registry/API.md`), whose index [`crate::sync`] writes as pointer files.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -42,11 +45,40 @@ impl fmt::Display for Tier {
     }
 }
 
-/// One file `apps/<host>/<owner>/<repo>[/<path>].toml`.
+/// The registry server used when `store.toml` does not exist: `(name,
+/// base URL)`; the public registry.
+pub const DEFAULT_API: Option<(&str, &str)> = Some(("ptyrc", "https://store.ptyrc.top"));
+
+/// The variable that, set and not empty, turns [`DEFAULT_API`] off (tests).
+pub const NO_DEFAULT: &str = "PTYRC_NO_DEFAULT_REGISTRY";
+
+/// Debug builds only: the base URL that stands for [`DEFAULT_API`]'s,
+/// [`NO_DEFAULT`] or not (tests of the default without the network).
+pub const TEST_DEFAULT: &str = "PTYRC_TEST_DEFAULT_REGISTRY";
+
+/// [`DEFAULT_API`], unless [`NO_DEFAULT`] is set.
+pub fn default_api() -> Option<(&'static str, &'static str)> {
+    #[cfg(debug_assertions)]
+    {
+        static BASE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+        let base = BASE.get_or_init(|| std::env::var(TEST_DEFAULT).ok().filter(|v| !v.is_empty()));
+        if let (Some(b), Some((name, _))) = (base, DEFAULT_API) {
+            return Some((name, b.as_str()));
+        }
+    }
+    match std::env::var_os(NO_DEFAULT) {
+        Some(v) if !v.is_empty() => None,
+        _ => DEFAULT_API,
+    }
+}
+
+/// One file `apps/<host>/<owner>/<repo>[/<path>].toml`, or
+/// `apps/<host>/<NAME>.toml` for an app of a registry server.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Pointer {
-    /// `https://host/owner/repo`.
+    /// `https://host/owner/repo`; `https://host/NAME` for an app of a
+    /// registry server (`http://` for a loopback host).
     pub origin: String,
     /// The manifest's path in the repository.
     #[serde(default = "default_manifest")]
@@ -111,7 +143,8 @@ impl Pointer {
 
     /// The origin it speaks for: `origin` and the directory of `manifest`.
     pub fn origin(&self) -> Result<Origin> {
-        if !self.origin.starts_with("https://") || self.origin.contains('#') {
+        let scheme = self.origin.starts_with("https://") || self.origin.starts_with("http://");
+        if !scheme || self.origin.contains('#') {
             return Err(reg_err(
                 format!("origin {:?}: not an https URL", self.origin),
                 "origin = \"https://host/owner/repo\"",
@@ -171,11 +204,23 @@ pub struct Pick {
     pub tier: Tier,
 }
 
+/// The newest version not yanked: the last listed (oldest first).
+pub fn latest(pointer: &Pointer) -> Option<&Version> {
+    pointer.versions.iter().rev().find(|v| !v.yanked)
+}
+
 /// Chooses a version: `@REF` as given; else the listed version of the
 /// best tier, the newest (by `date`, then the later in the file) among
 /// equals; not listed, nothing but yanked versions, or `--latest`: the
-/// head, `untested`.
+/// head, `untested`. A hosted pointer has no head: in its place
+/// [`latest`] (`--force`: the last, yanked or not); none, or `@NAME`:
+/// refused.
 pub fn choose(pointer: Option<&Pointer>, want: &Want) -> Result<Pick> {
+    if let Some(p) = pointer
+        && p.origin().is_ok_and(|o| o.is_hosted())
+    {
+        return choose_hosted(p, want);
+    }
     if let Some(p) = pointer
         && p.yanked
         && !want.force
@@ -211,9 +256,51 @@ pub fn choose(pointer: Option<&Pointer>, want: &Want) -> Result<Pick> {
     let Some(p) = pointer else {
         return Ok(head);
     };
+    Ok(choose_best(p).unwrap_or(head))
+}
+
+fn choose_hosted(p: &Pointer, want: &Want) -> Result<Pick> {
+    if p.yanked && !want.force {
+        return Err(reg_err(
+            format!("{}: yanked", p.origin),
+            "--force to install it anyway",
+        ));
+    }
+    let newest = || {
+        let v = latest(p).or(p.versions.last().filter(|_| want.force));
+        let v = v.ok_or_else(|| {
+            reg_err(
+                format!("{}: no version listed but yanked ones", p.origin),
+                "@REV, the sha256 of a listed archive, and --force",
+            )
+        })?;
+        Ok(Pick {
+            reference: Reference::Commit(v.commit.clone()),
+            tier: v.tier,
+        })
+    };
+    match &want.reference {
+        Some(Reference::Name(n)) => Err(reg_err(
+            format!(
+                "{}: @{n}: an app of a registry has no branch or tag",
+                p.origin
+            ),
+            "@REV, the sha256 of its archive; or nothing, for the version listed",
+        )),
+        Some(Reference::Commit(c)) => Ok(Pick {
+            reference: Reference::Commit(c.clone()),
+            tier: p.tier_of(c, want.force)?,
+        }),
+        Some(Reference::Head) => newest(),
+        None if want.latest => newest(),
+        None => choose_best(p).map_or_else(newest, Ok),
+    }
+}
+
+/// The listed version of the best tier, the newest among equals.
+fn choose_best(p: &Pointer) -> Option<Pick> {
     let date = |v: &Version| v.date.map(|d| d.to_string()).unwrap_or_default();
-    let best = p
-        .versions
+    p.versions
         .iter()
         .enumerate()
         .filter(|(_, v)| !v.yanked)
@@ -222,14 +309,11 @@ pub fn choose(pointer: Option<&Pointer>, want: &Want) -> Result<Pick> {
                 .cmp(&b.tier)
                 .then_with(|| date(a).cmp(&date(b)))
                 .then_with(|| i.cmp(j))
-        });
-    Ok(match best {
-        Some((_, v)) => Pick {
+        })
+        .map(|(_, v)| Pick {
             reference: Reference::Commit(v.commit.clone()),
             tier: v.tier,
-        },
-        None => head,
-    })
+        })
 }
 
 /// The tier of a fetched commit; no pointer: `Untested`.
@@ -245,8 +329,12 @@ pub fn tier_of(pointer: Option<&Pointer>, commit: &str, force: bool) -> Result<T
 pub struct Registry {
     pub name: String,
     pub dir: PathBuf,
-    /// Where it is fetched from; none for a local directory.
+    /// Where it is fetched from by `git`; none for a local directory or a
+    /// registry server.
     pub url: Option<String>,
+    /// The base URL of a registry server (`https://host`); its index is
+    /// written to `dir` as pointer files.
+    pub api: Option<String>,
 }
 
 /// What [`Registries::lookup_present`] found.
@@ -262,11 +350,29 @@ const MAX_POINTERS: usize = 100_000;
 impl Registry {
     /// Where a registry by `url` is fetched from; none for a `path`.
     pub fn remote(&self) -> Option<crate::origin::Remote> {
+        if let Some(a) = &self.api {
+            return Some(crate::origin::Remote::Registry(a.clone()));
+        }
         let u = self.url.as_deref()?;
         Some(match u.starts_with('/') {
             true => crate::origin::Remote::Local(PathBuf::from(u)),
             false => crate::origin::Remote::Https(u.to_string()),
         })
+    }
+
+    /// How old a copy may be before the implicit sync fetches it again:
+    /// [`crate::sync::MAX_AGE_API`] for a registry server, else
+    /// [`crate::sync::MAX_AGE`].
+    pub fn max_age(&self) -> Duration {
+        match self.api {
+            Some(_) => crate::sync::MAX_AGE_API,
+            None => crate::sync::MAX_AGE,
+        }
+    }
+
+    /// The host of a registry server.
+    pub fn api_host(&self) -> Option<String> {
+        crate::origin::parse_base(self.api.as_deref()?).ok()
     }
 
     /// Every pointer file under `apps/`, sorted by path; symlinks are not
@@ -339,6 +445,8 @@ struct RegistryEntry {
     url: Option<String>,
     #[serde(default)]
     path: Option<PathBuf>,
+    #[serde(default)]
+    api: Option<String>,
 }
 
 /// The registries of `store.toml`, in order.
@@ -348,22 +456,35 @@ pub struct Registries {
 }
 
 impl Registries {
-    /// Reads `<config>/ptyrc/store.toml`; absent: no registry.
+    /// Reads `<config>/ptyrc/store.toml`; absent: [`default_api`]. An
+    /// empty file: no registry.
     pub fn load(dirs: &Dirs) -> Result<Registries> {
         let p = dirs.store();
         match std::fs::read_to_string(&p) {
             Ok(s) => Registries::parse(dirs, &s),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Registries::default()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                Registries::defaults(dirs, default_api())
+            }
             Err(e) => Err(Error::io(p.display(), e)),
         }
     }
 
+    /// The registries without `store.toml`: `default`, else none.
+    pub fn defaults(dirs: &Dirs, default: Option<(&str, &str)>) -> Result<Registries> {
+        let mut r = Registries::default();
+        if let Some((name, base)) = default {
+            r.add_api(dirs, name, base)?;
+        }
+        Ok(r)
+    }
+
     /// Parses `store.toml`: `[[registry]]` with `name` and one of `url`
     /// (https, or the absolute path of a git repository; fetched into
-    /// `<cache>/ptyrc/registry/<name>/`) or `path` (a directory, read as
-    /// it is).
+    /// `<cache>/ptyrc/registry/<name>/`), `path` (a directory, read as
+    /// it is) or `api` (a registry server, `https://host`; its index
+    /// written into `<cache>/ptyrc/registry/<name>/`).
     pub fn parse(dirs: &Dirs, src: &str) -> Result<Registries> {
-        let hint = "[[registry]] name = \"main\", url = \"https://...\" or path = \"/dir\"";
+        let hint = "[[registry]] name = \"main\", url = \"https://...\", path = \"/dir\" or api = \"https://host\"";
         let f: StoreFile = toml::from_str(src).map_err(|e| {
             let line = e
                 .span()
@@ -385,17 +506,20 @@ impl Registries {
                     "a unique name: letters, digits, `.`, `_`, `-`",
                 ));
             }
-            let (dir, url) = match (r.url, r.path) {
-                (Some(u), None)
+            let (dir, url, api) = match (r.url, r.path, r.api) {
+                (Some(u), None, None)
                     if (u.starts_with("https://") && !u.contains("::"))
                         || (u.starts_with('/') && !u.contains(':')) =>
                 {
-                    (dirs.registry().join(&r.name), Some(u))
+                    (dirs.registry().join(&r.name), Some(u), None)
                 }
-                (None, Some(p)) if p.is_absolute() => (p, None),
+                (None, Some(p), None) if p.is_absolute() => (p, None, None),
+                (None, None, Some(a)) if crate::origin::parse_base(&a).is_ok() => {
+                    (dirs.registry().join(&r.name), None, Some(a))
+                }
                 _ => {
                     return Err(reg_err(
-                        format!("store.toml: registry {}: url or path", r.name),
+                        format!("store.toml: registry {}: one of url, path, api", r.name),
                         hint,
                     ));
                 }
@@ -404,6 +528,7 @@ impl Registries {
                 name: r.name,
                 dir,
                 url,
+                api,
             });
         }
         Ok(Registries { list })
@@ -414,13 +539,15 @@ impl Registries {
         let q = |s: &str| toml::Value::String(s.to_string()).to_string();
         let mut out = String::from(
             "# The registries, in order: the first that lists an origin speaks for it.\n\
-             # url: https, or a git repository here (fetched); path: a directory (read as it is).\n",
+             # url: https, or a git repository here (fetched); path: a directory (read as it is);\n\
+             # api: a registry server, https://host.\n",
         );
         for r in &self.list {
             out.push_str(&format!("\n[[registry]]\nname = {}\n", q(&r.name)));
-            match &r.url {
-                Some(u) => out.push_str(&format!("url = {}\n", q(u))),
-                None => out.push_str(&format!("path = {}\n", q(&r.dir.to_string_lossy()))),
+            match (&r.url, &r.api) {
+                (Some(u), _) => out.push_str(&format!("url = {}\n", q(u))),
+                (None, Some(a)) => out.push_str(&format!("api = {}\n", q(a))),
+                (None, None) => out.push_str(&format!("path = {}\n", q(&r.dir.to_string_lossy()))),
             }
         }
         out
@@ -429,8 +556,16 @@ impl Registries {
     /// Appends a registry: `url` (`path` false) or `path`, validated as
     /// `store.toml` would be.
     pub fn add(&mut self, dirs: &Dirs, name: &str, source: &str, path: bool) -> Result<()> {
+        self.add_key(dirs, name, if path { "path" } else { "url" }, source)
+    }
+
+    /// Appends a registry server: `base`, `https://host`.
+    pub fn add_api(&mut self, dirs: &Dirs, name: &str, base: &str) -> Result<()> {
+        self.add_key(dirs, name, "api", base)
+    }
+
+    fn add_key(&mut self, dirs: &Dirs, name: &str, key: &str, source: &str) -> Result<()> {
         let q = |s: &str| toml::Value::String(s.to_string()).to_string();
-        let key = if path { "path" } else { "url" };
         let one = format!("[[registry]]\nname = {}\n{key} = {}\n", q(name), q(source));
         let new = Registries::parse(dirs, &one)?;
         let mut all = self.clone();
