@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! A registry server, stubbed on 127.0.0.1: sync, fetch, push, tokens.
-//! Needs `curl` on PATH; skipped without.
+//! Each test by `curl` and by `python3`; a transport not installed is
+//! skipped.
 
 mod common;
 
@@ -12,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use common::{GPL, MANIFEST, tmp};
+use ptyrc_store::http::{self, Transport};
 use ptyrc_store::index::Index;
 use ptyrc_store::registry::{Registries, latest};
 use ptyrc_store::sync::{self, MAX_AGE_API, Synced};
@@ -122,15 +124,46 @@ impl Stub {
     }
 }
 
-fn curl() -> bool {
-    let ok = std::process::Command::new("curl")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !ok {
-        eprintln!("note: curl absent; hosted tests skipped");
+/// The transports installed; a note for each that is not.
+fn transports() -> Vec<Transport> {
+    let mut out = Vec::new();
+    for (t, program) in [(Transport::Curl, "curl"), (Transport::Python, "python3")] {
+        let ok = std::process::Command::new(program)
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success());
+        match ok {
+            true => out.push(t),
+            false => eprintln!("note: {program} absent; hosted tests by it skipped"),
+        }
     }
-    ok
+    out
+}
+
+/// `f` by each transport installed.
+fn each(f: impl Fn(Transport)) {
+    for t in transports() {
+        eprintln!("by {t:?}");
+        http::with_transport(t, || f(t));
+    }
+}
+
+/// The command lines of this process's children, NUL-separated.
+fn children_argv() -> Vec<String> {
+    let me = std::process::id().to_string();
+    let mut out = Vec::new();
+    for e in std::fs::read_dir("/proc").unwrap().flatten() {
+        let stat = std::fs::read_to_string(e.path().join("stat")).unwrap_or_default();
+        // `PID (COMM) STATE PPID ...`; COMM may hold spaces.
+        let ppid = stat
+            .rsplit_once(") ")
+            .and_then(|(_, r)| r.split(' ').nth(1));
+        if ppid == Some(me.as_str()) {
+            let argv = std::fs::read(e.path().join("cmdline")).unwrap_or_default();
+            out.push(String::from_utf8_lossy(&argv).into_owned());
+        }
+    }
+    out
 }
 
 fn json(v: serde_json::Value) -> Vec<u8> {
@@ -224,11 +257,12 @@ fn setup(name: &str, stub: &Stub) -> (std::path::PathBuf, Dirs, Registries) {
 
 #[test]
 fn sync_api_registry() {
-    if !curl() {
-        return;
-    }
+    each(sync_api_registry_by);
+}
+
+fn sync_api_registry_by(by: Transport) {
     let stub = Stub::new();
-    let (root, dirs, regs) = setup("hosted-sync", &stub);
+    let (root, dirs, regs) = setup(&format!("hosted-sync-{by:?}"), &stub);
     assert_eq!(regs.list[0].api.as_deref(), Some(stub.base.as_str()));
     assert_eq!(regs.list[0].max_age(), MAX_AGE_API);
     assert_eq!(
@@ -346,11 +380,12 @@ fn sync_api_registry() {
 
 #[test]
 fn fetch_archive_and_module() {
-    if !curl() {
-        return;
-    }
+    each(fetch_archive_and_module_by);
+}
+
+fn fetch_archive_and_module_by(by: Transport) {
     let stub = Stub::new();
-    let root = tmp("hosted-fetch");
+    let root = tmp(&format!("hosted-fetch-{by:?}"));
     let (bytes, rev) = archive(&root);
     let wasm = b"\0asm\x01\0\0\0".to_vec();
     let bad_wasm = b"\0asm\x01\0\0\0\x02\x09\x01\x03env\x01f\x00\x00".to_vec();
@@ -414,21 +449,80 @@ fn fetch_archive_and_module() {
     // No server there.
     let e = hosted::fetch_archive("http://127.0.0.1:1", &rev).unwrap_err();
     assert_eq!(e.kind, ErrorKind::Fetch);
+    // https asked of a server of plain http: refused, never downgraded.
+    let tls = stub.base.replace("http://", "https://");
+    let e = hosted::fetch_archive(&tls, &rev).unwrap_err();
+    assert_eq!(e.kind, ErrorKind::Fetch, "{by:?}");
+    let by = if by == Transport::Curl {
+        "curl"
+    } else {
+        "python3"
+    };
+    assert!(e.message.contains(&format!(": {by}: ")), "{e}");
+}
+
+/// The script of `python3`, alone: the scheme is the one allowed; a
+/// redirect is answered as it is.
+#[test]
+fn python_script_holds() {
+    if !transports().contains(&Transport::Python) {
+        return;
+    }
+    let stub = Stub::new();
+    stub.answer(|_| {
+        (
+            301,
+            vec![("Location", "http://127.0.0.1:1/".into())],
+            vec![],
+        )
+    });
+    let run = |scheme: &str| {
+        let mut c = std::process::Command::new("python3")
+            .args(["-I", "-S", "-c", http::PYTHON])
+            .env_clear()
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let line = serde_json::json!({"url": format!("{}/x", stub.base), "scheme": scheme,
+            "method": "GET", "headers": [], "length": null, "cap": 10, "connect": 5, "total": 20});
+        c.stdin
+            .take()
+            .unwrap()
+            .write_all(format!("{line}\n").as_bytes())
+            .unwrap();
+        c.wait_with_output().unwrap()
+    };
+    let o = run("https");
+    assert!(!o.status.success());
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.contains("protocol http refused: https only"), "{err}");
+    let o = run("http");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(o.stdout, b"301 null\n");
+    assert_eq!(stub.seen.lock().unwrap().len(), 1);
 }
 
 #[test]
 fn push_and_tokens() {
-    if !curl() {
-        return;
-    }
+    each(push_and_tokens_by);
+}
+
+fn push_and_tokens_by(by: Transport) {
     let stub = Stub::new();
-    let root = tmp("hosted-push");
+    let root = tmp(&format!("hosted-push-{by:?}"));
     let dirs = Dirs::under(&root);
     let (bytes, rev) = archive(&root);
     let r = rev.clone();
     let mut n = 0;
+    let argv: Arc<Mutex<Vec<String>>> = Arc::default();
+    let seen = argv.clone();
     stub.answer(move |q| {
         n += 1;
+        if q.header("authorization").is_some() {
+            seen.lock().unwrap().extend(children_argv());
+        }
         match (q.path.as_str(), q.header("authorization")) {
             (p, None) if p.starts_with("/v1/push/tar") && n == 1 => (
                 201,
@@ -518,6 +612,14 @@ fn push_and_tokens() {
     let q = stub.last();
     assert_eq!(q.header("authorization"), Some("Bearer tok-1.x"));
     assert_eq!(q.path, "/v1/push/tar");
+    let argv = argv.lock().unwrap().clone();
+    let by = if by == Transport::Curl {
+        "curl"
+    } else {
+        "python3"
+    };
+    assert!(argv.iter().any(|a| a.starts_with(by)), "{argv:?}");
+    assert!(!argv.iter().any(|a| a.contains("tok-1")), "{argv:?}");
     // A wrong token: the server's error and hint.
     let e = push::push_tar(&stub.base, &bytes, None, Some("wrong")).unwrap_err();
     assert_eq!(e.kind, ErrorKind::Fetch);
