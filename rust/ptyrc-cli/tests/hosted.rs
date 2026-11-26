@@ -576,6 +576,30 @@ fn push_search_add_update() {
     assert_eq!(out.status, 1, "{}", out.stderr);
     assert!(out.stderr.contains("TODO"), "{}", out.stderr);
 
+    // A description past 64 characters: refused before anything is sent.
+    let long = "x".repeat(65);
+    r.ptyrc(&["dev", "push", dir, "--dry-run", "--description", &long])
+        .fails(2, "--description: 65 characters", "64 at most");
+    r.ptyrc(&[
+        "dev",
+        "push",
+        dir,
+        "--dry-run",
+        "--description",
+        &long[..64],
+    ])
+    .ok();
+    let wordy = r.dir.join("wordy");
+    script_app(&wordy, "wordy", "0.1.0");
+    let m = manifest("wordy", "0.1.0").replace("Sand that", &format!("{long} Sand that"));
+    std::fs::write(wordy.join("ptyrc-app.toml"), m).unwrap();
+    r.ptyrc(&["dev", "push", wordy.to_str().unwrap(), "--dry-run"])
+        .fails(
+            2,
+            "the summary, the default description",
+            "--description TEXT",
+        );
+
     r.add_registry(&stub);
     let ls = r.ptyrc(&["store", "registry", "ls"]);
     ls.ok();

@@ -17,8 +17,9 @@ use ptyrc_store::{
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-/// The server's bound on a description, characters.
-const MAX_DESCRIPTION: usize = 2000;
+/// The bound on a description, characters: one line of the registry's
+/// page on a 375px screen.
+const MAX_DESCRIPTION: usize = 64;
 
 #[derive(Args)]
 pub struct PushArgs {
@@ -35,7 +36,7 @@ pub struct PushArgs {
     /// The registry server of store.toml [default: the first `api`]
     #[arg(long, value_name = "NAME")]
     registry: Option<String>,
-    /// What the registry shows [default: the manifest's summary]; 2000
+    /// What the registry shows [default: the manifest's summary]; 64
     /// characters at most
     #[arg(long, value_name = "TEXT")]
     description: Option<String>,
@@ -162,8 +163,11 @@ pub fn push(args: PushArgs) -> Result<ExitCode, Fail> {
     let n = description.chars().count();
     if n > MAX_DESCRIPTION {
         return Err(Fail::usage(
-            format!("--description: {n} characters"),
-            format!("{MAX_DESCRIPTION} at most"),
+            match &args.description {
+                Some(_) => format!("--description: {n} characters"),
+                None => format!("the summary, the default description: {n} characters"),
+            },
+            format!("{MAX_DESCRIPTION} at most; --description TEXT"),
         ));
     }
     let dirs = Dirs::from_env()?;
