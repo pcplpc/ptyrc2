@@ -1,6 +1,7 @@
 old
 .c*d*
 temp/
+registry-server
 git-identity.source
 target/
 __pycache__/
