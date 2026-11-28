@@ -8,7 +8,8 @@
 //! `.netrc`, no proxy. One protocol (`https`; `http` for a loopback
 //! base), no redirect, timeouts, a bound on the bytes read (the child
 //! is killed past it). The URL, the headers and the token go on stdin,
-//! never in `argv`. A status other than 2xx is an error: the server's
+//! never in `argv`. A bounded 429 proof-of-work challenge is solved and
+//! retried once. Another status outside 2xx is an error: the server's
 //! `{"error", "hint"}` as message and hint.
 //!
 //! `curl`: `-q` first; stdin is its configuration (`--config -`); a
@@ -23,6 +24,8 @@ use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+use sha2::{Digest, Sha256};
 
 use crate::error::{Error, ErrorKind, Result};
 use crate::origin::{is_loopback, parse_base};
@@ -191,6 +194,7 @@ struct Req<'a> {
     http: bool,
     body: Option<(&'a [u8], &'a str)>,
     token: Option<&'a str>,
+    work: Option<String>,
     cap: u64,
 }
 
@@ -227,28 +231,88 @@ fn request(
     {
         return Err(fetch_err(format!("{ty:?}: not a media type")));
     }
-    let req = Req {
+    let mut req = Req {
         url: format!("{base}{path}"),
         http: is_loopback(&host) && base.starts_with("http://"),
         body,
         token,
+        work: None,
         cap,
     };
-    let (code, etag, body) = match transport()? {
-        Transport::Curl => curl(&req)?,
-        Transport::Python => python(&req)?,
-    };
-    if body.len() as u64 > cap {
-        return Err(too_big(&req.url, cap));
-    }
-    if !(200..300).contains(&code) {
+    let transport = transport()?;
+    for _ in 0..2 {
+        let (code, etag, body) = match transport {
+            Transport::Curl => curl(&req)?,
+            Transport::Python => python(&req)?,
+        };
+        if body.len() as u64 > cap {
+            return Err(too_big(&req.url, cap));
+        }
+        if (200..300).contains(&code) {
+            return Ok(Response {
+                status: code,
+                body,
+                etag,
+            });
+        }
+        if code == 429
+            && req.work.is_none()
+            && let Some(work) = solve_work(&body)?
+        {
+            req.work = Some(work);
+            continue;
+        }
         return Err(refusal(&req.url, code, &body));
     }
-    Ok(Response {
-        status: code,
-        body,
-        etag,
-    })
+    unreachable!("the proof retry returns")
+}
+
+/// A registry's bounded proof-of-work challenge, solved without user input.
+fn solve_work(body: &[u8]) -> Result<Option<String>> {
+    #[derive(serde::Deserialize)]
+    struct Said {
+        work: Option<Work>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Work {
+        challenge: String,
+        difficulty: u8,
+    }
+    let Some(w) = serde_json::from_slice::<Said>(body)
+        .ok()
+        .and_then(|s| s.work)
+    else {
+        return Ok(None);
+    };
+    if w.challenge.is_empty()
+        || w.challenge.len() > 768
+        || !w
+            .challenge
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-._".contains(&b))
+        || !(1..=28).contains(&w.difficulty)
+    {
+        return Err(fetch_err(
+            "the registry sent an invalid proof-of-work challenge",
+        ));
+    }
+    for counter in 0..=u64::MAX {
+        let word = format!("{}:{counter:x}", w.challenge);
+        let digest = Sha256::digest(word.as_bytes());
+        let mut zero = 0u8;
+        for b in digest {
+            if b == 0 {
+                zero += 8;
+            } else {
+                zero += b.leading_zeros() as u8;
+                break;
+            }
+        }
+        if zero >= w.difficulty {
+            return Ok(Some(format!("{}.{counter:x}", w.challenge)));
+        }
+    }
+    unreachable!("a finite proof exists")
 }
 
 /// The environment of a child: `PATH`, the trust store, `LC_ALL=C`.
@@ -321,6 +385,9 @@ fn curl(req: &Req) -> Result<Answer> {
     let mut cfg = format!("url = \"{url}\"\nheader = \"Expect:\"\n");
     if let Some(t) = req.token {
         cfg.push_str(&format!("header = \"Authorization: Bearer {t}\"\n"));
+    }
+    if let Some(work) = &req.work {
+        cfg.push_str(&format!("header = \"X-Ptyrc-Work: {work}\"\n"));
     }
     let spool = match req.body {
         Some((bytes, ty)) => {
@@ -422,6 +489,9 @@ fn python(req: &Req) -> Result<Answer> {
     let mut headers = Vec::new();
     if let Some(t) = req.token {
         headers.push(("Authorization".to_string(), format!("Bearer {t}")));
+    }
+    if let Some(work) = &req.work {
+        headers.push(("X-Ptyrc-Work".to_string(), work.clone()));
     }
     if let Some((_, ty)) = req.body {
         headers.push(("Content-Type".to_string(), ty.to_string()));
@@ -528,4 +598,27 @@ fn clean(b: &[u8], max: usize) -> String {
         .take(max)
         .collect();
     s.trim().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Sha256, solve_work};
+    use sha2::Digest;
+
+    #[test]
+    fn solves_bounded_work() {
+        let proof = solve_work(br#"{"work":{"challenge":"abc.DEF-_9","difficulty":8}}"#)
+            .unwrap()
+            .unwrap();
+        let (challenge, counter) = proof.rsplit_once('.').unwrap();
+        assert_eq!(challenge, "abc.DEF-_9");
+        let digest = Sha256::digest(format!("{challenge}:{counter}").as_bytes());
+        assert_eq!(digest[0], 0);
+        assert!(solve_work(br#"{"work":{"challenge":"a\"b","difficulty":1}}"#).is_err());
+        assert!(
+            solve_work(br#"{"error":"ordinary limit"}"#)
+                .unwrap()
+                .is_none()
+        );
+    }
 }

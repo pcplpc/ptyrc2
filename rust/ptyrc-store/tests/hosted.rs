@@ -509,6 +509,47 @@ fn push_and_tokens() {
     each(push_and_tokens_by);
 }
 
+#[test]
+fn push_solves_registry_work() {
+    each(|by| {
+        let stub = Stub::new();
+        let root = tmp(&format!("hosted-work-{by:?}"));
+        let (bytes, rev) = archive(&root);
+        let answer_rev = rev.clone();
+        let mut n = 0;
+        stub.answer(move |q| {
+            n += 1;
+            if n == 1 {
+                assert_eq!(q.header("x-ptyrc-work"), None);
+                return (
+                    429,
+                    vec![],
+                    json(serde_json::json!({
+                        "error": "proof of work required",
+                        "hint": "automatic",
+                        "work": {"challenge": "abc.DEF-_9", "difficulty": 8}
+                    })),
+                );
+            }
+            let proof = q.header("x-ptyrc-work").expect("work header");
+            let (challenge, counter) = proof.rsplit_once('.').unwrap();
+            assert_eq!(challenge, "abc.DEF-_9");
+            assert!(sha256_hex(format!("{challenge}:{counter}").as_bytes()).starts_with("00"));
+            (
+                201,
+                vec![],
+                json(serde_json::json!({
+                    "name": "sand-garden", "kind": "tar", "rev": answer_rev,
+                    "tier": "untested", "token": "tok"
+                })),
+            )
+        });
+        let pushed = push::push_tar(&stub.base, &bytes, None, None).unwrap();
+        assert_eq!(pushed.rev, rev);
+        assert_eq!(stub.seen.lock().unwrap().len(), 2);
+    });
+}
+
 fn push_and_tokens_by(by: Transport) {
     let stub = Stub::new();
     let root = tmp(&format!("hosted-push-{by:?}"));
